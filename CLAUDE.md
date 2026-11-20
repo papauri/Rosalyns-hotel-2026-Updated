@@ -27,9 +27,8 @@ do not re-derive plans or re-scan the repo ad hoc.
 - `.claude/agents/` — codebase-scout (haiku, read-only mapper) · build-planner (opus,
   plans only, never edits code) · backend-specialist (opus) · frontend-specialist
   (opus) · ui-designer (opus, polish pass on just-touched files) · qa-auditor
-  (read-only gate, opus, anything with logic) · qa-quick (sonnet; only CSS/markup/docs diffs, escalates the rest). Model rule (owner 2026-11-11):
-  Opus for anything touching logic (money, stock, bookings, auth, security, Assistant rails); switch
-  autonomously to Sonnet for very small/tedious low-risk work it can surely do; haiku for docs/lint.
+  (read-only gate, opus, anything with logic) · qa-quick (sonnet; only CSS/markup/docs diffs, escalates the rest). Model rule:
+  RULES.md "Models and cost"; here "logic" also covers the Assistant rails.
 - Department leads (`.claude/DEPARTMENTS.md`): `dept-rooms-lead`, `dept-restaurant-lead`,
   `dept-accounting-lead`, `dept-stock-lead`, `dept-guest-site-lead`, `dept-events-gym-lead`, `dept-pwa-lead` (patch-only: installed app, offline, POS/KDS stations), `dept-import-lead` (opus; Import button: Excel/CSV/Word/PDF → review → import, `data_import` permission default admin+manager, no staff-list import, spec `.claude/IMPORT_PLAN.md`), `dept-patch-lead` (owner-approved feature patches in `.claude/PATCH_QUEUE.md` + all security patches), `dept-logs-lead` (owner 2026-11-14; System Logs + activity hook + Hotel Settings change log, who/when/old → new, secrets never stored), `dept-eod-lead` (owner 2026-11-13; End of Day report + timed report emails: who gets what, when, test mode, never twice; contract `.claude/EOD_SPEC.md`; liaises with accounting/restaurant/rooms/AI/guides leads) (opus; each audits/fixes its department end to end and
   is the one to ask when it breaks) and `artifacts-lead` (owner 2026-11-12: the anonymised sales showcase in `OneDrive\MSP\Showcase`, business-type picker + MSP panel track; same lead in msp-control-panel; told of shipped screen changes via the SYNC QUEUE, worked through once a week) and `manager-guides-lead` (owner 2026-11-19; haiku, sonnet for a brand-new guide: the illustrated 2-page manager PDFs in `OneDrive\MSP\Manager Guides`, kept current in every guides sync) and `ui-lead` (one visual language; turns the leads'
@@ -48,22 +47,18 @@ do not re-derive plans or re-scan the repo ad hoc.
   phones, addresses, companies, notes) and outbound email/WhatsApp muted. DB tests, test bookings and
   rehearsals run there. Rosalyn's stays LIVE: it is only ever a read-only source for the mirror script.
 
-- **Cost (owner 2026-11-11)**: guides + AI Assistant always LAST and only when the owner prompts (end of day or on request; owner 2026-11-14) — every ship logs what changed for them in `.claude/GUIDES_AI_SYNC.md`, never run the sync unprompted; one review per round; small tasks inline ONLY IF they cannot break logic; stop every `php -S` when not in use. Also follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
-  for docs/lint/small QA, CODE_INDEX + offset reads instead of whole files, one QA per ship,
-  `scripts/ship.php` to ship). Also: /compact every 3 completed tasks; /clear on phase switch; haiku for read-only/
-  lint/docs, Opus for build execution and logic QA (Sonnet only for very small sure tasks); Fable 5.2 only for the three cases in DEPARTMENTS.md cost rule 2 (spec check before a money/migration/auth build, final high-risk review after Opus passed, a fault Opus failed twice — owner 2026-11-14), otherwise never;
-  max 2 concurrent specialists; /cost checkpoint after every loop cycle; every
-  subagent brief carries exact file paths — no open-ended "explore".
-- **Safety**: commit and push completed work to `main` (see Git below); never destructive
-  SQL; `.env` may be edited when needed (owner 2026-11-09) — back it up first, never print secrets, never stage or commit it; park owner decisions as `blocked:` in BUILD_PLAN.md and continue
-  with the next task.
-- **Git**: commit and push to `origin/main` directly — no feature branches, no waiting for
-  the owner to trigger it. Commit only work that has passed the ship gate in `.claude/DEPARTMENTS.md`:
+- **Cost (hotel part; the general cost rules are in RULES.md)**: guides + AI Assistant always LAST and only when
+  the owner prompts (end of day or on request; owner 2026-11-14). Every ship logs what changed for them in
+  `.claude/GUIDES_AI_SYNC.md`; never run the sync unprompted. Small tasks inline ONLY IF they cannot break logic.
+  Follow the Cost rules in `.claude/DEPARTMENTS.md` (haiku for small QA, one QA per ship, `scripts/ship.php` to
+  ship; the Fable cases are DEPARTMENTS.md cost rule 2). /compact every 3 completed tasks; /clear on phase switch;
+  max 2 concurrent specialists; /cost checkpoint after every loop cycle.
+- **Safety (hotel part)**: park owner decisions as `blocked:` in BUILD_PLAN.md and continue with the next task.
+- **Git (stricter than RULES.md)**: commit only work that has passed the ship gate in `.claude/DEPARTMENTS.md`:
   `php -l`, tests, a mandatory independent `qa-auditor` review of the diff, and a headless
   browser check (`php -S 0.0.0.0:8000` + `scripts/tests/browser_check.mjs`, never MCP) for
-  anything with a screen. One commit per completed task, message
-  stating what changed and why. Check the diff for secrets and stray files before staging;
-  `.env` is untracked and stays that way. Never force-push, never rewrite pushed history.
+  anything with a screen. One commit per completed task, message stating what changed and why.
+  `.env` is untracked and stays that way. Never run `scripts/deploy_cpanel.php` (the owner deploys).
 - **Task tracker**: `.claude/TASKS.md` is the live list of open/shipped work. Read it first when a
   session resumes; the orchestrator updates it whenever a task starts, an agent reports, or work ships.
 - **Reporting**: STATUS block after every task (finished / in-progress / next 3 / blocked);
@@ -74,24 +69,19 @@ do not re-derive plans or re-scan the repo ad hoc.
   stop. Never pull queued/LATER work on your own. Ambiguous-but-not-blocking → best assumption,
   logged as `ASSUMPTION:` in BUILD_PLAN.md.
 
-## Token rules (owner 2026-10-24: "usage is way over normal") — apply before every step
-1. Fresh session per task: `/clear` after each shipped task; never `/resume` a long session (it
-   re-reads the whole history uncached). State lives in `.claude/TASKS.md` "Open" — read only that.
-2. Do it inline when it is under ~10 tool calls (one-file fix, lookup, port, test). An agent only for
-   real multi-file build work: ONE builder + ONE review, never parallel audits "to be safe".
+## Token rules (hotel part; the general ones are in RULES.md "Models and cost")
+1. When a session resumes, state lives in `.claude/TASKS.md` "Open": read only that.
+2. Inline work here means a one-file fix, lookup, port or test; never parallel audits "to be safe".
 3. Builders run only their own test file (`php scripts/tests/<x>.php`), never the full
    `run_tests.php` (10+ min, agents loop on it). At ship the orchestrator runs only what the change needs (tiers in DEPARTMENTS.md ship gate step 1): no DB tests for UI/docs, the area's suites for one area, the full suite only for core/money/migrations/auth.
 4. Never read big files whole: `.claude/CODE_INDEX.md` + Grep + offset reads. `config/database.php`
    (~15.1k lines), BUILD_PLAN/SYSTEM_MAP/CODE_INDEX are lookup-only. Shipped history is in
    `.claude/archive/`, never read unless asked.
-5. Briefs carry the facts (paths, lines, rule, test cases) so agents don't re-discover them; reports
-   under 150 words. Haiku for lint/docs/guides, Opus for build and logic QA, Sonnet only for very small sure tasks (owner 2026-11-09).
-6. Hard limits, not just rules (owner 2026-11-17): agents have NO turn caps (owner 2026-11-18,
-   DEPARTMENTS.md cost rule 11), sessions auto-compact at 250k (`.claude/settings.json`), and
+5. Briefs carry test cases as well as paths and lines.
+6. Hard limits (owner 2026-11-17): sessions auto-compact at 250k (`.claude/settings.json`), and
    `scripts/claude-hooks/read-guard.php` blocks whole reads of files over 400 lines / 40 KB. Work already
    committed at Rosalyn's is ported with `php scripts/port-commit.php <commit>`, not an agent.
-   Weekly (owner 2026-11-18): `Rosalyns-hotel-2026/.claude/scripts/usage-report.js --save` replaces COST_LOG.md;
-   see build-loop SKILL.md "Cost tracking".
+   The weekly usage report (RULES.md) replaces COST_LOG.md; see build-loop SKILL.md "Cost tracking".
 
 ## Code conventions (enforced by qa-auditor)
 
