@@ -262,11 +262,11 @@
 }
 
 .legend-dot.reserved {
-    background: #3b82f6;
+    background: #047857; /* same green as a confirmed bar on the Timeline */
 }
 
 .legend-dot.occupied {
-    background: #ef4444;
+    background: #1d4ed8; /* same blue as a checked-in bar on the Timeline */
 }
 
 .legend-dot.cleaning {
@@ -355,16 +355,16 @@
 
 .current-status-badge.status-occupied,
 .room-status-badge.occupied {
-    background: #fee2e2;
-    color: #b91c1c;
-    border-color: #fecaca;
+    background: #dbeafe;
+    color: #1d4ed8;
+    border-color: #bfdbfe;
 }
 
 .current-status-badge.status-reserved,
 .room-status-badge.reserved {
-    background: #dbeafe;
-    color: #1d4ed8;
-    border-color: #bfdbfe;
+    background: #d1fae5;
+    color: #047857;
+    border-color: #a7f3d0;
 }
 
 .current-status-badge.status-cleaning,
@@ -479,11 +479,11 @@
 }
 
 .calendar-day.status-reserved {
-    background: #eff6ff;
+    background: #ecfdf5;
 }
 
 .calendar-day.status-occupied {
-    background: #fef2f2;
+    background: #eff6ff;
 }
 
 .calendar-day.status-cleaning {
@@ -530,11 +530,11 @@
 }
 
 .day-status-dot.reserved {
-    background: #3b82f6;
+    background: #047857;
 }
 
 .day-status-dot.occupied {
-    background: #ef4444;
+    background: #1d4ed8;
 }
 
 .day-status-dot.cleaning {

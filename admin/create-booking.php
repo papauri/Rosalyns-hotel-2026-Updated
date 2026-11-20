@@ -121,6 +121,39 @@ try {
     $all_individual_rooms = [];
 }
 
+// Prefill from a link (Calendar timeline "New booking" on empty nights): ?room=&room_type=&check_in=&check_out=.
+// Only fills the form; nothing is held or saved, and the usual availability checks run on submit.
+// Invalid values are dropped one by one; a posted form always wins.
+$cb_prefill = ['check_in' => '', 'check_out' => '', 'room_type' => 0, 'room' => 0];
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $cbDateGet = static function (string $key): string {
+        $v = is_scalar($_GET[$key] ?? null) ? trim((string)$_GET[$key]) : '';
+        $d = $v !== '' ? DateTime::createFromFormat('!Y-m-d', $v) : false;
+        return ($d && $d->format('Y-m-d') === $v) ? $v : '';
+    };
+    $cbCi = $cbDateGet('check_in');
+    $cbCo = $cbDateGet('check_out');
+    if ($cbCi !== '' && $cbCi >= date('Y-m-d')) {
+        $cb_prefill['check_in'] = $cbCi;
+        if ($cbCo !== '' && $cbCo > $cbCi) {
+            $cb_prefill['check_out'] = $cbCo;
+        }
+    }
+    $cbType = filter_var($_GET['room_type'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($cbType !== false && $cbType !== null && in_array((int)$cbType, array_map('intval', array_column($rooms, 'id')), true)) {
+        $cb_prefill['room_type'] = (int)$cbType;
+    }
+    $cbRoom = filter_var($_GET['room'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($cbRoom !== false && $cbRoom !== null && $cb_prefill['room_type'] > 0) {
+        foreach ($all_individual_rooms as $cbIr) {
+            if ((int)$cbIr['id'] === (int)$cbRoom && (int)$cbIr['room_type_id'] === $cb_prefill['room_type']) {
+                $cb_prefill['room'] = (int)$cbRoom; // a room of another type is dropped, never re-typed
+                break;
+            }
+        }
+    }
+}
+
 // ─── AJAX: room type availability for date range ────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'check_room_type_availability') {
     header('Content-Type: application/json');
@@ -2253,13 +2286,13 @@ try {
                             <label>Check-in Date <span class="required">*</span></label>
                             <input type="date" name="check_in_date" id="checkInDate" required onchange="datesChanged()"
                                 min="<?php echo date('Y-m-d'); ?>"
-                                value="<?php echo htmlspecialchars($_POST['check_in_date'] ?? ''); ?>">
+                                value="<?php echo htmlspecialchars($_POST['check_in_date'] ?? $cb_prefill['check_in']); ?>">
                         </div>
                         <div class="form-group">
                             <label>Check-out Date <span class="required">*</span></label>
                             <input type="date" name="check_out_date" id="checkOutDate" required onchange="datesChanged()"
                                 min="<?php echo date('Y-m-d', strtotime('+1 day')); ?>"
-                                value="<?php echo htmlspecialchars($_POST['check_out_date'] ?? ''); ?>">
+                                value="<?php echo htmlspecialchars($_POST['check_out_date'] ?? $cb_prefill['check_out']); ?>">
                         </div>
                         <div class="form-group">
                             <label>Total Guests <span class="required">*</span></label>
@@ -3794,7 +3827,10 @@ try {
                         radio.setAttribute('data-double-override', ir.double_override ?? '');
                         radio.setAttribute('data-triple-override', ir.triple_override ?? '');
                         radio.setAttribute('data-children-override', ir.children_override ?? '');
-                        radio.onchange = applyIndividualRoomPolicyOverrides;
+                        radio.onchange = function () { cbPrefillRoom = 0; applyIndividualRoomPolicyOverrides(); };
+                        if (cbPrefillRoom && ir.available && Number(ir.id) === cbPrefillRoom && Number(roomId) === Number(cbPrefill.room_type)) {
+                            radio.checked = true;
+                        }
                         const lbl = document.createElement('span');
                         lbl.className = 'ir-card-label';
                         lbl.textContent = ir.label;
@@ -3806,6 +3842,13 @@ try {
                         card.appendChild(st);
                         listEl.appendChild(card);
                     });
+                    if (listEl.querySelector('input[name=individual_room_id]:checked')) {
+                        applyIndividualRoomPolicyOverrides();
+                    } else if (cbPrefillRoom && Number(roomId) === Number(cbPrefill.room_type)) {
+                        // The linked room is no longer free for these dates: fall back to auto-assign.
+                        cbPrefillRoom = 0;
+                        if (el('irModeAuto')) { el('irModeAuto').checked = true; setAutoAssign(true); }
+                    }
                 })
                 .catch(() => {
                     if (loadMsg) {
@@ -4183,8 +4226,18 @@ try {
         }
 
         // ── Init ──────────────────────────────────────────────────────────────────
+        // Prefill from a Calendar link (validated in PHP): room type in the first line, and the room ticked in
+        // "Pick a specific room" once its list loads. One-shot: dropped as soon as the user picks another room.
+        const cbPrefill = <?php echo json_encode($cb_prefill, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        let cbPrefillRoom = (cbPrefill.room_type && cbPrefill.room) ? cbPrefill.room : 0;
+
         function initBookingForm() {
-            addRoomLine();
+            if (cbPrefillRoom && el('irModePick')) {
+                el('irModePick').checked = true;
+                el('autoAssignRoom').value = '0';
+                el('irPickerSection').style.display = 'block';
+            }
+            addRoomLine(cbPrefill.room_type || undefined);
             const ci = el('checkInDate').value;
             const co = el('checkOutDate').value;
             if (ci && co) checkAvailabilityForDates(ci, co);

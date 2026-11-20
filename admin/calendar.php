@@ -1,14 +1,34 @@
 <?php
 
 /**
- * Calendar-Based Room Management
- * Hotel Website - Admin Panel
+ * Calendar: Room Timeline (default) and Month view (?view=month), plus compact Housekeeping and
+ * Maintenance tabs (?tab=housekeeping|maintenance). Hotel Website - Admin Panel.
+ * Both calendar views read admin/includes/calendar-data.php, so they always agree.
  */
 
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights in the booking popup
 require_once __DIR__ . '/includes/front-desk-counts.php'; // missed-arrival rule shared with the Room Dashboard
+require_once __DIR__ . '/includes/calendar-data.php'; // the one data source of the Timeline and the Month view
+
+$calUserId = (int)($user['id'] ?? 0);
+
+// Tabs: Calendar | Housekeeping | Maintenance. A tab the user cannot open (permission or module) is hidden.
+$calCanHkTab = rhCanLinkTo($calUserId, 'housekeeping.php');
+$calCanMtTab = rhCanLinkTo($calUserId, 'room-maintenance.php');
+$calTab = is_scalar($_GET['tab'] ?? null) ? (string)$_GET['tab'] : 'calendar';
+if (($calTab === 'housekeeping' && !$calCanHkTab) || ($calTab === 'maintenance' && !$calCanMtTab)
+    || !in_array($calTab, ['calendar', 'housekeeping', 'maintenance'], true)) {
+    $calTab = 'calendar';
+}
+
+// View: Timeline by default. Old links that carry ?year= / ?month= (and no view) still open the Month view.
+$calViewRaw = is_scalar($_GET['view'] ?? null) ? (string)$_GET['view'] : '';
+if ($calViewRaw === '') {
+    $calViewRaw = (isset($_GET['year']) || isset($_GET['month'])) ? 'month' : 'timeline';
+}
+$calView = $calViewRaw === 'month' ? 'month' : 'timeline';
 
 // Get date parameters
 $currentYear  = isset($_GET['year'])  ? intval($_GET['year'])  : date('Y');
@@ -28,6 +48,7 @@ if (!in_array($filterStatus, $allowedStatuses, true)) {
 }
 // Sanitise floor to alphanumeric
 $filterFloor = preg_replace('/[^A-Za-z0-9\s\-]/', '', $filterFloor);
+$filterSearchRaw = $filterSearch; // the Timeline escapes on output (JSON + textContent)
 $filterSearch = htmlspecialchars($filterSearch, ENT_QUOTES, 'UTF-8');
 
 // Build query-string for preserving filters when navigating months
@@ -65,259 +86,114 @@ if ($nextMonth > 12) {
     $nextYear++;
 }
 
-// Get all individual rooms with room type info
-try {
-    $stmt = $pdo->query("
-        SELECT ir.*, r.name as room_type_name, r.price_per_night, r.slug as room_type_slug
-        FROM individual_rooms ir
-        INNER JOIN rooms r ON ir.room_type_id = r.id
-        WHERE ir.is_active = 1 AND r.is_active = 1
-        ORDER BY r.name, ir.display_order ASC, ir.room_number ASC
-    ");
-    $individualRooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    $error = "Error fetching individual rooms: " . $e->getMessage();
-    $individualRooms = [];
-}
-
-// A joined-only pair is ONE room: one lane ("101A + 101B") on room A's row, room B is dropped.
-// $laneOfRoom maps every room id to the lane (room) id its nights are drawn on.
-$laneOfRoom = [];
-$laneRoomIds = []; // lane id => all room ids on that lane
-try {
-    $pairsByA = [];
-    foreach (rh_joined_only_pairs(true) as $jp) {
-        $pairsByA[$jp['room_a_id']] = $jp;
-    }
-    $rowsById = [];
-    foreach ($individualRooms as $irRow) {
-        $rowsById[(int)$irRow['id']] = $irRow;
-    }
-    $lanes = [];
-    foreach ($individualRooms as $irRow) {
-        $rid = (int)$irRow['id'];
-        $laneOfRoom[$rid] = $laneOfRoom[$rid] ?? $rid;
-        $laneRoomIds[$laneOfRoom[$rid]] = $laneRoomIds[$laneOfRoom[$rid]] ?? [$rid];
-        if (isset($pairsByA[$rid]) && isset($rowsById[$pairsByA[$rid]['room_b_id']])) {
-            $jp = $pairsByA[$rid];
-            $bRow = $rowsById[$jp['room_b_id']];
-            $laneOfRoom[$jp['room_b_id']] = $rid;
-            $laneRoomIds[$rid] = [$rid, $jp['room_b_id']];
-            $irRow['room_number'] = $jp['label'];
-            $irRow['room_name'] = (string)$jp['combined_name'];
-            $irRow['status'] = rh_joined_pair_status((string)$irRow['status'], (string)$bRow['status']);
-            $floorsPair = array_values(array_unique(array_filter([trim((string)($irRow['floor'] ?? '')), trim((string)($bRow['floor'] ?? ''))], static fn($v) => $v !== '')));
-            $irRow['floor'] = implode(' / ', $floorsPair);
-            if ($jp['price_override'] !== null && $jp['price_override'] !== '') {
-                $irRow['price_per_night'] = $jp['price_override'];
-            }
-            $irRow['is_joined_lane'] = true;
-        }
-        $lanes[$rid] = $irRow;
-    }
-    // Drop room B of each joined pair (it is drawn on room A's lane).
-    $individualRooms = array_values(array_filter($lanes, static function ($row) use ($laneOfRoom) {
-        return $laneOfRoom[(int)$row['id']] === (int)$row['id'];
-    }));
-    if ($filterRoomId && isset($laneOfRoom[$filterRoomId])) {
-        $filterRoomId = $laneOfRoom[$filterRoomId];
-    }
-} catch (Throwable $e) {
-    error_log('calendar joined lanes: ' . $e->getMessage());
-}
-
-// Collect unique floors for filter dropdown
-$allFloors = [];
-foreach ($individualRooms as $ir) {
-    $f = trim($ir['floor'] ?? '');
-    if ($f !== '' && !in_array($f, $allFloors, true)) {
-        $allFloors[] = $f;
-    }
-}
-natsort($allFloors);
-$allFloors = array_values($allFloors);
-
-// Get all room types for grouping (optional)
-try {
-    $stmt = $pdo->query("SELECT * FROM rooms WHERE is_active = 1 ORDER BY name");
-    $roomTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    $error = "Error fetching room types: " . $e->getMessage();
-    $roomTypes = [];
-}
-
-// Get blocked dates for current month (both room-type and individual room level)
-$blockedDatesByDate = [];
-$blockedDates = [];
-try {
-    $startDate = sprintf('%04d-%02d-01', $currentYear, $currentMonth);
-    $endDate = date('Y-m-t', strtotime($startDate)); // real last day: '-31' is an invalid DATE in short months and throws under strict SQL
-
-    // Use getBlockedDates() which correctly queries both blocked_dates and individual_room_blocked_dates tables
-    $blockedDates = getBlockedDates(null, $startDate, $endDate);
-
-    // Group blocked dates by date
-    $blockLaneSeen = [];
-    foreach ($blockedDates as $blocked) {
-        $dateKey = $blocked['block_date'];
-        if (!isset($blockedDatesByDate[$dateKey])) {
-            $blockedDatesByDate[$dateKey] = [];
-        }
-        if (($blocked['block_scope'] ?? 'type') === 'individual') {
-            // A block on a joined room is stored on both rooms but is ONE block on its lane.
-            $blockedRid = (int)($blocked['individual_room_id'] ?? 0);
-            $lane = $laneOfRoom[$blockedRid] ?? $blockedRid;
-            $laneKeySeen = $lane . '|' . $dateKey;
-            if ($lane !== $blockedRid || count($laneRoomIds[$lane] ?? []) > 1) {
-                if (isset($blockLaneSeen[$laneKeySeen])) {
-                    continue;
-                }
-                $blockLaneSeen[$laneKeySeen] = true;
-                $blocked['individual_room_id'] = $lane;
-            }
-        }
-        $blockedDatesByDate[$dateKey][] = $blocked;
-    }
-} catch (PDOException $e) {
-    $error = "Error fetching blocked dates: " . $e->getMessage();
-}
-
-// Get bookings for the current month with individual room info
-/** @var array<string, array<string, list<array<string, mixed>>>> $bookingsByDate */
-$bookingsByDate = [];
-$bookingsByIndividualRoom = []; // Also index by individual room for easier lookup
-$bookings = [];
-try {
-    $startDate = sprintf('%04d-%02d-01', $currentYear, $currentMonth);
-    $endDate = date('Y-m-t', strtotime($startDate)); // real last day: '-31' is an invalid DATE in short months and throws under strict SQL
-
-    $effCo = rh_effective_checkout_sql('b');
-    $stmt = $pdo->prepare("
-        SELECT b.*, {$effCo} AS effective_check_out, r.name as room_name, r.id as room_id, r.price_per_night,
-               ir.id as individual_room_id, ir.room_number as individual_room_number,
-               ir.room_name as individual_room_name, ir.floor as individual_room_floor,
-               ir.status as individual_room_status
-        FROM bookings b
-        INNER JOIN rooms r ON b.room_id = r.id
-        LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-        WHERE b.deleted_at IS NULL AND b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
-        AND (
-            (b.check_in_date <= :end_date AND {$effCo} >= :start_date)
-        )
-        ORDER BY b.check_in_date ASC, r.name ASC, ir.room_number ASC
-    ");
-    $stmt->execute(['start_date' => $startDate, 'end_date' => $endDate]);
-    $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    // Every room each booking holds (joined rooms / combinations live in booking_rooms).
-    $heldRooms = [];
-    if ($bookings) {
-        $ids = array_map('intval', array_column($bookings, 'id'));
-        $in = implode(',', array_fill(0, count($ids), '?'));
-        try {
-            $hr = $pdo->prepare("SELECT booking_id, individual_room_id FROM booking_rooms WHERE released_at IS NULL AND booking_id IN ($in)");
-            $hr->execute($ids);
-            foreach ($hr->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $heldRooms[(int)$row['booking_id']][(int)$row['individual_room_id']] = true;
-            }
-        } catch (PDOException $e) {
-            $heldRooms = [];
-        }
-    }
-
-    // Group bookings by night and room. A booking with no room yet goes on its room type's
-    // "Unassigned" lane (rt_<type>) so demand that still needs a room is visible.
-    foreach ($bookings as $booking) {
-        $checkIn = new DateTime($booking['check_in_date']);
-        $checkOut = new DateTime($booking['effective_check_out'] ?? $booking['check_out_date']);
-        $roomIdsHeld = $heldRooms[(int)$booking['id']] ?? [];
-        if (!empty($booking['individual_room_id'])) {
-            $roomIdsHeld[(int)$booking['individual_room_id']] = true;
-        }
-        // A joined room is one lane: a booking holding both rooms is drawn once, on room A's lane.
-        $roomKeys = $roomIdsHeld
-            ? array_values(array_unique(array_map(static fn ($rid) => 'ir_' . ($laneOfRoom[$rid] ?? $rid), array_keys($roomIdsHeld))))
-            : ['rt_' . $booking['room_id']];
-        // A joined-room booking shows on both rooms; say which pair it is.
-        $booking['pair_label'] = count($roomIdsHeld) > 1 ? getBookingRoomLabel((int)$booking['id']) : '';
-
-        $currentDate = clone $checkIn;
-        while ($currentDate < $checkOut) {
-            $dateKey = $currentDate->format('Y-m-d');
-            foreach ($roomKeys as $roomKey) {
-                $bookingsByDate[$dateKey][$roomKey][] = $booking;
-            }
-            $currentDate->modify('+1 day');
-        }
-    }
-} catch (PDOException $e) {
-    $error = "Error fetching bookings: " . $e->getMessage();
-}
-
-/**
- * What a room is on a given night:
- *  - occupied  = a checked-in guest sleeps there (an overdue guest keeps it until checked out)
- *  - reserved  = a pending / tentative / confirmed booking holds it (incl. arrival due today and a
- *                missed arrival that has not been resolved yet - the guest is NOT in the room)
- *  - otherwise the night is free. The room's physical state (cleaning, inspection) only describes
- *    today; maintenance / out of order run from today until fixed. Past free nights are history.
- */
-function getTimelineAwareRoomStatus(array $room, string $date, array $bookingsByDate)
-{
-    $today = date('Y-m-d');
-    $nightBookings = $bookingsByDate[$date]['ir_' . $room['id']] ?? [];
-    if ($nightBookings) {
-        foreach ($nightBookings as $booking) {
-            if ($booking['status'] === 'checked-in') {
-                return 'occupied';
-            }
-        }
-        return 'reserved';
-    }
-
-    $physical = (string)($room['status'] ?? 'available');
-    if ($date === $today) {
-        return $physical === 'occupied' ? 'available' : $physical; // occupied with no stay = stale flag
-    }
-    if ($date > $today && in_array($physical, ['maintenance', 'out_of_order'], true)) {
-        return $physical;
-    }
-    return 'available';
-}
-
-// Get days in month
-$daysInMonth = date('t', mktime(0, 0, 0, $currentMonth, 1, $currentYear));
-$firstDayOfWeek = date('w', mktime(0, 0, 0, $currentMonth, 1, $currentYear));
-
-// Month names
-$monthNames = [
-    1 => 'January',
-    2 => 'February',
-    3 => 'March',
-    4 => 'April',
-    5 => 'May',
-    6 => 'June',
-    7 => 'July',
-    8 => 'August',
-    9 => 'September',
-    10 => 'October',
-    11 => 'November',
-    12 => 'December'
-];
-
 // Today's date for highlighting
 $today = date('Y-m-d');
 
-// Calendar summary metrics for the header
-$activeRoomsCount = count($individualRooms);
-$activeBookingsCount = count($bookings);
-$blockedDayCount = count($blockedDatesByDate);
-$blockedEntryCount = 0;
-foreach ($blockedDatesByDate as $dayBlocks) {
-    $blockedEntryCount += count($dayBlocks);
+// Counts on the Housekeeping / Maintenance tabs (open tasks, open maintenance).
+$calHkOpenCount = 0;
+$calMtOpenCount = 0;
+try {
+    if ($calCanHkTab) {
+        $calHkOpenCount = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending', 'in_progress', 'blocked')")->fetchColumn();
+    }
+    if ($calCanMtTab) {
+        $calMtOpenCount = (int)$pdo->query("SELECT COUNT(*) FROM room_maintenance_schedules WHERE COALESCE(status, '') NOT IN ('completed', 'cancelled', 'verified')")->fetchColumn();
+    }
+} catch (PDOException $e) {
+    error_log('calendar tab counts: ' . $e->getMessage());
 }
 
-$calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
+$calIsMonth = $calTab === 'calendar' && $calView === 'month';
+
+if ($calIsMonth) {
+    // Month view: the month's nights from the shared data source (same rooms, lanes, blocks and bookings as before).
+    $startDate = sprintf('%04d-%02d-01', $currentYear, $currentMonth);
+    $endDate = date('Y-m-t', strtotime($startDate)); // real last day: '-31' is an invalid DATE in short months and throws under strict SQL
+    $calData = rh_calendar_load($pdo, $startDate, $endDate);
+    $individualRooms = $calData['rooms'];
+    $laneOfRoom = $calData['laneOfRoom'];   // room id => the lane (room) id its nights are drawn on
+    $laneRoomIds = $calData['laneRoomIds']; // lane id => all room ids on that lane
+    $allFloors = $calData['floors'];
+    $roomTypes = $calData['roomTypes'];
+    $blockedDates = $calData['blockedDates'];
+    $blockedDatesByDate = $calData['blockedDatesByDate'];
+    /** @var array<string, array<string, list<array<string, mixed>>>> $bookingsByDate */
+    $bookingsByDate = $calData['bookingsByDate'];
+    $bookings = $calData['bookings'];
+    if ($calData['error'] !== null) {
+        $error = $calData['error'];
+    }
+    if ($filterRoomId && isset($laneOfRoom[$filterRoomId])) {
+        $filterRoomId = $laneOfRoom[$filterRoomId];
+    }
+
+    // Get days in month
+    $daysInMonth = date('t', mktime(0, 0, 0, $currentMonth, 1, $currentYear));
+    $firstDayOfWeek = date('w', mktime(0, 0, 0, $currentMonth, 1, $currentYear));
+
+    // Month names
+    $monthNames = [
+        1 => 'January',
+        2 => 'February',
+        3 => 'March',
+        4 => 'April',
+        5 => 'May',
+        6 => 'June',
+        7 => 'July',
+        8 => 'August',
+        9 => 'September',
+        10 => 'October',
+        11 => 'November',
+        12 => 'December'
+    ];
+
+    // Calendar summary metrics for the header
+    $activeRoomsCount = count($individualRooms);
+    $activeBookingsCount = count($bookings);
+    $blockedDayCount = count($blockedDatesByDate);
+    $blockedEntryCount = 0;
+    foreach ($blockedDatesByDate as $dayBlocks) {
+        $blockedEntryCount += count($dayBlocks);
+    }
+
+    $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
+} elseif ($calTab === 'calendar') {
+    // Timeline: first paint from the same payload the range endpoint (api/calendar-timeline.php) returns.
+    $tlDays = (int)($_GET['days'] ?? 14);
+    if (!in_array($tlDays, [3, 7, 14, 30], true)) {
+        $tlDays = 14;
+    }
+    $tlStart = rh_cal_valid_date($_GET['start'] ?? '') ?? $today;
+    $tlPayload = rh_cal_timeline_payload($pdo, $tlStart, $tlDays, [
+        'user_id' => $calUserId,
+        'role' => (string)($user['role'] ?? ''),
+    ]);
+    if (!empty($tlPayload['error'])) {
+        $error = $tlPayload['error'];
+    }
+    // Filters carried in from other pages (e.g. individual-rooms.php links ?filter_room_id=).
+    $tlRoomLane = 0;
+    if ($filterRoomId > 0) {
+        foreach ($tlPayload['lanes'] as $tlLane) {
+            if (in_array($filterRoomId, $tlLane['room_ids'], true)) {
+                $tlRoomLane = (int)$tlLane['id'];
+            }
+        }
+    }
+    $tlInitial = [
+        'type' => $filterRoomType,
+        'room' => $tlRoomLane,
+        'floor' => $filterFloor,
+        'search' => $filterSearchRaw,
+        'days_set' => isset($_GET['days']),
+    ];
+} elseif ($calTab === 'housekeeping') {
+    $calHkFilter = (is_scalar($_GET['hk'] ?? null) && in_array((string)$_GET['hk'], ['dirty', 'cleaning', 'inspection', 'clean', 'unassigned'], true)) ? (string)$_GET['hk'] : '';
+    $calHk = rh_cal_hk_tab($pdo, $calHkFilter, $today);
+} else {
+    $calMtFilter = (is_scalar($_GET['mt'] ?? null) && in_array((string)$_GET['mt'], ['progress', 'due'], true)) ? (string)$_GET['mt'] : '';
+    $calMt = rh_cal_maint_tab($pdo, $calMtFilter, $today);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -325,14 +201,17 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Room Calendar - Admin Panel</title>
+    <title>Calendar - Admin Panel</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/admin-kpi.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-kpi.css'); ?>">
+    <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
     <link rel="stylesheet" href="css/calendar.css?v=<?php echo @filemtime(__DIR__ . '/css/calendar.css'); ?>">
+    <link rel="stylesheet" href="css/room-timeline.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline.css'); ?>">
 </head>
 
 <body>
@@ -340,7 +219,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="content">
-        <h2 class="section-title">📅 Room Calendar</h2>
+        <?php require __DIR__ . '/includes/calendar-shell.php'; ?>
 
         <?php if (isset($error)): ?>
             <div class="alert alert-error">
@@ -348,6 +227,10 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
             </div>
         <?php endif; ?>
 
+        <?php if (!$calIsMonth): ?>
+            <?php require __DIR__ . '/includes/calendar-timeline-view.php'; ?>
+    </div>
+        <?php else: ?>
         <div class="calendar-container">
             <div class="calendar-header calendar-page-header">
                 <div class="calendar-header-main">
@@ -846,5 +729,6 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
         })();
     </script>
 
-    <?php require_once 'includes/admin-footer.php'; ?>
+    <?php endif; ?>
 
+    <?php require_once 'includes/admin-footer.php'; ?>
