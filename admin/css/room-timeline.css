@@ -588,6 +588,9 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
     transform: translateY(100%);
 }
 .tl-drawer--sheet.is-open { transform: none; }
+/* The floating Assistant button (z-index 9997, bottom right) sits over the open sheet's actions on a phone:
+   hide it while the sheet is open. CSS only, so it comes back by itself when the sheet closes or the page changes. */
+body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
 .tl-drawer--sheet .tl-drawer__handle { display: block; width: 36px; height: 4px; margin: 8px auto 0; border-radius: 2px; background: var(--admin-surface-border, #d7dde6); }
 .tl-drawer--sheet .modal-footer { position: sticky; bottom: 0; flex-wrap: nowrap; }
 .tl-drawer--sheet .modal-footer > * { flex: 1 1 0; justify-content: center; }
