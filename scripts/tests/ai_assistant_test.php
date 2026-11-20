@@ -866,6 +866,7 @@ if (getenv('AI_TEST_BRIEF_ALERTS_ONLY')) { goto rh_ai_test_brief_p3; } // only P
 if (getenv('AI_TEST_MENU_ONLY')) { goto rh_ai_test_menu; } // only the menu & recipe advisor checks (2026-10-30)
 if (getenv('AI_TEST_BOOKED_RATE_ONLY')) { goto rh_ai_test_booked_rate; } // only the pure booked rate / rate plan checks (2026-11-10)
 if (getenv('AI_TEST_ATTN_NOTE_ONLY')) { goto rh_ai_test_attn_note; } // only the Dashboard Needs-attention note checks (2026-11-12)
+if (getenv('AI_TEST_MONEY_1121_ONLY')) { goto rh_ai_test_money_1121; } // only the 2026-11-21 money faults (unpaid by name, booking ids, the group total)
 if (getenv('AI_TEST_SYNC_ONLY')) { goto rh_ai_test_sync_1113; } // only the 2026-11-13 sync checks (stay permissions, company split, guest history, refund day)
 
 // ════ Tools: read only, no forbidden tool ════
@@ -7574,6 +7575,131 @@ try {
     }
 } catch (Throwable $e) {
     bad('Sync 2026-11-16 database checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+
+// ── Owner faults 2026-11-21 (one admin chat at Rosalyn's): "DR. X money unpaid" got "No unpaid balance or booking was
+//    found" for a guest with 9 unpaid rooms; "DR. X bookings" showed "(ID [number removed])" on each line; "Who much is
+//    the total for all roms" came back "... is MWK 0.00:" with nothing after it. Fake transport (no network); every
+//    database step inside a transaction that is rolled back. AI_TEST_MONEY_1121_ONLY=1 runs only this section. ──
+rh_ai_test_money_1121:
+echo "\n-- Money faults 2026-11-21 --\n";
+try {
+    require_once $root . '/includes/ai/ai-money.php';
+    // 1. The questions are money questions about a named guest / the group, answered locally (never the hotel-wide list)
+    $mfI1 = rh_ai_money_read_intent('DR. Pemphero Chikopa money unpaid');
+    $mfI2 = rh_ai_money_read_intent('Who much is the total for all rooms');
+    $mfI3 = rh_ai_money_read_intent('Chikopa owes');
+    check(($mfI1['ask'] ?? '') === 'left' && ($mfI1['who'] ?? '') === 'Pemphero Chikopa' && ($mfI2['ask'] ?? '') === 'total' && !empty($mfI2['group']) && ($mfI2['who'] ?? 'x') === ''
+        && rh_ai_money_read_intent('unpaid bookings') === null && rh_ai_money_read_intent('which guests owe money') === null && rh_ai_money_read_intent('show me unpaid bookings') === null
+        && rh_ai_money_read_intent('how much is the total for this month') === null && ($mfI3['who'] ?? '') === 'Chikopa',
+        'money words: "X money unpaid" = what X owes, "the total for all rooms" = the group\'s bill; "unpaid bookings" / "which guests owe money" / "the total for this month" stay hotel-wide', json_encode([$mfI1, $mfI2, $mfI3]));
+    // 2. "No unpaid balance or booking was found for DR. [GUEST_1]" is a named "no booking" claim (checked before it goes out);
+    //    the title's full stop does not end the sentence
+    check(rh_ai_named_absence_claims('No unpaid balance or booking was found for DR. [GUEST_1]. Check the booking reference on the screen.') === [0 => ['bookings', 'DR. [GUEST_1]']]
+        && rh_ai_named_absence_claims('I could not find any unpaid bookings for Mr. [GUEST_2].') === [0 => ['bookings', 'Mr. [GUEST_2]']]
+        && rh_ai_named_absence_claims('There are no unpaid bookings for today.') === [] && rh_ai_named_absence_claims('We have no unpaid bookings.') === [],
+        'named "no unpaid balance or booking for DR. X" is checked against the bookings search; a date or "we" is not a name');
+    // 3. Internal booking ids the model echoes from a lookup are taken out before the privacy scrub (no "[number removed]")
+    $mfEv = '{"count":2,"bookings":[{"booking_id":2100009083,"reference":"RBH2026481924"},{"booking_id": 2100009084,"reference":"RBH2026203705"}]}';
+    $mfIds = rh_ai_reply_drop_booking_ids("1. RBH2026481924 (ID 2100009083) - 27 Dec\n2. RBH2026203705 (confirmed, booking ID: 2100009084)\nPassport ID AB1234567 (ID 555555)", $mfEv);
+    check(strpos($mfIds, '2100009083') === false && strpos($mfIds, '2100009084') === false && strpos($mfIds, 'RBH2026481924 - 27 Dec') !== false
+        && strpos($mfIds, 'RBH2026203705 (confirmed)') !== false && strpos($mfIds, 'Passport ID AB1234567 (ID 555555)') !== false && rh_ai_reply_drop_booking_ids('(ID 2100009083)', '') === '(ID 2100009083)',
+        'model reply: "(ID <booking_id>)" from this turn\'s lookups is dropped; any other ID number is left to the privacy scrub', $mfIds);
+    // 4. The claim guard: a money figure is named by a money word ("6 rooms for [GUEST_1]" never picks totals.moved_to_guest_credit = 0)
+    $mfGEv = json_encode(['booking_id' => 2100009083, 'guest_name' => '[GUEST_1]', 'rooms' => [['reference' => 'RBH2026481924', 'billed' => 1599465.6], ['reference' => 'RBH2026203705', 'billed' => 1599465.6]],
+        'totals' => ['rooms' => 6, 'guests' => 12, 'billed' => 9596793.6, 'paid' => 5000000, 'owed' => 4596793.6, 'moved_to_guest_credit' => 0]]);
+    $mfGIx = rh_ai_claim_index($mfGEv, ['vault' => ['[GUEST_1]' => 'DR. Pemphero Chikopa']]);
+    $mfGOk = rh_ai_claim_check("The total billed across all 6 rooms for [GUEST_1] is MWK 9,596,793.60:\n- RBH2026481924: MWK 1,599,465.60\n- RBH2026203705: MWK 1,599,465.60", '', ['index' => $mfGIx]);
+    $mfGBad = rh_ai_claim_check('Still owed on the group: MWK 99,000.00.', '', ['index' => $mfGIx]);
+    check(!$mfGOk['bad'] && !$mfGOk['inconsistent'] && count($mfGBad['bad']) === 1 && rh_ai_claim_candidate('Still owed on the group: MWK 99,000.00.', $mfGBad['bad'][0], $mfGIx) === 'MWK 4,596,793.60',
+        'claim guard: "the total ... all 6 rooms for [GUEST_1] is 9,596,793.60" is backed (never "corrected" to a guest-credit 0.00); a wrong "still owed" is still corrected to 4,596,793.60', json_encode([$mfGOk['bad'], $mfGBad['bad']]));
+    check(rh_ai_claim_end_colon('The bill is **MWK 5.00:**') === 'The bill is **MWK 5.00.**' && rh_ai_claim_end_colon("Rooms:\n- 1: a") === "Rooms:\n- 1: a",
+        'a corrected reply never ends on a dangling ":" (the list after it was dropped)');
+    // 5. Database (test hotel only): the whole turn, locally, with the screen's own figures (rh_ai_folio = getBookingFolioSummary)
+    $mfAdm = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $mfRoom = (int)$pdo->query("SELECT id FROM rooms WHERE is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+    if (stripos((string)DB_NAME, 'rosalyn') !== false) {
+        skip('Money faults 2026-11-21 database checks: Rosalyn\'s is LIVE, they run at the test hotel only');
+    } elseif (!$mfAdm || $mfRoom <= 0) {
+        skip('Money faults 2026-11-21 database checks: no admin or no room');
+    } else {
+        $mfTrPrev = $GLOBALS['__rh_ai_transport'] ?? null;
+        rh_ai_set_transport($queueTransport);
+        $pdo->beginTransaction();
+        try {
+            $mfIns = $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests,
+                                        total_amount, total_with_vat, amount_paid, amount_due, status, primary_booking_id)
+                                    VALUES (?, ?, ?, 'aimoney1121@example.invalid', '+265 991 001 121', ?, ?, 3, 1, 1, 0, 300000, 300000, 0, 300000, 'confirmed', ?)");
+            $mfIn = date('Y-m-d', strtotime('+40 days'));
+            $mfOut = date('Y-m-d', strtotime('+43 days'));
+            $mfBk = static function (string $name, ?int $prim) use ($mfIns, $mfRoom, $mfIn, $mfOut, $pdo): array {
+                $ref = 'AITMF' . random_int(100000, 999999);
+                $mfIns->execute([$ref, $mfRoom, $name, $mfIn, $mfOut, $prim]);
+                $id = (int)$pdo->lastInsertId();
+                recalculateBookingFinancials($id);
+                return [$id, $ref];
+            };
+            $mfName = 'DR. Aimoney Kalulutest';
+            [$mfL, $mfLRef] = $mfBk($mfName, null);
+            [$mfM1, $mfM1Ref] = $mfBk($mfName, $mfL);
+            [$mfM2, $mfM2Ref] = $mfBk($mfName, $mfL);
+            [$mfS1, $mfS1Ref] = $mfBk('Aimoney Solotest', null);
+            [$mfS2, $mfS2Ref] = $mfBk('Aimoney Solotest', null);
+            $mfF = static function (array $ids): array {
+                $s = ['owed' => 0.0, 'billed' => 0.0];
+                foreach ($ids as $i) {
+                    $f = rh_ai_folio($i);
+                    $s['owed'] = round($s['owed'] + (float)($f['balance_due'] ?? 0), 2);
+                    $s['billed'] = round($s['billed'] + (float)($f['total'] ?? 0), 2);
+                }
+                return $s;
+            };
+            $mfG = $mfF([$mfL, $mfM1, $mfM2]);
+            $mfS = $mfF([$mfS1, $mfS2]);
+            $mfAsk = static function (string $msg, int $conv = 0) use ($pdo, $mfAdm): array {
+                $GLOBALS['ai2_calls'] = [];
+                $r = rh_ai_turn($pdo, $mfAdm, ['conversation_id' => $conv, 'message' => $msg, 'page' => 'bookings.php']);
+                return ['route' => (string)($r['route'] ?? ''), 'text' => (string)($r['reply'] ?? ''), 'calls' => count($GLOBALS['ai2_calls']), 'error' => (string)($r['error'] ?? ''), 'conv' => (int)($r['conversation_id'] ?? 0)];
+            };
+            $mfLoc = static fn(array $a): bool => $a['route'] === 'local' && $a['calls'] === 0 && $a['error'] === '';
+            $GLOBALS['ai2_q'] = [];
+            $mfA1 = $mfAsk('DR. Aimoney Kalulutest money unpaid');
+            check($mfG['owed'] > BALANCE_TOLERANCE && $mfLoc($mfA1) && strpos($mfA1['text'], 'Booked together: 3 rooms') !== false && strpos($mfA1['text'], 'the whole group still owes ' . rh_ai_fmt_cur(rh_ai_currency(), $mfG['owed'])) !== false
+                && strpos($mfA1['text'], $mfLRef) !== false && strpos($mfA1['text'], $mfM1Ref) !== false && strpos($mfA1['text'], $mfM2Ref) !== false && stripos($mfA1['text'], 'no unpaid') === false,
+                'live fault #1: "DR. X money unpaid" for a guest with 3 unpaid rooms booked together answers locally with every room and what the group owes (the Bookings figures), never "no unpaid balance"', json_encode([$mfA1, $mfG]));
+            $mfA2 = $mfAsk('Who much is the total for all roms', $mfA1['conv']);
+            check($mfLoc($mfA2) && strpos($mfA2['text'], 'the whole group\'s bill is ' . rh_ai_fmt_cur(rh_ai_currency(), $mfG['billed'])) !== false && strpos($mfA2['text'], 'still owed ' . rh_ai_fmt_cur(rh_ai_currency(), $mfG['owed'])) !== false
+                && strpos($mfA2['text'], ' 0.00:') === false && !preg_match('/:\s*$/', $mfA2['text']),
+                'live fault #3: "Who much is the total for all roms" right after is the group\'s bill (sum of each room\'s own bill), paid and still owed, locally - never "MWK 0.00:"', json_encode([$mfA2, $mfG]));
+            $mfA3 = $mfAsk('Aimoney Solotest money unpaid');
+            check($mfLoc($mfA3) && strpos($mfA3['text'], '2 bookings under this name') !== false && strpos($mfA3['text'], 'still owed in all: ' . rh_ai_fmt_cur(rh_ai_currency(), $mfS['owed'])) !== false
+                && strpos($mfA3['text'], $mfS1Ref) !== false && strpos($mfA3['text'], $mfS2Ref) !== false,
+                'one guest with 2 separate bookings: "X money unpaid" lists each booking\'s own bill and what is owed in all', json_encode([$mfA3, $mfS]));
+            // The model listed the guest's bookings (focus 0): "the total for all rooms" reads that list
+            $mfConv = (int)$mfA3['conv'];
+            rh_ai_message_add($pdo, $mfConv, 'tool', '', ['tool_name' => 'search_bookings', 'args' => ['query' => '[GUEST_1]'], 'result' => json_encode(rh_ai_t_search_bookings($pdo, $mfAdm, ['query' => 'Aimoney Kalulutest'])), 'agent' => 'model']);
+            $mfR4 = rh_ai_money_read_reply($pdo, $mfAdm, $mfConv, (array)rh_ai_money_read_intent('How much is the total for all rooms?'), [], 0);
+            check(is_array($mfR4) && strpos((string)$mfR4['text'], 'the whole group\'s bill is ' . rh_ai_fmt_cur(rh_ai_currency(), $mfG['billed'])) !== false && (int)($mfR4['focus'] ?? 0) === $mfL,
+                'after a list of one guest\'s bookings (nothing in focus), "the total for all rooms" is that guest\'s group bill', json_encode($mfR4));
+            // #2: a model reply listing the bookings with their internal ids reaches staff without "[number removed]"
+            $GLOBALS['ai2_q'] = [['reply' => ['tool_calls' => [['id' => 'toolu_mf1', 'name' => 'search_bookings', 'args' => ['query' => 'Kalulutest']]]]],
+                ['reply' => ['text' => "Here are the bookings:\n1. [BK_1] (ID $mfM2) - confirmed\n2. [BK_3] (ID $mfL) - confirmed"]]]; // the model sees references as tokens (newest first)
+            $mfA5 = $mfAsk('Please summarise every stay we hold under the surname Kalulutest, with dates');
+            $GLOBALS['ai2_q'] = [];
+            check($mfA5['error'] === '' && strpos($mfA5['text'], 'number removed') === false && strpos($mfA5['text'], (string)$mfL) === false && strpos($mfA5['text'], $mfLRef) !== false,
+                'live fault #2: a reply listing bookings never shows "(ID [number removed])" - the internal booking id is dropped, the reference stays', json_encode($mfA5));
+        } finally {
+            $pdo->rollBack();
+            $GLOBALS['ai2_q'] = [];
+            rh_ai_set_transport($mfTrPrev ?: $queueTransport);
+        }
+    }
+} catch (Throwable $e) {
+    bad('Money faults 2026-11-21 checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+if (getenv('AI_TEST_MONEY_1121_ONLY')) {
+    echo "$pass passed, $fail failed" . ($skip ? ", $skip skipped" : '') . "\n";
+    exit($fail ? 1 : 0);
 }
 if (getenv('AI_TEST_SYNC_ONLY')) {
     echo "$pass passed, $fail failed" . ($skip ? ", $skip skipped" : '') . "\n";

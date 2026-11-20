@@ -2450,6 +2450,25 @@ function rh_ai_chats_clear(PDO $db, int $uid, string $scope, int $conv = 0): int
     $st->execute([$conv, $uid]);
     return $st->rowCount();
 }
+/**
+ * A model reply without the internal booking ids it echoed from a lookup ("RBH2026481924 (ID 2100009083)", ", booking ID
+ * 2100009083"): staff know bookings by reference, and the privacy scrub turns "ID <digits>" into "ID [number removed]"
+ * (owner fault 2026-11-21). Only ids that are booking_id values in this turn's lookups are taken out; the scrub is
+ * unchanged for every other number.
+ */
+function rh_ai_reply_drop_booking_ids(string $text, string $evidence): string
+{
+    if ($text === '' || !preg_match_all('/"booking_id":\s*(\d+)/', $evidence, $m)) {
+        return $text;
+    }
+    $ids = array_flip($m[1]);
+    $out = preg_replace_callback('/[ \t]*(?:\(\s*(?:booking\s+)?id\s*[:#]?\s*(\d+)\s*\)|,\s*(?:booking\s+)?id\s*[:#]?\s*(\d+)\b)/iu', static function (array $g) use ($ids): string {
+        $n = ($g[1] ?? '') !== '' ? $g[1] : ($g[2] ?? '');
+        return isset($ids[$n]) ? '' : $g[0];
+    }, $text);
+    return is_string($out) ? $out : $text;
+}
+
 function rh_ai_message_add(PDO $db, int $conv, string $role, string $content, array $extra = []): int
 {
     $db->prepare("INSERT INTO ai_messages (conversation_id, role, agent, content, tool_name, tool_args_json, tool_result_json, provider, model_id, tokens_in, tokens_out, cost_usd, latency_ms)
@@ -3720,6 +3739,7 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
     if ($budget['in'] > RH_AI_EFFICIENCY_WARN_TOKENS) {
         rh_ai_efficiency_warn($kind, (int)$budget['in'], $usedModel); // measured, never capped
     }
+    $final = rh_ai_reply_drop_booking_ids($final, (string)($budget['evidence'] ?? '') . "\n" . $priorEvidence); // before the scrub (owner fault 2026-11-21)
     $final = rh_ai_scrub_outbound($db, $conv, $final); // stored tokenised (model text should already be)
     $chips = rh_ai_followup_chips($user, array_unique($budget['tools_used']));
     $budget['links'] = rh_ai_links_for_reply($final, (array)($budget['link_src'] ?? []), $budget['links']);

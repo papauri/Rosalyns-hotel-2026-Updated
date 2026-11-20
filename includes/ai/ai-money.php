@@ -305,9 +305,11 @@ function rh_ai_money_cancel_fee_text(PDO $db, array $res, int $id): string
  * (lead + primary_booking_id, as rh_booking_group_members), every status, each room's figure is its own bill (rh_ai_folio ->
  * getBookingFolioSummary, the Bookings Balance Due figure, company share kept apart by rh_ai_owe_words), a cancelled
  * room still owing its kept fee reads "Cancelled - fee owed" (rh_cancelled_fee_owed_label). null = not in a group (the
- * caller answers for the one booking). Read only.
+ * caller answers for the one booking). $ask 'total' (owner fault 2026-11-21: "the total for all rooms") leads with the
+ * group's bill - the sum of each room's own bill (getBookingFolioSummary grand total), the Group rooms table's Billed
+ * figure. Read only.
  */
-function rh_ai_money_group_text(PDO $db, array $res, int $id): ?string
+function rh_ai_money_group_text(PDO $db, array $res, int $id, string $ask = ''): ?string
 {
     // The group as rh_booking_group_members links it (the lead + every room whose primary_booking_id is the lead), but
     // every status: a cancelled room still owing its kept fee, a no-show owing its charge or a checked-out room with a
@@ -329,32 +331,116 @@ function rh_ai_money_group_text(PDO $db, array $res, int $id): ?string
     }
     $cur = (string)($res['currency'] ?? rh_ai_currency());
     $fm = static fn($v) => rh_ai_fmt_cur($cur, (float)$v);
-    $lines = [];
-    $total = 0.0;
-    $paid = 0.0;
-    $unread = 0;
+    $s = rh_ai_money_room_lines($rows, $cur, $ask === 'total');
+    $gap = $s['unread'] > 0 ? ' (' . $s['unread'] . ' room(s) could not be read, so this total leaves them out)' : '';
+    if ($ask === 'total') {
+        $head = '**Booked together: ' . count($rows) . ' rooms - the whole group\'s bill is ' . $fm($s['billed']) . '**' . $gap
+            . '; paid so far ' . $fm($s['paid']) . '; ' . ($s['owed'] > BALANCE_TOLERANCE ? 'still owed ' . $fm($s['owed']) : 'nothing is owed') . '.';
+    } else {
+        $head = '**Booked together: ' . count($rows) . ' rooms - the whole group still owes ' . $fm($s['owed']) . '**' . $gap
+            . '; paid so far ' . $fm($s['paid']) . '.';
+    }
+    return $head . rh_ai_local_lines($s['lines']) . "\n\nEach room's own bill, the same figures as Bookings. Payments are taken on each booking's screen.";
+}
+
+/**
+ * One line per room booking with its own bill (rh_ai_folio -> getBookingFolioSummary, the Bookings figures) and the sums:
+ * owed (balance due), paid, billed (the bill's grand total). $rows: id, booking_reference, status,
+ * cancellation_retained_amount, room_number, room_type. $bill: each line also shows the room's bill. Read only.
+ * @return array{lines:list<string>, owed:float, paid:float, billed:float, unread:int}
+ */
+function rh_ai_money_room_lines(array $rows, string $cur, bool $bill = false): array
+{
+    $fm = static fn($v) => rh_ai_fmt_cur($cur, (float)$v);
+    $out = ['lines' => [], 'owed' => 0.0, 'paid' => 0.0, 'billed' => 0.0, 'unread' => 0];
     foreach ($rows as $b) {
         $f = rh_ai_folio((int)$b['id']);
         $where = trim((string)($b['room_type'] ?? '') . ($b['room_number'] !== null && (string)$b['room_number'] !== '' ? ' room ' . $b['room_number'] : ' (room not assigned)'));
         if (!isset($f['balance_due'])) {
-            $unread++;
-            $lines[] = $b['booking_reference'] . ' · ' . $where . ': could not be read - open the booking';
+            $out['unread']++;
+            $out['lines'][] = $b['booking_reference'] . ' · ' . $where . ': could not be read - open the booking';
             continue;
         }
         $bal = (float)$f['balance_due'];
-        $total += $bal;
-        $paid += (float)($f['paid'] ?? 0);
+        $out['owed'] = round($out['owed'] + $bal, 2);
+        $out['paid'] = round($out['paid'] + (float)($f['paid'] ?? 0), 2);
+        $out['billed'] = round($out['billed'] + (float)($f['total'] ?? 0), 2);
         $st2 = strtolower((string)$b['status']);
         $label = function_exists('rh_cancelled_fee_owed_label') ? rh_cancelled_fee_owed_label($st2, $bal) : '';
         $kept = round((float)($b['cancellation_retained_amount'] ?? 0), 2);
         $owe = rh_ai_owe_words($f, $fm);
-        $lines[] = $b['booking_reference'] . ' · ' . $where . ' · ' . ($label !== '' ? $label : str_replace('-', ' ', $st2))
+        $out['lines'][] = $b['booking_reference'] . ' · ' . $where . ' · ' . ($label !== '' ? $label : str_replace('-', ' ', $st2))
             . ($st2 === 'cancelled' && $kept > BALANCE_TOLERANCE ? ' (fee kept ' . $fm($kept) . ')' : '')
-            . ': ' . ($owe !== '' ? $owe : 'nothing owed') . ' (paid ' . $fm($f['paid'] ?? 0) . ')';
+            . ': ' . ($bill ? 'bill ' . $fm($f['total'] ?? 0) . ', ' : '') . ($owe !== '' ? $owe : 'nothing owed') . ' (paid ' . $fm($f['paid'] ?? 0) . ')';
     }
-    $head = '**Booked together: ' . count($rows) . ' rooms - the whole group still owes ' . $fm($total) . '**' . ($unread > 0 ? ' (' . $unread . ' room(s) could not be read, so this total leaves them out)' : '')
-        . '; paid so far ' . $fm($paid) . '.';
-    return $head . rh_ai_local_lines($lines) . "\n\nEach room's own bill, the same figures as Bookings. Payments are taken on each booking's screen.";
+    return $out;
+}
+
+/**
+ * A money question about a guest with several room bookings (owner fault 2026-11-21: "DR. KENNEDY MALISITA money unpaid"
+ * with 9 unpaid rooms got "No unpaid balance or booking was found"). $ids: the bookings found under one guest name. All
+ * rooms of one group: the group answer (every room of it). Otherwise each booking's own bill and the sums. $partial: the
+ * search stopped at its page size. null = nothing to answer from. Read only.
+ * @return array|null ['text','focus']
+ */
+function rh_ai_money_many_text(PDO $db, array $ids, string $ask, bool $partial = false): ?array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($i) => $i > 0)));
+    if (count($ids) < 2) {
+        return null;
+    }
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $st = $db->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.status, b.cancellation_retained_amount,
+                               COALESCE(b.primary_booking_id, b.id) AS lead_id, ir.room_number, r.name AS room_type
+                        FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        WHERE b.deleted_at IS NULL AND b.id IN ($in) ORDER BY b.check_in_date, b.id");
+    $st->execute($ids);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (count($rows) < 2) {
+        return null;
+    }
+    $cur = rh_ai_currency();
+    $leads = array_values(array_unique(array_map(static fn($r) => (int)$r['lead_id'], $rows)));
+    if (!$partial && count($leads) === 1 && ($gt = rh_ai_money_group_text($db, ['currency' => $cur], $leads[0], $ask)) !== null) {
+        return ['text' => $gt, 'focus' => $leads[0]];
+    }
+    $fm = static fn($v) => rh_ai_fmt_cur($cur, (float)$v);
+    $s = rh_ai_money_room_lines($rows, $cur, $ask === 'total');
+    $gap = $s['unread'] > 0 ? ' (' . $s['unread'] . ' booking(s) could not be read, so this total leaves them out)' : '';
+    $owed = $s['owed'] > BALANCE_TOLERANCE ? 'still owed ' . $fm($s['owed']) : 'nothing is owed';
+    $head = $ask === 'total'
+        ? '**' . count($rows) . ' bookings under this name - their bill is ' . $fm($s['billed']) . ' in all**' . $gap . '; paid so far ' . $fm($s['paid']) . '; ' . $owed . '.'
+        : '**' . count($rows) . ' bookings under this name - ' . ($s['owed'] > BALANCE_TOLERANCE ? 'still owed in all: ' . $fm($s['owed']) : 'nothing is owed on any of them') . '**' . $gap . '; paid so far ' . $fm($s['paid']) . '.';
+    return ['text' => $head . rh_ai_local_lines($s['lines']) . "\n\nEach booking's own bill, the same figures as Bookings."
+        . ($partial ? ' These are the latest ' . count($rows) . ' bookings under this name only: Bookings lists every one.' : '') . ' Payments are taken on each booking\'s screen.', 'focus' => 0];
+}
+
+/**
+ * The bookings of this chat's latest booking search when they are all one guest's (one name on file) - what "the total
+ * for all rooms" right after "X's bookings" means. Only the newest few lookups count (an older search is not "them").
+ * [] = none. Read only (this chat's own, permission-checked lookups).
+ * @return list<int>
+ */
+function rh_ai_money_last_search_ids(PDO $db, int $conv): array
+{
+    try {
+        $st = $db->prepare("SELECT tool_name, tool_result_json FROM ai_messages WHERE conversation_id = ? AND role = 'tool' ORDER BY id DESC LIMIT 4");
+        $st->execute([$conv]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
+            if ((string)$t['tool_name'] !== 'search_bookings') {
+                continue;
+            }
+            $res = json_decode((string)$t['tool_result_json'], true);
+            $rows = is_array($res['bookings'] ?? null) ? $res['bookings'] : [];
+            if (count($rows) < 2 || !empty($res['close_match']) || !empty($res['match'])) {
+                return []; // one booking, a spelling guess or the hotel-wide latest list: not one guest's bookings
+            }
+            $names = array_unique(array_map(static fn($x) => mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', (string)($x['guest_name'] ?? '')))), $rows));
+            return count($names) === 1 ? array_map(static fn($x) => (int)($x['booking_id'] ?? 0), $rows) : [];
+        }
+    } catch (Throwable $e) {
+    }
+    return [];
 }
 
 /**
@@ -519,6 +605,7 @@ function rh_ai_money_read_intent(string $raw): ?array
         return null; // "what's left on my import" is about an Import review, not money owed
     }
     $ask = null;
+    $needWho = false;
     if (rh_ai_money_is_question($l) && (preg_match('/\b(?:cancell?ation|cancell?ing|cancel)\s+(?:fees?|charges?|penalty|penalties)\b/u', $l)
         || preg_match('/\b(?:how much|what)\b.{0,40}\b(?:cost|charge|pay|owe|fee|keep|lose)\b.{0,30}\bcancel/u', $l)
         || preg_match('/\b(?:cost|charge|fee)\b.{0,12}\bto cancel\b|\bif (?:they|he|she|the guest|we|i|the booking|it) (?:cancels?|cancelled|were cancelled|is cancelled)\b/u', $l)
@@ -535,6 +622,18 @@ function rh_ai_money_read_intent(string $raw): ?array
         $ask = 'deposit';
     } elseif (preg_match('/\bhow much (have|has|did) (\S+ ){0,4}paid?\b|\bamount paid\b|\bpaid so far\b|^(has|have|did) (\S+ ){0,4}paid?\b/u', $l)) {
         $ask = 'paid';
+    } elseif (!preg_match('/\b(?:revenue|sales|takings|income|report|occupancy|today|yesterday|tonight|(?:this|last|next|per|a) (?:day|night|week|month|year|quarter))\b|\bin (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/u', $l)
+        && (preg_match('/\btotal (?:bill|amount|cost|price|charge)\b/u', $l)
+        || (preg_match('/\b(?:how|who|what) much\b.{0,30}\btotal\b|^(?:what(?:\'s| is| was)|show|give me|tell me)\b.{0,12}\btotal\b/u', $l)
+            && preg_match('/\btotal (?:for|of|on) (?:all |each |every |the |this |that |his |her |their )?(?:(?:of )?(?:the )?(?:rooms?|booking|bookings|group|stay|them|him|her|it))\b/u', $l)))) {
+        // Owner fault 2026-11-21: "Who much is the total for all roms" - the bill itself (never revenue or sales:
+        // "the total for this month" names no booking and is not this)
+        $ask = 'total';
+    } elseif (preg_match('/\bunpaid\b|\bnot (?:yet )?(?:been )?paid\b|\bmoney (?:owed|owing|due|outstanding|left|unpaid)\b|\b(?:owes|owing|outstanding)\b/u', $l)) {
+        // Owner fault 2026-11-21: "DR. KENNEDY MALISITA money unpaid" went to the model and came back "no unpaid balance".
+        // Only with a named guest or a reference (below): "unpaid bookings" on its own is the hotel-wide list.
+        $ask = 'left';
+        $needWho = true;
     }
     if ($ask === null) {
         return null;
@@ -576,12 +675,19 @@ function rh_ai_money_read_intent(string $raw): ?array
         } elseif (preg_match('/^(?:is|has|did|does)\s+(\p{L}[\p{L}\'\-]+(?:\s+\p{L}[\p{L}\'\-]+)?)\s+(?:fully |completely |already )?(?:paid|owe|owing|settled)/iu', $txt, $m)
             && !preg_match('/^(it|he|she|they|this|that|the|their|his|her|everything|anything|someone|anyone)\b/iu', $m[1])) {
             $out['who'] = $m[1];
+        } elseif (preg_match('/^(\p{Lu}[\p{L}\'\-]+(?:\s+\p{Lu}[\p{L}\'\-]+){0,2})(?:\'s)?\s+(?:(?:money|balance|bill|bills|account|bookings?)\s+)?(?:unpaid|owes?|owing|outstanding|not paid|balance)\b/u', $txt, $m)
+            && !preg_match('/^(what|how|who|which|whose|is|has|have|does|did|any|the|show|list|tell|give|their|his|her|our)\b/iu', $m[1])
+            && function_exists('rh_ai_desk_name') && rh_ai_desk_name($m[1]) !== null) {
+            $out['who'] = (string)rh_ai_desk_name($m[1]); // "Kennedy Malisita money unpaid", "Banda owes"
         } elseif ($subject !== 'booking' && preg_match('/\b(?:member|booking|conference|event)\s+(?:for\s+|of\s+)?([\p{L}\p{N}][\p{L}\p{N}\'\-]+(?:\s+\p{Lu}[\p{L}\'\-]+){0,2})/u', $txt, $m)
             && !preg_match('/^(paid|fully|still|left|owe|is|has|the|their)\b/iu', $m[1])) {
             $out['who'] = $m[1];
         } elseif ($subject === 'event' && preg_match('/\bthe\s+(\p{L}[\p{L}\'\- ]{1,40}?)\s+(?:conference|event|wedding|function|meeting|seminar|workshop)\b/iu', $txt, $m)) {
             $out['who'] = trim($m[1]); // "is the Widgets conference fully paid?"
         }
+    }
+    if (!empty($needWho) && $out['who'] === '' && !isset($out['table']) && !isset($out['room'])) {
+        return null; // "unpaid bookings" with nobody named: the hotel-wide list (the model's balances lookup), not the booking in focus
     }
     return $out;
 }
@@ -613,6 +719,9 @@ function rh_ai_money_booking_text(PDO $db, array $res, string $ask, int $id): st
         case 'last':
             $head = $last ? '**' . $lastLine . '**' : '**No payment is recorded yet** on this booking (' . $f($owed) . ' to pay).';
             $lastLine = '';
+            break;
+        case 'total':
+            $head = '**The bill is ' . $f($total) . '** - paid ' . $f($paid) . '; ' . ($owed <= BALANCE_TOLERANCE ? 'nothing is owed.' : 'still to pay: ' . $f($owed) . '.');
             break;
         default:
             $head = '**Paid so far: ' . $f($paid) . '** of ' . $f($total) . '. ' . ($owed <= BALANCE_TOLERANCE ? 'Nothing is owed.' : 'Still to pay: ' . $f($owed) . '.');
@@ -657,12 +766,25 @@ function rh_ai_money_read_reply(PDO $db, array $user, int $conv, array $mi, arra
         if (!rh_ai_tool_allowed($user, 'get_booking')) {
             return $declined('get_booking');
         }
+        $manyAsk = in_array((string)$mi['ask'], ['left', 'full', 'paid', 'total'], true);
         if ($mi['who'] === '' && (int)($focus['focus'] ?? 0) <= 0 && $pageBooking <= 0) {
+            // "the total for all rooms" straight after a list of one guest's bookings: those bookings (owner fault
+            // 2026-11-21, the model then answered "MWK 0.00:")
+            $ids = !empty($mi['group']) && $manyAsk ? rh_ai_money_last_search_ids($db, $conv) : [];
+            if ($ids && ($mt = rh_ai_money_many_text($db, $ids, (string)$mi['ask'], count($ids) >= rh_ai_num('ai_list_page_rows'))) !== null) {
+                return ['text' => $mt['text'], 'links' => [['label' => 'Open on Bookings', 'url' => 'bookings.php']], 'chips' => [], 'focus' => $mt['focus'], 'focus_offer' => 0];
+            }
             return null; // nothing ties it to a booking: the model asks which one
         }
         if ($mi['who'] !== '') {
             $pick = rh_ai_desk_pick($db, $user, $conv, (string)$mi['who'], $focus, $pageBooking);
             if (isset($pick['reply'])) {
+                // One guest (one name on file) with several bookings: what each owes and the sum (owner fault 2026-11-21)
+                $rows = is_array($pick['rows'] ?? null) ? $pick['rows'] : [];
+                if ($manyAsk && $rows && count(array_unique(array_map(static fn($x) => mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', (string)($x['guest_name'] ?? '')))), $rows))) === 1
+                    && ($mt = rh_ai_money_many_text($db, array_column($rows, 'booking_id'), (string)$mi['ask'], !empty($pick['partial']))) !== null) {
+                    return ['text' => $mt['text'], 'links' => $pick['links'] ?? [], 'chips' => [], 'focus' => $mt['focus'], 'focus_offer' => 0];
+                }
                 return $pick['reply'];
             }
             $id = (int)$pick['id'];
@@ -674,7 +796,7 @@ function rh_ai_money_read_reply(PDO $db, array $user, int $conv, array $mi, arra
             return null;
         }
         rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => 'get_booking', 'args' => ['booking_id' => $id], 'result' => $r['json'], 'agent' => 'local']);
-        if (!empty($mi['group']) && ($gt = rh_ai_money_group_text($db, (array)$r['result'], $id)) !== null) {
+        if (!empty($mi['group']) && ($gt = rh_ai_money_group_text($db, (array)$r['result'], $id, (string)$mi['ask'])) !== null) {
             return ['text' => $gt, 'links' => $r['links'], 'chips' => [], 'focus' => $id, 'focus_offer' => 0, 'local' => ['tool' => 'get_booking', 'view' => []]];
         }
         $txt = $mi['ask'] === 'cancelfee' ? rh_ai_money_cancel_fee_text($db, (array)$r['result'], $id) : rh_ai_money_booking_text($db, (array)$r['result'], (string)$mi['ask'], $id);

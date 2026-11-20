@@ -1070,13 +1070,17 @@ function rh_ai_claim_labelled(string $text, array $c, array $ix): array
         }
         $keys = rh_ai_claim_ps('/[._]+/', $p);
         $score = 0;
+        $moneyWord = $c['kind'] !== 'money';
         foreach ($label as $w => $wt) {
             $w = (string)$w;
             if (in_array($w, $keys, true) || ($wt >= 2 && mb_strlen($w) > 3 && strpos($p, $w) !== false)) {
                 $score += $wt;
+                $moneyWord = $moneyWord || rh_ai_claim_pm(rh_ai_claim_kind_field_re('money'), $w);
             }
         }
-        if ($score >= 2) {
+        // A money figure is named by a money word (owner fault 2026-11-21: "all 6 rooms for [GUEST_1] is MWK 9,596,793.60"
+        // matched totals.moved_to_guest_credit = 0 by the word "guest" and was "corrected" to MWK 0.00)
+        if ($score >= 2 && $moneyWord) {
             $vals[(string)$v] = (float)$v;
         }
     }
@@ -1212,12 +1216,14 @@ function rh_ai_claim_candidate(string $text, array $c, array $ix): ?string
         $keys[] = mb_strtolower((string)$path);
         $last = (string)end($keys);
         $score = 0;
+        $moneyWord = $c['kind'] !== 'money';
         foreach ($label as $w => $wt) {
             if (in_array((string)$w, $keys, true) || strpos(mb_strtolower((string)$path), (string)$w) !== false) {
                 $score += $wt;
+                $moneyWord = $moneyWord || rh_ai_claim_pm(rh_ai_claim_kind_field_re('money'), (string)$w);
             }
         }
-        if ($score < 2) {
+        if ($score < 2 || !$moneyWord) { // a money figure is named by a money word (as rh_ai_claim_labelled)
             continue;
         }
         if ($c['kind'] === 'count' && is_numeric($v) && floor((float)$v) != (float)$v) {
@@ -1380,6 +1386,9 @@ function rh_ai_claim_correct(string $reply, array $check, array $ix, array $resu
         }
     }
     $text = trim((string)rh_ai_claim_pr("/\n{3,}/", "\n\n", (string)rh_ai_claim_pr('/^[ \t]*(?:[-*•]|\d+[.)])[ \t]*$/mu', '', $text)));
+    if (array_sum($steps) > 0) {
+        $text = rh_ai_claim_end_colon($text);
+    }
     return ['text' => $text, 'steps' => $steps, 'fixes' => $fixes, 'need_recheck' => $text === ''];
 }
 
@@ -1467,7 +1476,16 @@ function rh_ai_claim_strip(string $reply, array $chk, array $ix): string
         $text .= substr($reply, $a, $b - $a);
         $prevEnd = $b;
     }
-    return trim((string)rh_ai_claim_pr("/\n{3,}/", "\n\n", (string)rh_ai_claim_pr('/^[ \t]*(?:[-*•]|\d+[.)])[ \t]*$/mu', '', $text)));
+    return rh_ai_claim_end_colon(trim((string)rh_ai_claim_pr("/\n{3,}/", "\n\n", (string)rh_ai_claim_pr('/^[ \t]*(?:[-*•]|\d+[.)])[ \t]*$/mu', '', $text))));
+}
+
+/**
+ * A reply that now ends on ":" (the list after it was dropped) ends with a full stop instead (owner fault 2026-11-21:
+ * "... is MWK 0.00:" with nothing after it).
+ */
+function rh_ai_claim_end_colon(string $text): string
+{
+    return (string)rh_ai_claim_pr('/[ \t]*:([ \t*]*)$/u', '.$1', $text);
 }
 
 // ── 4. Learn ────────────────────────────────────────────────────────────────

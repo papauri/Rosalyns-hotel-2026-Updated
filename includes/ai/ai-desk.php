@@ -1840,7 +1840,9 @@ function rh_ai_desk_pick(PDO $db, array $user, int $conv, string $who, array $st
         if (count($fit) === 1) {
             return ['id' => (int)$fit[0]['booking_id'], 'row' => $fit[0]];
         }
-        return ['reply' => ['text' => count($rows) . ' bookings match "' . $asked . '" - which one? Tell me the reference.' . rh_ai_local_lines(array_map('rh_ai_booking_line', $rows)), 'links' => $r['links'], 'chips' => []]];
+        // 'rows' / 'partial': a money question about every booking of one guest answers for all of them (owner fault 2026-11-21)
+        return ['reply' => ['text' => count($rows) . ' bookings match "' . $asked . '" - which one? Tell me the reference.' . rh_ai_local_lines(array_map('rh_ai_booking_line', $rows)), 'links' => $r['links'], 'chips' => []],
+            'rows' => $rows, 'partial' => count($rows) >= rh_ai_num('ai_list_page_rows'), 'links' => $r['links']];
     }
     $close = is_array($res['close_matches'] ?? null) ? $res['close_matches'] : [];
     if ($close) {
@@ -2214,16 +2216,19 @@ function rh_ai_named_absence_claims(string $reply): array
     $lead = '(?:(?:sorry|unfortunately|it (?:looks|seems) like|i\'m afraid|i checked(?: and)?|however),? )?';
     $prep = '(?:for|under|in the name of|named|called|matching|with the name|by the name(?: of)?)';
     $out = [];
-    foreach (preg_split('/(?<=[.!?;])\s+|\n+/u', $reply) as $i => $s) {
+    // "for DR. [GUEST_1]" is one sentence: a title's full stop never ends it (owner fault 2026-11-21)
+    foreach (preg_split('/(?<=[.!?;])(?<!\bmr\.|\bmrs\.|\bms\.|\bdr\.|\bprof\.)\s+|\n+/iu', $reply) as $i => $s) {
         $s = trim((string)preg_replace('/[\s.!?;]+$/u', '', str_replace(['’', '‘', '*'], ["'", "'", ''], trim((string)$s))));
         if ($s === '') {
             continue;
         }
         foreach (['conference', 'gym_members', 'bookings'] as $k) {
             $x = '(?:' . $subjects[$k] . ')';
+            // "No unpaid balance or booking was found for X" (owner fault 2026-11-21): money words before the booking word
+            $mp = $k === 'bookings' ? '(?:(?:unpaid|outstanding|open|money|balances?|payments?|amounts?|owed|due) (?:or |and |nor )?){0,4}' : '';
             $shapes = [
-                '/^' . $lead . '(?:there (?:is|are|was|were) )?no ' . $x . '(?: (?:was|were|has been|have been|is|are|could be))?(?: (?:found|on file|on record|in the system|listed|booked|made))? ' . $prep . ' (?<name>.+)$/iu',
-                '/^' . $lead . 'i (?:couldn\'t|could not|can\'t|cannot|didn\'t|did not|was unable to|wasn\'t able to) (?:find|see|locate) (?:a |an |any )?' . $x . ' ' . $prep . ' (?<name>.+)$/iu',
+                '/^' . $lead . '(?:there (?:is|are|was|were) )?no ' . $mp . $x . '(?: (?:was|were|has been|have been|is|are|could be))?(?: (?:found|on file|on record|in the system|listed|booked|made))? ' . $prep . ' (?<name>.+)$/iu',
+                '/^' . $lead . 'i (?:couldn\'t|could not|can\'t|cannot|didn\'t|did not|was unable to|wasn\'t able to) (?:find|see|locate) (?:a |an |any )?' . $mp . $x . ' ' . $prep . ' (?<name>.+)$/iu',
                 '/^' . $lead . 'no ' . $x . ' match(?:es|ed)? (?<name>.+)$/iu',
                 '/^' . $lead . '(?<name>.+?) (?:has|have) no ' . $x . '(?: (?:on file|on record|in the system|yet))?$/iu',
                 '/^' . $lead . '(?<name>.+?) (?:does not|doesn\'t|did not|didn\'t) have (?:a |an |any )' . $x . '(?: (?:on file|on record|in the system|yet))?$/iu',
@@ -2279,7 +2284,7 @@ function rh_ai_named_absence_fix(PDO $db, array $user, int $conv, string $reply,
     if (!$claims) {
         return $reply;
     }
-    $parts = preg_split('/(?<=[.!?;])\s+|\n+/u', $reply); // the same split as the claims
+    $parts = preg_split('/(?<=[.!?;])(?<!\bmr\.|\bmrs\.|\bms\.|\bdr\.|\bprof\.)\s+|\n+/iu', $reply); // the same split as the claims
     $swap = [];
     foreach ($claims as $i => [$subject, $name]) {
         unset($asWritten);
