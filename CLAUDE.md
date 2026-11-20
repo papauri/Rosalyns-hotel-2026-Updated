@@ -5,6 +5,9 @@ Vanilla PHP (≥7.4, no framework) hotel website + PMS. PDO/MySQL (creds via `.e
 `includes/`; admin panel in `admin/` (session + CSRF + per-page permissions via
 `admin/admin-init.php`); key-authenticated JSON API in `api/`. Plain HTML/CSS/JS, no build step.
 
+General rules for every project (safety, git, models and cost, UI) live in `../AI-Setup/RULES.md`
+(the shared `AI-Setup` folder next to this repo). This file adds the hotel facts and may be stricter, never looser.
+
 ## Autonomous build system (default workflow)
 
 This project runs on an agent build system. **Default to `/build-loop`** for build work —
@@ -79,7 +82,7 @@ do not re-derive plans or re-scan the repo ad hoc.
 3. Builders run only their own test file (`php scripts/tests/<x>.php`), never the full
    `run_tests.php` (10+ min, agents loop on it). At ship the orchestrator runs only what the change needs (tiers in DEPARTMENTS.md ship gate step 1): no DB tests for UI/docs, the area's suites for one area, the full suite only for core/money/migrations/auth.
 4. Never read big files whole: `.claude/CODE_INDEX.md` + Grep + offset reads. `config/database.php`
-   (~9.5k lines), BUILD_PLAN/SYSTEM_MAP/CODE_INDEX are lookup-only. Shipped history is in
+   (~15.1k lines), BUILD_PLAN/SYSTEM_MAP/CODE_INDEX are lookup-only. Shipped history is in
    `.claude/archive/`, never read unless asked.
 5. Briefs carry the facts (paths, lines, rule, test cases) so agents don't re-discover them; reports
    under 150 words. Haiku for lint/docs/guides, Opus for build and logic QA, Sonnet only for very small sure tasks (owner 2026-11-09).
