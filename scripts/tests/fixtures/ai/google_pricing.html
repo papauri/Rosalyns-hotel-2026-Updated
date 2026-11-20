@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<!-- Test fixture for scripts/tests/ai_model_choices_test.php: a saved-style copy of Google's Gemini API price page
+     (https://ai.google.dev/gemini-api/docs/pricing). The layout is modelled on the page (one <h2> per model, the id in
+     <code>, a Standard table with Free and Paid columns, then a Batch table); the figures are made up for the tests. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Gemini Developer API pricing</title></head>
+<body>
+<h1 class="devsite-page-title">Gemini Developer API pricing</h1>
+<p>Prices are in US dollars per 1M tokens.</p>
+
+<h2 id="gemini-4-argon" data-text="Gemini 4 Argon">Gemini 4 Argon</h2>
+<p><em><code translate="no" dir="ltr">gemini-4-argon</code></em></p>
+<p>Our most capable model.</p>
+<section class="tabs"><h3>Standard</h3>
+<table class="pricing-table">
+<thead><tr><th></th><th scope="col">Free Tier</th><th scope="col">Paid Tier, per 1M tokens in USD</th></tr></thead>
+<tbody>
+<tr><td>Input price</td><td>Not available</td><td>$2.00 until November 30, 2026, then $4.00</td></tr>
+<tr><td>Output price (including thinking tokens)</td><td>Not available</td><td>$10.00 until November 30, 2026, then $20.00</td></tr>
+<tr><td>Context caching price</td><td>Not available</td><td>$0.20</td></tr>
+</tbody></table>
+<h3>Batch</h3>
+<table class="pricing-table">
+<thead><tr><th></th><th scope="col">Free Tier</th><th scope="col">Paid Tier, per 1M tokens in USD</th></tr></thead>
+<tbody>
+<tr><td>Input price</td><td>Not available</td><td>$1.00</td></tr>
+<tr><td>Output price (including thinking tokens)</td><td>Not available</td><td>$5.00</td></tr>
+</tbody></table>
+</section>
+
+<h2 id="gemini-3.8-flash" data-text="Gemini 3.8 Flash">Gemini 3.8 Flash</h2>
+<p><em><code translate="no" dir="ltr">gemini-3.8-flash</code></em></p>
+<section class="tabs"><h3>Standard</h3>
+<table class="pricing-table">
+<thead><tr><th></th><th scope="col">Free Tier</th><th scope="col">Paid Tier, per 1M tokens in USD</th></tr></thead>
+<tbody>
+<tr><td>Input price</td><td>Free of charge</td><td>$0.75 (text / image / video) until 31 Dec 2026, then $1.50<br>$2.00 (audio)</td></tr>
+<tr><td>Output price (including thinking tokens)</td><td>Free of charge</td><td>$3.75 until 31 Dec 2026, then $7.50</td></tr>
+</tbody></table>
+<h3>Batch</h3>
+<table class="pricing-table">
+<tr><th></th><th>Free Tier</th><th>Paid Tier, per 1M tokens in USD</th></tr>
+<tr><td>Input price</td><td>Not available</td><td>$0.375</td></tr>
+<tr><td>Output price (including thinking tokens)</td><td>Not available</td><td>$1.875</td></tr>
+</table>
+</section>
+
+<h2 id="gemini-3.1-pro" data-text="Gemini 3.1 Pro Preview">Gemini 3.1 Pro Preview</h2>
+<p><em><code translate="no" dir="ltr">gemini-3.1-pro-preview</code></em></p>
+<table class="pricing-table">
+<tr><th></th><th>Free Tier</th><th>Paid Tier, per 1M tokens in USD</th></tr>
+<tr><td>Input price</td><td>Not available</td><td>$2.00, prompts &lt;= 200k tokens<br>$4.00, prompts &gt; 200k tokens</td></tr>
+<tr><td>Output price (including thinking tokens)</td><td>Not available</td><td>$12.00, prompts &lt;= 200k tokens<br>$18.00, prompts &gt; 200k tokens</td></tr>
+</table>
+
+<h2 id="gemini-3.5-flash-lite" data-text="Gemini 3.5 Flash-Lite">Gemini 3.5 Flash-Lite</h2>
+<p><em><code translate="no" dir="ltr">gemini-3.5-flash-lite</code></em></p>
+<table class="pricing-table">
+<tr><th></th><th>Free Tier</th><th>Paid Tier, per 1M tokens in USD</th></tr>
+<tr><td>Input price</td><td>Free of charge</td><td>$0.25 (text / image / video)<br>$0.50 (audio)</td></tr>
+<tr><td>Output price (including thinking tokens)</td><td>Free of charge</td><td>$2.00</td></tr>
+</table>
+
+<h2 id="gemini-3.9-flash" data-text="Gemini 3.9 Flash">Gemini 3.9 Flash</h2>
+<p><em><code translate="no" dir="ltr">gemini-3.9-flash</code></em></p>
+<table class="pricing-table">
+<tr><th></th><th>Free Tier</th><th>Paid Tier, per 1M tokens in USD</th></tr>
+<tr><td>Input price</td><td>Free of charge</td><td>$0.80</td></tr>
+<tr><td>Output price (including thinking tokens)</td><td>Free of charge</td><td>$4.00</td></tr>
+</table>
+
+<h2 id="imagen" data-text="Imagen 5">Imagen 5</h2>
+<p><em><code translate="no" dir="ltr">imagen-5.0-generate</code></em></p>
+<table class="pricing-table">
+<tr><th></th><th>Free Tier</th><th>Paid Tier, per image in USD</th></tr>
+<tr><td>Image price</td><td>Not available</td><td>$0.04</td></tr>
+</table>
+</body>
+</html>

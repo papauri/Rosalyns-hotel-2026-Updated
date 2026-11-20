@@ -12,6 +12,7 @@
  */
 
 require_once __DIR__ . '/ai-providers.php';
+require_once __DIR__ . '/ai-price-page.php'; // prices read from the provider's own price page (Google)
 
 /** The catalog file, decoded once. Broken/missing file -> empty provider lists (never throws). */
 function rh_ai_catalog(): array
@@ -27,18 +28,19 @@ function rh_ai_catalog(): array
 }
 
 /**
- * A model this hotel never uses (owner 2026-10-28: "not ever Gemini 4"): never listed, suggested, saved or adopted.
- * Kept here, beside the big-model rule, as a provider rule.
+ * A model this hotel never uses: never listed, suggested, saved or adopted. Kept here, beside the big-model rule, as
+ * the one place an owner ban goes. None at present: the owner lifted the 2026-10-28 "never Gemini 4" rule on
+ * 2026-11-20 ("show and allow suggesting"); Gemini 4 models follow the same price and size rules as every other model.
  */
 function rh_ai_model_banned(string $id): bool
 {
-    return (bool)preg_match('#(^|/)gemini-?4#i', trim($id)); // gemini-4..., gemini4..., models/gemini-4...
+    return false;
 }
 
 /** The plain refusal when someone picks a banned model. */
 function rh_ai_model_banned_message(): string
 {
-    return 'Gemini 4 models are not used by this Assistant (owner rule). Choose a Gemini 3 model such as Gemini 3.8 Flash.';
+    return 'This model is not used by this Assistant (owner rule). Choose another model.';
 }
 
 /**
@@ -128,7 +130,8 @@ function rh_ai_model_version(string $id): float
 {
     $s = rh_ai_model_base_id($id);
     $s = (string)preg_replace('/-(\d{2})-(\d{2})$/', '', $s);
-    if (preg_match('/(\d+)(?:[.\-](\d{1,2}))?(?!\d)/', $s, $m)) {
+    // A size after the version is not a minor version ("gemma-4-31b-it" -> 4, not 4.31).
+    if (preg_match('/(\d+)(?:[.\-](\d{1,2})(?![\da-z]))?(?!\d)/', $s, $m)) {
         return (float)($m[1] . (isset($m[2]) && $m[2] !== '' ? '.' . $m[2] : ''));
     }
     return 0.0;
@@ -213,12 +216,13 @@ function rh_ai_suggest_top5(array $ranked): array
 
 /**
  * A big (flagship) model: never suggested for chat (owner 2026-10-28: "never use big models like Opus 5.5 just
- * for chat"). Big = an Opus / Fable / Argon / Pro / Ultra family, or a price out of US$15+ per million tokens.
+ * for chat"). Big = an Opus / Fable / Pro / Ultra family, or a price out of US$15+ per million tokens. Argon is no
+ * longer big by name (owner 2026-11-20): it is judged by its price (US$10 out until 30 Nov 2026, US$20 from 1 Dec).
  */
 function rh_ai_model_is_big(array $m): bool
 {
     $fam = '-' . rh_ai_model_family((string)($m['model_id'] ?? '')) . '-';
-    if (preg_match('/-(opus|fable|argon|pro|ultra)-/', $fam)) {
+    if (preg_match('/-(opus|fable|pro|ultra)-/', $fam)) {
         return true;
     }
     return isset($m['price_out']) && $m['price_out'] !== null && (float)$m['price_out'] + 0.0001 >= 15;
@@ -235,7 +239,7 @@ function rh_ai_model_is_big(array $m): bool
  */
 function rh_ai_suggest_roles(array $ranked): array
 {
-    // The bar may come from any priced model on offer; a banned (Gemini 4) or big model is never picked.
+    // The bar may come from any priced model on offer; a banned (owner rule, none at present) or big model is never picked.
     $cost = static fn(array $m): float => (float)$m['price_in'] + (float)$m['price_out'];
     $priced = array_values(array_filter($ranked, static fn($m) => isset($m['price_in'], $m['price_out']) && $m['price_in'] !== null && $m['price_out'] !== null));
     $small = array_values(array_filter($priced, static fn($m) => !rh_ai_model_is_big($m) && !rh_ai_model_banned((string)$m['model_id'])));
@@ -321,7 +325,20 @@ function rh_ai_sync_models(PDO $db, string $provider, array $ranked): void
              is_new = IF(price_edited = 1, 0, VALUES(is_new)), sort = VALUES(sort), last_seen_at = NOW()"
     );
     $ids = [];
-    $ranked = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)($m['model_id'] ?? '')))); // never stored, so never listed or chosen
+    $ranked = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)($m['model_id'] ?? '')))); // a banned model (none at present) is never stored
+    // Prices read from the provider's own price page (owner 2026-11-20), in effect today, laid over the built-in list.
+    // Every save keeps them (also when today's read failed); a price typed by hand still wins (price_edited = 1 below).
+    $pagePrices = rh_ai_price_page_prices($db, $provider);
+    if ($pagePrices) {
+        foreach ($ranked as $i => $m) {
+            $pp = rh_ai_price_page_for($pagePrices, (string)$m['model_id']);
+            if ($pp !== null) {
+                $ranked[$i]['price_in'] = $pp[0];
+                $ranked[$i]['price_out'] = $pp[1];
+                $ranked[$i]['is_new'] = false;
+            }
+        }
+    }
     // All or nothing (fault 2026-11-20): a lock wait part-way used to leave only the first rows marked as listed.
     $own = !$db->inTransaction();
     if ($own) {
@@ -461,7 +478,7 @@ function rh_ai_test_connection(string $provider, string $key, ?PDO $db = null): 
         return ['ok' => false, 'ms' => $list['ms'], 'message' => 'The key works, but the provider offers no chat models to it.', 'ranked' => [], 'ping_model' => ''];
     }
     // Which model answers the test (owner 2026-10-28): the chosen Fast model when the provider still lists it, else the
-    // suggested Fast model, then the cheapest other suggested one. Never a model outside that, never Gemini 4, never one marked closed.
+    // suggested Fast model, then the cheapest other suggested one. Never a model outside that, never a banned one, never one marked closed.
     $gone = rh_ai_models_gone($db, $provider);
     $usable = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)$m['model_id']) && !in_array((string)$m['model_id'], $gone, true)));
     if (!$usable) {
@@ -539,6 +556,8 @@ function rh_ai_refresh_provider(PDO $db, string $provider): array
     }
     $ranked = rh_ai_rank_models($provider, $list['models']);
     $before = array_column(rh_ai_models_for($db, $provider), 'model_id');
+    // The provider's price page first (Google only), so the list is saved with today's prices.
+    $pr = rh_ai_price_page_url($provider) !== '' ? rh_ai_price_page_refresh($db, $provider) : ['ok' => false, 'message' => ''];
     rh_ai_sync_models($db, $provider, $ranked);
     $newIds = array_values(array_diff(array_column($ranked, 'model_id'), $before));
     $new = count($newIds);
@@ -557,8 +576,12 @@ function rh_ai_refresh_provider(PDO $db, string $provider): array
                 . ', still chosen. Nothing was switched: choose a replacement in Assistant Settings > Models and save.');
         }
     }
-    return ['ok' => true, 'count' => count($ranked), 'new' => $new, 'new_ids' => $newIds, 'retired' => $ch['retired'],
-        'message' => rh_ai_model_choices_notice($ch, count($ranked), $newIds)];
+    $msg = rh_ai_model_choices_notice($ch, count($ranked), $newIds);
+    if ((string)$pr['message'] !== '') {
+        $msg .= ' ' . $pr['message'];
+    }
+    return ['ok' => true, 'count' => count($ranked), 'new' => $new, 'new_ids' => $newIds, 'retired' => $ch['retired'], 'prices_read' => !empty($pr['ok']),
+        'message' => $msg];
 }
 
 /**

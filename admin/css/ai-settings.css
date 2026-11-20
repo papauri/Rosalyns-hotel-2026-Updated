@@ -57,6 +57,41 @@
     background: var(--admin-surface, #fff);
     padding: 12px 14px;
     min-width: 0;
+    /* Owner 2026-11-20 ("not aligned correctly"): equal-height cards, buttons at the bottom. */
+    display: flex;
+    flex-direction: column;
+}
+
+.ai-provider .ai-key-form {
+    margin-top: auto;
+}
+
+.ai-provider__note--empty {
+    margin: 0;
+}
+
+/* Where the browser can, the rows line up across the cards too: head, note, key, test, key box, hint, buttons. */
+@supports (grid-template-rows: subgrid) {
+    .ai-provider {
+        display: grid;
+        grid-template-rows: subgrid;
+        grid-row: span 7;
+        row-gap: 0;
+        align-content: start;
+    }
+
+    .ai-provider .ai-key-form {
+        display: contents;
+    }
+
+    .ai-provider .ai-key-form .form-control,
+    .ai-provider .ai-key-form .ai-actions {
+        align-self: start;
+    }
+
+    .ai-provider .ai-key-form > .help-text {
+        margin: 4px 0 0;
+    }
 }
 
 .ai-provider__head {

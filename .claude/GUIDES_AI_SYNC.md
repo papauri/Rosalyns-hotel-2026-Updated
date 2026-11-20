@@ -30,6 +30,11 @@ when prompted."
 - **Assistant:** built by the AI lead; nothing more to sync.
 - **Manager Guides:** none.
 
+### AI Settings: top 10 models, Google price page, Gemini 4 allowed, untick + Save fixed, provider cards lined up (2026-11-20, owner ask + fault) - Liwonde a7e1e5d / Rosalyn's port
+- **Guides (22-assistant.html, Models rows ~350/377/378, admin only):** each provider now shows up to 10 current models (cheapest, fastest, latest); badges Newest / Cheapest / Fastest; "Replies here in about X s"; Google prices are read from Google's price page in the daily check and on Check for newer models ("Price from Google's page, <date>"), typed prices are never changed; Gemini 4 models are now shown and can be suggested (line 378 still says they are not); big models (Pro/Ultra/Opus or US$15+ per million out) are shown but never suggested; ticking a model makes it Extra, unticking clears its role, picking a role ticks it; Save fixes a missing Primary / second Fast and says what it set.
+- **Assistant:** built by the AI lead; nothing more to sync.
+- **Manager Guides:** none.
+
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 
 ### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md

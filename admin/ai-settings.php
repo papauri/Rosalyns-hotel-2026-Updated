@@ -130,18 +130,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'save_models') {
-            $roles = [];
+            // Owner fault 2026-11-20 ("failing to untick models and save"): the ticks are tidied into a choice that
+            // saves (no role -> Extra, one Primary, one Fast, one Fallback; a model the provider closed is taken off)
+            // and the message says what was done. rh_ai_save_selection still checks the result.
+            $offeredNow = array_column(rh_ai_models_for($pdo, $prov), null, 'model_id');
+            $allRows = [];
+            try {
+                $stAll = $pdo->prepare("SELECT model_id, label, role FROM ai_models WHERE provider = ?");
+                $stAll->execute([$prov]);
+                $allRows = array_column($stAll->fetchAll(PDO::FETCH_ASSOC), null, 'model_id');
+            } catch (Throwable $e) {
+                $allRows = [];
+            }
+            $nameOf = static fn(string $id): string => (string)($allRows[$id]['label'] ?? '') !== '' ? (string)$allRows[$id]['label'] : $id;
+            $picks = [];
+            $postRoles = [];
+            $saveNotes = [];
             foreach ((array)($_POST['pick'] ?? []) as $mid) {
                 $mid = (string)$mid;
-                $roles[$mid] = (string)($_POST['role'][$mid] ?? '');
+                if (!isset($offeredNow[$mid])) {
+                    if (isset($allRows[$mid])) {
+                        $was = (string)($allRows[$mid]['role'] ?? '');
+                        $saveNotes[] = $nameOf($mid) . ' is no longer offered by ' . $provLabel . ', so it was taken off' . ($was !== '' ? ' (it was ' . ucfirst($was) . ')' : '') . '.';
+                        continue;
+                    }
+                }
+                $picks[] = $mid;
+                $postRoles[$mid] = (string)($_POST['role'][$mid] ?? '');
             }
+            // A model in use that the provider no longer offers is shown greyed out and never posted: say it was taken off.
+            foreach (rh_ai_model_choices($pdo, $prov)['retired'] as $rid) {
+                if (!in_array($rid, $picks, true) && !in_array($rid, (array)($_POST['pick'] ?? []), true)) {
+                    $was = (string)($allRows[$rid]['role'] ?? '');
+                    $saveNotes[] = $nameOf($rid) . ' is no longer offered by ' . $provLabel . ', so it was taken off' . ($was !== '' ? ' (it was ' . ucfirst($was) . ')' : '') . '.';
+                }
+            }
+            $norm = rh_ai_normalise_picks($picks, $postRoles, array_map(static fn($m) => (float)$m['capability_rank'], $offeredNow), array_map(static fn($m) => (string)$m['label'], $offeredNow));
+            $roles = $norm['roles'];
+            $saveNotes = array_merge($saveNotes, $norm['notes']);
             $prices = [];
             foreach ((array)($_POST['price_in'] ?? []) as $mid => $pin) {
                 $prices[(string)$mid] = [(string)$pin, (string)($_POST['price_out'][$mid] ?? '')];
             }
             rh_ai_save_selection($pdo, $prov, $roles, $prices);
             logActivity($uid, 'ai_settings', 'Assistant models saved for ' . $provLabel . ': ' . implode(', ', array_map(static fn($k, $v) => $k . ' (' . $v . ')', array_keys($roles), $roles)));
-            $aiFlash('success', $roles ? 'Models saved. ' . $provLabel . ' is now the provider in use.' : 'No models chosen: the Assistant has no provider in use.', 'ai-models-' . $prov);
+            $setText = implode(', ', array_map(static fn($k, $v) => $nameOf((string)$k) . ' (' . ucfirst($v) . ')', array_keys($roles), $roles));
+            $aiFlash('success', $roles
+                ? 'Models saved: ' . $setText . '. ' . $provLabel . ' is now the provider in use.' . ($saveNotes ? ' ' . implode(' ', $saveNotes) : '')
+                : 'No models chosen: the Assistant has no provider in use.' . ($saveNotes ? ' ' . implode(' ', $saveNotes) : ''), 'ai-models-' . $prov);
         }
 
         if ($action === 'save_limits') {
@@ -659,6 +695,8 @@ $fmtPrice = static function ($v): string {
                         </div>
                         <?php if ($meta['note'] !== ''): ?>
                             <p class="help-text ai-provider__note"><i class="fas fa-info-circle"></i> <?php echo $h($meta['note']); ?></p>
+                        <?php else: /* kept so the key, test and buttons line up across the cards */ ?>
+                            <p class="help-text ai-provider__note ai-provider__note--empty" aria-hidden="true"></p>
                         <?php endif; ?>
                         <p class="ai-provider__key">
                             Key: <?php echo $hasKey ? '<code>' . $h(rh_ai_mask_last4((string)$st['key_last4'])) . '</code>' : '<span class="ai-muted">none saved</span>'; ?>
@@ -681,6 +719,8 @@ $fmtPrice = static function ($v): string {
                                 }
                                 ?>
                             </p>
+                        <?php else: ?>
+                            <p class="ai-provider__test ai-provider__test--none"><i class="fas fa-circle-question"></i> No key saved yet, so not tested.</p>
                         <?php endif; ?>
                         <form method="POST" action="ai-settings.php" autocomplete="off" class="ai-key-form">
                             <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
@@ -746,7 +786,7 @@ $fmtPrice = static function ($v): string {
                     </div></div>
                 <?php endforeach; ?>
             <?php else: ?>
-                <p class="help-text">Ticked rows are the suggestion until you save your own choice: the three cheapest models that still perform (within 15 of the best priced model's rank) as Primary, Fallback and Fast, and the next cheapest priced models as Extra. Big models (Opus, Fable, Pro, Argon, or US$15+ per million out) and models with no price are never suggested for chat. Primary answers questions; Fast handles short replies; Fallback takes over if Primary fails; Extra is kept ready.</p>
+                <p class="help-text">Ticked rows are the suggestion until you save your own choice: the three cheapest models that still perform (within 15 of the best priced model's rank) as Primary, Fallback and Fast, and the next cheapest priced models as Extra. Big models (Opus, Fable, Pro, Ultra, or US$15+ per million out) are shown but never suggested for chat, and neither are models with no price. Primary answers questions; Fast handles short replies; Fallback takes over if Primary fails; Extra is kept ready.</p>
                 <?php foreach ($modelsBy as $p => $rows): if (!$rows) { continue; }
                     // The choices on offer (fault 2026-11-20): the current top models, plus the ones still in use.
                     $choices = rh_ai_model_choices($pdo, $p);
@@ -755,7 +795,11 @@ $fmtPrice = static function ($v): string {
                     $mStatus = $choices['status'];
                     $hasSel = (bool)array_filter($rows, static fn($r) => (int)$r['is_selected'] === 1);
                     $suggest = $choices['suggest'];
-                    $newestDate = max(array_map(static fn($r) => (string)($r['released_at'] ?? ''), $rows));
+                    $mBadges = $choices['badges'];
+                    $mSpeed = $choices['speed_ms'];
+                    // Prices read from the provider's own price page (Google only): shown with the day they were read.
+                    $pagePrices = rh_ai_price_page_prices($pdo, $p);
+                    $pageAt = rh_ai_price_page_saved($pdo, $p)['at'];
                     $hasKeyP = !empty($states[$p]['has_key']);
                     $retiredRows = array_values(array_filter($rows, static fn($r) => ($mStatus[(string)$r['model_id']] ?? '') === 'retired'));
                 ?>
@@ -774,7 +818,7 @@ $fmtPrice = static function ($v): string {
                                 Nothing was switched for you: tick a replacement below, give it that role and click Save models. If you think it is still offered, click Check for newer models.
                             </div></div>
                         <?php endif; ?>
-                        <p class="help-text">Shown: the current top models for this provider and any model still in use. Older versions and models that are not good value for chat are left out.</p>
+                        <p class="help-text">Shown: up to <?php echo (int)RH_AI_MODEL_CHOICES_MAX; ?> current models for this provider, best first (cheapest, fastest, newest and most capable count equally), and any model still in use. Older versions, aliases and models that do not answer chat are left out. Ticking a model makes it Extra until you pick a role; unticking clears its role.</p>
                         <div class="table-container"><div class="table-responsive">
                         <table class="table ai-table">
                             <thead><tr>
@@ -784,7 +828,7 @@ $fmtPrice = static function ($v): string {
                                 <th>Context <i class="help" data-tip="How much text the model can read at once, in tokens (1 token is about 3/4 of a word). 1M = one million.">?</i></th>
                                 <th>Price in <i class="help" data-tip="US dollars per million tokens sent to the model. Used only to estimate cost on this page and against the monthly aim. Leave blank if unknown.">?</i></th>
                                 <th>Price out <i class="help" data-tip="US dollars per million tokens the model writes back. Used only for cost estimates and the monthly aim.">?</i></th>
-                                <th>Notes <i class="help" data-tip="Newest = most recently released in this list. New - set price = not in the built-in list; type its price from the provider's price page. Suggested = a current top model you have not chosen yet. No longer offered = the provider dropped a model you use; choose a replacement.">?</i></th>
+                                <th>Notes <i class="help" data-tip="Newest = the latest version in this list. Cheapest = the lowest price in plus out. Fastest = the quickest replies measured here (at least 5 in 30 days), otherwise the quickest kind of model (Flash-Lite, then Flash, then the rest). Price from Google's page = read from Google's price page on that day; a price you type is kept instead. New - set price = not in the built-in list; type its price from the provider's price page. Suggested = a current top model you have not chosen yet. No longer offered = the provider dropped a model you use; choose a replacement.">?</i></th>
                             </tr></thead>
                             <tbody>
                             <?php foreach ($rows as $m):
@@ -815,7 +859,14 @@ $fmtPrice = static function ($v): string {
                                     <td><input type="text" inputmode="decimal" name="price_in[<?php echo $h($mid); ?>]" value="<?php echo $h($fmtPrice($m['price_in_per_mtok'])); ?>" class="form-control ai-price" aria-label="Price in for <?php echo $h($m['label']); ?>" placeholder="$"></td>
                                     <td><input type="text" inputmode="decimal" name="price_out[<?php echo $h($mid); ?>]" value="<?php echo $h($fmtPrice($m['price_out_per_mtok'])); ?>" class="form-control ai-price" aria-label="Price out for <?php echo $h($m['label']); ?>" placeholder="$"></td>
                                     <td>
-                                        <?php if ($newestDate !== '' && (string)($m['released_at'] ?? '') === $newestDate): ?><span class="badge badge-info">Newest</span><?php endif; ?>
+                                        <?php foreach ((array)($mBadges[$mid] ?? []) as $bk): ?><span class="badge badge-info"><?php echo $h(['newest' => 'Newest', 'cheapest' => 'Cheapest', 'fastest' => 'Fastest'][$bk] ?? ''); ?></span> <?php endforeach; ?>
+                                        <?php if (isset($mSpeed[$mid])): ?><span class="ai-muted">Replies here in about <?php echo $h(number_format($mSpeed[$mid] / 1000, 1)); ?> s.</span><?php endif; ?>
+                                        <?php
+                                        $pp = rh_ai_price_page_for($pagePrices, $mid);
+                                        if ($pp !== null && (int)($m['price_edited'] ?? 0) !== 1 && $m['price_in_per_mtok'] !== null && $m['price_out_per_mtok'] !== null
+                                            && abs((float)$m['price_in_per_mtok'] - $pp[0]) < 0.00005 && abs((float)$m['price_out_per_mtok'] - $pp[1]) < 0.00005): ?>
+                                            <span class="ai-muted">Price from Google's page, <?php echo $h(date('j M Y', (int)strtotime($pageAt))); ?>.</span>
+                                        <?php endif; ?>
                                         <?php if ((int)$m['is_new'] === 1): ?><span class="badge badge-warning">New - set price</span><?php endif; ?>
                                         <?php if ($retired): ?><span class="badge badge-danger">No longer offered - choose a replacement</span><?php endif; ?>
                                         <?php if ($hasSel && !$ticked && isset($suggest[$mid])): ?><span class="badge badge-info">Suggested: <?php echo $h(ucfirst($suggest[$mid])); ?></span><?php endif; ?>
@@ -1483,13 +1534,42 @@ $fmtPrice = static function ($v): string {
             if (c) c.textContent = n + ' of 5 chosen';
         }
         document.querySelectorAll('.ai-models-form').forEach(sync);
+        // Owner fault 2026-11-20 ("failing to untick models and save"): the tick and the role move together.
+        // Ticking a row with no role makes it Extra; unticking clears its role; picking a role ticks the row; a second
+        // Primary, Fast or Fallback moves the earlier one to Extra. The server tidies the same way before saving.
+        function rowParts(el) {
+            var tr = el.closest('tr');
+            return tr ? { box: tr.querySelector('[data-ai-pick]'), role: tr.querySelector('select.ai-role') } : null;
+        }
+        function onlyOne(form, keep) {
+            if (!keep.value || keep.value === 'extra') return;
+            form.querySelectorAll('select.ai-role').forEach(function (s) {
+                if (s !== keep && !s.disabled && s.value === keep.value) s.value = 'extra';
+            });
+        }
         if (!window.__rhAiSettingsBound) {
             window.__rhAiSettingsBound = true;
             document.addEventListener('change', function (e) {
                 var t = e.target;
-                if (t && t.matches && t.matches('[data-ai-pick]')) {
-                    var form = t.closest('.ai-models-form');
-                    if (form) sync(form);
+                if (!t || !t.matches) return;
+                var form = t.closest('.ai-models-form');
+                if (!form) return;
+                var row = rowParts(t);
+                if (t.matches('[data-ai-pick]')) {
+                    if (row && row.role) {
+                        if (t.checked && !row.role.value) row.role.value = 'extra';
+                        if (!t.checked) row.role.value = '';
+                    }
+                    sync(form);
+                } else if (t.matches('select.ai-role') && row && row.box) {
+                    if (t.value && !row.box.checked) {
+                        if (row.box.disabled) { t.value = ''; return; } // already 5 chosen: untick one first
+                        row.box.checked = true;
+                    } else if (!t.value && row.box.checked) {
+                        row.box.checked = false;
+                    }
+                    onlyOne(form, t);
+                    sync(form);
                 }
             });
         }

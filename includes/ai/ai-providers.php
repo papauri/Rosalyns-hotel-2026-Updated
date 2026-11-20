@@ -204,10 +204,13 @@ function rh_ai_http_problem(array $r, string $key): string
     return $lead . ' (HTTP ' . $r['http'] . ')' . ($msg !== '' ? ': ' . rh_ai_scrub($msg, $key) : '.');
 }
 
-/** Ids of models that are not for chat (embeddings, speech, images, music, moderation, realtime/Live, robotics...). */
+/**
+ * Ids of models that are not for chat (embeddings, speech, images, music, moderation, realtime/Live, robotics, and
+ * agents that run on their own: deep research, antigravity, computer use - owner 2026-11-20).
+ */
 function rh_ai_is_chat_model(string $id): bool
 {
-    return !preg_match('/(embed|tts|whisper|dall-e|gpt-image|imagen|image|audio|moderation|realtime|transcribe|speech|veo|\baqa\b|babbage|davinci|sora|\blive\b|robotics|lyria|nano-banana|customtools|\bomni\b)/i', $id);
+    return !preg_match('/(embed|tts|whisper|dall-e|gpt-image|imagen|image|audio|moderation|realtime|transcribe|speech|veo|\baqa\b|babbage|davinci|sora|\blive\b|robotics|lyria|nano-banana|customtools|\bomni\b|deep-research|antigravity|computer-use)/i', $id);
 }
 
 /**

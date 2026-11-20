@@ -28,7 +28,7 @@ require_once __DIR__ . '/ai-vault.php';
 require_once __DIR__ . '/ai-tools.php';
 require_once __DIR__ . '/ai-context.php';
 require_once __DIR__ . '/ai-actions.php';
-require_once __DIR__ . '/ai-catalog.php'; // the Gemini 4 rule and closed models (rh_ai_role_models)
+require_once __DIR__ . '/ai-catalog.php'; // the banned-model rule and closed models (rh_ai_role_models)
 
 if (!defined('RH_AI_HISTORY_TURNS')) {
     define('RH_AI_HISTORY_TURNS', 12);
@@ -2506,7 +2506,7 @@ function rh_ai_role_models(PDO $db): array
         $st = $db->prepare("SELECT model_id, label, role, source, price_in_per_mtok, price_out_per_mtok FROM ai_models WHERE provider = ? AND is_selected = 1");
         $st->execute([$prov]);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
-            // Never a Gemini 4 model (owner rule) and never a model the provider has closed, even if one is still ticked.
+            // Never a banned model (owner rule, none at present) and never a model the provider has closed, even if one is still ticked.
             if (rh_ai_model_banned((string)$m['model_id']) || (string)($m['source'] ?? '') === 'gone') {
                 $unusable[] = $m;
                 continue;
@@ -2530,7 +2530,7 @@ function rh_ai_role_models(PDO $db): array
 }
 
 /**
- * A ticked model that may not be used (Gemini 4, or closed by the provider) is taken off its role once, and the people
+ * A ticked model that may not be used (banned by an owner rule, or closed by the provider) is taken off its role once, and the people
  * who manage Assistant Settings are told in one plain line so they can choose another model.
  */
 function rh_ai_untick_unusable(PDO $db, string $provider, array $rows): void
@@ -2544,7 +2544,7 @@ function rh_ai_untick_unusable(PDO $db, string $provider, array $rows): void
                 continue; // already taken off by another request
             }
             $name = trim((string)($m['label'] ?? '')) !== '' ? (string)$m['label'] : (string)$m['model_id'];
-            $why = rh_ai_model_banned((string)$m['model_id']) ? 'Gemini 4 models are not used' : 'the provider has closed it';
+            $why = rh_ai_model_banned((string)$m['model_id']) ? 'it is not used here (owner rule)' : 'the provider has closed it';
             if (function_exists('rh_ai_notify_settings')) {
                 rh_ai_notify_settings($db, 'model_unusable', $name . ' was taken off the ' . ($roleLabel[(string)$m['role']] ?? 'chosen') . ' role (' . $why . '); choose another model in Assistant Settings.');
             }

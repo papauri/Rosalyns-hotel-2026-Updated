@@ -134,7 +134,7 @@ function rh_ai_sk_breaker_open(PDO $db): bool
 
 /**
  * The two voters (D8): A = Fast (Primary when there is no Fast); B = the cheapest OTHER ticked role model (lowest output price,
- * then input price, then Fallback, Extra, Primary), only while ai_stock_two_models = 1. Never a Gemini 4 or closed model.
+ * then input price, then Fallback, Extra, Primary), only while ai_stock_two_models = 1. Never a banned or closed model.
  * Tests may set $GLOBALS['__rh_ai_sk_voters'].
  * @return array{provider:string,a:?array,b:?array,ids:string}
  */

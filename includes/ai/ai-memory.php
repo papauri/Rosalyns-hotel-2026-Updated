@@ -949,7 +949,7 @@ function rh_ai_model_missing(PDO $db, string $provider, string $model): string
         $st = $db->prepare("SELECT model_id, capability_rank, price_in_per_mtok FROM ai_models WHERE provider = ? AND is_selected = 0 AND model_id <> ?
                             AND source <> 'gone' AND price_in_per_mtok IS NOT NULL AND price_out_per_mtok IS NOT NULL ORDER BY capability_rank DESC, model_id");
         $st->execute([$provider, $model]);
-        $cands = array_values(array_filter($st->fetchAll(PDO::FETCH_ASSOC), static fn($c) => !function_exists('rh_ai_model_banned') || !rh_ai_model_banned((string)$c['model_id']))); // never a Gemini 4 model (owner rule)
+        $cands = array_values(array_filter($st->fetchAll(PDO::FETCH_ASSOC), static fn($c) => !function_exists('rh_ai_model_banned') || !rh_ai_model_banned((string)$c['model_id']))); // never a banned model (owner rule, none at present)
         if (!$cands) {
             rh_ai_incident_add($db, 'model_retired', 'A chosen model was retired and no priced model can take its place', ['provider' => $provider, 'model' => $model, 'role' => $role], ['severity' => 'warning']);
             rh_ai_notify_settings($db, 'model_retired', 'The provider has retired ' . $model . ' (' . $role . ') and no other model with a price is listed. Choose a model in Assistant Settings.');

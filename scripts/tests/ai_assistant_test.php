@@ -394,7 +394,7 @@ foreach (['text-embedding-3-small', 'tts-1-hd', 'whisper-1', 'dall-e-3', 'gpt-im
     if (rh_ai_is_chat_model($id)) { bad("$id must be filtered out as not a chat model"); }
 }
 ok('embedding/tts/image/audio/moderation/realtime models are filtered out');
-$nonChat = array_values(array_filter(['gemini-3.8-live', 'gemini-live-2.5-flash-preview', 'gemini-robotics-er-1.5-preview', 'nano-banana-pro-preview', 'lyria-realtime-exp', 'gemini-3.1-pro-preview-customtools', 'gemini-omni'], 'rh_ai_is_chat_model'));
+$nonChat = array_values(array_filter(['gemini-3.8-live', 'gemini-live-2.5-flash-preview', 'gemini-robotics-er-1.5-preview', 'nano-banana-pro-preview', 'lyria-realtime-exp', 'gemini-3.1-pro-preview-customtools', 'gemini-omni', 'deep-research-pro-preview-12-2026', 'antigravity-preview', 'gemini-2.5-computer-use-preview-10-2025'], 'rh_ai_is_chat_model'));
 check($nonChat === [] && rh_ai_is_chat_model('gemini-3.8-flash') && rh_ai_is_chat_model('gemini-3.5-flash-lite') && rh_ai_is_chat_model('gemini-4-argon') && rh_ai_is_chat_model('gemini-3.1-pro-preview'), 'Live, robotics, music, image and custom-tools Gemini ids are not chat models; the new chat models are', json_encode($nonChat));
 check(rh_ai_is_chat_model('claude-opus-5-5') && rh_ai_is_chat_model('gpt-5') && rh_ai_is_chat_model('gemini-2.5-pro') && rh_ai_is_chat_model('deepseek-chat'), 'chat models pass the filter');
 
@@ -442,16 +442,16 @@ check($gOk && !isset($gCat['gemini-2.5-pro']) && !isset($gCat['gemini-2.5-flash'
 check(rh_ai_model_family('gemini-3.8-flash') === 'gemini-flash' && rh_ai_model_family('gemini-3.5-flash-lite') === 'gemini-flash-lite' && rh_ai_model_family('gemini-3.1-pro-preview') === 'gemini-pro' && rh_ai_model_family('gemini-4-argon') === 'gemini-argon'
     && rh_ai_model_version('gemini-3.8-flash') === 3.8 && rh_ai_model_version('gemini-3.5-flash-lite') === 3.5 && rh_ai_model_version('gemini-3.1-pro-preview') === 3.1 && rh_ai_model_version('gemini-4-argon') === 4.0, 'new Gemini ids: Flash and Flash-Lite are different families, versions read right');
 $gRoles = rh_ai_suggest_roles(rh_ai_catalog_models('google'));
-check(array_slice($gRoles, 0, 3, true) === ['gemini-3.8-flash' => 'primary', 'gemini-3.6-flash' => 'fallback', 'gemini-3.5-flash-lite' => 'fast'] && count($gRoles) === 4 && !in_array($gRoles['gemini-4-argon'] ?? '', ['primary', 'fallback', 'fast'], true),
-    'google suggestion: the 3 cheapest within 15 of the best: 3.8 Flash Primary, 3.6 Flash Fallback, 3.5 Flash-Lite Fast', json_encode($gRoles));
+check(array_slice($gRoles, 0, 3, true) === ['gemini-3.8-flash' => 'primary', 'gemini-3.6-flash' => 'fallback', 'gemini-3.5-flash-lite' => 'fast'] && count($gRoles) === 5 && ($gRoles['gemini-4-argon'] ?? '') === 'extra',
+    'google suggestion: the 3 cheapest within 15 of the best: 3.8 Flash Primary, 3.6 Flash Fallback, 3.5 Flash-Lite Fast; Gemini 4 Argon (US$10 out, allowed since 2026-11-20) is an Extra', json_encode($gRoles));
 check(rh_ai_suggest_roles([['model_id' => 'a', 'rank' => 100, 'price_in' => 10, 'price_out' => 50], ['model_id' => 'new', 'rank' => 99, 'price_in' => null, 'price_out' => null], ['model_id' => 'b', 'rank' => 95, 'price_in' => 1, 'price_out' => 5], ['model_id' => 'c', 'rank' => 92, 'price_in' => 0.5, 'price_out' => 2], ['model_id' => 'd', 'rank' => 80, 'price_in' => 0.01, 'price_out' => 0.02]])
     === ['b' => 'primary', 'c' => 'fallback', 'd' => 'fast'], 'suggestion: a big model (US$50 out) and a model with no price are never suggested; fewer than 3 near the best are topped up with the next best');
 $aCat = rh_ai_suggest_roles(rh_ai_catalog_models('anthropic'));
 check(array_slice($aCat, 0, 3, true) === ['claude-sonnet-5-5' => 'primary', 'claude-sonnet-5' => 'fallback', 'claude-haiku-5-5' => 'fast'] && !array_filter(array_keys($aCat), static fn($id) => preg_match('/opus|fable/', $id)),
     'anthropic catalog suggestion: Sonnet 5.5 Primary, Sonnet 5 Fallback, Haiku 5.5 Fast; never Opus or Fable for chat', json_encode($aCat));
-check(rh_ai_model_is_big(['model_id' => 'claude-opus-5-5', 'price_out' => 20]) && rh_ai_model_is_big(['model_id' => 'claude-fable-5-1', 'price_out' => 50]) && rh_ai_model_is_big(['model_id' => 'gemini-4-argon', 'price_out' => 10])
+check(rh_ai_model_is_big(['model_id' => 'claude-opus-5-5', 'price_out' => 20]) && rh_ai_model_is_big(['model_id' => 'claude-fable-5-1', 'price_out' => 50]) && !rh_ai_model_is_big(['model_id' => 'gemini-4-argon', 'price_out' => 10]) && rh_ai_model_is_big(['model_id' => 'gemini-4-argon', 'price_out' => 20])
     && rh_ai_model_is_big(['model_id' => 'gemini-3.1-pro-preview', 'price_out' => 12]) && rh_ai_model_is_big(['model_id' => 'grok-4', 'price_out' => 15]) && !rh_ai_model_is_big(['model_id' => 'claude-sonnet-5-5', 'price_out' => 10]) && !rh_ai_model_is_big(['model_id' => 'gemini-3.8-flash', 'price_out' => 3.75]),
-    'big models (Opus, Fable, Argon, Pro, US$15+ out) are recognised; Sonnet and Flash are not');
+    'big models (Opus, Fable, Pro, US$15+ out) are recognised; Argon is big only by price (from 1 Dec, US$20 out); Sonnet and Flash are not');
 check(rh_ai_model_version('claude-opus-5-5') === 5.5 && rh_ai_model_version('claude-haiku-4-5-20251001') === 4.5 && rh_ai_model_version('gemini-2.5-flash-preview-05-20') === 2.5 && rh_ai_model_version('grok-4-0709') === 4.0 && rh_ai_model_version('gpt-4o-mini') === 4.0, 'version parsing');
 check(rh_ai_model_family('claude-opus-5-5') === 'claude-opus' && rh_ai_model_family('claude-haiku-4-5-20251001') === 'claude-haiku' && rh_ai_model_family('gemini-2.5-flash-preview-05-20') === 'gemini-flash' && rh_ai_model_family('gpt-5-mini') === 'gpt-mini', 'family parsing');
 $ranked = rh_ai_rank_models('anthropic', rh_ai_list_models('anthropic', $FAKE_KEY)['models']);
@@ -882,7 +882,7 @@ $agentSrc = (string)file_get_contents($root . '/includes/ai/ai-agents.php') . (s
 preg_match_all('/\b(?:INSERT\s+INTO|(?<!KEY\s)UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\s+`?(\w+)/i', $agentSrc, $wm2);
 $wt = array_values(array_unique($wm2[1]));
 sort($wt);
-check($wt === ['ai_actions', 'ai_conversations', 'ai_messages', 'ai_models', 'ai_tool_cache', 'ai_usage_daily', 'ai_user_prefs', 'ai_vault'], 'the chat writes only Assistant tables (sign-out purge: vault, cards, cache; a Gemini 4 or closed model taken off its role)', json_encode($wt));
+check($wt === ['ai_actions', 'ai_conversations', 'ai_messages', 'ai_models', 'ai_tool_cache', 'ai_usage_daily', 'ai_user_prefs', 'ai_vault'], 'the chat writes only Assistant tables (sign-out purge: vault, cards, cache; a closed model taken off its role)', json_encode($wt));
 check(stripos((string)file_get_contents($root . '/includes/ai/ai-providers.php'), 'temperature') === false || !preg_match("/'temperature'\s*=>/", (string)file_get_contents($root . '/includes/ai/ai-providers.php')), 'the adapters never set a temperature');
 
 if (!$chatReady) {
@@ -2736,7 +2736,7 @@ if (!rh_ai_schema_ready($pdo)) {
         $pinged = array_values(array_filter(array_map(static fn($c) => preg_match('#/models/([^:/]+):generateContent#', $c['url'], $mm) ? $mm[1] : '', $GLOBALS['ai2_calls'])));
         $sugNow = array_keys(rh_ai_suggest_roles(rh_ai_catalog_models('google')));
         check($tcRes['ok'] && count($pinged) === 2 && $pinged[0] === $closed && $pinged[1] !== $closed && in_array($pinged[1], $sugNow, true) && !array_filter($pinged, 'rh_ai_model_banned') && !in_array('gemini-2.5-flash-lite', $pinged, true),
-            'connection test: the chosen Fast model is tried first; after its 404 one retry on the next suggested model (never Gemini 4, never an unsuggested model)', json_encode([$pinged, $tcRes['message']]));
+            'connection test: the chosen Fast model is tried first; after its 404 one retry on the next suggested model (never a closed model, never an unsuggested model)', json_encode([$pinged, $tcRes['message']]));
         $src = $pdo->prepare("SELECT source FROM ai_models WHERE provider = 'google' AND model_id = ?");
         $src->execute([$closed]);
         $left = array_column(rh_ai_models_for($pdo, 'google'), 'model_id');
@@ -2768,22 +2768,16 @@ $gb2 = rh_ai_build_request(['provider' => 'google', 'model' => 'gemini-3.8-flash
 check(array_keys($gb1)[0] === 'systemInstruction' && $gb1['systemInstruction'] === $gb2['systemInstruction'] && $gb1['tools'] === $gb2['tools'] && $gb1['contents'][0] === $gb2['contents'][0]
     && ($gb1['contents'][2]['parts'][0]['text'] ?? '') === 'NOW 10:01' && ($gb1['contents'][2]['parts'][1]['text'] ?? '') === 'q2',
     'gemini: system prompt, tools and earlier chat are identical every call (cached); the time and screen go in front of this question only');
-// Never Gemini 4
-check(rh_ai_model_banned('gemini-4-argon') && rh_ai_model_banned('models/gemini-4.1-flash') && rh_ai_model_banned('Gemini-4-Flash-Lite') && rh_ai_model_banned('gemini4-flash') && rh_ai_model_banned('models/gemini4')
-    && !rh_ai_model_banned('gemini-3.8-flash') && !rh_ai_model_banned('claude-haiku-4-5'), 'the Gemini 4 rule matches every gemini-4 / gemini4 id and nothing else');
+// Gemini 4 allowed (owner 2026-11-20: "show and allow suggesting"; lifts the 2026-10-28 rule)
+check(!rh_ai_model_banned('gemini-4-argon') && !rh_ai_model_banned('models/gemini-4.1-flash') && !rh_ai_model_banned('Gemini-4-Flash-Lite') && !rh_ai_model_banned('gemini-3.8-flash') && !rh_ai_model_banned('claude-haiku-4-5'),
+    'no model id is banned any more: Gemini 4 is shown and can be suggested');
 $g4 = [['model_id' => 'gemini-4-flash', 'rank' => 99, 'price_in' => 0.05, 'price_out' => 0.1], ['model_id' => 'gemini-4-argon', 'rank' => 100, 'price_in' => 2, 'price_out' => 10],
     ['model_id' => 'gemini-3.8-flash', 'rank' => 92, 'price_in' => 0.75, 'price_out' => 3.75], ['model_id' => 'gemini-3.6-flash', 'rank' => 90, 'price_in' => 0.75, 'price_out' => 3.75], ['model_id' => 'gemini-3.5-flash-lite', 'rank' => 86, 'price_in' => 0.3, 'price_out' => 2.5]];
 $sr4 = rh_ai_suggest_roles($g4);
 $rk4 = array_column(rh_ai_rank_models('google', [['model_id' => 'gemini-4-argon'], ['model_id' => 'gemini-4-flash'], ['model_id' => 'gemini-3.8-flash']]), 'model_id');
-check(!array_filter(array_keys($sr4), 'rh_ai_model_banned') && !array_filter(rh_ai_suggest_top5($g4), 'rh_ai_model_banned') && ($sr4['gemini-3.8-flash'] ?? '') === 'primary'
-    && !array_filter(array_keys(rh_ai_suggest_roles(rh_ai_catalog_models('google'))), 'rh_ai_model_banned'),
-    'a Gemini 4 model is never suggested, even when it is cheaper or ranked higher (3.8 Flash stays Primary)', json_encode([$sr4, $rk4]));
-try {
-    rh_ai_save_selection($pdo, 'google', ['gemini-4-argon' => 'primary']);
-    bad('choosing a Gemini 4 model is refused');
-} catch (RuntimeException $e) {
-    check($e->getMessage() === rh_ai_model_banned_message() && stripos($e->getMessage(), 'Gemini 4') !== false, 'choosing a Gemini 4 model is refused with a plain message');
-}
+check(($sr4['gemini-4-flash'] ?? '') === 'primary' && in_array('gemini-4-argon', $rk4, true) && in_array('gemini-4-flash', $rk4, true)
+    && isset(rh_ai_suggest_roles(rh_ai_catalog_models('google'))['gemini-4-argon']),
+    'a cheaper, better Gemini 4 model is suggested like any other (Gemini 4 Argon is in the built-in suggestion as Extra)', json_encode([$sr4, $rk4]));
 // Defaults: US$5 a month for a fresh install
 check(rh_ai_setting_defaults()['ai_monthly_budget_usd'] === '5' && strpos((string)file_get_contents($root . '/admin/migrations/070_ai_assistant.php'), "'ai_monthly_budget_usd'   => '5'") !== false
     && rh_ai_setting_defaults()['ai_user_daily_token_cap'] === '2000000' && strpos((string)file_get_contents($root . '/admin/migrations/070_ai_assistant.php'), "'ai_user_daily_token_cap' => '2000000'") !== false
@@ -2839,7 +2833,6 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $mi->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 1, 'primary', 0.75, 3.75]);
         $mi->execute(['gemini-3.6-flash', 'Gemini 3.6 Flash', 90, 1, 'fallback', 0.75, 3.75]);
         $mi->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 1, 'fast', 0.30, 2.50]);
-        $mi->execute(['gemini-4-flash', 'Gemini 4 Flash', 99, 0, null, 0.05, 0.10]); // a cheaper, "better" Gemini 4 in the same family
         $GLOBALS['__rh_ai_efficiency_warnings'] = [];
         // Like the real provider, the fake reports the input tokens of what it was sent (unless a test sets them).
         rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
@@ -2920,40 +2913,41 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $r = $turnS('Which guests owe the most and since when?', [['text' => 'Still nobody owes anything.', 'usage' => ['in' => 9100, 'out' => 10]]]);
         check(($GLOBALS['__rh_ai_efficiency_warnings'][0]['in'] ?? 0) === 9100 && $r['reply'] === 'Still nobody owes anything.' && rh_ai_usage_summary($pdo, date('Y-m-d'), date('Y-m-d'))['heavy'] >= 1,
             'an answer over 8,000 input tokens is answered in full, logged as an efficiency warning and counted as heavy on the usage page', json_encode($GLOBALS['__rh_ai_efficiency_warnings']));
-        // A ticked Gemini 4 model or a closed model is never used for chat or fallback; it is taken off once and the managers are told
+        // A ticked closed model is never used for chat or fallback; it is taken off once and the managers are told
+        // (a made-up closed "Gemini 3.4 Flash", cheaper and ranked higher, stands in for the old Gemini 4 case)
         $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE provider = 'google'");
-        $mi->execute(['gemini-4-flash', 'Gemini 4 Flash', 99, 1, 'primary', 0.05, 0.10]);
+        $mi->execute(['gemini-3.4-flash', 'Gemini 3.4 Flash', 99, 1, 'primary', 0.05, 0.10]);
         $mi->execute(['gemini-3.6-flash', 'Gemini 3.6 Flash', 90, 1, 'fallback', 0.75, 3.75]);
         $mi->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 1, 'fast', 0.30, 2.50]);
-        $pdo->exec("UPDATE ai_models SET source = 'gone' WHERE provider = 'google' AND model_id = 'gemini-3.6-flash'");
+        $pdo->exec("UPDATE ai_models SET source = 'gone' WHERE provider = 'google' AND model_id IN ('gemini-3.6-flash', 'gemini-3.4-flash')");
         $rmS = rh_ai_role_models($pdo);
         $r = $turnS('Tell me something odd', [['raw' => ['http' => 503, 'body' => '{"error":{"message":"busy"}}']], ['raw' => ['http' => 503, 'body' => '{"error":{"message":"busy"}}']], ['reply' => ['text' => 'OK.']]]);
         $usedUrls = implode(' ', array_column($GLOBALS['ai2_calls'], 'url'));
-        $stillTicked = (int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE provider = 'google' AND is_selected = 1 AND model_id IN ('gemini-4-flash', 'gemini-3.6-flash')")->fetchColumn();
-        check(!isset($rmS['primary']) && !isset($rmS['fallback']) && ($rmS['fast']['model_id'] ?? '') === 'gemini-3.5-flash-lite' && strpos($usedUrls, 'gemini-4') === false && strpos($usedUrls, 'gemini-3.6-flash') === false && $stillTicked === 0,
-            'a ticked Gemini 4 model or a closed model is never used for chat or fallback, and is taken off its role', json_encode([array_keys($rmS), $usedUrls, $stillTicked]));
+        $stillTicked = (int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE provider = 'google' AND is_selected = 1 AND model_id IN ('gemini-3.4-flash', 'gemini-3.6-flash')")->fetchColumn();
+        check(!isset($rmS['primary']) && !isset($rmS['fallback']) && ($rmS['fast']['model_id'] ?? '') === 'gemini-3.5-flash-lite' && strpos($usedUrls, 'gemini-3.4-flash') === false && strpos($usedUrls, 'gemini-3.6-flash') === false && $stillTicked === 0,
+            'a ticked closed model is never used for chat or fallback, and is taken off its role', json_encode([array_keys($rmS), $usedUrls, $stillTicked]));
         $nt = json_encode(rh_ai_notices());
-        check(strpos($nt, 'Gemini 4 Flash was taken off the Primary role') !== false && strpos($nt, 'Gemini 3.6 Flash was taken off the Fallback role') !== false, 'the people who manage Assistant Settings are told in one plain line each', $nt);
+        check(strpos($nt, 'Gemini 3.4 Flash was taken off the Primary role') !== false && strpos($nt, 'Gemini 3.6 Flash was taken off the Fallback role') !== false, 'the people who manage Assistant Settings are told in one plain line each', $nt);
         $n1 = substr_count($nt, 'taken off');
         rh_ai_role_models($pdo);
         check(substr_count(json_encode(rh_ai_notices()), 'taken off') === $n1, 'they are told once');
         $mi->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 1, 'primary', 0.75, 3.75]);
-        $mi->execute(['gemini-4-flash', 'Gemini 4 Flash', 99, 0, null, 0.05, 0.10]);
+        $mi->execute(['gemini-3.4-flash', 'Gemini 3.4 Flash', 99, 0, null, 0.05, 0.10]); // still closed (source 'gone')
         $pdo->exec("UPDATE ai_models SET source = 'catalog' WHERE provider = 'google' AND model_id = 'gemini-3.6-flash'");
         $mi->execute(['gemini-3.6-flash', 'Gemini 3.6 Flash', 90, 1, 'fallback', 0.75, 3.75]);
-        // Never Gemini 4: not adopted by the upgrade check, not used to replace a retired model
+        // Never a closed model: not adopted by the upgrade check, not used to replace a retired model
         $GLOBALS['ai2_calls'] = [];
         $up = rh_ai_model_upgrade_check($pdo);
         $roleNow = $pdo->query("SELECT model_id FROM ai_models WHERE provider = 'google' AND role = 'primary' AND is_selected = 1")->fetchColumn();
-        check(!$up['changed'] && $roleNow === 'gemini-3.8-flash' && count($GLOBALS['ai2_calls']) === 0, 'the model upgrade check never tries or adopts a Gemini 4 model', json_encode($up));
-        $pdo->exec("UPDATE ai_models SET capability_rank = 50 WHERE provider = 'google' AND model_id <> 'gemini-4-flash' AND is_selected = 0");
-        $pdo->exec("DELETE FROM ai_models WHERE provider = 'google' AND is_selected = 0 AND model_id <> 'gemini-4-flash'");
+        check(!$up['changed'] && $roleNow === 'gemini-3.8-flash' && count($GLOBALS['ai2_calls']) === 0, 'the model upgrade check never tries or adopts a closed model', json_encode($up));
+        $pdo->exec("UPDATE ai_models SET capability_rank = 50 WHERE provider = 'google' AND model_id <> 'gemini-3.4-flash' AND is_selected = 0");
+        $pdo->exec("DELETE FROM ai_models WHERE provider = 'google' AND is_selected = 0 AND model_id <> 'gemini-3.4-flash'");
         $repl = rh_ai_model_missing($pdo, 'google', 'gemini-3.6-flash');
-        check(!rh_ai_model_banned($repl) && (string)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE model_id = 'gemini-4-flash' AND is_selected = 1")->fetchColumn() === '0', 'a retired model is never replaced by a Gemini 4 model', $repl);
-        // Never stored from a model list, so never listed or chosen on Assistant Settings
+        check($repl !== 'gemini-3.4-flash' && (string)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE model_id = 'gemini-3.4-flash' AND is_selected = 1")->fetchColumn() === '0', 'a retired model is never replaced by a closed model', (string)$repl);
+        // Gemini 4 in the provider list is stored and listed for choosing (owner 2026-11-20)
         rh_ai_sync_models($pdo, 'google', rh_ai_rank_models('google', [['model_id' => 'gemini-4-argon'], ['model_id' => 'gemini-3.8-flash'], ['model_id' => 'gemini-3.6-flash'], ['model_id' => 'gemini-3.5-flash-lite']]));
-        check((int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE model_id = 'gemini-4-argon'")->fetchColumn() === 0 && !array_filter(array_column(rh_ai_models_for($pdo, 'google'), 'model_id'), 'rh_ai_model_banned'),
-            'a Gemini 4 model in the provider list is never stored or listed for choosing');
+        check((int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE model_id = 'gemini-4-argon'")->fetchColumn() === 1 && in_array('gemini-4-argon', array_column(rh_ai_models_for($pdo, 'google'), 'model_id'), true),
+            'a Gemini 4 model in the provider list is stored and listed for choosing');
         // Automatic checks: the daily run asks the 5 key questions only, on the Fast model; the whole set weekly
         $pdo->exec("INSERT INTO ai_eval_runs (kind, run_date, is_daily, provider, model_id, total, run, passed, failed, skipped, pass_pct, tokens_total, tokens_per_answer, cost_usd, passed_ids, failed_ids, details_json, started_at, finished_at)
                     VALUES ('full', DATE_SUB(CURDATE(), INTERVAL 2 DAY), 1, 'google', 'gemini-3.5-flash-lite', 40, 40, 40, 0, 0, 100, 0, 0, 0, '', '', '{}', NOW(), NOW())");
@@ -2986,7 +2980,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         rh_ai_vault_forget();
     }
     rh_ai_set_transport($queueTransport);
-    check(rh_ai_enabled($pdo) === $wasOnS && (int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE model_id = 'gemini-4-flash'")->fetchColumn() === 0, 'speed and cost checks rolled back (no test rows, on/off state unchanged)');
+    check(rh_ai_enabled($pdo) === $wasOnS && (int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE model_id = 'gemini-3.4-flash'")->fetchColumn() === 0, 'speed and cost checks rolled back (no test rows, on/off state unchanged)');
 }
 
 // ── Hotel facts (owner 2026-10-28: "How come it doesn't know about the restaurant and bar and opening times etc.") ──
