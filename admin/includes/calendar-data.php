@@ -372,6 +372,19 @@ if (!function_exists('rh_cal_timeline_payload')) {
         return ($d && $d->format('Y-m-d') === $s) ? $s : null;
     }
 
+    /**
+     * Pure: where a lane's housekeeping icon opens: the Housekeeping timeline on that room (the page's ?room= takes a
+     * room NUMBER), or the "due now" list when the number is not one the page accepts.
+     */
+    function rh_cal_hk_href(string $roomNumber): string
+    {
+        $n = trim($roomNumber);
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,29}$/', $n)) {
+            return 'housekeeping.php?room=' . rawurlencode($n) . '&view=timeline';
+        }
+        return 'housekeeping.php?due=now';
+    }
+
     /** Pure: the date an in-house guest is due out: an overdue guest is due today. */
     function rh_cal_departure_date(array $b, string $today): string
     {
@@ -555,7 +568,8 @@ if (!function_exists('rh_cal_timeline_payload')) {
         foreach ($maintenance as $m) {
             $rid = (int)$m['individual_room_id'];
             $lane = $laneOfRoom[$rid] ?? $rid;
-            $cell = ['kind' => 'maintenance', 'label' => 'Maintenance', 'reason' => trim((string)($m['title'] ?? '')), 'href' => 'room-maintenance.php'];
+            $cell = ['kind' => 'maintenance', 'label' => 'Maintenance', 'reason' => trim((string)($m['title'] ?? '')),
+                'href' => 'room-maintenance.php?id=' . (int)($m['id'] ?? 0) . '&view=timeline'];
             foreach ($dates as $d) {
                 if ($d >= (string)$m['s'] && $d <= (string)$m['e']) {
                     $put($lane, $d, $cell);
@@ -568,9 +582,11 @@ if (!function_exists('rh_cal_timeline_payload')) {
             if (!in_array($st, ['maintenance', 'out_of_order'], true)) {
                 continue;
             }
+            // No job id here (the room status says it is out): open the Maintenance timeline on this room.
+            $roomHref = 'room-maintenance.php?room=' . (int)$l['id'] . '&view=timeline';
             $cell = $st === 'out_of_order'
-                ? ['kind' => 'ooo', 'label' => 'Out of order', 'reason' => '', 'href' => 'room-maintenance.php']
-                : ['kind' => 'maintenance', 'label' => 'Maintenance', 'reason' => '', 'href' => 'room-maintenance.php'];
+                ? ['kind' => 'ooo', 'label' => 'Out of order', 'reason' => '', 'href' => $roomHref]
+                : ['kind' => 'maintenance', 'label' => 'Maintenance', 'reason' => '', 'href' => $roomHref];
             foreach ($dates as $d) {
                 if ($d >= $today) {
                     $put((int)$l['id'], $d, $cell);
@@ -947,6 +963,7 @@ if (!function_exists('rh_cal_timeline_payload')) {
                 'joined' => !empty($l['is_joined_lane']),
                 'room_ids' => array_map('intval', $laneRoomIds[$lid] ?? [$lid]),
                 'hk' => ['state' => $hkState, 'label' => rh_cal_hk_label($hkState)],
+                'hk_href' => rh_cal_hk_href((string)($roomsById[$lid]['room_number'] ?? '')),
                 'today' => ['free' => $free, 'occ' => !empty($f['occ']), 'arr' => !empty($f['arr']), 'dep' => !empty($f['dep']),
                     'dirty' => $hkState === 'dirty', 'oos' => $oos],
             ];

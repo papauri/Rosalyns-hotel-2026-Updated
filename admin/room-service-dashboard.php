@@ -556,6 +556,29 @@ $rsOrderToken = bin2hex(random_bytes(16));
 $_SESSION['rs_order_tokens'] = array_slice(($_SESSION['rs_order_tokens'] ?? []) + [], -19, null, true);
 $_SESSION['rs_order_tokens'][$rsOrderToken] = time();
 $current_page = basename($_SERVER['PHP_SELF']);
+
+// Room timeline (CALENDAR_UI_DECISION 10.5): one day of orders by room and hour, drawn by js/room-timeline-ops.js from
+// rh_ops_payload(mode service). Read-only; the drawer's Delivered button posts the Active queue's own mark_delivered
+// form. Deep links: ?date=Y-m-d, ?room=<room id>, ?view=timeline|list, ?id=<order id> (another kind of order opens nothing).
+require_once __DIR__ . '/includes/ops-timeline-data.php';
+$opsMode = 'service';
+$opsPayload = null;
+$opsInitial = rh_ops_deeplink($_GET, 'service');
+try {
+    $opsDay = $opsInitial['date'] ?? $today;
+    if ($opsInitial['date'] === null && $opsInitial['id'] > 0) {
+        $opsDay = rh_ops_item_date($pdo, 'service', $opsInitial['id']) ?? $today; // a finished order opens on its own day
+    }
+    $opsPayload = rh_ops_payload($pdo, 'service', $opsDay, 1, ['user_id' => (int)($user['id'] ?? 0)]);
+} catch (Throwable $e) {
+    error_log('room service timeline: ' . $e->getMessage());
+    $opsPayload = null;
+}
+$opsPage = ['list' => '#rsActivePanel', 'table' => '#rsActiveTable', 'confirm' => '', 'edit' => ''];
+$opsRsLanes = []; // order id => room lane on the timeline (the Active queue rows carry it as data-ops-room)
+foreach (($opsPayload['items'] ?? []) as $opsIt) {
+    $opsRsLanes[(int)$opsIt['id']] = (int)$opsIt['room_id'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -570,6 +593,10 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <link rel="stylesheet" href="css/room-service-dashboard.css?v=<?php echo @filemtime(__DIR__ . '/css/room-service-dashboard.css'); ?>">
+    <?php if ($opsPayload): ?>
+    <link rel="stylesheet" href="css/room-timeline.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline.css'); ?>">
+    <link rel="stylesheet" href="css/room-timeline-ops.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline-ops.css'); ?>">
+    <?php endif; ?>
     <script src="js/station-sounds.js"></script>
 </head>
 
@@ -600,26 +627,50 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
         <div class="ck-kpis">
             <div class="ck-kpi">
-                <span class="ck-kpi__label">Today's RS orders</span>
+                <span class="ck-kpi__label">Today's RS orders <i class="help" data-tip="Room service orders placed today (hotel time), not counting cancelled or voided ones.">?</i></span>
                 <span class="ck-kpi__value"><?php echo (int)$kpis['orders_today']; ?></span>
             </div>
             <div class="ck-kpi ck-kpi--good">
-                <span class="ck-kpi__label">Revenue today</span>
+                <span class="ck-kpi__label">Revenue today <i class="help" data-tip="Total value of today's room service orders (not cancelled or voided), as charged.">?</i></span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format((float)$kpis['revenue_today'], 2); ?></span>
             </div>
             <div class="ck-kpi">
-                <span class="ck-kpi__label">Items served</span>
+                <span class="ck-kpi__label">Items served <i class="help" data-tip="Room service order lines marked served today.">?</i></span>
                 <span class="ck-kpi__value"><?php echo $itemsServedToday; ?></span>
             </div>
             <div class="ck-kpi">
-                <span class="ck-kpi__label">Avg delivery</span>
+                <span class="ck-kpi__label">Avg delivery <i class="help" data-tip="Average time from sending to the kitchen to delivered, for today's orders that have both times.">?</i></span>
                 <span class="ck-kpi__value"><?php echo rs_fmt_dur((int)$kpis['avg_seconds']); ?></span>
             </div>
             <div class="ck-kpi ck-kpi--warn">
-                <span class="ck-kpi__label">In progress</span>
+                <span class="ck-kpi__label">In progress <i class="help" data-tip="Every open room service order, any day: not delivered and not cancelled. The same orders as the Active queue.">?</i></span>
                 <span class="ck-kpi__value"><?php echo (int)$kpis['in_progress']; ?></span>
             </div>
         </div>
+
+        <?php if ($opsPayload): ?>
+        <?php
+        /* Order cards over the same open orders as In progress and the Active queue (rh_ops_rs_counts), plus the ones
+           delivered today. A click filters the timeline and the list to those orders and scrolls to them
+           (room-timeline-ops.js); click again to show all. */
+        $opsCards = [
+            'new' => ['New', 'fa-receipt', 'Open orders sent to the kitchen that nobody has started yet (any day).'],
+            'preparing' => ['Preparing', 'fa-utensils', 'Open orders the kitchen or bar has started (any day).'],
+            'ready' => ['Ready', 'fa-bell-concierge', 'Open orders ready to take to the room (any day).'],
+            'delivered' => ['Delivered today', 'fa-check', 'Orders delivered today (hotel time), not cancelled. They are on the Timeline; the Active queue only lists open orders.'],
+        ];
+        ?>
+        <div class="ck-kpis tl-cards tl-ops-cards" id="rsOrderCards">
+            <?php foreach ($opsCards as $opsKey => [$opsLabel, $opsIcon, $opsHelp]): ?>
+                <button type="button" class="ck-kpi tl-card" data-ops-card="<?php echo $opsKey; ?>" data-ops-count="<?php echo $opsKey; ?>" data-ops-sub="Show these orders" aria-pressed="false">
+                    <span class="ck-kpi__icon"><i class="fas <?php echo $opsIcon; ?>" aria-hidden="true"></i></span>
+                    <span class="ck-kpi__label"><?php echo htmlspecialchars($opsLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($opsHelp); ?>">?</i></span>
+                    <span class="ck-kpi__value"><?php echo (int)($opsPayload['counts'][$opsKey] ?? 0); ?></span>
+                    <span class="ck-kpi__sub">Show these orders</span>
+                </button>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
 
         <?php if ($canManage): ?>
             <div class="panel">
@@ -690,27 +741,30 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </div>
         <?php endif; ?>
 
-        <div class="panel">
+        <?php if ($opsPayload) { require __DIR__ . '/includes/ops-timeline-view.php'; } ?>
+
+        <div class="panel" id="rsActivePanel" data-rh-results>
             <h3><i class="fas fa-stopwatch" style="color:#856404;"></i> Active queue (<?php echo count($activeOrders); ?>)</h3>
+            <p class="rs-filter-note" id="rsActiveFilterNote" role="status" hidden></p>
             <?php if (!$activeOrders): ?>
                 <div class="empty"><i class="fas fa-coffee" style="font-size:32px; color:#d1d5db;"></i>
                     <p>No room service orders in progress.</p>
                 </div>
             <?php else: ?>
                 <div class="table-responsive">
-                    <table class="rs-table">
+                    <table class="rs-table" id="rsActiveTable">
                         <thead>
                             <tr>
-                                <th>Ref</th>
-                                <th>Room / Guest</th>
-                                <th>Items</th>
-                                <th>Stations</th>
-                                <th>Total</th>
-                                <th>Status</th>
-                                <th>Placed</th>
-                                <th>Fired</th>
-                                <th>Wait</th>
-                                <th></th>
+                                <th data-help="Ref|The order number. Click it to see the order's history.">Ref</th>
+                                <th data-help="Room / Guest|The room label on the order and the guest it was placed for.">Room / Guest</th>
+                                <th data-help="Items|Lines on the order; R = lines ready, S = lines served.">Items</th>
+                                <th data-help="Stations|The kitchen, bar or coffee stations that still have lines to make.">Stations</th>
+                                <th data-help="Total|The order total charged to the room bill.">Total</th>
+                                <th data-help="Status|Where the order is on the kitchen screen: new, in progress, ready, recalled.">Status</th>
+                                <th data-help="Placed|When the order was taken.">Placed</th>
+                                <th data-help="Fired|When the order reached the station; the figure in brackets is the delay after it was placed.">Fired</th>
+                                <th data-help="Wait|Time since the order reached the station (or since it was placed if it has not been fired).">Wait</th>
+                                <th data-help="Actions|Delivered: the order reached the room. Closes it.">&nbsp;</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -718,7 +772,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                                 $waitSec = $o['fired_at'] ? max(0, time() - strtotime($o['fired_at'])) : (time() - strtotime($o['created_at']));
                                 $fireDelaySec = $o['fired_at'] ? max(0, strtotime($o['fired_at']) - strtotime($o['created_at'])) : 0;
                             ?>
-                                <tr>
+                                <tr data-ops-id="<?php echo (int)$o['id']; ?>" data-ops-room="<?php echo (int)($opsRsLanes[(int)$o['id']] ?? 0); ?>" data-ops-cards="<?php echo htmlspecialchars(rh_ops_rs_state($o)); ?>">
                                     <td><button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" style="color:#7E684B; font-weight:600;"><?php echo htmlspecialchars($o['reference']); ?></button></td>
                                     <td>
                                         <strong><?php echo htmlspecialchars($o['table_number'] ?: '—'); ?></strong>
@@ -1026,6 +1080,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
         let _rsNotifFlight = false;
         async function rsPollReadyNotifications() {
+            // The room timeline rides this same timer (no timer of its own); it refreshes only while nobody is using it.
+            if (window.RoomTimeline && typeof window.RoomTimeline.opsPoll === 'function') window.RoomTimeline.opsPoll();
             if (_rsNotifFlight) return;
             _rsNotifFlight = true;
             try {
@@ -1090,9 +1146,46 @@ $current_page = basename($_SERVER['PHP_SELF']);
             once: true
         });
 
+        // Active queue (the timeline's List view) filtered by a status figure card. The timeline sets
+        // table.rhOpsFilter and calls this; data-filter-hidden tells the shared pager to leave a row out.
+        function filterTable() {
+            const table = document.getElementById('rsActiveTable');
+            const note = document.getElementById('rsActiveFilterNote');
+            const f = table ? table.rhOpsFilter : null;
+            let shown = 0;
+            if (table) {
+                table.querySelectorAll('tbody tr[data-ops-id]').forEach(function(row) {
+                    const match = !window.RoomTimeline || !window.RoomTimeline.opsRowMatch || window.RoomTimeline.opsRowMatch(table, row);
+                    row.dataset.filterHidden = match ? '' : '1';
+                    row.style.display = match ? '' : 'none';
+                    if (match) shown++;
+                });
+                if (typeof table.rhPagerRefresh === 'function') table.rhPagerRefresh(true);
+            }
+            if (!note) return;
+            if (f && f.card === 'delivered') {
+                note.textContent = 'Delivered orders have left this queue. See them on the Timeline.';
+            } else if (f && f.card && !shown) {
+                note.textContent = 'No orders in the queue match this card.';
+            } else {
+                note.textContent = '';
+            }
+            note.hidden = !note.textContent;
+        }
+
         // Poll every 12 seconds — same cadence as POS
         RHPoll.every(rsPollReadyNotifications, 12000);
     </script>
+    <?php if ($opsPayload): ?>
+    <script src="js/room-timeline.js?v=<?php echo (int)@filemtime(__DIR__ . '/js/room-timeline.js'); ?>"></script>
+    <script src="js/room-timeline-ops.js?v=<?php echo (int)@filemtime(__DIR__ . '/js/room-timeline-ops.js'); ?>"></script>
+    <script>
+        (function() {
+            var root = document.getElementById('opsTimeline');
+            if (root && window.RoomTimeline) window.RoomTimeline.init(root);
+        })();
+    </script>
+    <?php endif; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 </body>
 

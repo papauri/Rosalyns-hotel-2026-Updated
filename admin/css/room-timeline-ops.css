@@ -1,0 +1,113 @@
+/* Room timeline, operations modes (admin/housekeeping.php, admin/room-maintenance.php, admin/room-service-dashboard.php).
+   Loaded after room-timeline.css and reuses its .tl-* layout and tokens; only the task / job colours, the stay tint,
+   the count chip and the Timeline | List switch live here. Colours are the same aliases of the .badge-* pills the
+   booking bars use (CALENDAR_UI_DECISION 10.3); the hatch is the owner-approved blocked-room pattern. */
+
+/* ---------------------------------------------------------------- shell */
+.tl-ops { margin-bottom: 16px; }
+.tl-ops .tl-cell { cursor: default; }
+.tl-ops-cards { margin-bottom: 16px; }
+.tl-ops-view { width: max-content; }
+.tl-ops.is-list .tl-scroller,
+.tl-ops.is-list .tl-empty,
+.tl-ops.is-list .tl-toolbar__nav,
+.tl-ops.is-list .tl-range,
+.tl-ops.is-list .tl-filters-btn,
+.tl-ops.is-list .tl-toolbar__filters,
+.tl-ops.is-list .tl-toolbar__search,
+.tl-ops.is-list .tl-legend-wrap,
+.tl-ops.is-list [data-ops-allrooms] { display: none !important; }
+.tl-ops.is-list .tl-toolbar { margin-bottom: 0; }
+
+/* Guest in house that night (Housekeeping lanes). --tl-softer is already the weekend shade. */
+.tl-cell--stay { background: var(--tl-soft); }
+.tl-cell--stay.tl-cell--today { background: var(--tl-today); box-shadow: inset 0 -3px 0 var(--tl-line); }
+
+/* The deep-linked room. */
+.tl-lane--hit .tl-room { box-shadow: inset 3px 0 0 var(--admin-accent, #766550); }
+.tl-lane--hit .tl-room__num { text-decoration: underline; text-underline-offset: 3px; }
+tr.ops-row--hit > td { background: var(--tl-today, #F3ECE4); }
+
+/* ---------------------------------------------------------------- housekeeping tasks */
+.tl-task--pending { background: #9a4a08; color: #fff; border-color: #9a4a08; }
+.tl-task--progress { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.tl-task--done { background: rgba(107, 114, 128, .14); color: #374151; border-color: rgba(107, 114, 128, .25); }
+.tl-task--verified { background: #047857; color: #fff; border-color: #047857; }
+.tl-task--blocked { background: var(--tl-hatch); color: #374151; border-color: transparent; border-left: 3px solid #6b7280; }
+.tl-task--count { background: var(--tl-surface, #fffdfb); color: var(--admin-text, #1f2a37); border: 1px solid #374151; }
+.tl-task--pending:hover, .tl-task--progress:hover, .tl-task--verified:hover { border-color: #1f2a37; }
+
+/* ---------------------------------------------------------------- maintenance jobs */
+.tl-job--open { background: #fef1dd; color: #9a4a08; border: 1px dashed #9a4a08; }
+.tl-job--progress { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.tl-job--done { background: rgba(107, 114, 128, .14); color: #374151; border-color: rgba(107, 114, 128, .25); }
+.tl-job--blocks { background: var(--tl-hatch); color: #1f2a37; border-left: 3px solid #6b7280; }
+.tl-job--blocks.tl-job--progress { border-top-color: #1d4ed8; border-right-color: #1d4ed8; border-bottom-color: #1d4ed8; border-style: solid; }
+.tl-job--blocks.tl-job--done { opacity: .7; }
+
+/* Flags on a bar. */
+.tl-flag--urgent { color: #b91c1c; }
+.tl-flag--state { color: #374151; }
+
+/* Legend keys for the two modes. */
+.tl-key--task-pending { background: #9a4a08; }
+.tl-key--task-progress { background: #1d4ed8; }
+.tl-key--task-done { background: rgba(107, 114, 128, .14); border-color: rgba(107, 114, 128, .25); }
+.tl-key--task-verified { background: #047857; }
+.tl-key--job-open { background: #fef1dd; border: 1px dashed #9a4a08; }
+.tl-key--stay { background: var(--tl-soft); border-color: var(--tl-line); }
+
+/* ---------------------------------------------------------------- room service orders (one day, hour columns) */
+.tl-order--new { background: #9a4a08; color: #fff; border-color: #9a4a08; }
+.tl-order--preparing { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.tl-order--ready { background: #047857; color: #fff; border-color: #047857; }
+.tl-order--delivered { background: rgba(107, 114, 128, .14); color: #374151; border-color: rgba(107, 114, 128, .25); }
+.tl-order--cancelled { background: var(--tl-surface, #fffdfb); color: #6b7280; border: 1px dotted #6b7280; text-decoration: line-through; }
+.tl-order--new:hover, .tl-order--preparing:hover, .tl-order--ready:hover { border-color: #1f2a37; }
+.tl-key--order-ready { background: #047857; }
+.tl-key--order-void { background: var(--tl-surface, #fffdfb); border: 1px dotted #6b7280; }
+.tl-grid--hours .tl-head__wd:empty,
+.tl-grid--hours .tl-head__mon:empty { display: none; }
+.tl-grid--hours .tl-head__num { font-size: 14px; font-variant-numeric: tabular-nums; }
+.tl-ops .tl-btn[data-ops-allrooms][aria-pressed="true"] { background: var(--tl-soft); border-color: var(--admin-text, #1f2a37); }
+.tl-ops-items { list-style: none; margin: 0; padding: 0; }
+.tl-ops-items li + li { margin-top: 4px; }
+.tl-ops-items__note { display: block; font-size: 12px; color: var(--ck-muted, #786d62); }
+
+/* ---------------------------------------------------------------- several tasks on one day (drawer list) */
+.tl-ops-list { list-style: none; margin: 0; padding: 0; }
+.tl-ops-list li + li { border-top: 1px solid var(--tl-line); }
+.tl-ops-list__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 4px;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.tl-ops-list__item:hover { background: var(--admin-hover-bg, #edf2f8); }
+.tl-ops-list__item:focus-visible { outline: var(--tl-focus); outline-offset: -2px; }
+.tl-ops-list__name { font-weight: 600; flex: 1 1 auto; }
+
+/* ---------------------------------------------------------------- phone, touch, preferences */
+@media (max-width: 599px) {
+    .tl-ops-view { width: 100%; }
+}
+@media (pointer: coarse) and (min-width: 600px) {
+    .tl-ops-view .ck-tab { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .tl-ops-list__item { transition: none; }
+}
+@media (prefers-contrast: more) {
+    .tl-cell--stay { background: #e5e7eb; }
+    .tl-job--open { border-style: solid; }
+    .tl-order--cancelled { border-style: solid; }
+}

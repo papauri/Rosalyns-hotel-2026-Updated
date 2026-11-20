@@ -93,6 +93,19 @@
         var cfg;
         try { cfg = JSON.parse(jsonEl.textContent || '{}'); } catch (e) { return; }
         if (!cfg || !cfg.data) return;
+
+        // Seam for the operations pages (Housekeeping, Maintenance; later Room Service): a root whose JSON says
+        // "mode" other than booking is drawn by the mode registered in RoomTimeline.modes (admin/js/room-timeline-ops.js).
+        // The booking timeline below is untouched by it. A mode not registered yet is left unbound: the ops file
+        // binds waiting roots itself when it loads.
+        var mode = (typeof cfg.mode === 'string' && cfg.mode) ? cfg.mode : 'booking';
+        if (mode !== 'booking') {
+            var adapter = Object.prototype.hasOwnProperty.call(MODES, mode) ? MODES[mode] : null;
+            if (!adapter || typeof window.RoomTimeline.opsEngine !== 'function') return;
+            root.setAttribute('data-tl-bound', '1');
+            window.RoomTimeline.opsEngine(root, cfg, adapter);
+            return;
+        }
         root.setAttribute('data-tl-bound', '1');
 
         var ini = cfg.initial || {};
@@ -453,13 +466,24 @@
             txt.appendChild(el('span', 'tl-room__num', l.number));
             if (l.name) txt.appendChild(el('span', 'tl-room__name', l.name));
             link.appendChild(txt);
+            var hkLink = null;
             if (d.hk_on) {
                 var hk = el('span', 'tl-hk tl-hk--' + l.hk.state);
                 hk.title = l.hk.label;
                 hk.appendChild(icon({ clean: 'fa-check', dirty: 'fa-exclamation', cleaning: 'fa-ellipsis', inspection: 'fa-eye', blocked: 'fa-ban' }[l.hk.state] || 'fa-check'));
-                link.appendChild(hk);
+                if (d.can.hk_page && l.hk_href) {
+                    // Its own link (a link inside the room link is not allowed): opens this room on the Housekeeping timeline.
+                    hkLink = el('a', 'tl-hk-link');
+                    hkLink.href = String(l.hk_href);
+                    hkLink.setAttribute('aria-label', 'Housekeeping for room ' + l.number + ': ' + l.hk.label);
+                    hkLink.title = l.hk.label + '. Open housekeeping for this room.';
+                    hkLink.appendChild(hk);
+                } else {
+                    link.appendChild(hk);
+                }
             }
             rc.appendChild(link);
+            if (hkLink) rc.appendChild(hkLink);
         }
         row.appendChild(rc);
 
@@ -1858,5 +1882,17 @@
         });
     }
 
-    window.RoomTimeline = { init: init };
+    /* Modes other than the booking timeline register here (admin/js/room-timeline-ops.js): name -> adapter
+       { columns, rows, bars, drawer, search }. util = the shared helpers, so every mode draws the same way. */
+    var MODES = {};
+    window.RoomTimeline = {
+        init: init,
+        modes: MODES,
+        util: {
+            el: el, icon: icon, help: help, dnum: dnum, dstr: dstr, addDays: addDays, fmt: fmt, fmtRange: fmtRange,
+            store: store, viewport: viewport, allowedDays: allowedDays, defaultDays: defaultDays,
+            mqPhone: mqPhone, mqTablet: mqTablet, mqCoarse: mqCoarse, mqReduce: mqReduce,
+            STORE_COLLAPSE: STORE_COLLAPSE, STORE_DENSITY: STORE_DENSITY
+        }
+    };
 })();

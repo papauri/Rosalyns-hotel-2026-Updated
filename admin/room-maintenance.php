@@ -1386,6 +1386,31 @@ try {
 } catch (Throwable $e) {
     error_log('Unable to load maintenance logs: ' . $e->getMessage());
 }
+
+// Room timeline (CALENDAR_UI_DECISION 10): first paint for 31 days so every range button works without a fetch.
+// Every open job shows (block_room 0 too); the Calendar keeps drawing only the jobs that block the room.
+// Deep links: ?id= (job) &room= (room id) &date= &view=timeline|list &days=3|7|14|30; invalid values are ignored.
+// Read-only; on any failure the page keeps its list and old cards (the timeline section is simply not printed).
+require_once __DIR__ . '/includes/ops-timeline-data.php';
+$opsMode = 'maintenance';
+$opsPayload = null;
+$opsInitial = rh_ops_deeplink($_GET, 'maintenance');
+$opsInitial['status'] = '';
+$opsToday = date('Y-m-d');
+try {
+    $opsStart = $opsInitial['date'] ?? $opsToday;
+    if ($opsInitial['date'] === null && $opsInitial['id'] > 0) {
+        $opsItemDay = rh_ops_item_date($pdo, 'maintenance', $opsInitial['id']);
+        if ($opsItemDay !== null && ($opsItemDay < $opsToday || $opsItemDay > date('Y-m-d', strtotime('+30 days')))) {
+            $opsStart = $opsItemDay;
+        }
+    }
+    $opsPayload = rh_ops_payload($pdo, 'maintenance', $opsStart, 31, ['user_id' => (int)($user['id'] ?? 0)]);
+} catch (Throwable $e) {
+    error_log('maintenance timeline: ' . $e->getMessage());
+    $opsPayload = null;
+}
+$opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenanceSchedulesContainer table', 'confirm' => 'rmConfirm', 'edit' => 'editSchedule'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1400,6 +1425,9 @@ try {
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <link rel="stylesheet" href="css/room-maintenance.css?v=<?php echo @filemtime(__DIR__ . '/css/room-maintenance.css'); ?>">
+    <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
+    <link rel="stylesheet" href="css/room-timeline.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline.css'); ?>">
+    <link rel="stylesheet" href="css/room-timeline-ops.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline-ops.css'); ?>">
 </head>
 
 <body>
@@ -1431,6 +1459,28 @@ try {
         <?php endif; ?>
 
         <!-- Dashboard Statistics -->
+        <?php if ($opsPayload): ?>
+        <?php
+        /* Same four cards and counts as the Calendar's Maintenance tab (rh_cal_maint_tab). A click filters the timeline
+           and the list to those jobs (or rooms) and scrolls to them (room-timeline-ops.js); click again to show all. */
+        $opsCards = [
+            'open' => ['Open', 'fa-screwdriver-wrench', 'Maintenance jobs not yet completed or cancelled (planned and in progress), all rooms.', 'open', 'Show these jobs'],
+            'progress' => ['In progress', 'fa-person-digging', 'Maintenance jobs being worked on now.', 'progress', 'Show these jobs'],
+            'out' => ['Out of order now', 'fa-ban', 'Rooms in maintenance or out of order right now (as the Dashboard counts them).', 'out_now', 'Show these rooms'],
+            'due' => ['Due this week', 'fa-calendar-week', 'Open jobs due (or starting, when no due date) by 6 days from today, including overdue ones.', 'due', 'Show these jobs'],
+        ];
+        ?>
+        <div class="ck-kpis tl-cards tl-ops-cards" id="rmStatsDashboard">
+            <?php foreach ($opsCards as $opsKey => [$opsLabel, $opsIcon, $opsHelp, $opsCount, $opsSub]): ?>
+                <button type="button" class="ck-kpi tl-card" data-ops-card="<?php echo $opsKey; ?>" data-ops-count="<?php echo $opsCount; ?>" data-ops-sub="<?php echo $opsSub; ?>" aria-pressed="false">
+                    <span class="ck-kpi__icon"><i class="fas <?php echo $opsIcon; ?>" aria-hidden="true"></i></span>
+                    <span class="ck-kpi__label"><?php echo htmlspecialchars($opsLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($opsHelp); ?>">?</i></span>
+                    <span class="ck-kpi__value"><?php echo (int)($opsPayload['counts'][$opsCount] ?? 0); ?></span>
+                    <span class="ck-kpi__sub"><?php echo $opsSub; ?></span>
+                </button>
+            <?php endforeach; ?>
+        </div>
+        <?php else: ?>
         <div class="ck-kpis" id="rmStatsDashboard">
             <button type="button" class="ck-kpi" data-stat-key="today_total" data-stat-title="Today's Maintenance Tasks" data-stat-description="All maintenance schedules set for today.">
                 <span class="ck-kpi__icon"><i class="fas fa-calendar-day"></i></span>
@@ -1475,6 +1525,7 @@ try {
                 <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
         </div>
+        <?php endif; ?>
         <script type="application/json" id="rmScheduleData">
             <?php echo json_encode(array_map(static function (array $row): array {
                 $scheduledDate = (string)($row['due_date'] ?? '');
@@ -1596,6 +1647,8 @@ try {
             </div>
         <?php endif; ?>
 
+        <?php if ($opsPayload) { require __DIR__ . '/includes/ops-timeline-view.php'; } ?>
+
         <!-- Maintenance Schedules Table -->
         <?php
         // Every task is in the table; the shared pager (admin-section-pagination.js) shows
@@ -1642,7 +1695,7 @@ try {
                         </tr>
                     <?php else: ?>
                         <?php foreach ($sched_display as $row): ?>
-                            <tr data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['maintenance_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
+                            <tr data-ops-id="<?php echo (int)$row['id']; ?>" data-ops-room="<?php echo (int)($row['individual_room_id'] ?? 0); ?>" data-ops-cards="<?php echo implode(' ', array_keys(array_filter(rh_ops_maint_cards($row, rh_ops_maint_status($row), $opsToday)))); ?>" data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['maintenance_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
                                 <td class="admin-bulk-col"><?php echo adminBulkRowBox($row['id'], 'Select schedule ' . $row['title']); ?></td>
                                 <td><?php echo htmlspecialchars($row['room_number'] . ' ' . ($row['room_name'] ?? '')); ?></td>
                                 <td><?php echo htmlspecialchars($row['title']); ?></td>
@@ -2449,6 +2502,7 @@ try {
                     }
                     if (nextStats && curStats) curStats.innerHTML = nextStats.innerHTML;
                     if (nextData && curData) curData.textContent = nextData.textContent;
+                    if (window.RoomTimeline && typeof window.RoomTimeline.reload === 'function') window.RoomTimeline.reload(); // timeline + card counts
                 }).catch(function() {});
         }
 
@@ -2464,7 +2518,8 @@ try {
             table.querySelectorAll('tbody tr[data-status]').forEach(function(row) {
                 var text = row.textContent.toLowerCase();
                 var rowStat = (row.getAttribute('data-status') || '').toLowerCase();
-                var match = (!query || text.includes(query)) && (!status || rowStat === status);
+                var match = (!query || text.includes(query)) && (!status || rowStat === status)
+                    && (!window.RoomTimeline || !window.RoomTimeline.opsRowMatch || window.RoomTimeline.opsRowMatch(table, row)); // a figure card is on
                 row.dataset.filterHidden = match ? '' : '1';
                 row.style.display = match ? '' : 'none';
             });
@@ -2509,6 +2564,16 @@ try {
             if (e.target === this) rmCloseConfirm();
         });
     </script>
+    <?php if ($opsPayload): ?>
+    <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline.js'); ?>"></script>
+    <script src="js/room-timeline-ops.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-ops.js'); ?>"></script>
+    <script>
+        (function () {
+            var root = document.getElementById('opsTimeline');
+            if (root && window.RoomTimeline) { window.RoomTimeline.init(root); }
+        })();
+    </script>
+    <?php endif; ?>
 
     <?php require_once 'includes/admin-footer.php'; ?>
 </body>

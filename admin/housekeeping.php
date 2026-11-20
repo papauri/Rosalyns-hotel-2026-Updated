@@ -1547,6 +1547,30 @@ foreach ($assignments as $a) {
         $stats['verified_today']++;
     }
 }
+
+// Room timeline (CALENDAR_UI_DECISION 10): first paint for 31 days so every range button works without a fetch.
+// Deep links: ?id= (task) &room= (room number) &date= &view=timeline|list &days=3|7|14|30; invalid values are ignored.
+// Read-only; on any failure the page keeps its list and old cards (the timeline section is simply not printed).
+require_once __DIR__ . '/includes/ops-timeline-data.php';
+$opsMode = 'housekeeping';
+$opsPayload = null;
+$opsInitial = rh_ops_deeplink($_GET, 'housekeeping');
+$opsInitial['status'] = $hkFilterDue === 'now' ? 'due' : '';
+try {
+    $opsToday = date('Y-m-d');
+    $opsStart = $opsInitial['date'] ?? $opsToday;
+    if ($opsInitial['date'] === null && $opsInitial['id'] > 0) {
+        $opsItemDay = rh_ops_item_date($pdo, 'housekeeping', $opsInitial['id']);
+        if ($opsItemDay !== null && ($opsItemDay < $opsToday || $opsItemDay > date('Y-m-d', strtotime('+30 days')))) {
+            $opsStart = $opsItemDay;
+        }
+    }
+    $opsPayload = rh_ops_payload($pdo, 'housekeeping', $opsStart, 31, ['user_id' => (int)($user['id'] ?? 0)]);
+} catch (Throwable $e) {
+    error_log('housekeeping timeline: ' . $e->getMessage());
+    $opsPayload = null;
+}
+$opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'confirm' => 'hkConfirm', 'edit' => 'editAssignment'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1561,6 +1585,9 @@ foreach ($assignments as $a) {
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <link rel="stylesheet" href="css/housekeeping.css?v=<?php echo @filemtime(__DIR__ . '/css/housekeeping.css'); ?>">
+    <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
+    <link rel="stylesheet" href="css/room-timeline.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline.css'); ?>">
+    <link rel="stylesheet" href="css/room-timeline-ops.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline-ops.css'); ?>">
 </head>
 
 <body>
@@ -1592,6 +1619,29 @@ foreach ($assignments as $a) {
         <?php endif; ?>
 
         <!-- Dashboard Statistics -->
+        <?php if ($opsPayload): ?>
+        <?php
+        /* Same five cards and counts as the Calendar's Housekeeping tab (rh_cal_hk_tab). A click filters the timeline
+           and the list to those rooms and scrolls to them (room-timeline-ops.js); click again to show all. */
+        $opsCards = [
+            'dirty' => ['Dirty', 'fa-exclamation', 'Rooms with a cleaning task due and not started, or marked as cleaning. Active rooms, now.'],
+            'cleaning' => ['Cleaning', 'fa-ellipsis', 'Rooms with a cleaning task in progress right now.'],
+            'inspection' => ['Inspection', 'fa-eye', 'Rooms whose last cleaning task is done but not yet checked (verified).'],
+            'clean' => ['Clean', 'fa-check', 'Rooms with no cleaning due, in progress or waiting for inspection.'],
+            'unassigned' => ['Unassigned tasks', 'fa-user-slash', 'Rooms whose current open cleaning task has nobody assigned.'],
+        ];
+        ?>
+        <div class="ck-kpis tl-cards tl-ops-cards" id="hkStatsDashboard">
+            <?php foreach ($opsCards as $opsKey => [$opsLabel, $opsIcon, $opsHelp]): ?>
+                <button type="button" class="ck-kpi tl-card" data-ops-card="<?php echo $opsKey; ?>" data-ops-count="<?php echo $opsKey; ?>" data-ops-sub="Show these rooms" aria-pressed="false">
+                    <span class="ck-kpi__icon"><i class="fas <?php echo $opsIcon; ?>" aria-hidden="true"></i></span>
+                    <span class="ck-kpi__label"><?php echo htmlspecialchars($opsLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($opsHelp); ?>">?</i></span>
+                    <span class="ck-kpi__value"><?php echo (int)($opsPayload['counts'][$opsKey] ?? 0); ?></span>
+                    <span class="ck-kpi__sub">Show these rooms</span>
+                </button>
+            <?php endforeach; ?>
+        </div>
+        <?php else: ?>
         <div class="ck-kpis" id="hkStatsDashboard">
             <?php /* Cards open their detail on click; Verified Today lives in the task list. */ ?>
             <button type="button" class="ck-kpi" data-stat-key="today_total" data-stat-title="Today's Housekeeping Tasks" data-stat-description="All housekeeping assignments scheduled for today.">
@@ -1627,6 +1677,7 @@ foreach ($assignments as $a) {
             </button>
             <?php endif; ?>
         </div>
+        <?php endif; ?>
         <script type="application/json" id="hkAssignmentData">
             <?php echo json_encode(array_map(static function (array $row): array {
                 return [
@@ -1765,6 +1816,8 @@ foreach ($assignments as $a) {
             </div>
         <?php endif; ?>
 
+        <?php if ($opsPayload) { require __DIR__ . '/includes/ops-timeline-view.php'; } ?>
+
         <!-- Assignments Table -->
         <div class="table-card" id="hkAssignmentsCard" data-rh-results>
             <?php if ($hkTableFiltered): ?>
@@ -1815,7 +1868,7 @@ foreach ($assignments as $a) {
                         </tr>
                     <?php else: ?>
                         <?php foreach ($hkTableRows as $row): ?>
-                            <tr data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['assignment_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
+                            <tr data-ops-id="<?php echo (int)$row['id']; ?>" data-ops-room="<?php echo (int)($row['individual_room_id'] ?? 0); ?>" data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['assignment_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
                                 <td class="admin-bulk-col"><?php echo adminBulkRowBox($row['id'], 'Select assignment for room ' . $row['room_number']); ?></td>
                                 <td><strong><?php echo htmlspecialchars($row['room_number'] . ' ' . ($row['room_name'] ?? '')); ?></strong></td>
                                 <td><span class="type-badge <?php echo htmlspecialchars($row['assignment_type'] ?? ''); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $row['assignment_type'] ?? ''))); ?></span></td>
@@ -2541,6 +2594,7 @@ foreach ($assignments as $a) {
                     if (nextData && curData) curData.textContent = nextData.textContent;
                     if (window.AdminBulk) window.AdminBulk.refresh();
                     filterTable(true); // keep the search / status filter after the refresh
+                    if (window.RoomTimeline && typeof window.RoomTimeline.reload === 'function') window.RoomTimeline.reload(); // timeline + card counts
                 }).catch(function() {});
         }
 
@@ -2566,7 +2620,8 @@ foreach ($assignments as $a) {
             table.querySelectorAll('tbody tr[data-status]').forEach(function(row) {
                 var text = row.textContent.toLowerCase();
                 var rowStat = (row.getAttribute('data-status') || '').toLowerCase();
-                var match = (!query || text.includes(query)) && (!status || rowStat === status);
+                var match = (!query || text.includes(query)) && (!status || rowStat === status)
+                    && (!window.RoomTimeline || !window.RoomTimeline.opsRowMatch || window.RoomTimeline.opsRowMatch(table, row)); // a figure card is on
                 row.dataset.filterHidden = match ? '' : '1';
                 row.style.display = match ? '' : 'none';
             });
@@ -2612,6 +2667,16 @@ foreach ($assignments as $a) {
             if (e.target === this) hkCloseConfirm();
         });
     </script>
+    <?php if ($opsPayload): ?>
+    <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline.js'); ?>"></script>
+    <script src="js/room-timeline-ops.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-ops.js'); ?>"></script>
+    <script>
+        (function () {
+            var root = document.getElementById('opsTimeline');
+            if (root && window.RoomTimeline) { window.RoomTimeline.init(root); }
+        })();
+    </script>
+    <?php endif; ?>
 
     <?php require_once 'includes/admin-footer.php'; ?>
 </body>

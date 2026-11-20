@@ -317,6 +317,18 @@ a.tl-room__link:hover { background: var(--admin-hover-bg, #edf2f8); }
 .tl-hk--cleaning { color: #9a4a08; }
 .tl-hk--inspection { color: #1d4ed8; }
 .tl-hk--blocked { color: #374151; }
+/* The icon as its own link to the Housekeeping timeline (beside the room link, never inside it). */
+.tl-hk-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 32px;
+    color: inherit;
+    text-decoration: none;
+}
+.tl-hk-link:hover { background: var(--admin-hover-bg, #edf2f8); }
+.tl-hk-link:focus-visible { outline: var(--tl-focus); outline-offset: -2px; }
 
 /* Lanes and cells. */
 .tl-lane .tl-track { height: calc(var(--tl-levels, 1) * var(--tl-row-h)); }
@@ -667,6 +679,7 @@ body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
     .tl-corner__label { display: none; }
     .tl-room__link { padding: 0 4px; gap: 4px; justify-content: space-between; }
     .tl-room__name { display: none; }
+    .tl-hk-link { width: 24px; }
     .tl-room__num--un { font-size: 11px; white-space: normal; line-height: 1.1; }
     .tl-row--unassigned .tl-room__link > i { display: none; }
     .tl-group__cell { white-space: normal; }
@@ -676,6 +689,9 @@ body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
 @media (pointer: coarse) {
     .tl-lane[data-tl-lane] .tl-cell { cursor: pointer; }
     .tl-sum__btn { min-height: 28px; }
+}
+@media (pointer: coarse) and (min-width: 600px) {
+    .tl-hk-link { width: 44px; }
 }
 
 /* ---------------------------------------------------------------- preferences */
