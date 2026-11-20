@@ -724,6 +724,15 @@ if (!function_exists('rh_cal_timeline_payload')) {
         if (function_exists('mb_substr') && mb_strlen($noteText) > 280) {
             $noteText = mb_substr($noteText, 0, 280) . '...';
         }
+        // Joined: holds a pair, sits on a pair lane, or is of a joined-room type (even before a pair is assigned).
+        static $comboType = [];
+        $typeId = (int)$b['room_id'];
+        if (!array_key_exists($typeId, $comboType)) {
+            $comboType[$typeId] = function_exists('roomTypeHasActiveCombinations') && roomTypeHasActiveCombinations($typeId);
+        }
+        $isJoined = !empty($b['room_combination_id']) || $joinedLane || $comboType[$typeId];
+        $isGroup = $g['size'] > 1 || count($lanes) > 1;
+        $missed = rh_fd_is_missed_arrival((string)$b['status'], $ci, $today);
         return [
             'id' => $id,
             'ref' => (string)$b['booking_reference'],
@@ -749,19 +758,56 @@ if (!function_exists('rh_cal_timeline_payload')) {
             'pay' => ['key' => $pay['key'], 'label' => $pay['label'], 'short' => $pay['short'], 'class' => $pay['class']],
             'notes' => $noteText !== '',
             'note_text' => $noteText,
-            'joined' => !empty($b['room_combination_id']) || $joinedLane,
-            'group' => $g['size'] > 1 || count($lanes) > 1,
+            'joined' => $isJoined,
+            'group' => $isGroup,
             'group_size' => max((int)$g['size'], count($lanes)),
             'group_ref' => $g['ref'],
-            'missed' => rh_fd_is_missed_arrival((string)$b['status'], $ci, $today),
+            'missed' => $missed,
             'overdue' => $b['status'] === 'checked-in' && $co < $today,
+            'drag' => rh_cal_drag_rules((string)$b['status'], $ci, $co, $today, $isJoined, $isGroup, $missed),
         ];
+    }
+
+    /**
+     * Pure: what the timeline may change on this booking by drag (desktop) or the Move room / Change dates panels.
+     * move = give it another room (assign_individual_room; a confirmed booking may also change type through
+     * upgrade_room_type), end = add / take off nights at the end (stay_nights_quote / stay_nights_apply, in-house
+     * only). Everything else is "Open booking"; why says so in plain words. The user's permissions are applied on
+     * top in the page (can.move / can.nights) and again by bookings.php on every save.
+     * @return array{move:bool,end:bool,why:string}
+     */
+    function rh_cal_drag_rules(string $status, string $ci, string $co, string $today, bool $joined, bool $group, bool $missed): array
+    {
+        $why = '';
+        if (in_array($status, ['checked-out', 'cancelled', 'no-show'], true)) {
+            $why = 'This stay is closed. Open the booking to see it.';
+        } elseif ($joined) {
+            $why = 'Joined rooms move as a pair: change them from the booking.';
+        } elseif ($group) {
+            $why = 'Part of a group booking: change it from the booking.';
+        } elseif ($missed || ($status !== 'checked-in' && $ci < $today)) {
+            $why = 'The arrival date has passed: check the guest in or mark a no-show first.';
+        } elseif ($status === 'checked-in' && $co < $today) {
+            $why = 'Past check-out: check the guest out, or change the stay from the booking.';
+        } elseif ($status === 'pending' || $status === 'tentative') {
+            $why = 'Confirm the booking before giving it a room.';
+        }
+        if ($why !== '') {
+            return ['move' => false, 'end' => false, 'why' => $why];
+        }
+        if ($status === 'confirmed') {
+            return ['move' => true, 'end' => false, 'why' => 'To change the dates of a stay that has not started, open the booking.'];
+        }
+        if ($status === 'checked-in') {
+            return ['move' => false, 'end' => true, 'why' => 'The guest is in house: move rooms from the booking (the new room must be clean).'];
+        }
+        return ['move' => false, 'end' => false, 'why' => 'This booking cannot be changed here.'];
     }
 
     /** What this user may open from the timeline (links only; each target page re-checks). */
     function rh_cal_timeline_can(int $uid): array
     {
-        $keys = ['open_booking', 'checkin', 'checkout', 'assign', 'move', 'edit_dates', 'payment', 'create', 'rooms_page',
+        $keys = ['open_booking', 'checkin', 'checkout', 'assign', 'move', 'nights', 'edit_dates', 'payment', 'create', 'rooms_page',
             'blocked_page', 'maint_page', 'hk_page'];
         if ($uid <= 0 || !function_exists('rhCanLinkTo')) {
             return array_fill_keys($keys, false);
@@ -775,6 +821,8 @@ if (!function_exists('rh_cal_timeline_payload')) {
             'checkout' => $bookingsPage && $perm((string)rhBookingActionPermission('checkout')),
             'assign' => $bookingsPage && $perm('edit_booking'),
             'move' => $bookingsPage && $perm('edit_booking'),
+            // Add / take off nights on an in-house stay: the same permission bookings.php checks for stay_nights_*.
+            'nights' => $bookingsPage && $perm((string)rhBookingActionPermission('stay_nights_apply')),
             'edit_dates' => $link('edit-booking.php') && $perm((string)rhBookingActionPermission('adjust_dates')),
             'payment' => $link('payment-add.php') && $perm((string)rhBookingActionPermission('payment')),
             'create' => $link('create-booking.php'),
@@ -966,6 +1014,7 @@ if (!function_exists('rh_cal_timeline_payload')) {
             'days' => $days,
             'today' => $today,
             'currency' => $currency,
+            'tolerance' => BALANCE_TOLERANCE, // money comparisons in the timeline JS use the same tolerance as the server
             'dates' => $dateInfo,
             'groups' => array_values($groups),
             'lanes' => $laneOut,

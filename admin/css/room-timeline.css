@@ -425,6 +425,30 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
 .tl-bar--confirmed:hover, .tl-bar--pending:hover, .tl-bar--checked-in:hover { border-color: #1f2a37; }
 .tl-bar--locked { cursor: pointer; }
 
+/* Changes by drag (desktop only; the script sets these only when the bar may change). */
+.tl-bar { user-select: none; -webkit-user-select: none; }
+.tl-bar--movable { cursor: grab; }
+.tl.is-dragging, .tl.is-dragging .tl-bar, .tl.is-dragging .tl-cell { cursor: grabbing; }
+.tl-bar__grip {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: ew-resize;
+    border-left: 2px solid rgba(255, 255, 255, .55);
+}
+.tl-bar.is-dragging { opacity: .4; }
+.tl-bar--ghost {
+    z-index: 4;
+    pointer-events: none;
+    outline: 2px solid #1f2a37;
+    outline-offset: 1px;
+}
+.tl-bar--ghost-bad { outline-color: #b91c1c; }
+.tl-cell.tl-cell--drop-ok { background: rgba(59, 130, 246, .12); }
+.tl-cell.tl-cell--drop-bad { background: rgba(239, 68, 68, .12); cursor: not-allowed; }
+
 .tl-bar__flags { display: inline-flex; flex: none; gap: 2px; }
 .tl-flag {
     display: inline-flex;
@@ -522,6 +546,36 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
 .tl-dl__row dd { margin: 0; overflow-wrap: anywhere; }
 .tl-pay { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
 .tl-more { position: relative; }
+
+/* Move room / Change dates panels and their confirm step (inside the drawer or sheet). */
+.tl-confirm__text { margin: 0 0 12px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.tl-confirm__error { margin: 12px 0 0; padding: 8px 10px; border-radius: 6px; background: #fdecec; color: #991b1b; font-size: 13px; }
+.tl-confirm__error[hidden] { display: none; }
+.tl-confirm__fields { margin-top: 12px; }
+.tl-field { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 0; font-size: 13px; }
+.tl-field__label { color: var(--admin-text, #1f2a37); font-weight: 600; }
+.tl-field .form-control { min-height: 44px; box-sizing: border-box; }
+.tl-field textarea.form-control { min-height: 64px; }
+.tl-pick { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.tl-pick__btn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 6px;
+    background: #fff;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.tl-pick__btn:hover { border-color: var(--admin-text, #1f2a37); }
+.tl-pick__btn:focus-visible { outline: var(--tl-focus); outline-offset: 2px; }
+.tl-pick__num { font-weight: 600; }
+.tl-pick__meta { font-size: 12px; color: var(--ck-muted, #786d62); }
 
 .tl-drawer--sheet {
     top: auto;
@@ -623,7 +677,7 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
 
 /* ---------------------------------------------------------------- preferences */
 @media (prefers-reduced-motion: reduce) {
-    .tl-drawer, .tl-drawer--sheet, .tl-cell, .tl-bar { transition: none; }
+    .tl-drawer, .tl-drawer--sheet, .tl-cell, .tl-bar, .tl-pick__btn { transition: none; }
     .tl-scroller { scroll-behavior: auto; }
 }
 @media (prefers-contrast: more) {

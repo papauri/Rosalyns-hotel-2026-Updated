@@ -1,8 +1,9 @@
 /**
- * Room Timeline (admin/calendar.php, Calendar tab). Read-only tape chart: rooms down the side, days across,
+ * Room Timeline (admin/calendar.php, Calendar tab). Tape chart: rooms down the side, days across,
  * one bar per stay (half-day ends), blocks / maintenance hatched, housekeeping icon per room, per-day
  * occupancy / arrivals / departures, a drawer (desktop, tablet) or bottom sheet (phone) per booking and a
- * phone Agenda. Every action is a LINK to the existing page that does it.
+ * phone Agenda. Move room and Change dates (in-house check-out) run here through the existing admin/bookings.php
+ * actions only, always after a confirm (see "changes" below); every other action is a LINK to the page that does it.
  *
  * Data: the JSON block inside the section (first paint) and admin/api/calendar-timeline.php for other ranges.
  * Names and notes only ever reach the page through textContent.
@@ -127,13 +128,14 @@
         go(st, st.start, st.days);
     }
 
-    /* Show [start, start+days). Uses the loaded data when it covers the range, else asks the server. */
-    function go(st, start, days) {
+    /* Show [start, start+days). Uses the loaded data when it covers the range, else asks the server.
+       force: always ask the server (after a change was saved). */
+    function go(st, start, days, force) {
         st.start = start;
         st.days = days;
         var dateIn = q(st, '[data-tl-date]');
         if (dateIn) dateIn.value = start;
-        if (covers(st.data, start, days)) {
+        if (!force && covers(st.data, start, days)) {
             ++st.loading; // a newer view wins over any fetch still in flight
             render(st);
             return;
@@ -389,7 +391,18 @@
         setupRoving(st);
         renderAgenda(st);
         showMode(st);
-        announce(st, 'Showing ' + fmtRange(dates[0].d, dates[n - 1].d) + '.');
+        if (st.keepScroll) { // after a saved change: stay where the user was
+            scroller.scrollTop = st.keepScroll.top;
+            scroller.scrollLeft = st.keepScroll.left;
+            if (Math.abs(window.scrollY - st.keepScroll.win) > 1) window.scrollTo(window.scrollX, st.keepScroll.win);
+            st.keepScroll = null;
+        }
+        if (st.flash) {
+            announce(st, st.flash);
+            st.flash = '';
+        } else {
+            announce(st, 'Showing ' + fmtRange(dates[0].d, dates[n - 1].d) + '.');
+        }
     }
 
     function inView(st, b) {
@@ -530,12 +543,23 @@
         if (w < 96) bar.classList.add('tl-bar--narrow');
         if (w < 56) bar.classList.add('tl-bar--tiny');
 
+        // What may be changed from here (server rules in b.drag + this user's permissions); drag is desktop only.
+        var rules = rulesOf(st, b);
+        var desk = canDrag();
+        var dMove = desk && rules.move;
+        var dEnd = desk && rules.end && !it.cutE;
+        bar.setAttribute('draggable', 'false'); // never the browser's own drag and drop
+        bar.setAttribute('data-tl-draggable', (dMove || dEnd) ? 'true' : 'false');
+        if (dMove || dEnd) bar.classList.remove('tl-bar--locked');
+        if (dMove) bar.classList.add('tl-bar--movable');
+
         var who = b.guest + (b.room_guest && b.room_guest !== b.guest ? ' (' + b.room_guest + ')' : '');
         var room = unassigned ? 'no room yet' : ('Room ' + (b.room_label || (lane ? lane.number : '')));
         var pay = b.pay.key === 'paid' ? 'paid' : (b.pay.key === 'partial' ? 'part paid' : (b.pay.key === 'refunded' ? 'refunded' : 'unpaid'));
         var sentence = who + ', ' + statusWord(b.status) + (b.missed ? ' (missed arrival)' : '') + (b.overdue ? ' (past check-out)' : '')
             + ', ' + fmtRange(b.ci, b.co) + ', ' + nightsWord(b.nights) + ', ' + room + ', ' + pay;
-        bar.setAttribute('aria-label', sentence);
+        var keys = (rules.move ? ' Press M to move room.' : '') + (rules.end ? ' Press D to change dates.' : '');
+        bar.setAttribute('aria-label', sentence + '.' + keys);
         bar.title = sentence;
 
         if (it.cutS) bar.appendChild(icon('fa-angle-left tl-bar__cut'));
@@ -558,6 +582,12 @@
         else if (b.group) flags.appendChild(flag('group', 'fa-users'));
         if (flags.childNodes.length) bar.appendChild(flags);
         if (it.cutE) bar.appendChild(icon('fa-angle-right tl-bar__cut'));
+        if (dEnd) {
+            var grip = el('span', 'tl-bar__grip tl-bar__grip--end');
+            grip.setAttribute('aria-hidden', 'true');
+            grip.title = 'Drag to change the check-out date';
+            bar.appendChild(grip);
+        }
         return bar;
     }
     function flag(kind, ic) {
@@ -626,11 +656,14 @@
     /* ---------------------------------------------------------------- drawer / sheet */
     function asSheet() { return mqPhone.matches || (mqCoarse.matches && !mqTablet.matches && window.innerWidth < 1025 && window.innerWidth < 600); }
 
-    function openDrawer(st, title, buildBody, buildFoot, opener) {
+    /* keep: a step of a change in progress (Move room / Change dates); anything else drops that change first. */
+    function openDrawer(st, title, buildBody, buildFoot, opener, keep) {
+        if (st.busy) return false; // a save is running: its panel stays until it answers
+        if (!keep && st.pending) dropChange(st);
         var dr = q(st, '[data-tl-drawer]');
         var bd = q(st, '[data-tl-backdrop]');
         closeMenus(st);
-        st.lastFocus = opener || document.activeElement;
+        if (!keep || !st.lastFocus) st.lastFocus = opener || document.activeElement;
         q(st, '[data-tl-drawer-title]').textContent = title;
         var body = q(st, '[data-tl-drawer-body]');
         var foot = q(st, '[data-tl-drawer-foot]');
@@ -647,9 +680,11 @@
         window.requestAnimationFrame(function () { dr.classList.add('is-open'); });
         var close = q(st, '[data-tl-drawer-close]');
         if (close) close.focus();
+        return true;
     }
     function closeDrawer(st, restore) {
-        if (!st) return;
+        if (!st || st.busy) return;
+        if (st.pending) dropChange(st); // Cancel / Esc / close: the bar snaps back, nothing is saved
         var dr = q(st, '[data-tl-drawer]');
         if (!dr || dr.hidden) return;
         closeMenus(st);
@@ -680,7 +715,9 @@
 
     function openBooking(st, b, bar) {
         st.root.querySelectorAll('.tl-bar.is-selected').forEach(function (x) { x.classList.remove('is-selected'); });
+        if (st.busy) return;
         if (bar) bar.classList.add('is-selected');
+        st.drawerBooking = b;
         var can = st.data.can, today = st.data.today;
         var unassigned = !b.lanes.length;
         openDrawer(st, b.guest, function (body) {
@@ -709,8 +746,7 @@
             if (b.joined) dl(list, 'Joined rooms', 'Rooms ' + (b.room_label || '') + ' are booked together as one room.');
             else if (b.group) dl(list, 'Group', 'Group of ' + b.group_size + ' rooms' + (b.group_ref ? ', main booking ' + b.group_ref : '') + '.');
             body.appendChild(list);
-            var lockNote = el('p', 'tl-drawer__note', 'To move this stay or change its dates, use the actions below; they open the booking forms.');
-            body.appendChild(lockNote);
+            changeNotes(st, b).forEach(function (t) { body.appendChild(el('p', 'tl-drawer__note', t)); });
         }, function (foot) {
             if (can.open_booking) foot.appendChild(linkBtn('btn btn-secondary', 'booking-details.php?id=' + b.id, 'Open booking'));
             var primary = null;
@@ -725,8 +761,13 @@
 
             var more = [];
             var canRoom = b.status === 'confirmed' || b.status === 'checked-in';
-            if (!unassigned && canRoom && can.move) more.push(['bookings.php?action=room-change&booking_id=' + b.id, 'Move room', 'fa-right-left']);
-            if (can.edit_dates) more.push(['edit-booking.php?id=' + b.id, 'Change dates', 'fa-calendar-pen']);
+            var rules = rulesOf(st, b);
+            // Move room / Change dates run here when the timeline may do them (panel, then a confirm); otherwise
+            // they stay links to the booking forms. The 4th item is the panel the link opens instead.
+            if (rules.move) more.push(['bookings.php?action=' + (unassigned ? 'assign-room' : 'room-change') + '&booking_id=' + b.id, unassigned ? 'Choose a room' : 'Move room', 'fa-right-left', 'move']);
+            else if (!unassigned && canRoom && can.move) more.push(['bookings.php?action=room-change&booking_id=' + b.id, 'Move room', 'fa-right-left']);
+            if (rules.end) more.push(['edit-booking.php?id=' + b.id, 'Change dates', 'fa-calendar-pen', 'dates']);
+            else if (can.edit_dates) more.push(['edit-booking.php?id=' + b.id, 'Change dates', 'fa-calendar-pen']);
             if (can.payment && b.pay.key !== 'paid' && b.pay.key !== 'refunded') more.push(['payment-add.php?booking_type=room&booking_id=' + b.id, 'Record payment', 'fa-money-bill']);
             if (canRoom && can.assign && !(unassigned && b.status === 'confirmed') && b.status === 'confirmed') more.push(['bookings.php?action=assign-room&booking_id=' + b.id, 'Assign room', 'fa-door-open']);
             if (more.length) {
@@ -743,6 +784,10 @@
                 more.forEach(function (m) {
                     var a = linkBtn('', m[0], m[1], m[2]);
                     a.setAttribute('role', 'menuitem');
+                    if (m[3]) {
+                        a.setAttribute('data-tl-act', m[3]);
+                        a.setAttribute('data-tl-act-id', String(b.id));
+                    }
                     menu.appendChild(a);
                 });
                 wrap.appendChild(tb);
@@ -761,6 +806,612 @@
             if (m) m.style.cssText = '';
             var t = w.querySelector('[data-tl-more]');
             if (t) t.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    /* ---------------------------------------------------------------- changes (existing bookings.php actions only)
+       Move room: get_available_rooms (precheck), then assign_individual_room (no money). A confirmed booking dropped on a
+       room of another type: room_change_options (price + availability), then upgrade_room_type (charge pricing, the
+       upgrade flow that reprices) and assign_individual_room for the room it was dropped on.
+       Change dates (in-house, end of stay only): stay_nights_quote, then stay_nights_apply with the quoted figures.
+       Nothing is saved before Confirm; Confirm runs once (st.busy) and every rule is checked again by bookings.php. */
+    var mqFine = window.matchMedia('(pointer: fine)');
+    function canDrag() { return mqFine.matches && !mqCoarse.matches && window.innerWidth > 1024; }
+    function rulesOf(st, b) {
+        var dr = b.drag || {}, can = st.data.can || {};
+        return { move: !!dr.move && !!can.move, end: !!dr.end && !!can.nights, why: dr.why || '' };
+    }
+    function changeNotes(st, b) {
+        var dr = b.drag || {}, r = rulesOf(st, b), out = [];
+        if (!dr.move && !dr.end) return [dr.why || 'This booking cannot be changed here. Open the booking.'];
+        if (!r.move && !r.end) return ['Your role cannot change this booking from the timeline.'];
+        var drag = canDrag();
+        if (r.move) out.push(drag ? 'To move this stay, drag the bar to another room, or use More, Move room.' : 'To move this stay, use More, Move room.');
+        if (r.end) out.push(drag ? 'To change the check-out, drag the right edge of the bar, or use More, Change dates.' : 'To change the check-out, use More, Change dates.');
+        if (dr.why) out.push(dr.why);
+        return out;
+    }
+    function dot(s) { s = String(s || '').trim(); return s === '' || /[.!?]$/.test(s) ? s : s + '.'; }
+    function escHtml(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function toast(st, msg, kind) {
+        announce(st, msg);
+        // Alert.show renders HTML; server messages can carry staff-typed text (e.g. "Reason: ..."), so escape it.
+        if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show(escHtml(msg), kind || 'info');
+    }
+    function moneyTol(st) {
+        var t = Number(st && st.data ? st.data.tolerance : NaN);
+        return t > 0 ? t : 0.01;
+    }
+
+    /* POST one existing action to admin/bookings.php (its CSRF, deleted-booking and permission checks run first).
+       Resolves with the JSON answer; rejects with the server's message (it answers 200 + success:false). */
+    function postAction(fields) {
+        var fd = new FormData();
+        Object.keys(fields).forEach(function (k) { fd.append(k, String(fields[k])); });
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        var tok = window._rhCsrf || (meta ? (meta.getAttribute('content') || '') : '');
+        if (tok) fd.append('csrf_token', tok);
+        var ctl = window.AbortController ? new AbortController() : null;
+        var tid = ctl ? window.setTimeout(function () { ctl.abort(); }, 45000) : 0;
+        return fetch(new URL('bookings.php', window.location.href).pathname, {
+            method: 'POST',
+            body: fd,
+            credentials: 'same-origin',
+            signal: ctl ? ctl.signal : undefined,
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+        }).then(function (r) {
+            window.clearTimeout(tid);
+            var ct = r.headers.get('content-type') || '';
+            if (ct.indexOf('application/json') === -1) {
+                throw new Error('The server did not confirm this. Reload the page and check the booking before trying again.');
+            }
+            return r.json().then(function (j) {
+                if (!r.ok || !j || j.success === false) throw new Error(dot((j && (j.message || j.error)) || 'That did not work. Try again.'));
+                return j;
+            });
+        }, function (err) {
+            window.clearTimeout(tid);
+            throw new Error(err && err.name === 'AbortError'
+                ? 'The server took too long to answer. Reload the page and check the booking before trying again.'
+                : 'Could not reach the server. Check the connection and try again.');
+        });
+    }
+
+    /* Drop a change that was not confirmed: the bar snaps back. */
+    function dropChange(st) {
+        st.pending = null;
+        endDrag(st);
+    }
+    function endDrag(st) {
+        st.root.querySelectorAll('.tl-bar--ghost').forEach(function (g) { g.remove(); });
+        st.root.querySelectorAll('.tl-bar.is-dragging').forEach(function (x) { x.classList.remove('is-dragging'); });
+        st.root.classList.remove('is-dragging');
+        clearDrop(st);
+    }
+    function clearDrop(st) {
+        st.root.querySelectorAll('.tl-cell--drop-ok, .tl-cell--drop-bad').forEach(function (c) {
+            c.classList.remove('tl-cell--drop-ok', 'tl-cell--drop-bad');
+        });
+    }
+    function markDrop(st, row, from, to, ok) { // day numbers, both included
+        clearDrop(st);
+        if (!row) return;
+        var last = st.first + st.dates.length - 1;
+        for (var dn = Math.max(from, st.first); dn <= Math.min(to, last); dn++) {
+            var c = row.querySelector('.tl-cell[data-tl-day="' + (dn - st.first) + '"]');
+            if (c) c.classList.add(ok ? 'tl-cell--drop-ok' : 'tl-cell--drop-bad');
+        }
+    }
+    /* Nights from..to (day numbers, both included) free on this lane in the loaded data. A hint for the drop colour;
+       the server precheck decides. */
+    function laneFree(st, lane, b, from, to) {
+        if (to < from) return true;
+        var blocked = (st.blocksByLane[lane.id] || []).some(function (bl) { return dnum(bl.from) <= to && dnum(bl.to) >= from; });
+        if (blocked) return false;
+        return !(st.lanesBookings[lane.id] || []).some(function (o) {
+            return o.id !== b.id && dnum(o.ci) <= to && dnum(o.eco) - 1 >= from;
+        });
+    }
+    function moveVerdict(st, b, row) {
+        if (!row || !row.hasAttribute('data-tl-lane')) return null;
+        var lane = st.lanesById[row.getAttribute('data-tl-lane')];
+        if (!lane || b.lanes.indexOf(lane.id) !== -1) return null;
+        var v = { lane: lane, row: row, ok: true, why: '' };
+        if (lane.joined) {
+            v.ok = false;
+            v.why = 'Room ' + lane.number + ' is a pair of joined rooms. To book a pair, change the room type from the booking.';
+        } else if (!laneFree(st, lane, b, dnum(b.ci), dnum(b.co) - 1)) {
+            v.ok = false;
+            v.why = 'Room ' + lane.number + ' is taken or blocked on some of these nights.';
+        }
+        return v;
+    }
+    function placeGhost(st, d, row, left, width) {
+        if (!d.ghost) {
+            d.ghost = el('div', 'tl-bar tl-bar--ghost tl-bar--' + d.b.status);
+            d.ghost.setAttribute('aria-hidden', 'true');
+            d.ghost.appendChild(el('span', 'tl-bar__name', d.b.guest));
+        }
+        var track = row.querySelector('.tl-track');
+        if (!track) return;
+        if (d.ghost.parentNode !== track) track.appendChild(d.ghost);
+        d.ghost.style.left = left + 'px';
+        d.ghost.style.width = Math.max(12, width) + 'px';
+        d.ghost.style.top = '4px';
+    }
+
+    function beginDrag(st, e, bar) {
+        if (e.pointerType !== 'mouse' || !canDrag() || st.busy || st.pending) return;
+        if (bar.getAttribute('data-tl-draggable') !== 'true') return;
+        var b = st.byId[bar.getAttribute('data-tl-booking')];
+        if (!b) return;
+        var r = rulesOf(st, b);
+        var kind = e.target.closest('.tl-bar__grip--end') ? (r.end ? 'end' : null) : (r.move ? 'move' : null);
+        if (!kind) return;
+        st.drag = { kind: kind, bar: bar, b: b, row: bar.closest('.tl-lane'), x: e.clientX, y: e.clientY, id: e.pointerId, started: false };
+    }
+    function dragMove(st, e) {
+        var d = st.drag;
+        if (!d.started) {
+            if (Math.abs(e.clientX - d.x) < 4 && Math.abs(e.clientY - d.y) < 4) return;
+            d.started = true;
+            d.bar.classList.add('is-dragging');
+            st.root.classList.add('is-dragging');
+            clearSel(st);
+            try { q(st, '[data-tl-grid]').setPointerCapture(d.id); } catch (err) { /* not supported: moves still arrive */ }
+        }
+        e.preventDefault();
+        var left = parseFloat(d.bar.style.left) || 0, width = parseFloat(d.bar.style.width) || 0;
+        if (d.kind === 'move') {
+            var hit = document.elementFromPoint(e.clientX, e.clientY);
+            var row = hit && hit.closest('.tl-lane');
+            if (row && !q(st, '[data-tl-grid]').contains(row)) row = null;
+            d.target = moveVerdict(st, d.b, row);
+            if (!row) { clearDrop(st); return; }
+            placeGhost(st, d, row, left, width);
+            d.ghost.classList.toggle('tl-bar--ghost-bad', !!(d.target && !d.target.ok));
+            if (d.target) markDrop(st, row, dnum(d.b.ci), dnum(d.b.co) - 1, d.target.ok);
+            else clearDrop(st);
+            return;
+        }
+        // End edge: the check-out moves to the day under the pointer (never before tomorrow's first night).
+        var track = d.row && d.row.querySelector('.tl-track');
+        if (!track) return;
+        var tr = track.getBoundingClientRect();
+        var last = st.first + st.dates.length - 1;
+        var co = st.first + Math.floor((e.clientX - tr.left) / st.dayW);
+        co = Math.min(last, Math.max(co, dnum(d.b.ci) + 1, dnum(st.data.today)));
+        d.newCo = co;
+        placeGhost(st, d, d.row, left, (co - st.first + 0.5) * st.dayW - 2 - left);
+        var oldCo = dnum(d.b.co);
+        var lane = d.b.lanes.length ? st.lanesById[d.b.lanes[0]] : null;
+        var okEnd = co <= oldCo || !lane || laneFree(st, lane, d.b, oldCo, co - 1);
+        d.ghost.classList.toggle('tl-bar--ghost-bad', !okEnd);
+        if (co === oldCo) clearDrop(st);
+        else markDrop(st, d.row, Math.min(co, oldCo), Math.max(co, oldCo) - 1, okEnd);
+    }
+    function dragEnd(st) {
+        var d = st.drag;
+        st.drag = null;
+        if (!d || !d.started) return;
+        st.suppressClick = true;
+        window.setTimeout(function () { st.suppressClick = false; }, 0);
+        if (d.kind === 'move') {
+            var v = d.target;
+            if (!v) { endDrag(st); return; }
+            if (!v.ok) { endDrag(st); toast(st, v.why, 'warning'); return; }
+            startMove(st, d.b, v.lane, d.bar);
+            return;
+        }
+        var delta = (d.newCo || dnum(d.b.co)) - dnum(d.b.co);
+        if (!delta) { endDrag(st); return; }
+        startNights(st, d.b, delta, d.bar);
+    }
+
+    /* M / D on a focused bar, and the drawer's More items. */
+    function keyChange(st, b, bar, what) {
+        var r = rulesOf(st, b);
+        if (what === 'move' && r.move) { st.drawerBooking = b; showMovePanel(st, b, bar); return; }
+        if (what === 'dates' && r.end) { st.drawerBooking = b; showDatesPanel(st, b, bar); return; }
+        openBooking(st, b, bar);
+        announce(st, changeNotes(st, b)[0] || '');
+    }
+
+    /* A change cannot be made here: say why, offer the booking. The dragged bar snaps back at once. */
+    function refuse(st, b, msg, opener) {
+        endDrag(st);
+        st.pending = null;
+        openDrawer(st, b.guest, function (body) {
+            var p = el('p', 'tl-confirm__error', dot(msg));
+            p.setAttribute('role', 'alert');
+            body.appendChild(p);
+        }, function (foot) {
+            if (st.data.can.open_booking) foot.appendChild(linkBtn('btn btn-primary', 'booking-details.php?id=' + b.id, 'Open booking'));
+            var c = el('button', 'btn btn-secondary', 'Close');
+            c.type = 'button';
+            c.setAttribute('data-tl-cancel', '1');
+            foot.appendChild(c);
+        }, opener, true);
+    }
+    function waitPanel(st, title, text, opener) {
+        openDrawer(st, title, function (body) {
+            body.appendChild(el('p', 'tl-muted', text));
+        }, function (foot) {
+            var c = el('button', 'btn btn-secondary', 'Cancel');
+            c.type = 'button';
+            c.setAttribute('data-tl-cancel', '1');
+            foot.appendChild(c);
+        }, opener, true);
+    }
+
+    /* The confirm step: the sentence, the figures, any reason fields, Cancel / Confirm. cfg.run(values) returns a
+       Promise of { message, kind }; values comes from cfg.fields(body) (a getter that throws a plain message). */
+    function showConfirm(st, cfg) {
+        var errEl = null, btn = null, getVals = function () { return {}; };
+        var label = cfg.submit || 'Confirm';
+        openDrawer(st, cfg.title, function (body) {
+            body.appendChild(el('p', 'tl-confirm__text', cfg.text));
+            var list = el('dl', 'tl-dl');
+            cfg.lines.forEach(function (ln) { // [label, value, optional "?" helper text]
+                if (!ln) return;
+                dl(list, ln[0], ln[1]);
+                if (ln[2]) list.lastChild.querySelector('dt').appendChild(help(ln[2]));
+            });
+            body.appendChild(list);
+            if (cfg.fields) getVals = cfg.fields(body);
+            errEl = el('p', 'tl-confirm__error');
+            errEl.setAttribute('role', 'alert');
+            errEl.hidden = true;
+            body.appendChild(errEl);
+        }, function (foot) {
+            var c = el('button', 'btn btn-secondary', 'Cancel');
+            c.type = 'button';
+            c.setAttribute('data-tl-cancel', '1');
+            foot.appendChild(c);
+            btn = el('button', 'btn btn-primary', label);
+            btn.type = 'button';
+            btn.setAttribute('data-tl-confirm', '1');
+            foot.appendChild(btn);
+        }, cfg.opener, true);
+        function showErr(m) {
+            errEl.textContent = dot(m);
+            errEl.hidden = false;
+        }
+        st.pending.confirm = function () {
+            if (st.busy) return; // single flight: a second click while saving does nothing
+            var vals;
+            try { vals = getVals(); } catch (e) { showErr(e.message); return; }
+            st.busy = true;
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            btn.textContent = 'Saving...';
+            errEl.hidden = true;
+            var cancelBtn = st.root.querySelector('[data-tl-drawer-foot] [data-tl-cancel]');
+            if (cancelBtn) cancelBtn.disabled = true;
+            Promise.resolve().then(function () { return cfg.run(vals); }).then(function (res) {
+                st.busy = false;
+                finishChange(st, res.message, res.kind || 'success');
+            }, function (e) {
+                st.busy = false;
+                btn.disabled = false;
+                btn.removeAttribute('aria-busy');
+                btn.textContent = label;
+                if (cancelBtn) cancelBtn.disabled = false;
+                showErr(e.message || 'That did not work. Try again.');
+            });
+        };
+        if (btn) btn.focus();
+    }
+    function finishChange(st, msg, kind) {
+        st.pending = null;
+        closeDrawer(st, false);
+        endDrag(st);
+        toast(st, msg, kind);
+        st.flash = msg;
+        var sc = q(st, '[data-tl-scroller]');
+        st.keepScroll = sc ? { top: sc.scrollTop, left: sc.scrollLeft, win: window.scrollY } : null;
+        go(st, st.start, st.days, true);
+    }
+
+    /* ---- Move room */
+    function roomLabel(r) { return String(r.room_number || r.label || r.id); }
+    function roomsOfType(b, typeId) {
+        return postAction({ action: 'get_available_rooms', room_type_id: typeId, check_in: b.ci, check_out: b.co, exclude_booking_id: b.id })
+            .then(function (j) {
+                if (j.mode && j.mode !== 'rooms') throw new Error('Rooms of this type are booked as joined pairs. Change it from the booking.');
+                return j.data || [];
+            });
+    }
+    /* The server's allowed list for this room: the same list the Assign room picker shows. */
+    function checkRoom(list, roomId, number) {
+        var hit = null;
+        list.forEach(function (r) { if (Number(r.id) === Number(roomId)) hit = r; });
+        if (!hit) throw new Error('Room ' + number + ' is not a room this booking can use.');
+        if (hit.current) throw new Error('The booking already has Room ' + number + '.');
+        if (!hit.available) throw new Error('Room ' + number + ' cannot take this stay: ' + (hit.reason || 'it is not free on these nights'));
+        if (hit.requires_child_override) throw new Error('Room ' + number + ' does not take children. Assign it from the booking, where the override note is asked for.');
+        return hit;
+    }
+    function precheckMove(st, b, lane) {
+        if (lane.type_id === b.type_id) {
+            return roomsOfType(b, b.type_id).then(function (list) { return { cross: false, room: checkRoom(list, lane.id, lane.number) }; });
+        }
+        if (b.status !== 'confirmed') return Promise.reject(new Error('Only a confirmed booking can change room type here. Open the booking.'));
+        return postAction({ action: 'room_change_options', booking_id: b.id }).then(function (j) {
+            var data = j.data || {}, opt = null;
+            (data.options || []).forEach(function (o) { if (Number(o.id) === Number(lane.type_id)) opt = o; });
+            if (!opt) throw new Error('This booking cannot change to the room type of Room ' + lane.number + '.');
+            if (!opt.available) throw new Error(opt.name + ': ' + (opt.unavailable_reason || 'not available for these nights'));
+            // A cheaper type that leaves the guest paid above the new bill creates a credit (money back): that needs
+            // the booking's Change room type dialog, which explains the refund / credit note. Never from the calendar.
+            var tol = moneyTol(st), q = opt.quote || {};
+            var paid = Number((data.booking || {}).amount_paid || 0);
+            if (Number(q.charge_delta || 0) < -tol && paid > Number(q.charge_total || 0) - tol) {
+                throw new Error('The guest has already paid more than the ' + opt.name + ' price, so this move would leave money to give back. Do this from the booking (Change room type), where the refund or credit note is handled.');
+            }
+            return roomsOfType(b, lane.type_id).then(function (list) {
+                return { cross: true, room: checkRoom(list, lane.id, lane.number), opt: opt };
+            });
+        });
+    }
+    function startMove(st, b, lane, opener) {
+        var token = { b: b };
+        st.pending = token;
+        waitPanel(st, 'Move room', 'Checking Room ' + lane.number + ' for ' + fmtRange(b.ci, b.co) + '...', opener);
+        precheckMove(st, b, lane).then(function (plan) {
+            if (st.pending !== token) return;
+            confirmMove(st, b, lane, plan, opener);
+        }, function (err) {
+            if (st.pending !== token) return;
+            refuse(st, b, err.message, opener);
+        });
+    }
+    function confirmMove(st, b, lane, plan, opener) {
+        var from = b.lanes.length ? 'Room ' + (b.room_label || '') : 'no room yet';
+        var text = 'Move ' + b.guest + ' (' + b.ref + ') from ' + from + ' to Room ' + lane.number + ', '
+            + fmtRange(b.ci, b.co) + ', ' + nightsWord(b.nights) + '.';
+        var lines = [['Dates', fmtRange(b.ci, b.co) + ' (no change)']];
+        var opt = plan.opt, qt = opt ? opt.quote : null;
+        if (plan.cross) {
+            lines.push(['Room type', (b.type_name || 'Current type') + ' to ' + opt.name]);
+            var dlt = Number(qt.charge_delta || 0);
+            lines.push(['Price', qt.direction === 'same'
+                ? 'No change (same rate)'
+                : money(st, qt.current_total) + ' to ' + money(st, qt.charge_total) + ' (' + (dlt > 0 ? '+' : '-') + money(st, Math.abs(dlt)) + ')',
+                'The stay total now and after the change, at the new room type\'s rate for the same nights (the Change room type quote).']);
+            lines.push(['Email to guest', 'Not sent (send it from the booking if needed)']);
+        } else {
+            lines.push(['Price', 'No change', 'Same room type, same nights: giving the booking another room never changes the bill.']);
+        }
+        if (b.status === 'confirmed' && lane.hk && lane.hk.state !== 'clean') lines.push(['Housekeeping', 'Room ' + lane.number + ': ' + lane.hk.label + ' (it must be ready by check-in)']);
+        showConfirm(st, {
+            title: 'Move room',
+            text: text,
+            lines: lines,
+            opener: opener,
+            fields: plan.cross ? function (body) { return reasonFields(body, opt); } : null,
+            run: function (vals) {
+                var assign = function () {
+                    return postAction({ action: 'assign_individual_room', booking_id: b.id, individual_room_id: lane.id });
+                };
+                if (!plan.cross) {
+                    return assign().then(function (j) { return { message: dot(j.message || ('Moved to Room ' + lane.number)) }; });
+                }
+                return postAction({
+                    action: 'upgrade_room_type', booking_id: b.id, new_room_id: lane.type_id, pricing: 'charge',
+                    reason_code: vals.reason, note: vals.note, send_email: '0'
+                }).then(function (j1) {
+                    // The type change is saved (and gave the booking a room of the new type); now the room it was
+                    // dropped on. If that fails the type change stands: say so, never retry the paid part.
+                    return assign().then(function () {
+                        return { message: dot(j1.message || 'Room type changed') + ' Room ' + lane.number + ' assigned.' };
+                    }, function (e2) {
+                        return { message: dot(j1.message || 'Room type changed') + ' Room ' + lane.number + ' could not be given: ' + dot(e2.message) + ' Check the room on the booking.', kind: 'warning' };
+                    });
+                });
+            }
+        });
+    }
+    /* Reason (+ note) for a room type change, as the Change room type form asks them (rh_room_change_reasons). */
+    function reasonFields(body, opt) {
+        var wrap = el('div', 'tl-confirm__fields');
+        var l1 = el('label', 'tl-field');
+        l1.appendChild(el('span', 'tl-field__label', 'Reason for the change'));
+        var sel = el('select', 'form-control');
+        sel.appendChild(el('option', null, 'Choose a reason'));
+        sel.firstChild.value = '';
+        Object.keys(opt.reasons || {}).forEach(function (k) {
+            var o = el('option', null, opt.reasons[k]);
+            o.value = k;
+            sel.appendChild(o);
+        });
+        l1.appendChild(sel);
+        wrap.appendChild(l1);
+        var l2 = el('label', 'tl-field');
+        var noteNeeded = function () { return opt.quote.direction === 'downgrade' || /_other$/.test(sel.value); };
+        var noteLab = el('span', 'tl-field__label', 'Note');
+        l2.appendChild(noteLab);
+        var ta = el('textarea', 'form-control');
+        ta.rows = 2;
+        ta.maxLength = 500;
+        l2.appendChild(ta);
+        wrap.appendChild(l2);
+        var sync = function () { noteLab.textContent = noteNeeded() ? 'Note (required: who authorised it and why)' : 'Note (optional)'; };
+        sel.addEventListener('change', sync);
+        sync();
+        body.appendChild(wrap);
+        return function () {
+            if (!sel.value) throw new Error('Choose a reason for the room change.');
+            var note = String(ta.value || '').trim();
+            if (noteNeeded() && note.length < 5) throw new Error('Add a short note explaining the room change (who authorised it and why).');
+            return { reason: sel.value, note: note };
+        };
+    }
+    /* Touch, tablet, phone and keyboard: the rooms of this type the booking may move to, then the same confirm. */
+    function showMovePanel(st, b, opener) {
+        var token = { b: b };
+        st.pending = token;
+        waitPanel(st, b.lanes.length ? 'Move room' : 'Choose a room', 'Finding free rooms for ' + fmtRange(b.ci, b.co) + '...', opener);
+        roomsOfType(b, b.type_id).then(function (list) {
+            if (st.pending !== token) return;
+            var ok = list.filter(function (r) { return r.available && !r.current && !r.requires_child_override; });
+            var other = list.filter(function (r) { return !r.current; }).length - ok.length;
+            token.pick = function (id) {
+                var r = null;
+                ok.forEach(function (x) { if (String(x.id) === String(id)) r = x; });
+                if (!r) return;
+                var lane = st.lanesById[r.id] || { id: Number(r.id), number: roomLabel(r), type_id: b.type_id, hk: null };
+                confirmMove(st, b, lane, { cross: false, room: r }, opener);
+            };
+            openDrawer(st, b.lanes.length ? 'Move room' : 'Choose a room', function (body) {
+                body.appendChild(el('p', 'tl-confirm__text', b.guest + ' (' + b.ref + '), ' + fmtRange(b.ci, b.co) + ', ' + nightsWord(b.nights)
+                    + (b.lanes.length ? ', now in Room ' + (b.room_label || '') : '') + '.'));
+                if (!ok.length) {
+                    body.appendChild(el('p', 'tl-drawer__note', 'No other ' + (b.type_name || 'room') + ' room is free for these nights.'));
+                } else {
+                    body.appendChild(el('p', 'tl-muted', 'Free ' + (b.type_name || '') + ' rooms for these nights (the price does not change):'));
+                    var ul = el('ul', 'tl-pick');
+                    ok.forEach(function (r) {
+                        var li = el('li');
+                        var btn = el('button', 'tl-pick__btn');
+                        btn.type = 'button';
+                        btn.setAttribute('data-tl-room-pick', String(r.id));
+                        btn.appendChild(el('span', 'tl-pick__num', 'Room ' + roomLabel(r)));
+                        var extra = [];
+                        if (r.floor) extra.push('Floor ' + r.floor);
+                        if (r.turnover) extra.push(String(r.turnover));
+                        if (extra.length) btn.appendChild(el('span', 'tl-pick__meta', extra.join(', ')));
+                        li.appendChild(btn);
+                        ul.appendChild(li);
+                    });
+                    body.appendChild(ul);
+                }
+                if (other > 0) body.appendChild(el('p', 'tl-muted', other + ' other ' + (other === 1 ? 'room is' : 'rooms are') + ' taken, blocked or not suitable.'));
+            }, function (foot) {
+                var c = el('button', 'btn btn-secondary', 'Cancel');
+                c.type = 'button';
+                c.setAttribute('data-tl-cancel', '1');
+                foot.appendChild(c);
+                if (st.data.can.move && b.status === 'confirmed' && b.lanes.length) {
+                    foot.appendChild(linkBtn('btn btn-secondary', 'bookings.php?action=room-change&booking_id=' + b.id, 'Change room type'));
+                }
+            }, opener, true);
+        }, function (err) {
+            if (st.pending !== token) return;
+            refuse(st, b, err.message, opener);
+        });
+    }
+
+    /* ---- Change dates (in-house: add / take off nights at the end) */
+    function showDatesPanel(st, b, opener) {
+        var token = { b: b };
+        st.pending = token;
+        var minCo = dstr(Math.max(dnum(b.ci) + 1, dnum(st.data.today)));
+        var input = null, errEl = null;
+        token.dates = function () {
+            var v = input ? input.value : '';
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) { errEl.textContent = 'Pick the new check-out date.'; errEl.hidden = false; return; }
+            if (v < minCo) { errEl.textContent = 'The check-out cannot be before ' + fmt(minCo) + '.'; errEl.hidden = false; return; }
+            var delta = dnum(v) - dnum(b.co);
+            if (!delta) { errEl.textContent = 'That is the current check-out. Pick another date.'; errEl.hidden = false; return; }
+            if (Math.abs(delta) > 60) { errEl.textContent = 'Change at most 60 nights at a time.'; errEl.hidden = false; return; }
+            startNights(st, b, delta, opener);
+        };
+        openDrawer(st, 'Change dates', function (body) {
+            body.appendChild(el('p', 'tl-confirm__text', b.guest + ' (' + b.ref + ') checked in on ' + fmt(b.ci) + ' and checks out on ' + fmt(b.co) + '.'));
+            var lab = el('label', 'tl-field');
+            lab.appendChild(el('span', 'tl-field__label', 'New check-out date'));
+            input = el('input', 'form-control');
+            input.type = 'date';
+            input.min = minCo;
+            input.value = b.co;
+            lab.appendChild(input);
+            body.appendChild(lab);
+            body.appendChild(el('p', 'tl-muted', 'The check-in date cannot be changed here. The next step shows the new total before anything is saved.'));
+            errEl = el('p', 'tl-confirm__error');
+            errEl.setAttribute('role', 'alert');
+            errEl.hidden = true;
+            body.appendChild(errEl);
+        }, function (foot) {
+            var c = el('button', 'btn btn-secondary', 'Cancel');
+            c.type = 'button';
+            c.setAttribute('data-tl-cancel', '1');
+            foot.appendChild(c);
+            var go2 = el('button', 'btn btn-primary', 'Show the new total');
+            go2.type = 'button';
+            go2.setAttribute('data-tl-dates-go', '1');
+            foot.appendChild(go2);
+        }, opener, true);
+        if (input) input.focus();
+    }
+    function startNights(st, b, delta, opener) {
+        var token = { b: b };
+        st.pending = token;
+        waitPanel(st, 'Change dates', 'Working out the new total...', opener);
+        postAction({ action: 'stay_nights_quote', booking_id: b.id, delta: delta, un_fee_override: '', un_fee_reason: '' }).then(function (j) {
+            if (st.pending !== token) return;
+            var qt = j.quote;
+            if (!qt) throw new Error('Could not work out the new total.');
+            if (Number(qt.delta) > 0 && qt.available === false) {
+                throw new Error('Not available: ' + (qt.availability_error || 'the room is taken on the added nights'));
+            }
+            if (Number(qt.money_back || 0) > 0.01) {
+                throw new Error(money(st, qt.money_back) + ' was paid for the nights taken off and goes back to the guest. Do this from the booking, where the refund or credit note is chosen');
+            }
+            confirmNights(st, b, qt, opener);
+        }).catch(function (err) {
+            if (st.pending !== token) return;
+            refuse(st, b, err.message, opener);
+        });
+    }
+    function confirmNights(st, b, qt, opener) {
+        var n = Math.abs(Number(qt.delta));
+        var verb = Number(qt.delta) > 0 ? 'Add ' + nightsWord(n) + ' to' : 'Take ' + nightsWord(n) + ' off';
+        var text = verb + ' the stay of ' + b.guest + ' (' + b.ref + '): check-out ' + qt.old_check_out_fmt + ' to ' + qt.new_check_out_fmt
+            + ', ' + qt.old_nights + ' to ' + qt.new_nights + ' nights.';
+        var lines = [
+            ['Check-out', qt.old_check_out_fmt + ' to ' + qt.new_check_out_fmt],
+            ['Nights', qt.old_nights + ' to ' + qt.new_nights],
+            ['Price', money(st, qt.old_total) + ' to ' + money(st, qt.new_total), 'The room charge for the whole stay, now and with the new check-out. It is worked out again when you confirm: if it changed, nothing is saved.'],
+            Number(qt.folio || 0) > 0.01 ? ['Extras (unchanged)', money(st, qt.folio), 'Food, drinks and other charges on the guest bill. Changing nights does not touch them.'] : null,
+            ['Paid so far', money(st, qt.paid), 'Everything paid on this booking to date.'],
+            ['Balance owed', money(st, qt.old_due) + ' to ' + money(st, qt.new_due), 'Room charge plus extras (and any fee kept for nights taken off), less what has been paid: now and after the change.'],
+            qt.plan_note ? ['Discount', qt.plan_note] : null,
+            (qt.unused && qt.unused.unused > 0 && qt.unused.text) ? ['Unused nights', qt.unused.text] : null,
+            qt.pay_later ? ['Pay-later booking', 'The balance stays owed under the agreed arrangement.'] : null,
+            Number(qt.delta) > 0 ? ['Room availability', 'Checked: the room is free on the added nights.'] : null
+        ];
+        showConfirm(st, {
+            title: 'Change dates',
+            text: text,
+            lines: lines,
+            opener: opener,
+            fields: function (body) {
+                var lab = el('label', 'tl-field');
+                lab.appendChild(el('span', 'tl-field__label', 'Reason (required)'));
+                var inp = el('input', 'form-control');
+                inp.type = 'text';
+                inp.maxLength = 255;
+                inp.setAttribute('data-tl-reason', '1');
+                lab.appendChild(inp);
+                body.appendChild(lab);
+                return function () {
+                    var r = String(inp.value || '').trim();
+                    if (r.length < 3) throw new Error('Say why the nights are changing (the reason is required).');
+                    return { reason: r };
+                };
+            },
+            run: function (vals) {
+                var un = qt.unused;
+                return postAction({
+                    action: 'stay_nights_apply', booking_id: b.id, delta: qt.delta,
+                    expected_new_total: qt.new_total, expected_total_delta: qt.total_delta, reason: vals.reason,
+                    un_fee_override: '', un_fee_reason: '',
+                    un_fee_quoted: (un && un.overridable) ? Number(un.amount).toFixed(2) : ''
+                }).then(function (j) { return { message: dot(j.message || 'Stay updated') }; });
+            }
         });
     }
 
@@ -953,6 +1604,36 @@
         root.addEventListener('click', function (e) {
             var t = e.target;
             var x;
+            if (st.suppressClick) { // the click that ends a drag is not a click on the bar
+                st.suppressClick = false;
+                if (t.closest('[data-tl-grid]')) return;
+            }
+            if ((x = t.closest('[data-tl-confirm]'))) {
+                e.preventDefault();
+                if (st.pending && typeof st.pending.confirm === 'function') st.pending.confirm();
+                return;
+            }
+            if ((x = t.closest('[data-tl-cancel]'))) { e.preventDefault(); closeDrawer(st); return; }
+            if ((x = t.closest('[data-tl-act]'))) {
+                e.preventDefault();
+                closeMenus(st);
+                var ab0 = st.drawerBooking;
+                if (ab0 && String(ab0.id) === x.getAttribute('data-tl-act-id')) {
+                    if (x.getAttribute('data-tl-act') === 'move') showMovePanel(st, ab0);
+                    else showDatesPanel(st, ab0);
+                }
+                return;
+            }
+            if ((x = t.closest('[data-tl-room-pick]'))) {
+                e.preventDefault();
+                if (st.pending && typeof st.pending.pick === 'function') st.pending.pick(x.getAttribute('data-tl-room-pick'));
+                return;
+            }
+            if ((x = t.closest('[data-tl-dates-go]'))) {
+                e.preventDefault();
+                if (st.pending && typeof st.pending.dates === 'function') st.pending.dates();
+                return;
+            }
             if ((x = t.closest('[data-tl-today]'))) { go(st, st.data.today, st.days); return; }
             if ((x = t.closest('[data-tl-prev]'))) { go(st, addDays(st.start, -st.days), st.days); return; }
             if ((x = t.closest('[data-tl-next]'))) { go(st, addDays(st.start, st.days), st.days); return; }
@@ -1056,6 +1737,14 @@
             if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].indexOf(e.key) !== -1) {
                 e.preventDefault();
                 moveFocus(st, bar, e.key);
+                return;
+            }
+            var k = String(e.key || '').toLowerCase();
+            if ((k === 'm' || k === 'd') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                var kb = st.byId[bar.getAttribute('data-tl-booking')];
+                if (!kb) return;
+                e.preventDefault();
+                keyChange(st, kb, bar, k === 'm' ? 'move' : 'dates');
             }
         });
 
@@ -1063,6 +1752,8 @@
         var grid = q(st, '[data-tl-grid]');
         grid.addEventListener('pointerdown', function (e) {
             if (e.button !== 0) return;
+            var onBar = e.target.closest('.tl-bar');
+            if (onBar) { beginDrag(st, e, onBar); return; }
             var cell = e.target.closest('.tl-cell');
             if (!cell || e.target.closest('.tl-bar, .tl-block, .tl-sel')) return;
             var row = cell.closest('.tl-lane');
@@ -1081,6 +1772,7 @@
             drawSel(st);
         });
         grid.addEventListener('pointermove', function (e) {
+            if (st.drag) { dragMove(st, e); return; }
             if (!st.sel || !st.sel.dragging) return;
             var hit = document.elementFromPoint(e.clientX, e.clientY);
             var cell = hit && hit.closest('.tl-cell');
@@ -1091,6 +1783,7 @@
             drawSel(st);
         });
         grid.addEventListener('pointerup', function (e) {
+            if (st.drag) { dragEnd(st); return; }
             if (st.tap) {
                 var tp = st.tap;
                 st.tap = null;
@@ -1101,7 +1794,11 @@
             st.sel.dragging = false;
             finishSel(st);
         });
-        grid.addEventListener('pointercancel', function () { st.tap = null; if (st.sel && st.sel.dragging) clearSel(st); });
+        grid.addEventListener('pointercancel', function () {
+            st.tap = null;
+            if (st.drag) { st.drag = null; endDrag(st); }
+            if (st.sel && st.sel.dragging) clearSel(st);
+        });
     }
 
     function toggleFilters(st, open) {
@@ -1125,6 +1822,7 @@
         document.addEventListener('keydown', function (e) {
             var st = live();
             if (!st || e.key !== 'Escape') return;
+            if (st.drag) { st.drag = null; endDrag(st); return; }
             if (st.root.querySelector('.tl-more.open')) { closeMenus(st); return; }
             if (st.sel) { clearSel(st); return; }
             if (st.root.classList.contains('is-filters-open')) { toggleFilters(st, false); return; }

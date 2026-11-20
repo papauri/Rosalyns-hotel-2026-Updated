@@ -1,7 +1,8 @@
 <?php
 /**
  * Room Timeline (Calendar tab) and the compact Housekeeping / Maintenance tabs of admin/calendar.php.
- * Read-only: every action is a link to the existing page that does it (each re-checks its own permission).
+ * Changes go only through the existing admin/bookings.php actions (move room, add / take off nights; see
+ * admin/js/room-timeline.js); everything else is a link to the page that does it (each re-checks its own permission).
  * The timeline grid is drawn by admin/js/room-timeline.js from the JSON block below (same payload as
  * admin/api/calendar-timeline.php); names reach the page only through textContent.
  */
@@ -26,7 +27,7 @@ $tlDate = static function ($v, string $fmt = 'j M Y'): string {
         'data' => $tlPayload,
         'initial' => $tlInitial,
         'api' => 'api/calendar-timeline.php',
-    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     $tlFloors = [];
     foreach ($tlPayload['lanes'] as $tlLane) {
         if ($tlLane['floor'] !== '' && !in_array($tlLane['floor'], $tlFloors, true)) {

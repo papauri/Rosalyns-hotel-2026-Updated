@@ -40,7 +40,7 @@ try {
         'user_id' => (int)($user['id'] ?? 0),
         'role' => (string)($user['role'] ?? ''),
     ]);
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 } catch (Throwable $e) {
     error_log('calendar-timeline: ' . $e->getMessage());
     http_response_code(500);
