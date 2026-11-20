@@ -28,7 +28,10 @@ if (!function_exists('import_default_aliases')) {
             // pack_price, sell_price), container and portion words, "Total Balance" as the quantity when the sheet has no other quantity column.
             // v5 (2026-11-19, Step U2 d): "pour" / "pours" as portion words (a bar count written in pours is turned into bottles).
             // v6 (2026-11-20, bottle sizes): more ways a bar sheet heads its served-by column ("Served in", "Serving size", "Pour size").
-            'version' => 6,
+            // v7 (2026-11-20, glass + container sizes): glass_words ("Glass", "Gls", "Tumbler": a served glass of any drink, its ml optional) and
+            // pour_containers (carton, box, casket, jug, can, tetra ...: a container a drink is poured from by the glass, its ml optional); "gls" as a portion word.
+            // v8 (2026-11-20, review): quantity_words (half, double, dbl, triple ...) reach hotels already seeded at v7 through the top-up.
+            'version' => 8,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -155,7 +158,23 @@ if (!function_exists('import_default_aliases')) {
             // ... and words for a PORTION served out of a bottle / casket (never a stock unit of its own)
             'portion_words' => [
                 'shot', 'shots', 'tot', 'tots', 'glass', 'glasses', 'measure', 'measures', 'cup', 'cups', 'serving', 'servings',
-                'portion', 'portions', 'scoop', 'scoops', 'slice', 'slices', 'pint', 'pints', 'single', 'double', 'dash', 'pour', 'pours',
+                'portion', 'portions', 'scoop', 'scoops', 'slice', 'slices', 'pint', 'pints', 'single', 'double', 'dash', 'pour', 'pours', 'gls',
+            ],
+            // v7: words for a served GLASS of any drink (milk, juice, wine). "Glass 175", "250ml glass", "Gls 200": the number is the glass size in ml,
+            // shown as read from the file and changeable; no number = asked in step 3 (optional, never guessed). A hotel's own Drink measures list wins.
+            'glass_words' => ['glass', 'glasses', 'gls', 'glas', 'tumbler', 'tumblers'],
+            // v7: stock units a drink is POURED from by the glass (a carton of juice, a casket of wine): their size in ml (optional) is asked in step 3.
+            // Crates, cases and packs are not here: they hold bottles, and a size in the name is one bottle.
+            'pour_containers' => [
+                'carton', 'cartons', 'ctn', 'ctns', 'box', 'boxes', 'bx', 'casket', 'caskets', 'cask', 'casks', 'bag in box', 'bag-in-box', 'bib',
+                'jug', 'jugs', 'can', 'cans', 'tetra', 'tetras', 'tetra pak', 'tetrapak', 'tetra pack',
+            ],
+            // v7: words in a "served by" cell that make one sale MORE or LESS than one measure ("Half tot", "Dbl tot", "Triple"). An optional reading
+            // of such a cell is kept only when it names that same measure from the hotel's list (a "double" for "Double tot"); otherwise it is dropped
+            // and the cell stays for the person. Never a conversion.
+            'quantity_words' => [
+                'half', 'halves', 'halfs', 'double', 'doubles', 'dbl', 'dbls', 'dble', 'triple', 'triples', 'treble', 'trebles', 'tpl',
+                'quarter', 'quarters', 'twin', 'twins', 'pair', 'pairs',
             ],
             'units' => [
                 'piece', 'pieces', 'pc', 'pcs', 'each', 'ea', 'bottle', 'bottles', 'btl', 'btls', 'can', 'cans', 'kg', 'kgs',

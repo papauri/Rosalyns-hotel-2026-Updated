@@ -375,6 +375,215 @@ if (!function_exists('import_measure_words')) {
         return $out;
     }
 
+    /** A word list from the alias set (glass_words / pour_containers) as a set of normalised singular words. */
+    function import_word_set(array $words): array
+    {
+        $o = [];
+        foreach ($words as $w) {
+            $n = import_norm_text((string)$w);
+            if ($n !== '') {
+                $o[$n] = true;
+                $o[import_measure_singular($n)] = true;
+            }
+        }
+        return $o;
+    }
+
+    /**
+     * A served GLASS (owner 2026-11-20: "Glass could also mean a non standard glass, maybe for milk or juice, measured in ml optionally"):
+     * the "served by" cell's word is a glass word ("Glass", "Glasses of wine", "Gls", "Tumbler"). Its size, when the cell writes one:
+     * a volume ("250ml glass", "Glass 175 ml", "Glass 0.25 L") or a bare number of 10 or more next to the glass word ("Glass 175", "Gls 200" = ml). Never a guess:
+     * no number = ml null (asked in step 3, optional). Returns ['word' => 'glass', 'ml' => ?float] or null (not a glass).
+     */
+    function import_glass_read(string $served, array $glassSet): ?array
+    {
+        $t = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $served)));
+        if ($t === '' || !$glassSet) {
+            return null;
+        }
+        $vol = import_served_volume_in($t);
+        $rest = $vol ? $vol[1] : $t;
+        $rest = trim((string)preg_replace('/^(?:per|a|an|one|1|x)\s+/u', '', $rest));
+        $rest = trim((string)preg_replace('/\s+(?:of|x|@)$/u', '', $rest), " .-/()@");
+        if (preg_match('/^(.+?)\s+of\s+.+$/u', $rest, $p)) {
+            $rest = trim($p[1]);
+        }
+        $ml = $vol ? (float)$vol[0] : null;
+        if (!$vol) {
+            $num = null;
+            if (preg_match('/^(\p{L}[\p{L} ]*?)\s*(\d{1,6}(?:\.\d+)?)$/u', $rest, $p)) {
+                [$rest, $num] = [trim($p[1]), $p[2]];          // "glass 175", "gls200"
+            } elseif (preg_match('/^(\d{1,6}(?:\.\d+)?)\s*(\p{L}[\p{L} ]*)$/u', $rest, $p)) {
+                [$rest, $num] = [trim($p[2]), $p[1]];          // "250 glass"
+            }
+            if ($num !== null) {
+                $n = (float)$num;
+                $ml = ($n >= 10 && $n <= 100000) ? round($n, 2) : null;    // "Glass 2" is a count, not 2 ml: left blank (asked), never read as a size
+            }
+        }
+        $w = import_norm_text($rest);
+        if ($w === '' || (!isset($glassSet[$w]) && !isset($glassSet[import_measure_singular($w)]))) {
+            return null;
+        }
+        return ['word' => import_measure_singular($w), 'ml' => $ml];
+    }
+
+    /**
+     * Does an optional reading of a "served by" cell agree with the cell's own words? Checked by the plain rules BEFORE the reading is used:
+     * - any number other than 1 in the cell ("2 tots", "x2") = more than one measure: dropped;
+     * - a quantity word (alias quantity_words: half, double, dbl, triple ...) = dropped unless the reading names that same measure and no other served word is in the cell (the word
+     *   itself, or the hotel measure it reads as): "Dbl tot" read as "shot" is dropped;
+     * - otherwise every cell word the plain rules know (a hotel measure or its other name, a glass word, the stock unit) must be the same
+     *   served word as the reading: "Pint glass" read as "shot" is dropped.
+     * - a served or unit word of the alias lists ($vocabSet: portion, glass, container, unit words) that is not on the hotel's measures list must
+     *   be the reading's own word: "Pint", "Scoop" or "Tot" read as "shot" or "glass" is dropped ("single", "one" and a plain 1 are neutral);
+     *   this holds next to a quantity word too: "Double tot", "Double pint", "Double measure" read as "double" are dropped, only "Double" alone is kept.
+     * The reading itself must be one measure the plain rules know (a hotel measure, the stock unit, a glass or ml). Returns false = leave blank.
+     */
+    function import_served_ai_fits(string $cell, string $aiServed, string $unit, array $list, array $synonyms, array $glassSet, array $qtySet, array $vocabSet): bool
+    {
+        $ai = import_served_read($aiServed, $unit, $list, $synonyms);
+        $aiGlass = $ai['kind'] === 'as_is' ? import_glass_read($aiServed, $glassSet) : null;
+        $aiWord = $ai['kind'] === 'list' ? 'm:' . $ai['word'] : ($ai['kind'] === 'unit' ? 'unit' : ($aiGlass !== null ? 'glass' : ($ai['kind'] === 'ml' ? 'ml' : '')));
+        if ($aiWord === '') {
+            return false;
+        }
+        $aiNorm = import_measure_singular(import_norm_text($aiServed));
+        $t = mb_strtolower((string)preg_replace('/(?<=\d)(?=\p{L})|(?<=\p{L})(?=\d)/u', ' ', $cell));
+        $t = (string)preg_replace('/(\d)[.,](\d)/u', '$1_$2', $t);           // keep "0.5" one token
+        $words = preg_split('/\s+/u', trim((string)preg_replace('/[^\p{L}\p{N}_]+/u', ' ', $t))) ?: [];
+        $wordOf = function (string $w) use ($unit, $list, $synonyms, $glassSet): string {
+            $r = import_served_read($w, $unit, $list, $synonyms);
+            if ($r['kind'] === 'list') {
+                return 'm:' . $r['word'];
+            }
+            if ($r['kind'] === 'unit') {
+                return 'unit';
+            }
+            return isset($glassSet[$w]) || isset($glassSet[import_measure_singular($w)]) ? 'glass' : '';
+        };
+        $qty = [];
+        $base = [];
+        foreach ($words as $w) {
+            if ($w === '') {
+                continue;
+            }
+            if (preg_match('/\p{N}/u', $w)) {      // any count but a plain 1 ("2", "0.5", "½") = not one measure
+                if (!preg_match('/^\d+(?:_\d+)?$/u', $w) || (float)str_replace('_', '.', $w) != 1.0) {
+                    return false;
+                }
+                continue;
+            }
+            if ($w === 'single' || $w === 'one') {
+                continue;
+            }
+            if (isset($qtySet[$w]) || isset($qtySet[import_measure_singular($w)])) {
+                $qty[] = $w;
+                continue;
+            }
+            $m = $wordOf($w);
+            if ($m !== '') {
+                $base[] = $m;
+            } elseif (isset($vocabSet[$w]) || isset($vocabSet[import_measure_singular($w)])) {
+                // a served / unit word of the alias lists that is not on the hotel's measures list ("Pint", "Scoop", "Tot"): only the
+                // same word may be read from it, never another measure
+                $base[] = import_measure_singular($w) === $aiNorm ? $aiWord : 'w:' . import_measure_singular($w);
+            }
+        }
+        if ($qty) {
+            foreach ($qty as $w) {
+                $m = $wordOf($w);
+                if (!(($m !== '' && $m === $aiWord) || import_measure_singular($w) === $aiNorm)) {
+                    return false;
+                }
+            }
+        }
+        foreach ($base as $m) {
+            if ($m !== $aiWord) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A stock unit a drink is poured from by the glass (alias pour_containers: carton, box, casket, jug, can, tetra ...), as written, with the one
+     * volume written in it ("Carton 1 L" -> ml 1000, read from that cell). Returns ['word' => 'carton', 'ml' => ?float] or null.
+     */
+    function import_pour_container(string $unit, array $pourSet): ?array
+    {
+        $t = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $unit)));
+        if ($t === '' || !$pourSet) {
+            return null;
+        }
+        $vol = import_served_volume_in($t);
+        $w = import_norm_text($vol ? $vol[1] : $t);
+        if ($w === '' || (!isset($pourSet[$w]) && !isset($pourSet[import_measure_singular($w)]))) {
+            return null;
+        }
+        return ['word' => import_measure_singular($w), 'ml' => $vol ? (float)$vol[0] : null];
+    }
+
+    /** Stock units in one glass: glass ml / container ml, 6 dp (the same rounding as a recipe line); null when either is unknown or it rounds to 0. */
+    function import_glass_qty(?float $glassMl, ?float $containerMl): ?float
+    {
+        if ($glassMl === null || $containerMl === null || !is_finite($glassMl) || !is_finite($containerMl) || $glassMl <= 0 || $containerMl <= 0) {
+            return null;
+        }
+        $q = round($glassMl / $containerMl, 6);
+        return $q > 0 ? $q : null;
+    }
+
+    /**
+     * Optional help reading what the plain rules could not (wiring only; the Assistant side is the AI lead's). $ask = [['key','name','unit','served']],
+     * $allowed = [key => [field => true]] (only the blanks of that row: served_by | portion_ml | container_ml), $fn = the suggester or null (off / missing).
+     * Every suggestion is checked here: a known key, an allowed field, an ml of 0 < x <= 100000 (2 dp), a short plain served-by text; anything else is
+     * dropped. Never throws. Returns [key => [field => ['v' => value, 'src' => plain text]]]: only ever a pre-fill the person can change or clear.
+     */
+    function import_measure_ai_merge(array $ask, array $allowed, ?callable $fn): array
+    {
+        if ($fn === null || !$ask) {
+            return [];
+        }
+        try {
+            $got = $fn(array_values($ask));
+        } catch (Throwable $e) {
+            return [];
+        }
+        $out = [];
+        foreach (is_array($got) ? $got : [] as $s) {
+            if (!is_array($s)) {
+                continue;
+            }
+            $key = (string)($s['key'] ?? '');
+            $field = (string)($s['field'] ?? '');
+            if ($key === '' || empty($allowed[$key][$field]) || isset($out[$key][$field])) {
+                continue;
+            }
+            $src = trim((string)preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', mb_substr(is_scalar($s['source'] ?? null) ? (string)$s['source'] : '', 0, 120)));
+            $v = $s['value'] ?? null;
+            if ($field === 'served_by') {
+                $v = is_string($v) ? trim((string)preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', $v)) : '';
+                if ($v === '' || mb_strlen($v) > 60) {
+                    continue;
+                }
+            } else {
+                if (is_string($v)) {
+                    $v = trim(str_replace(',', '', preg_replace('/\s*ml$/i', '', $v)));
+                }
+                if (!is_int($v) && !is_float($v) && !(is_string($v) && is_numeric($v))) {
+                    continue;
+                }
+                $v = round((float)$v, 2);
+                if (!is_finite($v) || $v <= 0 || $v > 100000) {
+                    continue;
+                }
+            }
+            $out[$key][$field] = ['v' => $v, 'src' => $src];
+        }
+        return $out;
+    }
+
     /** "66 shots = 2.2 bottles (30 shots in one bottle: your answer)"; plain stock written next to it is added in. */
     function import_measure_text(float $plain, float $amount, string $word, float $n, string $unit, float $result, string $how): string
     {

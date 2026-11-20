@@ -1918,7 +1918,7 @@ $drJs = (string)file_get_contents($root . '/admin/js/data-import.js');
 $drPhp = (string)file_get_contents($root . '/includes/import/drinks.php');
 $drFrom = (int)strpos($drJs, 'function sizesSection');
 $drBody = $drFrom > 0 ? substr($drJs, $drFrom, (int)strpos($drJs, 'function fixedSections') - $drFrom) : '';
-$t($drBody !== '' && strpos($drJs, "'Optional: add a bottle size so these can go on the menu") !== false && strpos($drJs, 'sizesSection(p);') !== false
+$t($drBody !== '' && strpos($drJs, "'Optional: add sizes so these can go on the menu") !== false && strpos($drJs, 'sizesSection(p);') !== false
     && strpos($drBody, "post('sizes_list'") !== false && strpos($drBody, "post('sizes_set'") !== false
     && strpos($drBody, 'showStep') === false && strpos($drBody, 'next.') === false
     && strpos($drPhp, "'Add bottle size in Step 3 (optional)") !== false && stripos($drBody, 'smart') === false && stripos($drBody, 'magic') === false,
@@ -1926,10 +1926,10 @@ $t($drBody !== '' && strpos($drJs, "'Optional: add a bottle size so these can go
 $skV = import_pack_vocab($al);
 $skOk = true;
 foreach (['Shot' => 'portion', 'Per shot' => 'portion', '1 Shot' => 'portion', 'Tot 25ml' => 'portion', 'Glass 175 ml' => 'portion', '25ml' => 'portion', 'Glasses of wine' => 'portion',
-    'Btl 750ml' => '', 'Glass 175' => '', 'Bottle' => '', 'Per case' => 'container'] as $cell => $want) {
+    'Btl 750ml' => '', 'Glass 175' => 'portion', 'Gls 200' => 'portion', '250 glass' => 'portion', 'Bottle' => '', 'Per case' => 'container'] as $cell => $want) {
     if (import_served_kind($cell, $skV) !== $want) { $skOk = false; echo "  served kind $cell: " . import_served_kind($cell, $skV) . "\n"; }
 }
-$t($skOk, 'served by: "Per shot", "1 Shot", "Tot 25ml", "Glass 175 ml", "25ml" are portions; "Btl 750ml" and "Glass 175" (no ml) are not (never a guess)');
+$t($skOk, 'served by: "Per shot", "1 Shot", "Tot 25ml", "Glass 175 ml", "25ml", "Glass 175", "Gls 200" are portions; "Btl 750ml" is not; "Per case" is a container');
 $skP = import_pack_decide(['price' => 15000, 'unit' => 'bottle', 'served' => 'Glass 175ml'], $skV);
 $skP2 = import_pack_decide(['price' => 15000, 'served' => 'Btl'], $skV);
 $t($skP !== null && $skP['unit'] === 'bottle' && !empty($skP['served_portion']) && $skP2 !== null && $skP2['unit'] === 'Btl',
@@ -1952,6 +1952,75 @@ $clD = import_pack_decide(['price' => 12000, 'unit' => 'Crate', 'served' => 'Bot
 $t($clD !== null && $clD['unit'] === 'Crate' && $clD['pack'] === null, 'unit cell wins in the pack rule too (no pack worked out of a served-by word) ' . json_encode($clD['unit'] ?? null));
 $t(import_measure_plural('25ml', 2) === '25 ml measures' && import_measure_plural('25ml', 1) === '25 ml measure' && import_measure_plural('shot', 2) === 'shots',
     'a bare volume served by reads "In 25 ml measures", never "25mls"');
+
+// owner 2026-11-20: "Glass could also mean a non standard glass maybe for milk or juice and can be measured in ml optionally while a carton of
+// juice could be in litres or whatever optionally": glass size + container size, read from the file or typed, never guessed
+$gaDef = import_default_aliases();
+$glSet = import_word_set((array)($gaDef['glass_words'] ?? []));
+$poSet = import_word_set((array)($gaDef['pour_containers'] ?? []));
+$t((int)$gaDef['version'] >= 7 && isset($glSet['glass'], $glSet['gls'], $glSet['tumbler']) && isset($poSet['carton'], $poSet['casket'], $poSet['bag in box'], $poSet['tetra'], $poSet['jug'])
+    && !isset($poSet['crate']) && !isset($poSet['case']) && !isset($poSet['pack']) && in_array('gls', (array)$gaDef['portion_words'], true),
+    'aliases v7: glass words (glass, gls, tumbler) and pour containers (carton, casket, bag-in-box, tetra, jug) are seeded; crate / case / pack are not pour containers');
+$gr = function (string $c) use ($glSet) { return import_glass_read($c, $glSet); };
+$t($gr('Glass 175')['ml'] === 175.0 && $gr('250ml glass')['ml'] === 250.0 && $gr('Gls 200')['ml'] === 200.0 && $gr('Glass of wine 175ml')['ml'] === 175.0
+    && $gr('Glass 0.25 L')['ml'] === 250.0 && $gr('Glass') !== null && $gr('Glass')['ml'] === null && $gr('Glasses')['word'] === 'glass' && $gr('Tumbler')['word'] === 'tumbler'
+    && $gr('Glass 2')['ml'] === null && $gr('Shot') === null && $gr('Tot 25ml') === null && $gr('Bottle') === null && $gr('') === null,
+    'glass read: "Glass 175", "250ml glass", "Gls 200", "Glass of wine 175ml", "Glass 0.25 L" give the glass size; "Glass" alone is a glass with no size (asked); "Glass 2" is not 2 ml; shots / bottles are not glasses');
+$pc = function (string $u) use ($poSet) { return import_pour_container($u, $poSet); };
+$t($pc('Carton 1 L')['word'] === 'carton' && $pc('Carton 1 L')['ml'] === 1000.0 && $pc('Casket 5 litre')['ml'] === 5000.0 && $pc('Ctn')['word'] === 'ctn'
+    && $pc('carton')['ml'] === null && $pc('Bag-in-box')['word'] === 'bag in box' && $pc('Crate') === null && $pc('Bottle') === null && $pc('Case 24') === null,
+    'pour containers: "Carton 1 L" is a carton of 1000 ml (read from the unit cell), "Casket 5 litre" 5000 ml; a plain carton has no size (asked); crates, cases and bottles are not');
+$t(import_glass_qty(250.0, 1000.0) === 0.25 && abs(1 / import_glass_qty(250.0, 1000.0) - 4) < 0.0000001 && import_glass_qty(175.0, 750.0) === 0.233333
+    && import_glass_qty(null, 1000.0) === null && import_glass_qty(250.0, null) === null && import_glass_qty(0.0, 1000.0) === null && import_glass_qty(1.0, 100000000.0) === null,
+    'cost per glass: Orange juice, Carton 1 L, served Glass 250 = 0.25 of a carton (4 glasses); 175 of 750 = 0.233333; an unknown size = not worked out (never 0)');
+$t(import_served_read('Double', 'bottle', [['name' => 'shot', 'ml' => 25]], $svSyn)['kind'] === 'as_is' && import_served_read('double', 'bottle', $svList, $svSyn)['measure'] === 'double',
+    '"double" is only ever the hotel\'s own Double measure (two measures), never a shot');
+// the optional reader (wiring only): a stub here, never a real call. Only checked values for the asked rows and fields are kept.
+$aiAsk = [['key' => 'k1', 'name' => 'Fresh milk', 'unit' => 'carton', 'served' => 'Glass'], ['key' => 'k2', 'name' => 'Mango juice', 'unit' => 'box', 'served' => 'Gls']];
+$aiAllowed = ['k1' => ['portion_ml' => true, 'container_ml' => true], 'k2' => ['served_by' => true]];
+$aiSeen = null;
+$aiStub = function (array $items) use (&$aiSeen) {
+    $aiSeen = $items;
+    return [
+        ['key' => 'k1', 'field' => 'portion_ml', 'value' => 250, 'source' => 'Glass <script>alert(1)</script> on BAR C4'],
+        ['key' => 'k1', 'field' => 'container_ml', 'value' => '1,000 ml', 'source' => 'name'],
+        ['key' => 'k2', 'field' => 'served_by', 'value' => 'double', 'source' => 'C9 "Dbl"'],
+        ['key' => 'k2', 'field' => 'portion_ml', 'value' => 50, 'source' => 'not asked'],          // a field not asked for this row
+        ['key' => 'zz', 'field' => 'portion_ml', 'value' => 50, 'source' => 'unknown row'],
+        ['key' => 'k1', 'field' => 'portion_ml', 'value' => 999, 'source' => 'second answer'],     // first one kept
+        'junk', ['key' => 'k1', 'field' => 'sql', 'value' => 1],
+    ];
+};
+$aiGot = import_measure_ai_merge($aiAsk, $aiAllowed, $aiStub);
+$t(count($aiSeen ?? []) === 2 && ($aiGot['k1']['portion_ml']['v'] ?? null) === 250.0 && ($aiGot['k1']['container_ml']['v'] ?? null) === 1000.0
+    && ($aiGot['k2']['served_by']['v'] ?? null) === 'double' && !isset($aiGot['k2']['portion_ml']) && !isset($aiGot['zz'])
+    && strpos((string)$aiGot['k1']['portion_ml']['src'], '<') === false && strpos((string)$aiGot['k1']['portion_ml']['src'], '>') === false,
+    'optional reader: only asked rows and fields are kept, ml checked (1,000 ml = 1000), the first answer wins, "<" / ">" never reach the screen from a source ' . json_encode($aiGot));
+$aiBad = import_measure_ai_merge($aiAsk, $aiAllowed, function () {
+    return [['key' => 'k1', 'field' => 'portion_ml', 'value' => -5], ['key' => 'k1', 'field' => 'container_ml', 'value' => 200000],
+        ['key' => 'k2', 'field' => 'served_by', 'value' => str_repeat('x', 61)], ['key' => 'k1', 'field' => 'portion_ml', 'value' => 'abc']];
+});
+$t($aiBad === [] && import_measure_ai_merge($aiAsk, $aiAllowed, null) === [] && import_measure_ai_merge($aiAsk, $aiAllowed, function () { throw new RuntimeException('down'); }) === []
+    && import_measure_ai_merge([], $aiAllowed, $aiStub) === [] && import_measure_ai_merge($aiAsk, $aiAllowed, function () { return 'nonsense'; }) === [],
+    'optional reader: bad values (-5, 200000 ml, 61 characters, "abc") are dropped; off / missing / failing / nonsense = nothing, everything works as before');
+$t(strpos($drPhp, "function_exists('rh_ai_import_measure_suggest')") !== false && strpos($drPhp, 'rh_ai_enabled($pdo)') !== false && strpos($drPhp, "'/ai/ai-import-suggest.php'") !== false
+    && strpos($drPhp, 'count($ask) >= 40') !== false,
+    'optional reader: loaded only when its file is there, used only while the Assistant is switched on, at most 40 rows a call');
+// the cell's own words decide before any reading of "served by" is used (review 2026-11-20: "Half tot" / "Dbl tot" are never one shot)
+$qSet = import_word_set((array)($gaDef['quantity_words'] ?? []));
+$fl = [['name' => 'shot', 'ml' => 25], ['name' => 'double', 'ml' => 50]];
+$fSyn = ['tot' => 'shot', 'tots' => 'shot'];
+$vSet = import_word_set(array_merge((array)($gaDef['portion_words'] ?? []), (array)($gaDef['glass_words'] ?? []), (array)($gaDef['container_words'] ?? []), (array)($gaDef['pour_containers'] ?? []), (array)($gaDef['units'] ?? []), array_keys((array)($gaDef['unit_synonyms'] ?? []))));
+$fits = function (string $cell, string $ai, ?array $syn = null) use ($fl, $fSyn, $glSet, $qSet, $vSet) { return import_served_ai_fits($cell, $ai, 'bottle', $fl, $syn ?? $fSyn, $glSet, $qSet, $vSet); };
+$t(isset($qSet['half'], $qSet['dbl'], $qSet['double'], $qSet['triple']) && !$fits('Half tot', 'shot') && !$fits('Dbl tot', 'shot') && !$fits('Double tot', 'shot')
+    && !$fits('2 tots', 'shot') && !$fits('Tot x2', 'shot') && !$fits('0.5 tot', 'shot') && !$fits('Triple', 'shot') && !$fits('Half tot', 'half'),
+    'reading vs cell: "Half tot", "Dbl tot", "Double tot", "2 tots", "Tot x2", "0.5 tot", "Triple" read as one shot are all dropped (left blank for the person)');
+$t($fits('Double', 'double') && !$fits('Double tot', 'double') && !$fits('Double pint', 'double') && !$fits('Double glass', 'double') && !$fits('Double can', 'double') && !$fits('Double measure', 'double') && !$fits('Dbl tot', 'double') && !$fits('Tot measure', 'shot') && !$fits('1 tot', 'shot') && $fits('Single shot', 'shot') && $fits('One double', 'double')
+    && $fits('Tumbler', 'glass') && !$fits('Pint glass', 'shot') && !$fits('Shot glass', 'double') && !$fits('Dbl', 'triple') && !$fits('Whatever', '2 shots')
+    && isset($vSet['pint'], $vSet['scoop'], $vSet['tot']) && !$fits('Pint', 'shot') && !$fits('Scoop', 'shot') && !$fits('Tot', 'glass') && !$fits('½ tot', 'shot') && !$fits('Can', 'glass'),
+    'reading vs cell: kept only when the cell agrees ("Double" = the hotel\'s Double; "Single shot" = shot; "Tumbler" = glass); "Double tot" / "Double pint" / "Double glass" / "Double can" / "Double measure" (another served word next to the quantity), "Dbl tot", "Tot measure", "Pint", "Scoop", "Can" (an alias served/unit word that is not the reading), "½ tot" or another count is dropped and left for the person');
+$t(strpos($drPhp, "!empty(\$answers['_sizes']['ai_done'])") !== false && strpos($drPhp, "\$a['_sizes']['ai_done'] = 1;") !== false && strpos($drPhp, 'import_served_ai_fits($served, $aiServed, $unit, $list, $synonyms, $glassSet, $qtySet, $vocabSet)') !== false,
+    'optional reader: one call per import (job marker claimed under the row lock before asking); its served-by reading must fit the cell first');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

@@ -120,6 +120,18 @@
   </ul>
   <p><strong>On a phone</strong> (a narrow screen), each item is shown as a stacked block: the item name at the top, then each value with its label above it, then the questions and buttons for that item. Scroll down the block to answer.</p>
 
+  <h3 id="sizes">Step 3: Sizes for glasses, shots and containers (optional)</h3>
+<p>Some drinks are sold by a measure: a shot of spirit, or a glass of milk, juice or wine. Import needs two sizes to work out what one sale costs: how many ml one <strong>glass</strong> holds, and how many ml one <strong>bottle, carton, box, casket, bag-in-box or jug</strong> holds. The section <strong>Optional: add sizes so these can go on the menu</strong> appears in Step 3 only when the file has such drinks.</p>
+  <ol class="steps">
+    <li>Open the section <strong>Optional: add sizes so these can go on the menu</strong> in Step 3.</li>
+    <li>For each group, type the size once. The box says <strong>One glass holds:</strong> for glass sizes, and <strong>One bottle holds:</strong>, <strong>One carton holds:</strong> or a similar line for container sizes. Type the number of ml.</li>
+    <li>To give one drink its own size, type it in that drink's row. A blank row uses the group's size.</li>
+    <li>Look at the column <strong>Menu in step 4</strong> to see whether the drink can be ticked for the menu.</li>
+  </ol>
+  <p><strong>Sizes Import reads from your file.</strong> Import fills in a size when the file says it: in the drink's name, in its unit cell (for example <em>Carton 1 L</em>), or in its served-by cell (for example <em>Glass 250</em>). Ml, cl and litres are all read. A size read from the file shows as <strong>Read from your file</strong>, with the cell it came from. You can change it or press <strong>Clear</strong>. Import never guesses a size.</p>
+  <p><strong>Unusual wording.</strong> If the Assistant is switched on, the import may also read unusual wording, such as <em>Single</em>, <em>Gls</em> or <em>Ctn</em>, and fill in a size or a sold-as reading from it. These are shown the same way, as <strong>Read from your file</strong>, and you confirm them. Without the Assistant, the import works the same.</p>
+  <p><strong>Never blocked.</strong> None of this stops <strong>Next</strong>. A blank size is fine: the drink just cannot go on the menu in Step 4. A size that looks odd, for example under 50 ml or smaller than one measure, still saves, with a warning. Saving sizes changes no stock quantities or costs, and each size saved is in System Logs.</p>
+
   <h3>Step 4: Confirm</h3>
   <p>This is the last check. It shows the numbers for the whole file:</p>
   <ul>
@@ -132,7 +144,10 @@
     <li><strong>Still need an answer</strong>: questions and blocked rows to sort out first.</li>
   </ul>
   <h3 id="drinks-for-menu">Drinks for the menu (Step 4)</h3>
-  <p>When the file has a selling price for a drink, Step 4 also lists <strong>Drinks for the menu</strong>. For each drink it shows the name, how it is sold, the price (VAT included, used exactly as typed, never added to), the category (the file's column, or Bar; set per row or with <strong>Set for all</strong>), the cost of one, the profit of one, and a warning when it sells below cost. Nothing goes on the menu unless you tick it. A drink already on the menu shows <em>"Update price X &rarr; Y"</em>. Ticking needs the <strong>Import</strong> and <strong>Menu</strong> permissions. Ticked drinks go on the drinks menu and the bar till, linked to one measure of stock. History and System Logs show the old and new price.</p>
+  <p>When the file has a selling price for a drink, Step 4 also lists <strong>Drinks for the menu</strong>. For each drink it shows the name, how it is sold, the price (VAT included, used exactly as typed, never added to), the category (the file's column, or Bar; set per row or with <strong>Set for all</strong>), the cost of one, the profit of one, and a warning when it sells below cost. Nothing goes on the menu unless you tick it. A drink already on the menu shows <em>"Update price X &rarr; Y"</em>. Ticking needs the <strong>Import</strong> and <strong>Menu</strong> permissions. Ticked drinks go on the drinks menu and the bar till, linked to one measure of stock. History and System Logs show the old and new price. When the import is finished, the page has a <strong>See projected profit</strong> link (for people who can open Stock Reports). It opens Stock Reports at <strong>Projected profit</strong>, for every drink on the menu. It uses stock on hand, so stock from this import counts there once its opening count is approved.</p>
+  <p><strong>Sold by the shot or glass.</strong> The column <strong>Sold as</strong> shows one sale: the served-by cell of your file (a shot, a glass), or one main unit when there is none. The cost of one sale is worked out from the sizes in Step 3. With both sizes, the drink can be ticked. The cost of one glass is the container cost × glass ml ÷ container ml. Example: a 1 L carton with 250 ml glasses gives 4 glasses, so one glass costs a quarter of the carton. Without the sizes, the drink shows the reason in its row and stays unticked.</p>
+  <p><strong>Selling price.</strong> Step 2 shows the file's selling price column as <em>Recognised</em>. It is used here, so the drink is not listed as not imported.</p>
+  <p>The list has <strong>Previous</strong> and <strong>Next</strong> buttons, a box where you type a page number, and <strong>Show 10</strong>, <strong>Show 25</strong>, <strong>Show 50</strong> or <strong>Show 100</strong>.</p>
   <p>Below the numbers, Step 4 lists the rows left out, then the fixes. See <a href="#blocked">Rows left out</a> and <a href="#fixed">Fixed for you</a>.</p>
   <p><strong>Items already in stock: tick for all of them.</strong> If some items are already in your stock, a box shows two buttons. Each button ticks one thing for every matched item and shows how many it will change first:</p>
   <ol class="steps">

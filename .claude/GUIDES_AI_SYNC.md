@@ -25,6 +25,13 @@ when prompted."
 
 ## Pending (oldest first)
 
+### AI Settings: Check for newer models refreshes the pick lists (2026-11-20, owner fault) - Liwonde 69942d3 / Rosalyn's 214a0f1
+- **Guides (AI Settings page, admin only):** after Check for newer models the lists show the current top models and drop older ones; the model in use stays selected as '(older, still in use)' until someone saves another; a retired model shows a warning only.
+- **Assistant:** built by the AI lead; nothing more to sync.
+- **Manager Guides:** none.
+
+## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
+
 ### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md
 - **Guides (23 Import):** Step 2 now shows the selling price column as "Recognised", used in Step 4 "Drinks for the menu" (no longer "Not imported"). Step 4 lists: Previous / Next, type a page number, Show 10/25/50/100. Finished screen: "See projected profit" link (people who can open Stock Reports) opens Stock Reports > Projected profit.
 - **Manager Guides (stock):** check the import line still matches (no "Not imported" wording).
@@ -33,7 +40,7 @@ when prompted."
 ### Import: optional bottle size for shot/glass drinks + more measure wording (2026-11-20, owner ask) - hashes in TASKS.md
 - **Guides (23 Import, 08 Stock):** Step 3 has an optional "bottle size" question for drinks sold by the shot or glass when the file gives no size: once per group, with a per-row change; never guessed; never blocks Next; a size under 50 ml or smaller than one measure saves with a warning. With a size, Step 4 can tick those drinks (cost per shot = bottle cost × shot ml / bottle ml). More wording is read: "Per shot", "1 Shot", "Tot 25ml", "25ml" ("In 25 ml measures"). If the file has a Unit column, it always sets the stock unit; a serving column only says how it is sold.
 - **Manager Guides (stock):** the import line can say "add a bottle size so shot drinks can go on the menu".
-- **Assistant (AI_REQUEST from dept-import-lead, owner "harness AI where possible"):** an Assistant hook that suggests served-by and bottle-size readings from unusual wording ("Single", "Measure", "Glass 175") for the import. Suggestions only, shown as "Read from your file", confirmed by the user; the import works fully with AI off. AI lead builds it in the next owner-prompted sync.
+- **Assistant (AI_REQUEST from dept-import-lead, owner "harness AI where possible"):** an Assistant hook that suggests served-by and bottle-size readings from unusual wording ("Single", "Measure", "Glass 175") for the import. Suggestions only, shown as "Read from your file", confirmed by the user; the import works fully with AI off. AI lead builds it in the next owner-prompted sync. Built, Liwonde (2026-11-20), file includes/ai/ai-import-suggest.php (rh_ai_import_measure_suggest; test scripts/tests/ai_import_suggest_test.php); import wiring by dept-import-lead.
 
 ## Synced 2026-11-20 (guides Rosalyn's 909510e / Liwonde 8704293 · Assistant: see TASKS.md SYNC 2026-11-20 · Manager Guides: Stock, Bookings, Money and End of Day, Staff and Permissions refreshed) - entries kept for reference
 

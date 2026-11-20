@@ -82,7 +82,8 @@ if (!function_exists('import_pack_vocab')) {
     /**
      * The kind of a "served by" cell as hotels write it (owner 2026-11-20, plain rules): "Shot" as before; also "Per shot", "1 Shot", "a tot",
      * "Tot 25ml", "Glass 175 ml", "Glass of wine" (the word before "of") -> the kind of its measure word; a volume alone ("25ml") -> portion.
-     * "Btl 750ml" stays '' (a unit word), "Glass 175" (no ml) stays '' (never a guess). Same reading as import_served_read (measure.php).
+     * "Btl 750ml" -> the kind of "btl" (a unit word: the unit itself, never a portion); "Glass 175", "Gls 200", "250 glass" -> portion when the
+     * word is a portion word (the word decides; the number is read for drinks only, import_glass_read). Anything else -> ''.
      */
     function import_served_kind(string $served, array $vocab): string
     {
@@ -103,6 +104,15 @@ if (!function_exists('import_pack_vocab')) {
         }
         if (preg_match('/^(.+?)\s+of\s+.+$/u', $rest, $p)) {
             $rest = trim($p[1]);
+        }
+        // "Glass 175", "Gls 200", "250 glass": a portion word with a bare number is still that portion (what the number means is read
+        // elsewhere, drinks only: import_glass_read); the word alone decides, never the number (owner 2026-11-20)
+        if (preg_match('/^(\p{L}[\p{L} ]*?)\s*\d+(?:[.,]\d+)?$/u', $rest, $p) || preg_match('/^\d+(?:[.,]\d+)?\s*(\p{L}[\p{L} ]*)$/u', $rest, $p)) {
+            foreach ([trim($p[1]), import_measure_singular(trim($p[1]))] as $w) {
+                if (import_pack_word_kind($w, $vocab) === 'portion') {
+                    return 'portion';
+                }
+            }
         }
         foreach ([$rest, import_measure_singular($rest)] as $w) {
             $k = import_pack_word_kind($w, $vocab);

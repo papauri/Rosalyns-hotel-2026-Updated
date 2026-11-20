@@ -221,7 +221,7 @@ try {
             [$n('Tequila'), 'bottle', '9000', '2', '1000', 'Shot'],
         ], 'd.csv'), 'zzd-d-' . $run . '.csv');
         $sizes = function () use ($pdo, $jD, $admin) {
-            $v = import_job_sizes_view($pdo, $jD, $admin, ['size' => 100]);
+            $v = import_job_sizes_view($pdo, $jD, $admin, ['size' => 100, 'ai' => false]);
             $by = [];
             foreach ((array)($v['rows'] ?? []) as $r) { $by[$r['name']] = $r; }
             return [$v, $by];
@@ -237,8 +237,8 @@ try {
             ($S0[$n('Brandy 750ml')]['from'] ?? '') === 'name' && abs((float)($S0[$n('Brandy 750ml')]['ml'] ?? 0) - 750) < 0.000001 && preg_match('/A5$/', (string)($S0[$n('Brandy 750ml')]['name_source'] ?? '')) === 1
             && !empty($D0[$n('Brandy 750ml')]['tickable']), json_encode($S0[$n('Brandy 750ml')] ?? null));
         $groups = array_column((array)($sv0['groups'] ?? []), null, 'key');
-        $ck('sizes: one group for the shot drinks kept in bottles, one for "175 ml (glass)"; blank by default; counts',
-            isset($groups['m:shot|bottle'], $groups['ml:175|bottle']) && $groups['m:shot|bottle']['ml'] === null && ($sv0['counts']['need'] ?? 0) === 5 && ($sv0['counts']['filled'] ?? -1) === 1,
+        $ck('sizes: one group for the shot drinks kept in bottles, one for the glass drinks (Red Wine, Glass 175ml: its 175 ml read from the file); blank by default; counts',
+            isset($groups['m:shot|bottle'], $groups['gl:bottle']) && $groups['m:shot|bottle']['ml'] === null && ($sv0['counts']['need'] ?? 0) === 5 && ($sv0['counts']['filled'] ?? -1) === 1,
             json_encode([$sv0['groups'] ?? null, $sv0['counts'] ?? null]));
         $rBad = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'value' => 'abc']);
         $rOdd = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:nothing|bottle', 'value' => '750']);
@@ -288,6 +288,134 @@ try {
             json_encode([$qpp($n('Vodka'), 'Bar'), $qpp($n('Red Wine'), 'Bar')]));
         $ck('import: no stock quantity or cost was changed by a bottle size', abs((float)$col('SELECT current_quantity FROM stock_ingredients WHERE id = ?', [$vodIng])) < 0.000001
             && abs((float)$col('SELECT cost_per_unit FROM stock_ingredients WHERE id = ?', [$vodIng]) - 15000) < 0.000001);
+
+        // ---- file E: glass size + container size (owner 2026-11-20: "Glass could also mean a non standard glass maybe for milk or juice and can
+        // be measured in ml optionally while a carton of juice could be in litres or whatever optionally"); the optional reader is a stub here
+        $stubOurs = false;
+        if (!function_exists('rh_ai_import_measure_suggest')) {
+            function rh_ai_import_measure_suggest(array $items): array { $GLOBALS['zzd_ai_calls'][] = $items; return (array)($GLOBALS['zzd_ai_reply'] ?? []); }
+            $stubOurs = true;
+        }
+        // a local stub, never the real reader by name (no model call from a test shell, even if the Assistant file was loaded first)
+        $stubFn = function (array $items): array { $GLOBALS['zzd_ai_calls'][] = $items; return (array)($GLOBALS['zzd_ai_reply'] ?? []); };
+        $headE = ['Item Name', 'Unit', 'Unit Price', 'Balance', 'Selling Price', 'Served By'];
+        $jE = $start($file($headE, [
+            [$n('Orange juice'), 'Carton 1 L', '3000', '5', '1500', 'Glass 250'],
+            [$n('Fresh milk'), 'Carton', '2000', '5', '1000', 'Glass'],
+            [$n('Castle Lager'), 'Crate', '12000', '3', '1500', 'Bottle'],
+            [$n('Pineapple juice'), 'Carton', '2400', '5', '1200', 'Glass'],
+            [$n('Mystery'), 'bottle', '9000', '2', '900', 'Dubbel'],    // a typo the plain rules cannot read; no other served word in it
+            [$n('Half rum'), 'bottle', '9000', '2', '450', 'Half tot'],
+            [$n('Dbl gin'), 'bottle', '9000', '2', '1800', 'Dbl tot'],
+            [$n('Big glass'), 'Carton 250ml', '1000', '2', '3000', 'Glass 500'],
+            [$n('Coke'), 'bottle', '500', '24', '1000', 'Bottle'], [$n('Fanta'), 'bottle', '500', '24', '1000', 'Bottle'], [$n('Sprite'), 'bottle', '500', '24', '1000', 'Bottle'],   // most cells read, so the column stays a served-by column
+        ], 'e.csv'), 'zzd-e-' . $run . '.csv');
+        $sizesE = function () use ($pdo, $jE, $admin) {
+            $v = import_job_sizes_view($pdo, $jE, $admin, ['size' => 100, 'ai' => false]);
+            $by = [];
+            foreach ((array)($v['rows'] ?? []) as $r) { $by[$r['name']] = $r; }
+            return [$v, $by];
+        };
+        [$svE, $SE] = $sizesE();
+        [, $E0] = $view($jE, $admin);
+        $oj = $E0[$n('Orange juice')] ?? [];
+        $ck('glass: Orange juice, Unit "Carton 1 L", served "Glass 250" = 4 glasses a carton: tickable with no answer, cost of one glass 3000 x 250 / 1000 = 750, price exactly 1500',
+            !empty($oj['tickable']) && abs((float)$oj['cost'] - 750) <= BALANCE_TOLERANCE && abs((float)$oj['price'] - 1500) < 0.000001,
+            json_encode([$oj, $SE[$n('Orange juice')] ?? null]));
+        $ck('glass: Orange juice ("Carton 1 L") sits in the cartons group, not a group of its own', ($SE[$n('Orange juice')]['group'] ?? '') === 'gl:carton', (string)($SE[$n('Orange juice')]['group'] ?? ''));
+        $fm = $E0[$n('Fresh milk')] ?? [];
+        $ck('glass: a milk glass with no size and a carton with no size is not tickable, with the plain hint; nothing is guessed',
+            empty($fm['tickable']) && strpos((string)($fm['why_not'] ?? ''), 'Add glass size and carton size in Step 3 (optional)') === 0 && array_key_exists('glass_ml', $SE[$n('Fresh milk')] ?? [])
+            && $SE[$n('Fresh milk')]['glass_ml'] === null, json_encode([$fm, $SE[$n('Fresh milk')] ?? null]));
+        $ck('glass: Castle Lager (Crate, served Bottle) is still crates: no glass or container question', !isset($SE[$n('Castle Lager')]), json_encode(array_keys($SE)));
+        $gE = array_column((array)($svE['groups'] ?? []), null, 'key');
+        $ck('glass: one "Sold by the glass, kept in cartons" group asks both sizes', isset($gE['gl:carton']) && !empty($gE['gl:carton']['glass_q']) && !empty($gE['gl:carton']['cont']), json_encode($svE['groups'] ?? null));
+        // the optional reader (stub): only rows the plain rules could not read; fills only blanks, shown as read from the file; "double" never a shot
+        $pj = $E0[$n('Pineapple juice')] ?? [];
+        $my = $E0[$n('Mystery')] ?? [];
+        $GLOBALS['zzd_ai_calls'] = [];
+        $GLOBALS['zzd_ai_reply'] = [
+            ['key' => $pj['key'] ?? '', 'field' => 'container_ml', 'value' => 1000, 'source' => '<script>alert(1)</script> Pineapple 1L on sheet'],
+            ['key' => $pj['key'] ?? '', 'field' => 'portion_ml', 'value' => 200, 'source' => 'cell F5'],
+            ['key' => $my['key'] ?? '', 'field' => 'served_by', 'value' => 'double', 'source' => 'cell F6 "Dubbel"'],
+            ['key' => $E0[$n('Half rum')]['key'] ?? '', 'field' => 'served_by', 'value' => 'shot', 'source' => 'cell F7 "Half tot"'],
+            ['key' => $E0[$n('Dbl gin')]['key'] ?? '', 'field' => 'served_by', 'value' => 'shot', 'source' => 'cell F8 "Dbl tot"'],
+            ['key' => $oj['key'] ?? '', 'field' => 'portion_ml', 'value' => 999, 'source' => 'not asked'],
+        ];
+        $nAi = import_job_sizes_ai_fill($pdo, $jE, $stubFn);
+        $sent = array_column((array)($GLOBALS['zzd_ai_calls'][0] ?? []), 'key');
+        [, $SE2] = $sizesE();
+        [, $E2] = $view($jE, $admin);
+        $pj2 = $SE2[$n('Pineapple juice')] ?? [];
+        $ck('reader: only the rows the plain rules could not read are sent (not Orange juice, not Castle Lager); its sizes fill the blanks as read from the file, markup stripped',
+            $nAi === 5 && in_array($pj['key'] ?? '-', $sent, true) && in_array($my['key'] ?? '-', $sent, true) && !in_array($oj['key'] ?? '-', $sent, true)
+            && ($pj2['from'] ?? '') === 'ai' && ($pj2['glass_from'] ?? '') === 'ai' && !empty($E2[$n('Pineapple juice')]['tickable'])
+            && abs((float)$E2[$n('Pineapple juice')]['cost'] - 2400 * 200 / 1000) <= BALANCE_TOLERANCE && strpos(json_encode($pj2), '<script') === false
+            && abs((float)($E2[$n('Orange juice')]['cost'] ?? 0) - 750) <= BALANCE_TOLERANCE, json_encode([$nAi, $sent, $pj2]));
+        $my2 = $E2[$n('Mystery')] ?? [];
+        $ck('reader: "double" is only ever the hotel\'s own Double measure (two shots), never one shot',
+            ($my2['measure_from'] ?? '') === 'ai' && stripos((string)($my2['measure'] ?? ''), 'double') !== false && stripos((string)($my2['measure'] ?? ''), 'shot') === false, json_encode([$my2, $SE2[$n('Mystery')] ?? null]));
+        $wBig = import_job_sizes_set($pdo, $jE, $admin, ['mode' => 'row', 'key' => $fm['key'] ?? '', 'field' => 'ml', 'value' => '1000']);
+        $wBig2 = import_job_sizes_set($pdo, $jE, $admin, ['mode' => 'row', 'key' => $fm['key'] ?? '', 'field' => 'glass', 'value' => '2000']);
+        $wTiny = import_job_sizes_set($pdo, $jE, $admin, ['mode' => 'row', 'key' => $fm['key'] ?? '', 'field' => 'glass', 'value' => '20']);
+        $wBad = import_job_sizes_set($pdo, $jE, $admin, ['mode' => 'row', 'key' => $fm['key'] ?? '', 'field' => 'glass', 'value' => 'big']);
+        $ck('glass: a glass bigger than its carton, or under 30 ml, is kept but warned (never refused); text is refused',
+            !empty($wBig['ok']) && !empty($wBig2['ok']) && strpos((string)($wBig2['warning'] ?? ''), 'more than one carton') !== false && !empty($wTiny['ok'])
+            && strpos((string)($wTiny['warning'] ?? ''), 'very small for a glass') !== false && empty($wBad['ok']) && strpos((string)($wBad['error'] ?? ''), 'Glass size') === 0,
+            json_encode([$wBig2, $wTiny, $wBad]));
+        $wG = import_job_sizes_set($pdo, $jE, $admin, ['mode' => 'group', 'key' => 'gl:carton', 'field' => 'glass', 'value' => '250']);
+        import_job_sizes_set($pdo, $jE, $admin, ['mode' => 'row', 'key' => $fm['key'] ?? '', 'field' => 'glass', 'value' => '']);
+        [, $E1] = $view($jE, $admin);
+        $fm1 = $E1[$n('Fresh milk')] ?? [];
+        $ck('glass: group glass 250 + row carton 1000 makes Fresh milk tickable: cost 2000 x 250 / 1000 = 500 (0.25 of a carton a sale); the read 200 ml still wins on Pineapple',
+            !empty($wG['ok']) && !empty($fm1['tickable']) && abs((float)$fm1['cost'] - 500) <= BALANCE_TOLERANCE
+            && abs((float)($E1[$n('Pineapple juice')]['cost'] ?? 0) - 480) <= BALANCE_TOLERANCE, json_encode([$fm1, $E1[$n('Pineapple juice')] ?? null]));
+        $ck('reader: "Half tot" and "Dbl tot" read as one shot are dropped by the cell\'s own words: left as written for the person, never costed as a shot',
+            ($E2[$n('Half rum')]['measure_from'] ?? '') !== 'ai' && ($E2[$n('Dbl gin')]['measure_from'] ?? '') !== 'ai' && empty($E2[$n('Half rum')]['tickable']) && empty($E2[$n('Dbl gin')]['tickable'])
+            && stripos((string)($E2[$n('Half rum')]['measure'] ?? ''), 'shot') === false && stripos((string)($E2[$n('Dbl gin')]['measure'] ?? ''), 'shot') === false,
+            json_encode([$E2[$n('Half rum')] ?? null, $E2[$n('Dbl gin')] ?? null]));
+        $ck('glass: "Glass 500" from a "Carton 250ml" (both read from the file) shows the row warning (kept, not refused)',
+            strpos((string)($SE2[$n('Big glass')]['warn'] ?? ''), 'more than one carton') !== false && strpos((string)($E2[$n('Big glass')]['size_warn'] ?? ''), '500 ml glass') !== false
+            && ($SE2[$n('Fresh milk')]['warn'] ?? 'x') === '', json_encode($SE2[$n('Big glass')] ?? null));
+        $rClrAi = import_job_sizes_set($pdo, $jE, $admin, ['mode' => 'row', 'key' => $pj['key'] ?? '', 'field' => 'glass', 'value' => '']);
+        $nAgain = import_job_sizes_ai_fill($pdo, $jE, $stubFn);
+        [, $SE3] = $sizesE();
+        $ck('reader: clearing a read glass size drops it (the group size now applies), the read carton size stays, and the row is not asked again',
+            !empty($rClrAi['ok']) && $nAgain === 0 && ($SE3[$n('Pineapple juice')]['glass_from'] ?? '') === 'group' && (float)($SE3[$n('Pineapple juice')]['glass_ml'] ?? 0) === 250.0
+            && ($SE3[$n('Pineapple juice')]['from'] ?? '') === 'ai', json_encode($SE3[$n('Pineapple juice')] ?? null));
+        if ($stubOurs) {
+            $hook = import_measure_ai_hook($pdo);
+            $on = function_exists('rh_ai_enabled') && rh_ai_enabled($pdo);
+            $ck('reader: the page hook finds the reader only through function_exists and the Assistant switch (fail-closed)', $on ? is_callable($hook) : $hook === null, json_encode(['on' => $on, 'hook' => $hook !== null]));
+        }
+        // ---- file F: 60 cells the plain rules cannot read, three loads: the paid reader is called ONCE for the whole import (40 rows), never again
+        $rowsF = [];
+        for ($i = 1; $i <= 60; $i++) {      // 3 readable cells to each unread one, so the column stays a served-by column
+            $rowsF[] = [$n('Odd ' . $i), 'bottle', '9000', '1', '900', 'Odd pour ' . $i];
+            for ($k = 1; $k <= 3; $k++) { $rowsF[] = [$n('Soft ' . $i . '-' . $k), 'bottle', '500', '1', '1000', 'Bottle']; }
+        }
+        $jF = $start($file($headE, $rowsF, 'f.csv'), 'zzd-f-' . $run . '.csv');
+        $callsF = [];
+        $cntFn = function (array $items) use (&$callsF): array { $callsF[] = count($items); return []; };
+        $nF = [import_job_sizes_ai_fill($pdo, $jF, $cntFn), import_job_sizes_ai_fill($pdo, $jF, $cntFn), import_job_sizes_ai_fill($pdo, $jF, $cntFn)];
+        $ck('reader: 60 unread rows over 3 loads = exactly 1 call (40 rows); rows past 40 stay for the person', count($callsF) === 1 && ($callsF[0] ?? 0) === 40 && $nF === [0, 0, 0],
+            json_encode([$callsF, $nF]));
+        // ---- tick Orange juice + Fresh milk, import: one sale of each takes 0.25 of a carton off stock; the read size is saved on Orange juice
+        foreach (['Orange juice', 'Fresh milk'] as $nm) { import_job_drinks_set($pdo, $jE, $admin, ['mode' => 'tick', 'key' => $E1[$n($nm)]['key'], 'on' => true]); }
+        $cE = import_commit_stock($pdo, $jE, $admin);
+        $ojIng = (int)$col('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Orange juice')]);
+        $fmIng = (int)$col('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Fresh milk')]);
+        $ck('import: the carton sizes are saved on their stock items (Orange juice 1000 read from its unit cell and ticked, Fresh milk 1000 typed); Pineapple (not ticked) is not',
+            !empty($cE['ok']) && $vol($n('Orange juice')) === 1000.0 && $vol($n('Fresh milk')) === 1000.0 && $vol($n('Pineapple juice')) === null,
+            json_encode([$cE['ok'] ?? null, $cE['error'] ?? null, $vol($n('Orange juice')), $vol($n('Fresh milk')), $vol($n('Pineapple juice'))]));
+        $seedStock($ojIng, 5);
+        $seedStock($fmIng, 5);
+        foreach (['Orange juice' => $ojIng, 'Fresh milk' => $fmIng] as $nm => $iid) {
+            $pos = rh_menu_pos_find($pdo, $n($nm), 'Bar');
+            if ($pos) { deductStockForMenuItem((int)$pos['id'], (string)$pos['slug'], 1.0, 'manual', null, $admin); }
+            $left = (float)$col('SELECT current_quantity FROM stock_ingredients WHERE id = ?', [$iid]);
+            $ck('sale: one glass of ' . $nm . ' takes 0.25 of a carton (5 -> 4.75)', $pos && abs($left - 4.75) < 0.000001, json_encode([$pos, $left]));
+        }
     }
 } catch (Throwable $e) {
     $ck('child ran without an exception', false, $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());

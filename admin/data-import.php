@@ -578,8 +578,9 @@ if ($isAjax) {
         di_json(import_job_sizes_view($pdo, $jobId, $uid, ['q' => (string)($_POST['q'] ?? ''), 'group' => (string)($_POST['group'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'),
             'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 10)]));
     }
-    if ($action === 'sizes_set') {      // mode group (key = group, value = ml or '') | row (key = item key, value = ml or '')
-        di_json(import_job_sizes_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''), 'value' => (string)($_POST['value'] ?? '')]));
+    if ($action === 'sizes_set') {      // mode group (key = group) | row (key = item key); field ml (bottle / container size) | glass (glass size) | served (row, clear); value = ml or ''
+        di_json(import_job_sizes_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''), 'value' => (string)($_POST['value'] ?? ''),
+            'field' => (string)($_POST['field'] ?? 'ml')]));
     }
 
     if ($action === 'cancel') {

@@ -116,7 +116,7 @@ if (!function_exists('rh_import_setting_defaults')) {
         }
         $kinds = ['units' => 'unit', 'section_words' => 'section_word', 'total_words' => 'total_word',
             'summary_phrases' => 'summary_phrase', 'skip_sheet_words' => 'skip_sheet_word', 'noise_tokens' => 'noise_token', 'guard_words' => 'guard_word',
-            'container_words' => 'container_word', 'portion_words' => 'portion_word'];
+            'container_words' => 'container_word', 'portion_words' => 'portion_word', 'glass_words' => 'glass_word', 'pour_containers' => 'pour_container', 'quantity_words' => 'quantity_word'];
         foreach ($kinds as $key => $kind) {
             foreach ((array)($d[$key] ?? []) as $w) {
                 $rows[] = [$kind, (string)$w, ''];
@@ -193,10 +193,10 @@ if (!function_exists('rh_import_setting_defaults')) {
         }
         $listKey = ['unit' => 'units', 'section_word' => 'section_words', 'total_word' => 'total_words',
             'summary_phrase' => 'summary_phrases', 'skip_sheet_word' => 'skip_sheet_words', 'noise_token' => 'noise_tokens', 'guard_word' => 'guard_words',
-            'container_word' => 'container_words', 'portion_word' => 'portion_words'];
+            'container_word' => 'container_words', 'portion_word' => 'portion_words', 'glass_word' => 'glass_words', 'pour_container' => 'pour_containers', 'quantity_word' => 'quantity_words'];
         $res = ['version' => $out['version'], 'fields' => [], 'derived' => [], 'units' => [], 'section_words' => [],
             'total_words' => [], 'summary_phrases' => [], 'skip_sheet_words' => [], 'noise_tokens' => [], 'unit_synonyms' => [], 'field_fallbacks' => [], 'guard_words' => [],
-            'container_words' => [], 'portion_words' => []];
+            'container_words' => [], 'portion_words' => [], 'glass_words' => [], 'pour_containers' => [], 'quantity_words' => []];
         foreach ($rows as $r) {
             $k = $r['kind'];
             if ($k === 'unit_synonym') {
@@ -220,7 +220,7 @@ if (!function_exists('rh_import_setting_defaults')) {
         if (!$res['unit_synonyms']) {
             $res['unit_synonyms'] = $out['unit_synonyms'];
         }
-        foreach (['container_words', 'portion_words'] as $k) {        // v4 kinds: a hotel seeded before v4 (or a cut-short seed) still reads packs
+        foreach (['container_words', 'portion_words', 'glass_words', 'pour_containers', 'quantity_words'] as $k) {   // v4 / v7 kinds: a hotel seeded before them (or a cut-short seed) still reads them
             if (!$res[$k]) {
                 $res[$k] = (array)($out[$k] ?? []);
             }
