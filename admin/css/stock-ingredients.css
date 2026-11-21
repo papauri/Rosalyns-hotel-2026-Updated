@@ -799,3 +799,9 @@
         font-weight: 600;
     }
 }
+
+/* Put on the menu (owner 2026-11-22): tick column on the Stock items list */
+.stock-table .stm-tick-col { width: 52px; text-align: center; white-space: nowrap; }
+.stock-table .stm-tick-col input[type="checkbox"] { width: 20px; height: 20px; margin: 0; vertical-align: middle; cursor: pointer; accent-color: var(--au-accent-deep, #7a5b34); }
+.stm-tick-label { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer; }
+.stm-put-btn[disabled] { opacity: .55; cursor: not-allowed; }

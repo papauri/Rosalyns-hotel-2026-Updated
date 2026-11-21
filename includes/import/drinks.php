@@ -1441,6 +1441,79 @@ if (!function_exists('import_drinks_build')) {
     }
 
     /**
+     * Write ONE drink to the drinks menu, its till row and (when it has none) its one-measure stock link: the writes import_drinks_commit
+     * makes for a ticked row, shared with Stock Items > Put on the menu (admin/includes/stock-to-menu-lib.php) so both write the same way.
+     * The caller holds the transaction and the menu lock and has checked the Menu permission. $r: action 'add' | 'update', name, price
+     * (VAT included, written exactly to 2 dp), category (add only; an update keeps the drink's own), measure (words), menu_id + menu_name
+     * (update), link ({kind, qty, name, ml}) for a new stock link. $priceNote goes in the log text ("VAT included" ...).
+     * @return array{action:string, linked:bool, what:string, pos:array, menu_id:int, old_price:?string, price:string}
+     * @throws RuntimeException
+     */
+    function import_drinks_menu_write(PDO $pdo, array $r, int $ingId, int $userId, bool $drinkReady, string $priceNote): array
+    {
+        static $hasLink = null, $hasLinkPdo = null;
+        if ($hasLink === null || $hasLinkPdo !== $pdo) {
+            $hasLink = $pdo->prepare('SELECT COUNT(*) FROM stock_recipes sr JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id WHERE sr.menu_item_id = ? AND sr.menu_type = ?');
+            $hasLinkPdo = $pdo;
+        }
+        $linked = false;
+        $oldPrice = null;
+        $menuId = 0;
+        $price = number_format((float)$r['price'], 2, '.', '');
+        if ($r['action'] === 'add') {
+            $category = $r['category'];
+            if ($category === '' || mb_strlen($category) > 100) {
+                throw new RuntimeException('"' . $r['name'] . '": its menu category is missing or too long.');
+            }
+            $dup = rh_find_duplicate($pdo, 'drink_menu', 'item_name', $r['name'], ['category' => $category]);
+            if ($dup) {
+                throw new RuntimeException('A drink called "' . $dup['value'] . '" is already in "' . $category . '". Please review the drinks list again.');
+            }
+            $ord = $pdo->prepare('SELECT COALESCE(MAX(display_order), 0) + 1 FROM drink_menu WHERE category = ?');
+            $ord->execute([$category]);
+            $displayOrder = (int)$ord->fetchColumn();
+            $pdo->prepare('INSERT INTO drink_menu (item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$r['name'], '', $price, $category, 1, $displayOrder, '', 'bar', 1, 1]);
+            $menuId = (int)$pdo->lastInsertId();
+            $pos = rh_menu_pos_sync_item($pdo, 'drink', [
+                'item_name' => $r['name'], 'description' => '', 'price' => $price, 'category' => $category, 'station' => 'bar',
+                'is_available' => 1, 'display_order' => $displayOrder, 'show_pos' => 1, 'show_room_service' => 1, 'tags' => '',
+            ], null, null);
+            $what = 'added "' . $r['name'] . '" to the drinks menu (' . $category . ') at ' . $price . ' per ' . $r['measure'] . ' (' . $priceNote . ')';
+        } else {
+            $st = $pdo->prepare('SELECT * FROM drink_menu WHERE id = ? FOR UPDATE');
+            $st->execute([$r['menu_id']]);
+            $cur = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$cur) {
+                throw new RuntimeException('"' . $r['menu_name'] . '" is no longer on the drinks menu. Please review the drinks list again.');
+            }
+            $oldPrice = number_format((float)$cur['price'], 2, '.', '');
+            $pdo->prepare('UPDATE drink_menu SET price = ? WHERE id = ?')->execute([$price, (int)$cur['id']]);
+            // the till's copy, exactly as Menu Management does on an edit that changes only the price: same name and category (so an
+            // item on an open order is never moved), its availability left as the till has it
+            $pos = rh_menu_pos_sync_item($pdo, 'drink', [
+                'item_name' => (string)$cur['item_name'], 'description' => (string)($cur['description'] ?? ''), 'price' => $price, 'category' => (string)$cur['category'],
+                'station' => (string)($cur['station'] ?? 'bar'), 'is_available' => null, 'display_order' => (int)$cur['display_order'],
+                'show_pos' => (int)$cur['show_pos'], 'show_room_service' => (int)$cur['show_room_service'], 'tags' => (string)($cur['tags'] ?? ''),
+            ], ['item_name' => (string)$cur['item_name'], 'category' => (string)$cur['category']], null);
+            $menuId = (int)$cur['id'];
+            $what = 'changed the price of "' . rh_clean_text((string)$cur['item_name']) . '" (' . rh_clean_text((string)$cur['category']) . ') from ' . $oldPrice . ' to ' . $price
+                . ' (' . $priceNote . ')';
+        }
+        // the stock link: one measure per sale, only when the drink has none (an existing link, maybe with more lines, is never replaced)
+        $hasLink->execute([$pos['id'], $pos['slug']]);
+        if ((int)$hasLink->fetchColumn() === 0) {
+            if ($ingId <= 0 || !$r['link']) {
+                throw new RuntimeException('"' . $r['name'] . '": its stock item was not found, so its stock link could not be made. Nothing was saved.');
+            }
+            rh_menu_recipe_save($pdo, (int)$pos['id'], (string)$pos['slug'], null, null, [import_drinks_link_line($ingId, $r['link'], $drinkReady)], $userId > 0 ? $userId : null);
+            $linked = true;
+            $what .= '; each sale takes ' . $r['measure'] . ' off stock';
+        }
+        return ['action' => $r['action'] === 'add' ? 'add' : 'update', 'linked' => $linked, 'what' => $what, 'pos' => $pos, 'menu_id' => $menuId, 'old_price' => $oldPrice, 'price' => $price];
+    }
+
+    /**
      * Write the ticked drinks. The caller (import_commit_stock_locked) holds the transaction, the import lock and the menu lock, and has
      * already applied the stock part (so a new stock item exists). Everything is re-read here; a ticked row that is no longer tickable stops
      * the whole import with a plain message. Same writes as Menu Management: drink_menu, then its till row (rh_menu_pos_sync_item), then
@@ -1476,7 +1549,6 @@ if (!function_exists('import_drinks_build')) {
             }
         }
         $find = $pdo->prepare('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1');
-        $hasLink = $pdo->prepare('SELECT COUNT(*) FROM stock_recipes sr JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id WHERE sr.menu_item_id = ? AND sr.menu_type = ?');
         foreach ($b['rows'] as $r) {
             if (!$r['ticked']) {
                 continue;
@@ -1486,57 +1558,12 @@ if (!function_exists('import_drinks_build')) {
                 $find->execute([$r['name']]);
                 $ingId = (int)$find->fetchColumn();
             }
-            $price = number_format((float)$r['price'], 2, '.', '');
-            if ($r['action'] === 'add') {
-                $category = $r['category'];
-                if ($category === '' || mb_strlen($category) > 100) {
-                    throw new RuntimeException('"' . $r['name'] . '": its menu category is missing or too long.');
-                }
-                $dup = rh_find_duplicate($pdo, 'drink_menu', 'item_name', $r['name'], ['category' => $category]);
-                if ($dup) {
-                    throw new RuntimeException('A drink called "' . $dup['value'] . '" is already in "' . $category . '". Please review the drinks list again.');
-                }
-                $ord = $pdo->prepare('SELECT COALESCE(MAX(display_order), 0) + 1 FROM drink_menu WHERE category = ?');
-                $ord->execute([$category]);
-                $displayOrder = (int)$ord->fetchColumn();
-                $pdo->prepare('INSERT INTO drink_menu (item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$r['name'], '', $price, $category, 1, $displayOrder, '', 'bar', 1, 1]);
-                $pos = rh_menu_pos_sync_item($pdo, 'drink', [
-                    'item_name' => $r['name'], 'description' => '', 'price' => $price, 'category' => $category, 'station' => 'bar',
-                    'is_available' => 1, 'display_order' => $displayOrder, 'show_pos' => 1, 'show_room_service' => 1, 'tags' => '',
-                ], null, null);
-                $out['added']++;
-                $what = 'added "' . $r['name'] . '" to the drinks menu (' . $category . ') at ' . $price . ' per ' . $r['measure'] . ' (selling price from ' . $r['price_source'] . ', VAT included)';
-            } else {
-                $st = $pdo->prepare('SELECT * FROM drink_menu WHERE id = ? FOR UPDATE');
-                $st->execute([$r['menu_id']]);
-                $cur = $st->fetch(PDO::FETCH_ASSOC);
-                if (!$cur) {
-                    throw new RuntimeException('"' . $r['menu_name'] . '" is no longer on the drinks menu. Please review the drinks list again.');
-                }
-                $oldPrice = number_format((float)$cur['price'], 2, '.', '');
-                $pdo->prepare('UPDATE drink_menu SET price = ? WHERE id = ?')->execute([$price, (int)$cur['id']]);
-                // the till's copy, exactly as Menu Management does on an edit that changes only the price: same name and category (so an
-                // item on an open order is never moved), its availability left as the till has it
-                $pos = rh_menu_pos_sync_item($pdo, 'drink', [
-                    'item_name' => (string)$cur['item_name'], 'description' => (string)($cur['description'] ?? ''), 'price' => $price, 'category' => (string)$cur['category'],
-                    'station' => (string)($cur['station'] ?? 'bar'), 'is_available' => null, 'display_order' => (int)$cur['display_order'],
-                    'show_pos' => (int)$cur['show_pos'], 'show_room_service' => (int)$cur['show_room_service'], 'tags' => (string)($cur['tags'] ?? ''),
-                ], ['item_name' => (string)$cur['item_name'], 'category' => (string)$cur['category']], null);
-                $out['updated']++;
-                $what = 'changed the price of "' . rh_clean_text((string)$cur['item_name']) . '" (' . rh_clean_text((string)$cur['category']) . ') from ' . $oldPrice . ' to ' . $price
-                    . ' (selling price from ' . $r['price_source'] . ', VAT included)';
-            }
-            // the stock link: one measure per sale, only when the drink has none (an existing link, maybe with more lines, is never replaced)
-            $hasLink->execute([$pos['id'], $pos['slug']]);
-            if ((int)$hasLink->fetchColumn() === 0) {
-                if ($ingId <= 0 || !$r['link']) {
-                    throw new RuntimeException('"' . $r['name'] . '": its stock item was not found, so its stock link could not be made. Nothing was imported.');
-                }
-                rh_menu_recipe_save($pdo, (int)$pos['id'], (string)$pos['slug'], null, null, [import_drinks_link_line($ingId, $r['link'], $drinkReady)], $userId > 0 ? $userId : null);
+            $w = import_drinks_menu_write($pdo, $r, $ingId, $userId, $drinkReady, 'selling price from ' . $r['price_source'] . ', VAT included');
+            $out[$w['action'] === 'add' ? 'added' : 'updated']++;
+            if ($w['linked']) {
                 $out['linked']++;
-                $what .= '; each sale takes ' . $r['measure'] . ' off stock';
             }
+            $what = $w['what'];
             $out['names'][] = $r['name'];
             if (function_exists('logActivity')) {
                 logActivity($userId, 'drink_menu_import', 'Import #' . $jobId . ': ' . $what . '.');

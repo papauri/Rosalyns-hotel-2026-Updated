@@ -1071,6 +1071,13 @@ $mmRenderRs = static function (array $groups) use ($currencySymbol, $recipeBy, $
 
             <!-- Drinks Menu Tab Content -->
             <div class="tab-content <?php echo $current_tab === 'drinks' ? 'active' : ''; ?>" id="drinks-tab">
+                <?php if (($user['role'] ?? '') === 'admin' || !function_exists('rh_module_key_enabled') || rh_module_key_enabled('stock')): /* Add from stock (owner 2026-11-22): admin/stock-to-menu.php, Menu permission like this page */ ?>
+                    <div class="mm-from-stock" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 14px;">
+                        <a class="mm-btn mm-btn-sm" href="stock-to-menu.php" style="display:inline-flex;align-items:center;gap:6px;min-height:44px;text-decoration:none;"><i class="fas fa-boxes-stacked"></i> Add from stock</a>
+                        <span style="font-size:.86rem;color:var(--au-muted,#5f6b7a);">Put drinks from your stock items on this menu: tick the item, type its price.</span>
+                        <i class="help" data-tip="Opens the stock items that are not on the drinks menu yet. For each one you choose what one sale is (a bottle, a shot, a glass), type the price with VAT and pick the category. It goes on this menu and the till with its stock link, so each sale takes it off stock.">?</i>
+                    </div>
+                <?php endif; ?>
                 <?php $mmRenderTab('drinks', $grouped_drinks); ?>
             </div>
 

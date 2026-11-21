@@ -42,6 +42,7 @@ $suites = [
     'Data import stock'     => 'scripts/tests/import_stock_test.php',
     'Data import export'    => 'scripts/tests/import_export_test.php',
     'Menu portions + search' => 'scripts/tests/menu_portions.php',
+    'Stock items to the drinks menu' => 'scripts/tests/stock_to_menu_test.php',
     'Stock receiving'       => 'scripts/tests/stock_receiving.php',
     'Stock count approval'  => 'scripts/tests/stock_count_approval.php',
     'Stock count big form'  => 'scripts/tests/stock_count_bigform.php',

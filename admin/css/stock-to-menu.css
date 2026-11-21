@@ -1,0 +1,55 @@
+/* Put stock items on the drinks menu (admin/stock-to-menu.php). Existing admin tokens only; solid surfaces, one accent. */
+.stm-page { padding-bottom: 140px; }
+.stm-head-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.stm-card { background: var(--au-surface, #fffdfb); border: 1px solid var(--au-border, #d8dde5); border-radius: var(--au-radius-sm, 10px); padding: 16px 18px; margin-bottom: 16px; box-shadow: var(--au-shadow-sm); min-width: 0; }
+.stm-intro p { margin: 0 0 6px; font-size: .95rem; color: var(--au-text, #1e2938); line-height: 1.5; }
+.stm-intro p:last-child { margin-bottom: 0; }
+.stm-muted { color: var(--au-muted, #5f6b7a); font-size: .82rem; }
+.stm-small { display: block; font-size: .76rem; margin-top: 3px; }
+.stm-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
+.stm-toolbar label { display: flex; flex-direction: column; gap: 4px; font-size: .78rem; color: var(--au-muted, #5f6b7a); flex: 1 1 180px; min-width: 0; }
+.stm-toolbar input, .stm-toolbar select { min-height: 44px; padding: 8px 10px; border: 1px solid var(--au-border, #d8dde5); border-radius: 8px; font-family: inherit; font-size: .9rem; background: #fff; width: 100%; box-sizing: border-box; }
+.stm-btn { min-height: 44px; padding: 9px 16px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: .88rem; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; box-sizing: border-box; }
+.stm-btn--primary { background: var(--au-accent-deep, #7a5b34); color: #fff; }
+.stm-btn--ghost { background: #fff; border-color: var(--au-border, #d8dde5); color: var(--au-text, #1e2938); }
+.stm-btn[disabled] { opacity: .5; cursor: not-allowed; }
+.stm-table { width: 100%; border-collapse: collapse; }
+.stm-table th, .stm-table td { padding: 8px 6px; border-bottom: 1px solid var(--au-border-soft, #e7ecf3); font-size: .86rem; text-align: left; vertical-align: top; }
+.stm-table th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--au-muted, #5f6b7a); }
+.stm-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stm-table input[type="text"], .stm-table select { min-height: 44px; padding: 6px 8px; border: 1px solid var(--au-border, #d8dde5); border-radius: 8px; font-family: inherit; font-size: .9rem; box-sizing: border-box; background: #fff; max-width: 100%; }
+.stm-in-name { width: 160px; }
+.stm-in-sold { width: 150px; }
+.stm-in-price { width: 84px; text-align: right; }
+.stm-in-cat { width: 110px; }
+.stm-table input[readonly], .stm-table select[disabled] { background: var(--au-bg, #f5f6f8); color: var(--au-muted, #5f6b7a); }
+.stm-stock, .stm-sold-note { display: block; margin-top: 4px; max-width: 160px; font-size: .76rem; line-height: 1.35; overflow-wrap: anywhere; }
+.stm-sold-note:empty { display: none; }
+.stm-col-tick { width: 48px; }
+.stm-tick { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer; }
+.stm-tick input { width: 20px; height: 20px; margin: 0; accent-color: var(--au-accent-deep, #7a5b34); cursor: pointer; }
+.stm-row--ticked td { background: #faf7f1; }
+.stm-row--blocked td { color: var(--au-muted, #5f6b7a); }
+.stm-status { min-width: 130px; max-width: 210px; }
+.stm-pill { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: .78rem; font-weight: 600; line-height: 1.35; border: 1px solid transparent; }
+.stm-pill--new { background: #e8f3ec; color: var(--au-success, #15803d); border-color: #cfe5d6; }
+.stm-pill--update { background: #fdf3e6; color: var(--au-warning, #b45309); border-color: #f1dcbc; }
+.stm-pill--same { background: var(--au-bg, #f5f6f8); color: var(--au-muted, #5f6b7a); border-color: var(--au-border-soft, #e7ecf3); }
+.stm-pill--blocked { background: #f8e9ea; color: var(--au-danger, #b4232f); border-color: #efd0d3; font-weight: 500; }
+.stm-warn { display: block; margin-top: 4px; font-size: .76rem; color: var(--au-warning, #b45309); }
+.stm-neg { color: var(--au-danger, #b4232f); font-weight: 600; }
+.stm-msg { display: none; margin: 0 0 14px; padding: 12px 14px; border-radius: 8px; font-size: .9rem; line-height: 1.5; border: 1px solid transparent; }
+.stm-msg.is-shown { display: block; }
+.stm-msg--ok { background: #e8f3ec; color: #14532d; border-color: #cfe5d6; }
+.stm-msg--warn { background: #fdf3e6; color: #7c3a06; border-color: #f1dcbc; }
+.stm-msg--error { background: #f8e9ea; color: #7f1d1d; border-color: #efd0d3; }
+.stm-empty { text-align: center; padding: 30px 12px; color: var(--au-muted, #5f6b7a); }
+.stm-bar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--au-surface, #fffdfb); border: 1px solid var(--au-border, #d8dde5); border-radius: var(--au-radius-sm, 10px); box-shadow: var(--au-shadow-md); }
+.stm-bar__count { font-size: .9rem; color: var(--au-text, #1e2938); }
+@media (max-width: 640px) {
+    .stm-card { padding: 14px 12px; }
+    .stm-page { padding-bottom: 380px; }
+    .stm-bar .stm-btn, .stm-toolbar .stm-btn { flex: 1 1 auto; justify-content: center; }
+}
+/* headers may wrap (the shared table style keeps them on one line), so the table fits a laptop with the menu open */
+#stm-table thead th { white-space: normal; line-height: 1.3; }

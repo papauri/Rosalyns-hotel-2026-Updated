@@ -2221,6 +2221,7 @@ function getPermissionForPage(string $page)
         'purchase-orders.php' => 'stock_management',
         'stock-reorder.php' => 'stock_management',
         'stock-cost-fix.php' => 'stock_management', // Fix crate prices (owner 2026-11-17): the same permission as editing stock items
+        'stock-to-menu.php' => 'menu',             // Put stock items on the drinks menu (owner 2026-11-22): it writes the drinks menu, so Menu Management's permission
         'gym-classes.php' => 'gym',
     ];
 
@@ -2353,6 +2354,7 @@ function getModuleForPage(string $page)
         'purchase-orders.php' => 'stock',
         'stock-reorder.php' => 'stock',
         'stock-cost-fix.php' => 'stock',
+        'stock-to-menu.php' => ['pos', 'stock'], // Put stock items on the drinks menu: the menu (pos) and stock both
         'stock-suppliers.php' => 'stock',
         'data-import.php' => 'stock', // Import (stock lists); it also checks rh_import_enabled(), which is fail-closed
         'stock-clear.php' => 'stock', // Clear Stock Data

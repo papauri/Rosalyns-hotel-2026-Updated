@@ -710,6 +710,9 @@ $measureReady = rh_stock_measure_ready($pdo); // migration 088: count measures (
 $measureSizes = $measureReady ? rh_stock_measure_sizes() : ["shot_ml" => 0, "glass_ml" => 0];
 $drinkReady = rh_stock_drink_ready($pdo); // migration 089: bottle size + the hotel's drink measures list
 $drinkList = $drinkReady ? rh_drink_measures_list() : [];
+// Put on the menu (owner 2026-11-22): tick stock items and open admin/stock-to-menu.php; only for people who may change the menu
+$canPutOnMenu = function_exists('hasPermission') && hasPermission((int)$user['id'], 'menu')
+    && ($user['role'] === 'admin' || !function_exists('rh_module_key_enabled') || rh_module_key_enabled('pos'));
 try {
     $supplierOptions = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { $supplierOptions = []; }
@@ -944,12 +947,19 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <option value="archived">Archived</option>
             </select>
             <span id="filter-count" data-total="<?php echo count($ingredients); ?>" style="color:#6c757d;font-size:13px;"><?php echo count($ingredients); ?> ingredient(s)</span>
+            <?php if ($canPutOnMenu && !empty($ingredients)): ?>
+                <button type="button" class="btn-secondary stm-put-btn" id="stm-put-btn" disabled onclick="stmPutOnMenu()" title="Put the ticked items on the drinks menu and the till: you type the price and what one sale is on the next screen"><i class="fas fa-wine-glass"></i> <span id="stm-put-text">Put on the menu</span></button>
+                <i class="help" data-tip="Tick the items to sell, then press Put on the menu. The next screen asks the drink name, what one sale is (a bottle, a shot, a glass), the price with VAT and the category. Nothing changes until you save there.">?</i>
+            <?php endif; ?>
         </div>
 
         <div class="table-responsive" data-rh-results>
             <table class="stock-table" id="stock-table">
                 <thead>
                     <tr>
+                        <?php if ($canPutOnMenu): ?>
+                            <th class="stm-tick-col"><input type="checkbox" id="stm-tick-all" aria-label="Tick all shown" title="Tick every item the search and filters show, on all pages" onchange="stmTickAll(this.checked)"> <i class="help" data-tip="Tick the items to put on the drinks menu. The box here ticks every item the search, category and status boxes show, on every page (archived items are left out).">?</i></th>
+                        <?php endif; ?>
                         <th>Name <i class="help" data-tip="The ingredient's display name. Used everywhere — recipes, stock-in logs, wastage reports.">?</i></th>
                         <th class="col-optional-lg">Category <i class="help" data-tip="Free-text grouping (e.g. Dairy, Meat, Pantry). Used to keep the recipe-builder dropdown tidy.">?</i></th>
                         <th class="col-optional-md">Unit <i class="help" data-tip="Base unit of measure for this ingredient. All stock-in receipts, recipe quantities, and adjustments use this same unit. Pick once and stick to it.">?</i></th>
@@ -1006,6 +1016,9 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             data-name="<?php echo htmlspecialchars(strtolower($i['name'])); ?>"
                             data-category="<?php echo htmlspecialchars($i['category']); ?>"
                             data-status="<?php echo $rowStatus; ?>">
+                            <?php if ($canPutOnMenu): ?>
+                                <td class="stm-tick-col"><?php if (!$i['is_archived']): ?><label class="stm-tick-label"><input type="checkbox" class="stm-tick" value="<?php echo (int)$i['id']; ?>" aria-label="Tick <?php echo htmlspecialchars($i['name']); ?>" onchange="stmCount()"></label><?php endif; ?></td>
+                            <?php endif; ?>
                             <td>
                                 <strong><?php echo htmlspecialchars($i['name']); ?></strong>
                                 <?php if (!empty($i['notes'])): ?>
@@ -1098,11 +1111,11 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <?php endforeach; ?>
                     <?php if (empty($ingredients) && $ingFilter === 'low'): ?>
                         <tr>
-                            <td colspan="10" style="text-align:center; padding:30px; color:#6c757d;">Nothing needs restocking right now. <a href="stock-ingredients.php">Show all <?php echo strtolower($stockNounPl); ?></a></td>
+                            <td colspan="<?php echo $canPutOnMenu ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">Nothing needs restocking right now. <a href="stock-ingredients.php">Show all <?php echo strtolower($stockNounPl); ?></a></td>
                         </tr>
                     <?php elseif (empty($ingredients)): ?>
                         <tr>
-                            <td colspan="10" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
+                            <td colspan="<?php echo $canPutOnMenu ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -2157,6 +2170,26 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             openModal('discardBatchModal');
         }
 
+        // Put on the menu (owner 2026-11-22): ticked items open admin/stock-to-menu.php
+        function stmCount() {
+            const n = document.querySelectorAll('.ing-row .stm-tick:checked').length;
+            const btn = document.getElementById('stm-put-btn');
+            if (!btn) return;
+            btn.disabled = n === 0;
+            document.getElementById('stm-put-text').textContent = n ? 'Put ' + n + ' on the menu' : 'Put on the menu';
+        }
+        function stmTickAll(on) {
+            document.querySelectorAll('.ing-row').forEach(row => {
+                const box = row.querySelector('.stm-tick');
+                if (box && row.dataset.filterHidden !== '1') box.checked = on;
+            });
+            stmCount();
+        }
+        function stmPutOnMenu() {
+            const ids = Array.from(document.querySelectorAll('.ing-row .stm-tick:checked')).map(b => b.value);
+            if (ids.length) window.location.href = 'stock-to-menu.php?ids=' + encodeURIComponent(ids.join(','));
+        }
+
         function filterTable() {
             const q = document.getElementById('filter-search').value.toLowerCase();
             const cat = document.getElementById('filter-category').value;
@@ -2183,6 +2216,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             } else if (table) {
                 rows.forEach(row => { row.hidden = false; });
             }
+            const tickAll = document.getElementById('stm-tick-all');
+            if (tickAll) tickAll.checked = false;
             const counter = document.getElementById('filter-count');
             if (counter) {
                 const total = parseInt(counter.dataset.total || '0', 10);
