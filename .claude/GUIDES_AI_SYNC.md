@@ -61,6 +61,17 @@ when prompted."
   rh_menu_pos_sync_item). Page URL admin/menu-management.php?tab=room-service.
 - **Manager Guides:** Menu/Restaurant guide - one line on the Room service tab and moving drinks into categories.
 
+### Blocked Dates calendar: block single rooms on a month grid (2026-11-22, owner FEATURE) - commit "Blocked Dates calendar" in both repos
+- **Guides (Blocked Dates):** the page opens on a Calendar: All rooms row, then each room type row and its rooms (a joined
+  room is one row), one column per night of the month (prev / next / This month / month picker, Room type filter). Click a
+  night, drag across nights and rooms, shift-click a range or click a room name for its whole month; pick the block type and
+  reason and press Block, or press Unblock. Letters B/M/E/F = Blocked / Maintenance / Event / Fully booked on that row; a light
+  tint = blocked by the room type or All rooms row (unblock it on that row); blue bar = booked; red ring = booked AND blocked.
+  Past nights cannot be changed. The old table is the List tab. Needs the Block Rooms permission to change anything.
+- **Assistant:** no table, column, setting or permission change. New POST action grid_apply on admin/blocked-dates.php
+  (op block/unblock, items JSON). Page URLs: blocked-dates.php?month=YYYY-MM, blocked-dates.php?view=list.
+- **Manager Guides:** the Rooms / Front desk guide line on blocking dates (now a calendar).
+
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 
 ### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md

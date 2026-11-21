@@ -489,3 +489,310 @@
     min-width: 0;
     text-overflow: ellipsis;
 }
+
+/* ================================================================
+   Calendar view: rooms down the side, the month's nights across.
+   Solid surfaces, one accent (selection). Blocked here = dark solid
+   with a letter, blocked by a wider row = light tint, booked = blue
+   bar, booked AND blocked = red ring.
+   ================================================================ */
+.bd-viewtabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--admin-surface-border);
+}
+
+.bd-viewtab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--admin-muted);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.bd-viewtab:hover { color: var(--admin-text); }
+
+.bd-viewtab.is-active {
+    color: var(--admin-text);
+    border-bottom-color: var(--admin-accent);
+    font-weight: 600;
+}
+
+.bdg-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.bdg-monthnav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.bdg-month {
+    margin: 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    min-width: 9.5rem;
+    text-align: center;
+}
+
+.bdg-jump { margin: 0; }
+.bdg-jump input { max-width: 11rem; }
+
+.bdg-typefilter {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.bdg-typefilter .form-label { margin: 0; white-space: nowrap; font-size: 0.8rem; }
+.blocked-dates-page .bdg-typefilter select.form-select { width: auto; min-width: 12rem; }
+
+.bdg-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 1.1rem;
+    font-size: 0.78rem;
+    color: var(--admin-muted);
+    margin-bottom: 0.6rem;
+}
+
+.bdg-legend__item { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+.bdg-swatch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    border: 1px solid var(--admin-surface-border);
+    background: var(--admin-surface);
+    position: relative;
+    flex-shrink: 0;
+}
+
+.bdg-hint {
+    font-size: 0.78rem;
+    color: var(--admin-muted);
+    margin: 0 0 0.6rem;
+}
+
+.bdg-scroll {
+    overflow: auto;
+    max-height: 70vh;
+    border: 1px solid var(--admin-surface-border);
+    border-radius: 8px;
+    background: var(--admin-surface);
+}
+
+/* A real table at every width (the admin's phone rules turn tables into blocks/cards), so the room
+   column and day header stay pinned while the nights scroll inside .bdg-scroll. */
+.blocked-dates-page .bdg-scroll > table.bdg-table { display: table; }
+
+.bdg-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.75rem;
+    user-select: none;
+    -webkit-user-select: none;
+    min-width: 100%;
+}
+
+.bdg-table th,
+.bdg-table td {
+    border-right: 1px solid #e6e9ee;
+    border-bottom: 1px solid #e6e9ee;
+}
+
+/* Sticky day header and room column */
+.bdg-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--admin-table-head);
+}
+
+.bdg-table thead th.bdg-corner {
+    left: 0;
+    z-index: 4;
+    text-align: left;
+    padding: 0.4rem 0.6rem;
+    font-weight: 600;
+    min-width: 9.5rem;
+}
+
+.bdg-dayhead {
+    width: 34px;
+    min-width: 34px;
+    padding: 0.25rem 0;
+    text-align: center;
+    font-weight: 500;
+    line-height: 1.15;
+}
+
+/* Table cells ignore min-width, so the block-level labels inside the day header set each night's
+   minimum width: the grid then scrolls sideways on a phone instead of squashing 31 nights. */
+.bdg-dayhead__wd { display: block; min-width: 32px; font-size: 0.62rem; color: var(--admin-muted); text-transform: uppercase; }
+.bdg-dayhead__n { display: block; min-width: 32px; font-size: 0.8rem; color: var(--admin-text); }
+.bdg-table thead th.bdg-dayhead.is-weekend { background: #e9edf3; }
+.bdg-dayhead.is-past .bdg-dayhead__n { color: var(--admin-muted); }
+.bdg-dayhead.is-today { box-shadow: inset 0 -3px 0 var(--admin-accent); }
+.bdg-dayhead.is-today .bdg-dayhead__n { font-weight: 700; }
+
+.bdg-rowhead {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--admin-surface);
+    text-align: left;
+    padding: 0.3rem 0.6rem;
+    min-width: 9.5rem;
+    max-width: 13rem;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bdg-rowhead:hover,
+.bdg-rowhead:focus-visible { background: var(--admin-hover-bg); outline: none; }
+.bdg-table th.bdg-rowhead,
+.bdg-table thead th.bdg-corner { text-transform: none; letter-spacing: normal; }
+.bdg-rowhead__name,
+.bdg-rowhead__sub,
+.bdg-rowhead__status { min-width: 8rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
+.bdg-rowhead__name { display: block; color: var(--admin-text); }
+.bdg-rowhead__sub { display: block; font-size: 0.66rem; color: var(--admin-muted); font-weight: 400; }
+.bdg-rowhead__status { display: block; font-size: 0.66rem; color: #8B2D24; font-weight: 600; }
+.bdg-rowhead__icon { font-size: 0.65rem; color: var(--admin-muted); margin-left: 0.2rem; }
+
+.bdg-row--all .bdg-rowhead,
+.bdg-row--type .bdg-rowhead { background: #f1f3f6; font-weight: 600; }
+.bdg-row--type th,
+.bdg-row--type td { border-top: 2px solid #d7dde6; }
+.bdg-row--room .bdg-rowhead { padding-left: 1.3rem; }
+
+/* Night cells */
+.bdg-cell {
+    position: relative;
+    height: 30px;
+    min-width: 34px;
+    text-align: center;
+    vertical-align: middle;
+    background: var(--admin-surface);
+    padding: 0;
+}
+
+.bdg-cell.is-weekend { background: #f6f7f9; }
+.bdg-cell.is-past { background: #eef0f2; opacity: 0.7; }
+.bdg-cell.is-today { box-shadow: inset 2px 0 0 var(--admin-accent), inset -2px 0 0 var(--admin-accent); }
+.bdg-cell[data-sel="1"] { cursor: pointer; }
+.bdg-cell[data-sel="1"]:hover { background: var(--admin-hover-bg); }
+.bdg-cell:focus-visible { outline: 2px solid var(--admin-text); outline-offset: -2px; }
+
+.bdg-cell.is-inherited,
+.bdg-swatch--inherited { background: #e6dbd3; border-color: #d3c4b9; }
+
+.bdg-cell.is-blocked,
+.bdg-swatch--blocked { background: #4b352d; color: #fff; border-color: #4b352d; }
+.bdg-cell.is-blocked.bdg-code-maintenance { background: #5b4a2e; }
+.bdg-cell.is-blocked.bdg-code-event { background: #34495e; }
+.bdg-cell.is-blocked.bdg-code-full { background: #3f3f46; }
+.bdg-cell.is-blocked[data-sel="1"]:hover { background: #2e211c; }
+.bdg-code { font-weight: 700; font-size: 0.7rem; letter-spacing: 0.02em; }
+
+.bdg-bookbar,
+.bdg-swatch--booked::after {
+    position: absolute;
+    left: 3px;
+    right: 3px;
+    bottom: 3px;
+    height: 4px;
+    border-radius: 2px;
+    background: #2f6fad;
+}
+
+.bdg-swatch--booked::after { content: ""; }
+
+.bdg-cell.is-conflict,
+.bdg-swatch--conflict { box-shadow: inset 0 0 0 2px #c0392b; }
+.bdg-swatch--conflict { background: #4b352d; border-color: #c0392b; }
+
+/* Selection: the one accent */
+.bdg-cell.is-selected { box-shadow: inset 0 0 0 3px var(--admin-accent); }
+.bdg-cell.is-selected:not(.is-blocked) { background: #efe9e2; }
+
+/* Action bar under the grid */
+.bdg-actionbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-top: 0.75rem;
+    padding: 0.7rem 0.9rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
+    background: var(--admin-surface);
+    border: 1px solid var(--admin-surface-border);
+    border-radius: 8px;
+    box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.06);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem 1rem;
+}
+
+.bdg-actionbar__summary {
+    flex: 1 1 18rem;
+    font-size: 0.82rem;
+    color: var(--admin-text);
+    min-width: 0;
+}
+
+.bdg-actionbar__fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.blocked-dates-page .bdg-actionbar__fields select.form-select { width: auto; min-width: 9rem; }
+.bdg-actionbar__fields input { width: 14rem; max-width: 100%; }
+.bdg-actionbar .admin-modal-feedback { flex-basis: 100%; margin: 0; }
+.bdg-actionbar .admin-modal-feedback:empty { display: none; }
+
+/* Touch tablets and phones: every night and every button is at least 44 x 44. */
+@media (pointer: coarse) {
+    .bdg-cell { height: 44px; }
+    .bdg-dayhead__wd,
+    .bdg-dayhead__n { min-width: 44px; }
+    .bdg-rowhead { height: 44px; }
+    .bdg-actionbar .btn,
+    .bdg-actionbar .form-select,
+    .bdg-actionbar .form-control,
+    .bdg-monthnav .btn,
+    .bdg-monthnav input,
+    .blocked-dates-page .bdg-typefilter select.form-select { min-height: 44px; min-width: 44px; }
+}
+
+@media (max-width: 640px) {
+    .bdg-typefilter { width: 100%; }
+    .blocked-dates-page .bdg-typefilter select.form-select { flex: 1; min-width: 0; }
+    .bdg-rowhead__name,
+    .bdg-rowhead__sub,
+    .bdg-rowhead__status { min-width: 5.5rem; max-width: 6.5rem; }
+    .bdg-actionbar__fields { width: 100%; }
+    .bdg-actionbar__fields input { flex: 1 1 100%; width: auto; }
+}

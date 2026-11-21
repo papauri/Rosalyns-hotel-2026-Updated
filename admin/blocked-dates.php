@@ -54,12 +54,266 @@ function rh_block_check_room_type(PDO $pdo, ?int $roomId): ?string
     return (int)$st->fetchColumn() > 0 ? null : 'The selected room type does not exist.';
 }
 
-/** Error text if the individual room does not exist, else null. */
+/** Error text if the individual room does not exist or is switched off, else null. */
 function rh_block_check_individual_room(PDO $pdo, int $roomId): ?string
 {
-    $st = $pdo->prepare('SELECT COUNT(*) FROM individual_rooms WHERE id = ?');
+    $st = $pdo->prepare('SELECT is_active FROM individual_rooms WHERE id = ?');
     $st->execute([$roomId]);
-    return (int)$st->fetchColumn() > 0 ? null : 'The selected room does not exist.';
+    $active = $st->fetchColumn();
+    if ($active === false) {
+        return 'The selected room does not exist.';
+    }
+    return (int)$active === 1 ? null : 'The selected room is switched off (inactive), so it cannot be blocked.';
+}
+
+/** The valid "YYYY-MM" month the calendar shows ($raw), or the current month. */
+function rh_block_grid_month($raw): string
+{
+    $raw = is_string($raw) ? trim($raw) : '';
+    if (preg_match('/^\d{4}-\d{2}$/', $raw)) {
+        $d = DateTime::createFromFormat('!Y-m-d', $raw . '-01');
+        if ($d && $d->format('Y-m') === $raw && (int)$d->format('Y') >= 2000 && (int)$d->format('Y') <= 2100) {
+            return $raw;
+        }
+    }
+    return date('Y-m');
+}
+
+/**
+ * Calendar cells posted by the grid -> targets. Each item is {t: "all"|"type"|"room", id, d: [nights]}.
+ * "room" is an individual room id; a member of a joined room (pair) stands for BOTH of its rooms.
+ * Past or invalid nights are dropped. Returns a list of targets, or an error string.
+ *
+ * @return array<int,array{scope:string,id:?int,room_ids:int[],type_id:?int,label:string,dates:string[]}>|string
+ */
+function rh_block_grid_targets(PDO $pdo, $rawJson)
+{
+    $items = is_string($rawJson) ? json_decode($rawJson, true) : null;
+    if (!is_array($items) || !$items) {
+        return 'Select at least one night on the calendar.';
+    }
+    if (count($items) > 300) {
+        return 'Too many rows at once. Select fewer rows and try again.';
+    }
+    $targets = [];
+    $nights = 0;
+    $hadPast = false;
+    foreach ($items as $it) {
+        if (!is_array($it)) {
+            return 'The selection could not be read. Reload the page and try again.';
+        }
+        $t = (string)($it['t'] ?? '');
+        $id = isset($it['id']) && $it['id'] !== null && $it['id'] !== '' ? (int)$it['id'] : null;
+        $rawDates = is_array($it['d'] ?? null) ? $it['d'] : [];
+        $dates = rh_clean_block_dates($rawDates);
+        if (count($dates) < count(array_filter($rawDates, static fn($x) => is_string($x) && rh_normalize_block_date($x) !== null))) {
+            $hadPast = true;
+        }
+        if (!$dates) {
+            continue;
+        }
+        if ($t === 'all') {
+            $key = 'all';
+            $target = ['scope' => 'all', 'id' => null, 'room_ids' => [], 'type_id' => null, 'label' => 'All rooms'];
+        } elseif ($t === 'type' && $id !== null && $id > 0) {
+            $st = $pdo->prepare('SELECT name FROM rooms WHERE id = ?');
+            $st->execute([$id]);
+            $name = $st->fetchColumn();
+            if ($name === false) {
+                return 'A selected room type no longer exists. Reload the page.';
+            }
+            $key = 'type:' . $id;
+            $target = ['scope' => 'type', 'id' => $id, 'room_ids' => [], 'type_id' => $id, 'label' => 'All ' . $name . ' rooms'];
+        } elseif ($t === 'room' && $id !== null && $id > 0) {
+            if (($err = rh_block_check_individual_room($pdo, $id)) !== null) {
+                return $err . ' Reload the page.';
+            }
+            $roomIds = rh_block_room_ids((string)$id);
+            sort($roomIds);
+            if (!$roomIds) {
+                return 'A selected room could not be found. Reload the page.';
+            }
+            foreach ($roomIds as $rid) {
+                if (($err = rh_block_check_individual_room($pdo, $rid)) !== null) {
+                    return 'Both rooms of a joined room must be active to block it. ' . $err;
+                }
+            }
+            $ph = implode(',', array_fill(0, count($roomIds), '?'));
+            $st = $pdo->prepare("SELECT room_number, room_type_id FROM individual_rooms WHERE id IN ($ph) ORDER BY id");
+            $st->execute($roomIds);
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            $key = 'room:' . implode('+', $roomIds); // a pair is one target whichever member was posted
+            $target = ['scope' => 'room', 'id' => $roomIds[0], 'room_ids' => $roomIds, 'type_id' => (int)$rows[0]['room_type_id'],
+                'label' => 'Room ' . implode(' + ', array_column($rows, 'room_number'))];
+        } else {
+            return 'The selection could not be read. Reload the page and try again.';
+        }
+        $prev = $targets[$key]['dates'] ?? [];
+        $target['dates'] = rh_clean_block_dates(array_merge($prev, $dates));
+        $nights += count($target['dates']) - count($prev);
+        $targets[$key] = $target;
+        if ($nights > 5000) {
+            return 'Too many nights at once (over 5000). Select fewer and try again.';
+        }
+    }
+    if (!$targets) {
+        return $hadPast ? 'Past nights cannot be blocked or unblocked. Select nights from today onwards.' : 'Select at least one night on the calendar.';
+    }
+    return array_values($targets);
+}
+
+/** Nights (from $dates) on which this target already has its OWN block row. */
+function rh_block_grid_direct_nights(PDO $pdo, array $target, array $dates): array
+{
+    if (!$dates) {
+        return [];
+    }
+    $ph = implode(',', array_fill(0, count($dates), '?'));
+    if ($target['scope'] === 'room') {
+        $rph = implode(',', array_fill(0, count($target['room_ids']), '?'));
+        $st = $pdo->prepare("SELECT DISTINCT block_date FROM individual_room_blocked_dates WHERE individual_room_id IN ($rph) AND block_date IN ($ph)");
+        $st->execute(array_merge($target['room_ids'], $dates));
+    } elseif ($target['scope'] === 'type') {
+        $st = $pdo->prepare("SELECT DISTINCT block_date FROM blocked_dates WHERE room_id = ? AND block_date IN ($ph)");
+        $st->execute(array_merge([$target['id']], $dates));
+    } else {
+        $st = $pdo->prepare("SELECT DISTINCT block_date FROM blocked_dates WHERE room_id IS NULL AND block_date IN ($ph)");
+        $st->execute($dates);
+    }
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $d) {
+        $out[substr((string)$d, 0, 10)] = true;
+    }
+    return $out;
+}
+
+/** Nights (from $dates) on which a wider block covers this target: its room type's block or an all-rooms block. */
+function rh_block_grid_inherited_nights(PDO $pdo, array $target, array $dates): array
+{
+    if (!$dates || $target['scope'] === 'all') {
+        return [];
+    }
+    $ph = implode(',', array_fill(0, count($dates), '?'));
+    if ($target['scope'] === 'type') {
+        // A room-type row's own block is not "wider": only the all-rooms block covers it.
+        $st = $pdo->prepare("SELECT DISTINCT block_date FROM blocked_dates WHERE room_id IS NULL AND block_date IN ($ph)");
+        $st->execute($dates);
+    } else {
+        $st = $pdo->prepare("SELECT DISTINCT block_date FROM blocked_dates WHERE (room_id IS NULL OR room_id = ?) AND block_date IN ($ph)");
+        $st->execute(array_merge([$target['type_id']], $dates));
+    }
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $d) {
+        $out[substr((string)$d, 0, 10)] = true;
+    }
+    return $out;
+}
+
+/**
+ * Block or unblock the calendar's selection in ONE transaction under the blocked_dates lock: every night
+ * is saved, or nothing is. Blocking a night that is already blocked on the same row updates its type and
+ * reason. Unblocking only removes a row's OWN block: a night covered by its room type's (or the all-rooms)
+ * block stays blocked and is reported, because a room cannot be let out of a wider block on its own.
+ *
+ * @return array{ok:bool,message:string}
+ */
+function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $blockType, ?string $reason, ?int $by): array
+{
+    $result = rh_block_locked($pdo, function () use ($pdo, $op, $targets, $blockType, $reason, $by) {
+        $added = 0;
+        $updated = 0;
+        $removed = 0;
+        $stillBlocked = 0;
+        $notBlocked = 0;
+        $pdo->beginTransaction();
+        try {
+            foreach ($targets as $tg) {
+                $direct = rh_block_grid_direct_nights($pdo, $tg, $tg['dates']);
+                if ($op === 'block') {
+                    foreach ($tg['dates'] as $d) {
+                        if ($tg['scope'] === 'room') {
+                            foreach ($tg['room_ids'] as $rid) {
+                                if (!blockIndividualRoomDate($rid, $d, $blockType, $reason, $by)) {
+                                    throw new RuntimeException('Could not block ' . $tg['label'] . ' on ' . $d . '.');
+                                }
+                            }
+                        } elseif (!blockRoomDate($tg['scope'] === 'type' ? $tg['id'] : null, $d, $blockType, $reason, $by)) {
+                            throw new RuntimeException('Could not block ' . $tg['label'] . ' on ' . $d . '.');
+                        }
+                        isset($direct[$d]) ? $updated++ : $added++;
+                    }
+                } else {
+                    $inherited = rh_block_grid_inherited_nights($pdo, $tg, $tg['dates']);
+                    foreach ($tg['dates'] as $d) {
+                        if (isset($direct[$d])) {
+                            if ($tg['scope'] === 'room') {
+                                foreach ($tg['room_ids'] as $rid) {
+                                    if (!unblockIndividualRoomDate($rid, $d)) {
+                                        throw new RuntimeException('Could not unblock ' . $tg['label'] . ' on ' . $d . '.');
+                                    }
+                                }
+                            } elseif (!unblockRoomDate($tg['scope'] === 'type' ? $tg['id'] : null, $d)) {
+                                throw new RuntimeException('Could not unblock ' . $tg['label'] . ' on ' . $d . '.');
+                            }
+                            $removed++;
+                            if (isset($inherited[$d])) {
+                                $stillBlocked++;
+                            }
+                        } elseif (isset($inherited[$d])) {
+                            $stillBlocked++;
+                        } else {
+                            $notBlocked++;
+                        }
+                    }
+                }
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('blocked-dates grid_apply: ' . $e->getMessage());
+            return ['ok' => false, 'message' => ($e instanceof RuntimeException ? $e->getMessage() . ' ' : '') . 'Nothing was changed.'];
+        }
+
+        if ($op === 'block') {
+            $msg = 'Blocked ' . $added . ' night(s).';
+            if ($updated > 0) {
+                $msg .= ' ' . $updated . ' night(s) were already blocked and now show the new block type and reason.';
+            }
+            // Heads-up: bookings that already sleep on the newly blocked nights (blocks never move them).
+            $refs = [];
+            foreach ($targets as $tg) {
+                $lists = $tg['scope'] === 'room'
+                    ? array_map(static fn($rid) => getBookingsOverlappingBlockDates(null, $rid, $tg['dates']), $tg['room_ids'])
+                    : [getBookingsOverlappingBlockDates($tg['scope'] === 'type' ? $tg['id'] : null, null, $tg['dates'])];
+                foreach ($lists as $rows) {
+                    foreach ($rows as $b) {
+                        $refs[(string)$b['booking_reference']] = true;
+                    }
+                }
+            }
+            if ($refs) {
+                $list = array_keys($refs);
+                $msg .= ' Note: ' . count($list) . ' existing booking(s) already sleep on these nights (' . implode(', ', array_slice($list, 0, 5))
+                    . (count($list) > 5 ? ', ...' : '') . '). Blocks do not cancel or move bookings; reassign or contact those guests.';
+            }
+            return ['ok' => true, 'message' => $msg];
+        }
+
+        if ($removed === 0 && $stillBlocked === 0) {
+            return ['ok' => false, 'message' => 'None of the selected nights were blocked, so nothing was changed.'];
+        }
+        $msg = 'Unblocked ' . $removed . ' night(s).';
+        if ($stillBlocked > 0) {
+            $msg .= ' ' . $stillBlocked . ' selected night(s) are still blocked by a room-type or all-rooms block; unblock those on the "All ... rooms" or "All rooms" row.';
+        }
+        if ($notBlocked > 0) {
+            $msg .= ' ' . $notBlocked . ' selected night(s) were not blocked.';
+        }
+        return ['ok' => $removed > 0, 'message' => $msg];
+    });
+    return is_array($result) ? $result : ['ok' => false, 'message' => 'Someone else is saving blocks right now. Please try again in a moment. Nothing was changed.'];
 }
 
 /**
@@ -131,10 +385,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $action = $_POST['action'] ?? '';
 
-    if (!$canBlockRooms && in_array($action, ['block_date', 'block_multiple', 'unblock_date', 'bulk_unblock'], true)) {
+    if (!$canBlockRooms && in_array($action, ['block_date', 'block_multiple', 'unblock_date', 'bulk_unblock', 'grid_apply'], true)) {
         // Server-side refusal: the buttons are disabled for this user, but never trust the page.
         $message = rhBlockRoomsDeniedMessage();
         $messageType = 'error';
+        if ($action === 'grid_apply') {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => $message]);
+            exit;
+        }
+    } elseif ($action === 'grid_apply') {
+        // Calendar grid: block or unblock any mix of rooms, room types and the all-rooms row in one save.
+        $gridOp = (string)($_POST['op'] ?? '');
+        $targets = in_array($gridOp, ['block', 'unblock'], true)
+            ? rh_block_grid_targets($pdo, $_POST['items'] ?? '')
+            : 'Unknown action.';
+        $out = is_string($targets)
+            ? ['ok' => false, 'message' => $targets]
+            : rh_block_grid_apply($pdo, $gridOp, $targets, rh_normalize_block_type($_POST['block_type'] ?? 'manual'),
+                rh_normalize_block_reason(isset($_POST['reason']) ? (string)$_POST['reason'] : null), isset($user['id']) ? (int)$user['id'] : null);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => $out['ok'], 'message' => $out['message']]);
+        exit;
     } elseif ($action === 'block_date') {
         $block_scope = $_POST['block_scope'] ?? 'type'; // 'type' or 'individual'
 
@@ -257,7 +529,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $messageType = $okMsg !== '' ? 'success' : 'error';
         }
     } elseif ($action === 'unblock_date') {
-        $id = (int)$_POST['id'] ?? 0;
+        $id = (int)($_POST['id'] ?? 0);
         $block_scope = $_POST['block_scope'] ?? 'type';
 
         if ($id > 0) {
@@ -412,8 +684,12 @@ if (isset($_GET['individual_room_id']) && $_GET['individual_room_id'] !== 'all')
         $filter_individual_token = (string)$filter_individual_room_id;
     }
 }
-$filter_start_date = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-01'); // First day of current month
-$filter_end_date = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-t'); // Last day of current month
+// Invalid dates fall back to the current month (a bad value must not reach the query).
+$filter_start_date = rh_normalize_block_date((string)($_GET['start_date'] ?? '')) ?? date('Y-m-01');
+$filter_end_date = rh_normalize_block_date((string)($_GET['end_date'] ?? '')) ?? date('Y-m-t');
+if ($filter_end_date < $filter_start_date) {
+    [$filter_start_date, $filter_end_date] = [$filter_end_date, $filter_start_date];
+}
 
 // Get blocked dates (both type and individual level)
 $blocked_dates = getBlockedDates($filter_room_id, $filter_start_date, $filter_end_date, $filter_individual_room_id);
@@ -422,6 +698,18 @@ if ($filter_pair_room_ids) {
     $blocked_dates = getBlockedDates($filter_room_id, $filter_start_date, $filter_end_date, null);
     $blocked_dates = array_values(array_filter($blocked_dates, static function ($bd) use ($filter_pair_room_ids) {
         return ($bd['block_scope'] ?? 'type') !== 'individual' || in_array((int)$bd['individual_room_id'], $filter_pair_room_ids, true);
+    }));
+}
+// Filtering by one room: the room-type blocks shown are only the ones that cover THAT room
+// (its own type and all-rooms), not every other type's blocks.
+$filter_room_type_ids = $filter_pair_room_ids ?: ($filter_individual_room_id !== null ? [$filter_individual_room_id] : []);
+if ($filter_room_type_ids) {
+    $ph = implode(',', array_fill(0, count($filter_room_type_ids), '?'));
+    $tst = $pdo->prepare("SELECT DISTINCT room_type_id FROM individual_rooms WHERE id IN ($ph)");
+    $tst->execute($filter_room_type_ids);
+    $filterTypeOfRoom = array_map('intval', $tst->fetchAll(PDO::FETCH_COLUMN));
+    $blocked_dates = array_values(array_filter($blocked_dates, static function ($bd) use ($filterTypeOfRoom) {
+        return ($bd['block_scope'] ?? 'type') === 'individual' || $bd['room_id'] === null || in_array((int)$bd['room_id'], $filterTypeOfRoom, true);
     }));
 }
 
@@ -516,16 +804,57 @@ $blocked_dates = array_values(array_filter($blocked_dates, static function ($bd)
     return true;
 }));
 
-// Get blocked dates for calendar display
-$calendar_start = date('Y-m-d', strtotime('-3 months'));
-$calendar_end = date('Y-m-d', strtotime('+6 months'));
-$calendar_blocked_dates = getBlockedDates(null, $calendar_start, $calendar_end);
-
-// Format blocked dates for calendar - simple array of dates
-$blocked_dates_array = [];
-foreach ($calendar_blocked_dates as $bd) {
-    $blocked_dates_array[] = $bd['block_date'];
+// ── Calendar view (default): rooms down the side, the month's nights across ──────────────────
+$bdView = ($_GET['view'] ?? '') === 'list' ? 'list' : 'calendar';
+$gridMonth = rh_block_grid_month($_GET['month'] ?? '');
+$gridStart = $gridMonth . '-01';
+$gridEnd = date('Y-m-t', strtotime($gridStart));
+$gridToday = date('Y-m-d');
+$gridDays = [];
+$gridTypes = [];       // active room types, by name
+$gridLanes = [];       // room type id => lanes (a joined-only pair is ONE lane, as on the Calendar)
+$gridAll = [];         // night => all-rooms block row
+$gridType = [];        // room type id => night => room-type block row
+$gridRoom = [];        // lane id => night => individual block row
+$gridBooked = [];      // lane id => night => booking references sleeping there
+$gridError = null;
+if ($bdView === 'calendar') {
+    require_once __DIR__ . '/includes/calendar-data.php';
+    for ($d = new DateTime($gridStart), $e = new DateTime($gridEnd); $d <= $e; $d->modify('+1 day')) {
+        $gridDays[] = $d->format('Y-m-d');
+    }
+    $calData = rh_calendar_load($pdo, $gridStart, $gridEnd);
+    $gridError = $calData['error'];
+    $gridTypes = $calData['roomTypes'];
+    foreach ($calData['rooms'] as $lane) {
+        $gridLanes[(int)$lane['room_type_id']][] = $lane;
+    }
+    foreach ($calData['blockedDates'] as $bd) {
+        $night = substr((string)$bd['block_date'], 0, 10);
+        if (($bd['block_scope'] ?? 'type') === 'individual') {
+            $rid = (int)$bd['individual_room_id'];
+            $gridRoom[(int)($calData['laneOfRoom'][$rid] ?? $rid)][$night] = $gridRoom[(int)($calData['laneOfRoom'][$rid] ?? $rid)][$night] ?? $bd;
+        } elseif ($bd['room_id'] === null) {
+            $gridAll[$night] = $bd;
+        } else {
+            $gridType[(int)$bd['room_id']][$night] = $bd;
+        }
+    }
+    foreach ($calData['bookingsByDate'] as $night => $byLane) {
+        foreach ($byLane as $laneKey => $list) {
+            if (strpos((string)$laneKey, 'ir_') !== 0) {
+                continue;
+            }
+            foreach ($list as $b) {
+                $gridBooked[(int)substr((string)$laneKey, 3)][$night][(string)$b['booking_reference']] = (string)($b['guest_name'] ?? '');
+            }
+        }
+    }
 }
+$gridBlockLabels = ['manual' => 'Blocked', 'maintenance' => 'Maintenance', 'event' => 'Event', 'full' => 'Fully booked'];
+$gridBlockCodes = ['manual' => 'B', 'maintenance' => 'M', 'event' => 'E', 'full' => 'F'];
+$gridPrevMonth = date('Y-m', strtotime($gridStart . ' -1 month'));
+$gridNextMonth = date('Y-m', strtotime($gridStart . ' +1 month'));
 
 $site_name = getSetting('site_name');
 ?>
@@ -598,6 +927,189 @@ $site_name = getSetting('site_name');
             </div>
         <?php endif; ?>
 
+        <nav class="bd-viewtabs" aria-label="Blocked dates view">
+            <a href="blocked-dates.php?month=<?php echo htmlspecialchars($gridMonth, ENT_QUOTES); ?>" class="bd-viewtab<?php echo $bdView === 'calendar' ? ' is-active' : ''; ?>"<?php echo $bdView === 'calendar' ? ' aria-current="page"' : ''; ?>>
+                <i class="fas fa-calendar-days"></i> Calendar
+            </a>
+            <a href="blocked-dates.php?view=list" class="bd-viewtab<?php echo $bdView === 'list' ? ' is-active' : ''; ?>"<?php echo $bdView === 'list' ? ' aria-current="page"' : ''; ?>>
+                <i class="fas fa-list"></i> List
+            </a>
+        </nav>
+
+        <?php if ($bdView === 'calendar'): ?>
+        <div class="card bdg-card">
+            <div class="card-header bdg-toolbar">
+                <div class="bdg-monthnav">
+                    <a class="btn btn-ghost btn-sm" href="blocked-dates.php?month=<?php echo $gridPrevMonth; ?>" aria-label="Previous month"><i class="fas fa-chevron-left"></i></a>
+                    <h3 class="bdg-month"><?php echo date('F Y', strtotime($gridStart)); ?></h3>
+                    <a class="btn btn-ghost btn-sm" href="blocked-dates.php?month=<?php echo $gridNextMonth; ?>" aria-label="Next month"><i class="fas fa-chevron-right"></i></a>
+                    <a class="btn btn-secondary btn-sm" href="blocked-dates.php">This month</a>
+                    <form method="GET" class="bdg-jump">
+                        <label class="rh-visually-hidden" for="bdgJumpMonth">Go to month</label>
+                        <input type="month" id="bdgJumpMonth" name="month" class="form-control form-control-sm" value="<?php echo htmlspecialchars($gridMonth, ENT_QUOTES); ?>" onchange="this.form.submit()">
+                    </form>
+                </div>
+                <div class="bdg-typefilter">
+                    <label class="form-label" for="bdgTypeFilter">Room type</label>
+                    <select id="bdgTypeFilter" class="form-select form-select-sm">
+                        <option value="">All room types</option>
+                        <?php foreach ($gridTypes as $gt): ?>
+                            <option value="<?php echo (int)$gt['id']; ?>"><?php echo htmlspecialchars($room_type_label($gt)); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="bdg-legend">
+                    <span class="bdg-legend__item"><span class="bdg-swatch bdg-swatch--blocked">B</span> Blocked on this row (B Blocked, M Maintenance, E Event, F Fully booked)</span>
+                    <span class="bdg-legend__item"><span class="bdg-swatch bdg-swatch--inherited"></span> Blocked by the room type or All rooms row</span>
+                    <span class="bdg-legend__item"><span class="bdg-swatch bdg-swatch--booked"></span> A booking sleeps here</span>
+                    <span class="bdg-legend__item"><span class="bdg-swatch bdg-swatch--conflict"></span> Booked AND blocked: move or contact the guest</span>
+                    <i class="help" data-tip="Each row is one room (a joined room is one row), with its room type's row above it and the All rooms row at the top. Each column is one night of <?php echo htmlspecialchars(date('F Y', strtotime($gridStart)), ENT_QUOTES); ?>: blocking the 5th stops a stay sleeping on the night of the 5th, but a guest can still check out on the 5th. Click a night, or drag across nights and rooms, then press Block or Unblock below. Past nights cannot be changed.">?</i>
+                </div>
+                <?php if ($gridError): ?>
+                    <div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> Some calendar data could not be loaded. Reload the page; if it keeps happening use the List view.</div>
+                <?php endif; ?>
+                <?php if ($canBlockRooms): ?>
+                    <p class="bdg-hint"><i class="fas fa-hand-pointer"></i> Click a night to select it, drag to select several nights or rooms, or click a room name to select its whole month. Shift-click selects a range.</p>
+                <?php endif; ?>
+
+                <div class="bdg-scroll" id="bdgWrap">
+                    <table class="bdg-table no-card-mobile" id="bdgTable" role="grid" aria-label="Blocked nights for <?php echo htmlspecialchars(date('F Y', strtotime($gridStart)), ENT_QUOTES); ?>" data-can-edit="<?php echo $canBlockRooms ? '1' : '0'; ?>">
+                        <thead>
+                            <tr>
+                                <th scope="col" class="bdg-corner">Room</th>
+                                <?php foreach ($gridDays as $night): $ts = strtotime($night); $wd = (int)date('N', $ts); ?>
+                                    <th scope="col" class="bdg-dayhead<?php echo $wd >= 6 ? ' is-weekend' : ''; ?><?php echo $night === $gridToday ? ' is-today' : ''; ?><?php echo $night < $gridToday ? ' is-past' : ''; ?>" title="<?php echo date('l j F Y', $ts); ?>">
+                                        <span class="bdg-dayhead__wd"><?php echo substr(date('D', $ts), 0, 2); ?></span>
+                                        <span class="bdg-dayhead__n"><?php echo date('j', $ts); ?></span>
+                                    </th>
+                                <?php endforeach; ?>
+                            </tr>
+                        </thead>
+                        <?php
+                        /** One night cell. $direct = this row's own block row; $inherited = a wider block that covers it. */
+                        $gridCell = static function (string $t, ?int $id, string $rowLabel, string $night, ?array $direct, ?array $inherited, array $booked) use ($gridToday, $canBlockRooms, $gridBlockLabels, $gridBlockCodes): string {
+                            $ts = strtotime($night);
+                            $cls = ['bdg-cell'];
+                            if ((int)date('N', $ts) >= 6) { $cls[] = 'is-weekend'; }
+                            if ($night === $gridToday) { $cls[] = 'is-today'; }
+                            $past = $night < $gridToday;
+                            if ($past) { $cls[] = 'is-past'; }
+                            $info = [$rowLabel, date('D j M Y', $ts) . ' (night)'];
+                            $code = '';
+                            if ($direct) {
+                                $bt = (string)($direct['block_type'] ?? 'manual');
+                                $cls[] = 'is-blocked';
+                                $cls[] = 'bdg-code-' . (isset($gridBlockCodes[$bt]) ? $bt : 'manual');
+                                $code = $gridBlockCodes[$bt] ?? 'B';
+                                $info[] = 'Blocked on this row: ' . ($gridBlockLabels[$bt] ?? 'Blocked')
+                                    . (!empty($direct['reason']) ? ' - ' . $direct['reason'] : '')
+                                    . ' (by ' . ($direct['created_by_name'] ?? 'System') . ')';
+                            }
+                            if ($inherited) {
+                                $bt = (string)($inherited['block_type'] ?? 'manual');
+                                if (!$direct) { $cls[] = 'is-inherited'; }
+                                $info[] = 'Also blocked by ' . ($inherited['room_id'] === null ? 'All rooms' : 'room type ' . ($inherited['room_name'] ?? '')) . ': '
+                                    . ($gridBlockLabels[$bt] ?? 'Blocked') . (!empty($inherited['reason']) ? ' - ' . $inherited['reason'] : '');
+                            }
+                            if (!$direct && !$inherited) {
+                                $info[] = 'Open for sale';
+                            }
+                            $bookedHtml = '';
+                            if ($booked) {
+                                $cls[] = 'is-booked';
+                                if ($direct || $inherited) { $cls[] = 'is-conflict'; }
+                                $parts = [];
+                                foreach ($booked as $ref => $guest) {
+                                    $parts[] = $ref . ($guest !== '' ? ' (' . $guest . ')' : '');
+                                }
+                                $info[] = 'Booked: ' . implode(', ', $parts);
+                                $bookedHtml = '<span class="bdg-bookbar" aria-hidden="true"></span>';
+                            }
+                            $infoText = implode(' · ', $info);
+                            $attrs = ' class="' . implode(' ', $cls) . '" title="' . htmlspecialchars($infoText, ENT_QUOTES) . '" data-info="' . htmlspecialchars($infoText, ENT_QUOTES) . '"';
+                            if (!$past && $canBlockRooms) {
+                                $attrs .= ' data-sel="1" data-t="' . $t . '" data-id="' . ($id === null ? '' : (int)$id) . '" data-d="' . $night . '"'
+                                    . ' data-state="' . ($direct ? 'direct' : ($inherited ? 'inherited' : 'open')) . '"' . ($booked ? ' data-booked="1"' : '')
+                                    . ' role="gridcell" aria-selected="false" tabindex="-1"';
+                            } else {
+                                $attrs .= ' role="gridcell"';
+                            }
+                            return '<td' . $attrs . '>' . ($code !== '' ? '<span class="bdg-code">' . $code . '</span>' : '') . $bookedHtml . '</td>';
+                        };
+                        ?>
+                        <tbody class="bdg-group bdg-group--all">
+                            <tr class="bdg-row bdg-row--all">
+                                <th scope="row" class="bdg-rowhead" data-row-select tabindex="0" title="Blocks here stop every room in the hotel">
+                                    <span class="bdg-rowhead__name"><i class="fas fa-hotel"></i> All rooms</span>
+                                    <span class="bdg-rowhead__sub">whole hotel</span>
+                                </th>
+                                <?php foreach ($gridDays as $night) { echo $gridCell('all', null, 'All rooms', $night, $gridAll[$night] ?? null, null, []); } ?>
+                            </tr>
+                        </tbody>
+                        <?php foreach ($gridTypes as $gt): $tid = (int)$gt['id']; $typeName = (string)$gt['name']; ?>
+                            <tbody class="bdg-group" data-type-group="<?php echo $tid; ?>">
+                                <tr class="bdg-row bdg-row--type">
+                                    <th scope="row" class="bdg-rowhead" data-row-select tabindex="0" title="<?php echo htmlspecialchars(isset($joined_type_ids[$tid]) ? 'Blocks here stop the joined pairs of this type only; the rooms can still be sold on their own.' : 'Blocks here stop every ' . $typeName . ' room, and joined pairs that use them.', ENT_QUOTES); ?>">
+                                        <span class="bdg-rowhead__name"><i class="fas fa-layer-group"></i> All <?php echo htmlspecialchars($typeName); ?></span>
+                                        <span class="bdg-rowhead__sub"><?php echo isset($joined_type_ids[$tid]) ? 'joined pairs (room type)' : 'room type'; ?></span>
+                                    </th>
+                                    <?php foreach ($gridDays as $night) { echo $gridCell('type', $tid, 'All ' . $typeName . ' rooms', $night, $gridType[$tid][$night] ?? null, $gridAll[$night] ?? null, []); } ?>
+                                </tr>
+                                <?php foreach ($gridLanes[$tid] ?? [] as $lane):
+                                    $lid = (int)$lane['id'];
+                                    $isPair = !empty($lane['is_joined_lane']);
+                                    $laneLabel = 'Room ' . $lane['room_number'];
+                                    $laneStatus = (string)($lane['status'] ?? '');
+                                    $laneNote = $isPair ? 'Joined room: blocks both rooms' : (!empty($room_joined_label[$lid]) ? 'Part of joined room ' . implode(', ', $room_joined_label[$lid]) . ': blocking this room also stops that pair' : '');
+                                ?>
+                                    <tr class="bdg-row bdg-row--room">
+                                        <th scope="row" class="bdg-rowhead" data-row-select tabindex="0"<?php echo $laneNote !== '' ? ' title="' . htmlspecialchars($laneNote, ENT_QUOTES) . '"' : ''; ?>>
+                                            <span class="bdg-rowhead__name">
+                                                <?php echo htmlspecialchars((string)$lane['room_number']); ?>
+                                                <?php if ($isPair || !empty($room_joined_label[$lid])): ?><i class="fas fa-link bdg-rowhead__icon" aria-label="<?php echo htmlspecialchars($laneNote, ENT_QUOTES); ?>"></i><?php endif; ?>
+                                            </span>
+                                            <?php if (in_array($laneStatus, ['maintenance', 'out_of_order'], true)): ?>
+                                                <span class="bdg-rowhead__status"><?php echo $laneStatus === 'maintenance' ? 'Maintenance' : 'Out of order'; ?> now</span>
+                                            <?php elseif (!empty($lane['room_name']) && $lane['room_name'] !== $lane['room_number']): ?>
+                                                <span class="bdg-rowhead__sub"><?php echo htmlspecialchars((string)$lane['room_name']); ?></span>
+                                            <?php endif; ?>
+                                        </th>
+                                        <?php foreach ($gridDays as $night) {
+                                            echo $gridCell('room', $lid, $laneLabel, $night, $gridRoom[$lid][$night] ?? null, $gridType[$tid][$night] ?? ($gridAll[$night] ?? null), $gridBooked[$lid][$night] ?? []);
+                                        } ?>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        <?php endforeach; ?>
+                    </table>
+                </div>
+
+                <?php if ($canBlockRooms): ?>
+                <div class="bdg-actionbar" id="bdgBar">
+                    <div class="bdg-actionbar__summary" id="bdgSummary" aria-live="polite">No nights selected</div>
+                    <div class="bdg-actionbar__fields">
+                        <label class="rh-visually-hidden" for="bdgBlockType">Block type</label>
+                        <select id="bdgBlockType" class="form-select form-select-sm">
+                            <option value="manual">Blocked</option>
+                            <option value="maintenance">Maintenance</option>
+                            <option value="event">Event</option>
+                            <option value="full">Fully booked</option>
+                        </select>
+                        <label class="rh-visually-hidden" for="bdgReason">Reason (optional)</label>
+                        <input type="text" id="bdgReason" class="form-control form-control-sm" maxlength="255" placeholder="Reason (optional)">
+                        <button type="button" class="btn btn-primary btn-sm" id="bdgBlockBtn" disabled><i class="fas fa-ban"></i> Block</button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="bdgUnblockBtn" disabled><i class="fas fa-unlock"></i> Unblock</button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="bdgClearBtn" disabled>Clear</button>
+                    </div>
+                    <div id="bdgFeedback" class="admin-modal-feedback" role="status"></div>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php else: ?>
+
         <!-- Filters -->
         <div class="card blocked-dates-filter-card">
             <div class="card-header blocked-dates-filter-card__header">
@@ -605,6 +1117,7 @@ $site_name = getSetting('site_name');
             </div>
             <div class="card-body">
                 <form method="GET" class="blocked-dates-filter-form">
+                    <input type="hidden" name="view" value="list">
                     <div class="bdfilter-field">
                         <label class="form-label">Room Type</label>
                         <select name="room_id" class="form-select">
@@ -645,7 +1158,7 @@ $site_name = getSetting('site_name');
                             <button type="submit" class="btn btn-primary">
                                 <i class="fas fa-magnifying-glass"></i> Apply
                             </button>
-                            <a href="blocked-dates.php" class="btn btn-ghost">Reset</a>
+                            <a href="blocked-dates.php?view=list" class="btn btn-ghost">Reset</a>
                         </div>
                     </div>
                 </form>
@@ -653,7 +1166,7 @@ $site_name = getSetting('site_name');
         </div>
 
         <!-- Blocked Dates List -->
-        <div class="card">
+        <div class="card" id="bdListCard">
             <div class="card-header">
                 <i class="fas fa-list"></i> Blocked Dates
                 <span class="badge badge-info blocked-dates-count"><?php echo count($blocked_dates); ?> dates</span>
@@ -769,6 +1282,7 @@ $site_name = getSetting('site_name');
                 <?php endif; ?>
             </div>
         </div>
+        <?php endif; ?>
     </div>
 
     <!-- Block Single Date Modal -->
@@ -954,8 +1468,6 @@ $site_name = getSetting('site_name');
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
     <script>
-        // Blocked dates array for disabling in calendar
-        const blockedDates = <?php echo json_encode($blocked_dates_array); ?>;
 
         function initBlockedDatePickers() {
             if (typeof flatpickr !== 'function') {
@@ -1106,19 +1618,29 @@ $site_name = getSetting('site_name');
         });
 
         function refreshBlockedDatesTable() {
-            fetch(window.location.href)
+            // no-store: a cached copy of the page would show the blocks as they were before the save.
+            fetch(window.location.href, { cache: 'no-store', credentials: 'same-origin' })
                 .then(function(r) {
                     return r.text();
                 })
                 .then(function(html) {
                     const doc = new DOMParser().parseFromString(html, 'text/html');
-                    const next = doc.getElementById('blockedDatesContainer');
-                    const cur = document.getElementById('blockedDatesContainer');
-                    if (next && cur) cur.outerHTML = next.outerHTML;
+                    // List view: the whole list card (it may have been the "no blocked dates" state).
+                    // Calendar view: the grid; the grid script then clears its selection.
+                    ['bdListCard', 'bdgWrap'].forEach(function(id) {
+                        const next = doc.getElementById(id);
+                        const cur = document.getElementById(id);
+                        if (next && cur) cur.outerHTML = next.outerHTML;
+                    });
+                    if (window.bdgAfterRefresh) window.bdgAfterRefresh();
                 }).catch(function() {});
         }
+        window.refreshBlockedDatesTable = refreshBlockedDatesTable;
     </script>
     <script src="js/admin-components.js"></script>
+    <?php if ($bdView === 'calendar' && $canBlockRooms): ?>
+    <script src="js/blocked-dates-grid.js?v=<?php echo @filemtime(__DIR__ . '/js/blocked-dates-grid.js'); ?>"></script>
+    <?php endif; ?>
 
     <?php require_once 'includes/admin-footer.php'; ?>
 
