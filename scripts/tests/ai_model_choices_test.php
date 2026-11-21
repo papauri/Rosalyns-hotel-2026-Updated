@@ -240,6 +240,32 @@ try {
         'at most 10 choices; a model with no price never pushes a priced one out; the suggestion is always among them', json_encode($choiceIds));
     $inUse = array_keys($sel($pdo));
     check(!array_diff($inUse, $ids($c8['rows'])), 'the models in use are always shown, even outside the top 10', json_encode($inUse));
+
+    // Fit limits to the cap (owner 2026-11-21: "auto set to the best capacity to fit budget")
+    $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL");
+    $pdo->exec("UPDATE ai_models SET is_selected = 1, role = 'primary', price_in_per_mtok = 0.75, price_out_per_mtok = 3.75 WHERE provider = 'google' AND model_id = 'gemini-3.8-flash'");
+    rh_ai_save_settings(['ai_provider' => 'google', 'ai_turn_token_cap' => '60000'], $pdo);
+    $hist = $pdo->query("SELECT COALESCE(SUM(tokens_in), 0) tin, COALESCE(SUM(tokens_out), 0) tout FROM ai_usage_daily WHERE day >= CURDATE() - INTERVAL 30 DAY")->fetch(PDO::FETCH_ASSOC);
+    $share = ((float)$hist['tin'] + (float)$hist['tout']) >= 20000 ? min(0.5, max(0.02, (float)$hist['tout'] / ((float)$hist['tin'] + (float)$hist['tout']))) : 0.1;
+    $perTok = (0.75 * (1 - $share) + 3.75 * $share) / 1000000;
+    $f5 = rh_ai_fit_limits($pdo, 5.0, 1);
+    // A person can go past the daily limit by one whole question: each share pays for daily + turn, 10 % kept back (review 2026-11-21)
+    $allow = 5.0 * 0.9 / $perTok / 31 / 2;
+    $expTurn = (int)max(5000, min(60000, floor($allow / 2 / 1000) * 1000));
+    $expDaily = (int)max(1000, floor(($allow - $expTurn) / 1000) * 1000);
+    check($f5['ok'] && $f5['slots'] === 2 && $f5['turn'] === $expTurn && $f5['daily'] === $expDaily && $f5['month_max'] <= 5.0
+        && ($f5['daily'] + $f5['turn']) * 2 * 31 * $perTok <= 5.0 * 0.9 + 0.0001 && ($f5['daily'] + $f5['turn'] + 1000) * 2 * 31 * $perTok > 5.0 * 0.9 && $f5['model'] !== '',
+        'fit: 1 person + nightly checks at US$5 on 0.75/3.75: daily limit plus one whole question past it, used every day for 31 days, stays within 90 % of the cap', json_encode($f5));
+    $f50 = rh_ai_fit_limits($pdo, 50.0, 4);
+    check($f50['ok'] && $f50['slots'] === 5 && $f50['daily'] > $f5['daily'] && $f50['month_max'] <= 50.0 && $f50['turn'] <= 60000, 'fit: a bigger cap and more people still stay within the cap', json_encode($f50));
+    $fTiny = rh_ai_fit_limits($pdo, 0.0, 1);
+    check(!$fTiny['ok'] && $fTiny['reason'] !== '', 'fit: no cap, no fit (a plain reason)', json_encode($fTiny));
+    $pdo->exec("UPDATE ai_models SET price_in_per_mtok = NULL, price_out_per_mtok = NULL WHERE provider = 'google' AND model_id = 'gemini-3.8-flash'");
+    $fNo = rh_ai_fit_limits($pdo, 5.0, 1);
+    check(!$fNo['ok'] && strpos($fNo['reason'], 'no price yet') !== false, 'fit: a Primary with no price yet gives a plain reason, never a guess', $fNo['reason']);
+    $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL");
+    $fNone = rh_ai_fit_limits($pdo, 5.0, 1);
+    check(!$fNone['ok'] && strpos($fNone['reason'], 'Primary') !== false, 'fit: no Primary chosen gives a plain reason', $fNone['reason']);
 } finally {
     $pdo->rollBack();
     rh_ai_set_transport(null);

@@ -499,6 +499,17 @@ if ($schemaReady) {
 }
 $roleLabels = array_map(static fn($r) => (string)($r['label'] ?? ''), getAllRoles());
 
+// Owner 2026-11-21: "for Budgets and limits be able to auto set to the best capacity to fit budget".
+$fit = ['ok' => false, 'reason' => 'The Assistant tables are not ready yet.'];
+if ($schemaReady) {
+    try {
+        $fit = rh_ai_fit_limits($pdo, (float)($settings['ai_monthly_budget_usd'] ?? 0), count($access));
+    } catch (Throwable $e) {
+        $fit = ['ok' => false, 'reason' => 'The fit could not be worked out just now.'];
+    }
+}
+$usd = static fn(float $v): string => 'US$' . number_format($v, 2);
+
 // Usage (last 30 days) and month-to-date estimated cost
 $usage = [];
 $monthCost = 0.0;
@@ -506,7 +517,7 @@ if ($schemaReady && $canUsage) {
     try {
         $usage = $pdo->query(
             "SELECT d.day, d.provider, d.model_id, d.requests, d.tokens_in, d.tokens_out, d.cost_usd,
-                    COALESCE(NULLIF(u.full_name, ''), u.username, CONCAT('User #', d.user_id)) AS person
+                    COALESCE(NULLIF(u.full_name, ''), u.username, IF(d.user_id = 0, 'Nightly checks', CONCAT('User #', d.user_id))) AS person
              FROM ai_usage_daily d LEFT JOIN admin_users u ON u.id = d.user_id
              WHERE d.day >= CURDATE() - INTERVAL 30 DAY
              ORDER BY d.day DESC, person ASC, d.model_id ASC
@@ -594,7 +605,12 @@ $fmtCtx = static function ($n): string {
     return $n >= 1000000 ? rtrim(rtrim(number_format($n / 1000000, 2), '0'), '.') . 'M' : (int)round($n / 1000) . 'K';
 };
 $fmtPrice = static function ($v): string {
-    return $v === null || $v === '' ? '' : rtrim(rtrim(number_format((float)$v, 4, '.', ''), '0'), '.');
+    if ($v === null || $v === '') {
+        return '';
+    }
+    // Money style: at least 2 decimals ($0.30, $2.50), up to 4 for very cheap models ($0.0375).
+    $s = rtrim(number_format((float)$v, 4, '.', ''), '0');
+    return strlen(substr(strrchr($s, '.'), 1)) < 2 ? number_format((float)$v, 2, '.', '') : $s;
 };
 ?>
 <!DOCTYPE html>
@@ -906,20 +922,48 @@ $fmtPrice = static function ($v): string {
 
         <!-- 4. Budgets and limits -->
         <div class="rh-panel ai-card" id="ai-limits">
-            <div class="rh-panel__head"><h2 class="rh-panel__title">Budgets and limits <i class="help" data-tip="Caps that stop the Assistant before it costs more than you want. The provider bills your account directly; these are estimates from the prices above.">?</i></h2></div>
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Budgets and limits <i class="help" data-tip="The monthly cap you set, and the limits that keep use within it. The provider bills your account directly; costs here are estimates from the model prices.">?</i></h2></div>
             <div class="rh-panel__body">
                 <form method="POST" action="ai-settings.php" class="ai-limits-grid">
                     <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
                     <input type="hidden" name="action" value="save_limits">
                     <div class="form-group">
-                        <label for="ai_cap"><strong>Daily limit per person (tokens)</strong></label>
-                        <input type="number" min="1000" max="50000000" step="1000" id="ai_cap" name="ai_user_daily_token_cap" class="form-control" value="<?php echo $h((int)$settings['ai_user_daily_token_cap']); ?>">
-                        <p class="help-text">Tokens read plus written per person per day. Only a guard against a runaway loop: 2,000,000 is many times a very busy day, so normal use never reaches it.</p>
-                    </div>
-                    <div class="form-group">
                         <label for="ai_budget"><strong>Monthly cap (US$)</strong></label>
                         <input type="number" min="1" max="100000" step="0.01" id="ai_budget" name="ai_monthly_budget_usd" class="form-control" value="<?php echo $h($settings['ai_monthly_budget_usd']); ?>">
-                        <p class="help-text">The most the Assistant should cost a month. The only cost figure you set: model prices are filled in automatically. It is shown next to this month's estimated cost as information only: chat never pauses when it is passed.</p>
+                        <p class="help-text">The most the Assistant should cost a month. The only cost figure you set: model prices are filled in automatically. Passing it never pauses chat on its own; Fit limits to the cap sets the daily limit so a month cannot pass it.</p>
+                    </div>
+                    <div class="ai-fit" data-ai-fit
+                        <?php if (!empty($fit['ok'])): ?>
+                        data-per-token="<?php echo $h(sprintf('%.17g', (float)$fit['per_token'])); ?>" data-slots="<?php echo (int)$fit['slots']; ?>"
+                        data-avg="<?php echo (int)$fit['avg_question']; ?>" data-turn="<?php echo (int)rh_ai_turn_token_cap(); ?>" data-people="<?php echo (int)$fit['people']; ?>"
+                        <?php endif; ?>>
+                        <div class="ai-fit__text">
+                            <strong>Fit limits to the cap</strong>
+                            <i class="help" data-tip="Sets Daily limit per person and Most tokens for one question so that even if every person with Assistant access, plus the nightly checks, used all of it every day of a 31-day month (and went past the daily limit by one whole question, as can happen), the cost stays within the monthly cap, with 10% kept back. Priced at the Primary model's price (the Fast model is cheaper, so a real month costs less), with the share of tokens read and written from the last 30 days. Nothing is saved until you click Save limits.">?</i>
+                            <?php if (!empty($fit['ok'])):
+                                $nowDaily = (int)$settings['ai_user_daily_token_cap'];
+                                $nowTurn = (int)($settings['ai_turn_token_cap'] ?? 60000);
+                                $nowMax = ($nowDaily + $nowTurn) * (int)$fit['slots'] * 31 * (float)$fit['per_token']; // one question can run past the daily limit ?>
+                                <p class="help-text" data-ai-fit-out>
+                                    At <?php echo $h($usd((float)$settings['ai_monthly_budget_usd'])); ?> a month with <?php echo $h($fit['model']); ?>
+                                    (<?php echo $h($usd((float)$fit['price_in'])); ?> in / <?php echo $h($usd((float)$fit['price_out'])); ?> out per million tokens),
+                                    <?php echo (int)$fit['people']; ?> <?php echo (int)$fit['people'] === 1 ? 'person' : 'people'; ?> with access plus the nightly checks:
+                                    up to <strong><?php echo $h(number_format((int)$fit['daily'])); ?> tokens a day each</strong> (about <?php echo $h(number_format((int)$fit['questions'])); ?> questions), at most <?php echo $h(number_format((int)$fit['turn'])); ?> for one question.
+                                    Used in full every day, a month costs at most <?php echo $h($usd((float)$fit['month_max'])); ?>.
+                                </p>
+                                <p class="help-text" data-ai-fit-now>
+                                    Now: <?php echo $h(number_format($nowDaily)); ?> a day each, which could cost up to <?php echo $h($usd($nowMax)); ?> a month<?php echo $nowMax > (float)$settings['ai_monthly_budget_usd'] + 0.005 ? ', more than the cap' : ', within the cap'; ?>.
+                                </p>
+                            <?php else: ?>
+                                <p class="help-text"><?php echo $h((string)($fit['reason'] ?? '')); ?></p>
+                            <?php endif; ?>
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-sm" data-ai-fit-btn<?php echo empty($fit['ok']) ? ' disabled' : ''; ?>><i class="fas fa-sliders-h" aria-hidden="true"></i> Fit limits to the cap</button>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_cap"><strong>Daily limit per person (tokens)</strong></label>
+                        <input type="number" min="1000" max="50000000" step="1000" id="ai_cap" name="ai_user_daily_token_cap" class="form-control" value="<?php echo $h((int)$settings['ai_user_daily_token_cap']); ?>">
+                        <p class="help-text">Tokens read plus written per person per day; the nightly checks count as one more person. When it is used up, quick lookups still work and the rest is back the next day.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_rate"><strong>Messages per person in 10 minutes</strong></label>
@@ -939,10 +983,10 @@ $fmtPrice = static function ($v): string {
                     <div class="form-group">
                         <label for="ai_actions_on"><strong>Action cards</strong></label>
                         <select id="ai_actions_on" name="ai_actions_enabled" class="form-control">
-                            <option value="1"<?php echo (($settings['ai_actions_enabled'] ?? '1') !== '0') ? ' selected' : ''; ?>>On - it can prepare changes for people to confirm</option>
-                            <option value="0"<?php echo (($settings['ai_actions_enabled'] ?? '1') === '0') ? ' selected' : ''; ?>>Off - answers only, no cards</option>
+                            <option value="1"<?php echo (($settings['ai_actions_enabled'] ?? '1') !== '0') ? ' selected' : ''; ?>>On - prepares changes</option>
+                            <option value="0"<?php echo (($settings['ai_actions_enabled'] ?? '1') === '0') ? ' selected' : ''; ?>>Off - answers only</option>
                         </select>
-                        <p class="help-text">A card (new booking, check-in, check-out, housekeeping job...) changes nothing until the person taps Confirm, and then runs through the normal screen. Only people with "Confirm Assistant actions" (Staff &amp; Access) see cards.</p>
+                        <p class="help-text">On: it can prepare changes for people to confirm. Off: answers only, no cards. A card (new booking, check-in, check-out, housekeeping job...) changes nothing until the person taps Confirm, and then runs through the normal screen. Only people with "Confirm Assistant actions" (Staff &amp; Access) see cards.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_idle"><strong>Lock the Assistant after (minutes without use)</strong></label>
@@ -962,10 +1006,10 @@ $fmtPrice = static function ($v): string {
                     <div class="form-group">
                         <label for="ai_digest"><strong>Weekly digest email</strong></label>
                         <select id="ai_digest" name="ai_digest_enabled" class="form-control">
-                            <option value="1"<?php echo (($settings['ai_digest_enabled'] ?? '1') !== '0') ? ' selected' : ''; ?>>On - once a week to people who manage Assistant Settings</option>
-                            <option value="0"<?php echo (($settings['ai_digest_enabled'] ?? '1') === '0') ? ' selected' : ''; ?>>Off - no digest emails</option>
+                            <option value="1"<?php echo (($settings['ai_digest_enabled'] ?? '1') !== '0') ? ' selected' : ''; ?>>On - weekly email</option>
+                            <option value="0"<?php echo (($settings['ai_digest_enabled'] ?? '1') === '0') ? ' selected' : ''; ?>>Off - no email</option>
                         </select>
-                        <p class="help-text">A short email with what needs attention and last week's room figures, worked out from what each person's account can see. Each person can switch it off in the Assistant's Reply settings.</p>
+                        <p class="help-text">On: once a week to the people who manage Assistant Settings. A short email with what needs attention and last week's room figures, worked out from what each person's account can see. Each person can switch it off in the Assistant's Reply settings.</p>
                     </div>
                     <div class="ai-actions ai-limits-save">
                         <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save limits</button>
@@ -1012,18 +1056,18 @@ $fmtPrice = static function ($v): string {
                     <div class="form-group">
                         <label for="ai_learn_on"><strong>Learning</strong></label>
                         <select id="ai_learn_on" name="ai_learning_enabled" class="form-control">
-                            <option value="1"<?php echo ($settings['ai_learning_enabled'] ?? '1') !== '0' ? ' selected' : ''; ?>>On - it keeps notes from corrections and its mistakes</option>
-                            <option value="0"<?php echo ($settings['ai_learning_enabled'] ?? '1') === '0' ? ' selected' : ''; ?>>Frozen - it uses what it knows but keeps nothing new</option>
+                            <option value="1"<?php echo ($settings['ai_learning_enabled'] ?? '1') !== '0' ? ' selected' : ''; ?>>On - keeps notes</option>
+                            <option value="0"<?php echo ($settings['ai_learning_enabled'] ?? '1') === '0' ? ' selected' : ''; ?>>Frozen - keeps nothing new</option>
                         </select>
-                        <p class="help-text">Notes only ever change what it knows and how it words things - never what it may see or do.</p>
+                        <p class="help-text">On: it keeps notes from corrections and its mistakes. Frozen: it uses what it knows but keeps nothing new. Notes only ever change what it knows and how it words things - never what it may see or do.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_cloud_on"><strong>Cloud providers</strong></label>
                         <select id="ai_cloud_on" name="ai_cloud_enabled" class="form-control">
-                            <option value="1"<?php echo ($settings['ai_cloud_enabled'] ?? '1') !== '0' ? ' selected' : ''; ?>>On - questions that need a model go to the provider</option>
-                            <option value="0"<?php echo ($settings['ai_cloud_enabled'] ?? '1') === '0' ? ' selected' : ''; ?>>Off - nothing leaves the hotel; quick local answers only</option>
+                            <option value="1"<?php echo ($settings['ai_cloud_enabled'] ?? '1') !== '0' ? ' selected' : ''; ?>>On - uses the provider</option>
+                            <option value="0"<?php echo ($settings['ai_cloud_enabled'] ?? '1') === '0' ? ' selected' : ''; ?>>Off - local answers only</option>
                         </select>
-                        <p class="help-text">Off stops every call to a provider at once. Arrivals, departures, in house, room status and how-to answers still work.</p>
+                        <p class="help-text">On: questions that need a model go to the provider. Off stops every call to a provider at once: nothing leaves the hotel. Arrivals, departures, in house, room status and how-to answers still work.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_c_days"><strong>Clean days in a row to be complete</strong></label>
@@ -1144,26 +1188,26 @@ $fmtPrice = static function ($v): string {
                     <div class="form-group">
                         <label for="ai_sk_on"><strong>Stock name check</strong></label>
                         <select id="ai_sk_on" name="ai_stock_helper_enabled" class="form-control">
-                            <option value="0"<?php echo ($settings['ai_stock_helper_enabled'] ?? '0') !== '1' ? ' selected' : ''; ?>>Off - Fix crate prices works exactly as before</option>
-                            <option value="1"<?php echo ($settings['ai_stock_helper_enabled'] ?? '0') === '1' ? ' selected' : ''; ?>>On - suggestions on Fix crate prices</option>
+                            <option value="0"<?php echo ($settings['ai_stock_helper_enabled'] ?? '0') !== '1' ? ' selected' : ''; ?>>Off - as before</option>
+                            <option value="1"<?php echo ($settings['ai_stock_helper_enabled'] ?? '0') === '1' ? ' selected' : ''; ?>>On - suggestions shown</option>
                         </select>
-                        <p class="help-text">Only works while the Assistant itself is on. Item names, units, prices and bar menu prices are sent; never notes, suppliers or people.</p>
+                        <p class="help-text">Off: Fix crate prices works exactly as before. On: suggestions on Fix crate prices. Only works while the Assistant itself is on. Item names, units, prices and bar menu prices are sent; never notes, suppliers or people.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_sk_two"><strong>Two models must agree</strong></label>
                         <select id="ai_sk_two" name="ai_stock_two_models" class="form-control">
-                            <option value="1"<?php echo ($settings['ai_stock_two_models'] ?? '1') !== '0' ? ' selected' : ''; ?>>Yes - Fast and the cheapest other chosen model</option>
-                            <option value="0"<?php echo ($settings['ai_stock_two_models'] ?? '1') === '0' ? ' selected' : ''; ?>>No - Fast only (cheaper; nothing is offered for "Use all")</option>
+                            <option value="1"<?php echo ($settings['ai_stock_two_models'] ?? '1') !== '0' ? ' selected' : ''; ?>>Yes - two must agree</option>
+                            <option value="0"<?php echo ($settings['ai_stock_two_models'] ?? '1') === '0' ? ' selected' : ''; ?>>No - Fast only</option>
                         </select>
-                        <p class="help-text">A crate size goes into "Use all agreed suggestions" only when both models give the same size and there are at least 5 bar prices.</p>
+                        <p class="help-text">Yes: Fast and the cheapest other chosen model. No: Fast only (cheaper; nothing is offered for "Use all"). A crate size goes into "Use all agreed suggestions" only when both models give the same size and there are at least 5 bar prices.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_sk_prefill"><strong>Use all agreed suggestions</strong></label>
                         <select id="ai_sk_prefill" name="ai_stock_prefill_enabled" class="form-control">
-                            <option value="0"<?php echo ($settings['ai_stock_prefill_enabled'] ?? '0') !== '1' ? ' selected' : ''; ?>>Off - each size is filled one at a time</option>
-                            <option value="1"<?php echo ($settings['ai_stock_prefill_enabled'] ?? '0') === '1' ? ' selected' : ''; ?>>On - one button fills every agreed size</option>
+                            <option value="0"<?php echo ($settings['ai_stock_prefill_enabled'] ?? '0') !== '1' ? ' selected' : ''; ?>>Off - one at a time</option>
+                            <option value="1"<?php echo ($settings['ai_stock_prefill_enabled'] ?? '0') === '1' ? ' selected' : ''; ?>>On - fill all at once</option>
                         </select>
-                        <p class="help-text">Can only be switched on after the name test below has passed with the models in use now. A filled box still needs Preview and Confirm.</p>
+                        <p class="help-text">Off: each size is filled one at a time. On: one button fills every agreed size. Can only be switched on after the name test below has passed with the models in use now. A filled box still needs Preview and Confirm.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_sk_items"><strong>Names in one request</strong></label>
@@ -1295,7 +1339,7 @@ $fmtPrice = static function ($v): string {
                     <span class="ai-stat__value">$<?php echo $h(number_format($monthCost, 2)); ?></span>
                     <span class="ai-stat__sub">monthly cap $<?php echo $h(number_format((float)$settings['ai_monthly_budget_usd'], 2)); ?></span>
                 </div>
-                <p class="help-text"><a href="ai-usage.php"><i class="fas fa-chart-bar" aria-hidden="true"></i> Open the usage dashboard</a> - cost per answer, answers given without a model call, and totals by person, day and model.</p>
+                <p class="help-text ai-usage-link"><a href="ai-usage.php" class="btn btn-secondary btn-sm"><i class="fas fa-chart-bar" aria-hidden="true"></i> Open the usage dashboard</a> Cost per answer, answers given without a model call, and totals by person, day and model.</p>
                 <?php if (!$usage): ?>
                     <p class="help-text">No questions asked in the last 30 days.</p>
                 <?php else: ?>
@@ -1540,6 +1584,36 @@ $fmtPrice = static function ($v): string {
 
     <script>
     (function () {
+        // Fit limits to the cap (owner 2026-11-21): same sum as rh_ai_fit_limits, with the cap typed in the field now.
+        var fit = document.querySelector('[data-ai-fit]');
+        var fitBtn = fit ? fit.querySelector('[data-ai-fit-btn]') : null;
+        if (fit && fitBtn && fit.dataset.perToken) {
+            fitBtn.addEventListener('click', function () {
+                var per = parseFloat(fit.dataset.perToken), slots = parseInt(fit.dataset.slots, 10), avg = parseInt(fit.dataset.avg, 10);
+                var capEl = document.getElementById('ai_budget'), dayEl = document.getElementById('ai_cap'), turnEl = document.getElementById('ai_turn_cap');
+                var out = fit.querySelector('[data-ai-fit-out]'), now = fit.querySelector('[data-ai-fit-now]');
+                var cap = parseFloat(capEl && capEl.value);
+                if (!(cap > 0) || !(per > 0) || !(slots > 0) || !dayEl) {
+                    if (out) out.textContent = 'Type a monthly cap first.';
+                    return;
+                }
+                // A person can go past the daily limit by one whole question: each share pays for daily + turn; 10% kept back.
+                var allow = cap * 0.9 / per / 31 / slots;
+                var t = parseInt(fit.dataset.turn, 10) || 60000; // the saved limit, as on the server, so a bigger cap can raise it again
+                var turn = Math.max(5000, Math.min(t, Math.floor(allow / 2 / 1000) * 1000));
+                var daily = Math.min(50000000, Math.max(1000, Math.floor((allow - turn) / 1000) * 1000));
+                dayEl.value = daily;
+                if (turnEl) turnEl.value = turn;
+                var money = function (v) { return 'US$' + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); };
+                var max = (daily + turn) * slots * 31 * per;
+                if (out) {
+                    out.textContent = 'Filled in: ' + daily.toLocaleString('en-GB') + ' tokens a day each (about ' + Math.floor(daily / avg).toLocaleString('en-GB')
+                        + ' questions), at most ' + turn.toLocaleString('en-GB') + ' for one question. Used in full every day, a month costs at most ' + money(max) + (max <= cap + 0.005 ? ', within ' : ', over (the smallest limits allowed) ') + money(cap) + '. Click Save limits to keep it.';
+                }
+                if (now) now.hidden = true;
+                [dayEl, turnEl].forEach(function (el) { if (el) { el.classList.add('ai-fit-filled'); } });
+            });
+        }
         // Up to 5 models per provider: count the ticks and stop a sixth (the server checks again).
         function sync(form) {
             var boxes = form.querySelectorAll('[data-ai-pick]');

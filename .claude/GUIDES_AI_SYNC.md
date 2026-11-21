@@ -688,6 +688,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides (Budgets and limits, Usage): "Monthly aim" is now "Monthly cap (US$)"; still information only.
 - Assistant: settings key unchanged (`ai_monthly_budget_usd`); if it mentions the figure, call it the monthly cap. `rh_ai_save_selection()` takes no prices.
 
+### Assistant Settings: Fit limits to the cap + layout fixes (2026-11-21, owner FEATURE)
+- Owner: "for Budgets and limits be able to auto set to the best capacity to fit budget and fix the UI in assistant settings".
+- Guides (Assistant Settings > Budgets and limits): Monthly cap now comes first. New "Fit limits to the cap" button fills Daily limit per person and Most tokens for one question so that even if every person with access plus the nightly checks used all of it every day (and went one question past the daily limit, which can happen), a month stays within the cap with 10% kept back; it shows the figures and what the current limit could cost. Click Save limits to keep it. When a person's daily limit is used up, quick lookups still work and the rest is back the next day.
+- Guides: on/off pickers now read short ("On - prepares changes", "Off - local answers only"...); the full meaning is in the help text under each. Usage table names the system row "Nightly checks". Prices show as $0.30, not $0.3.
+- Assistant: new helper `rh_ai_fit_limits()` (includes/ai/ai-catalog.php); no tool change.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)

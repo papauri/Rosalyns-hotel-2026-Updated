@@ -145,8 +145,51 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+    font-family: 'Jost', sans-serif; /* same face as the panel titles (the global h3 is the serif display face) */
     font-size: 15px;
+    font-weight: 600;
+    color: var(--rh-ink, #231F1C);
     margin: 14px 0 8px;
+}
+
+/* Fit limits to the cap (2026-11-21): one full-width row under the cap */
+.ai-fit {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    padding: 12px 14px;
+    margin: 0 0 14px;
+    border: 1px solid var(--rh-line, #d7dde6);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--rh-line-soft, #eceff3);
+}
+
+.ai-fit__text {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+.ai-fit__text .help-text {
+    margin: 4px 0 0;
+}
+
+.ai-fit .btn {
+    flex: 0 0 auto;
+}
+
+.ai-limits-grid .form-control.ai-fit-filled {
+    border-color: var(--rh-brand, #766550);
+    box-shadow: 0 0 0 2px rgba(118, 101, 80, 0.18);
+}
+
+.ai-usage-link {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
 }
 
 .ai-pick-count {
@@ -158,7 +201,28 @@
 .ai-table .ai-id {
     font-size: 11.5px;
     color: var(--admin-muted, #6b7280);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word; /* breaks only at the id's hyphens (was split at every character) */
+}
+
+/* More room for the model name on the desktop table (a preferred share, so the table still fits) */
+@media (min-width: 769px) {
+    /* The headers carry a "?" and a sort arrow: on one line each they took the Model column's room */
+    #ai-models .ai-models-form .ai-table thead th {
+        white-space: normal;
+    }
+
+    #ai-models .ai-models-form .ai-table thead th:nth-child(1) {
+        white-space: nowrap; /* "Use" stays on one line */
+    }
+
+    .ai-models-form .ai-table th:nth-child(2),
+    .ai-models-form .ai-table td:nth-child(2) {
+        width: 26%;
+    }
+
+    .ai-models-form .ai-table .ai-role {
+        min-width: 96px;
+    }
 }
 
 .ai-table td .badge {

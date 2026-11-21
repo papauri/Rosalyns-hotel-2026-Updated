@@ -595,5 +595,72 @@ function rh_ai_model_refresh_run(PDO $db): array
     return ['ran' => true, 'results' => $results];
 }
 
+/**
+ * Limits that fit the monthly cap (owner 2026-11-21: "for Budgets and limits be able to auto set to the best capacity
+ * to fit budget"). Worst case on purpose: every person with access, plus the nightly checks, uses the whole daily
+ * allowance every day of a 31-day month, and every token is priced at the Primary model's price (the Fast model is
+ * cheaper, so the real month costs less). The split of tokens read / written comes from the last 30 days (10 % written
+ * when there is too little history). Nothing is saved here: the page fills the fields and a person clicks Save limits.
+ * @return array{ok:bool,reason:string,model:string,price_in:float,price_out:float,out_share:float,per_token:float,
+ *               people:int,slots:int,daily:int,turn:int,avg_question:int,questions:int,month_max:float}
+ */
+function rh_ai_fit_limits(PDO $db, float $capUsd, int $people): array
+{
+    $out = ['ok' => false, 'reason' => '', 'model' => '', 'price_in' => 0.0, 'price_out' => 0.0, 'out_share' => 0.1, 'per_token' => 0.0,
+        'people' => max(0, $people), 'slots' => max(1, $people) + 1, 'daily' => 0, 'turn' => 0, 'avg_question' => 5000, 'questions' => 0, 'month_max' => 0.0];
+    $prov = rh_ai_active_provider();
+    $primary = null;
+    foreach ($prov !== '' ? rh_ai_models_for($db, $prov) : [] as $m) {
+        if ((int)$m['is_selected'] === 1 && $m['role'] === 'primary') {
+            $primary = $m;
+        }
+    }
+    if ($primary === null) {
+        $out['reason'] = 'Choose and save models (with one Primary) first: the fit is worked out from the Primary model\'s price.';
+        return $out;
+    }
+    $out['model'] = (string)$primary['label'] !== '' ? (string)$primary['label'] : (string)$primary['model_id'];
+    if ($primary['price_in_per_mtok'] === null || $primary['price_out_per_mtok'] === null) {
+        $out['reason'] = $out['model'] . ' has no price yet, so the cost of a token is not known. Prices are filled in automatically each day.';
+        return $out;
+    }
+    if ($capUsd <= 0) {
+        $out['reason'] = 'Set a monthly cap first.';
+        return $out;
+    }
+    $out['price_in'] = (float)$primary['price_in_per_mtok'];
+    $out['price_out'] = (float)$primary['price_out_per_mtok'];
+    $tin = $tout = $req = 0.0;
+    try {
+        $h = $db->query("SELECT COALESCE(SUM(tokens_in), 0) AS tin, COALESCE(SUM(tokens_out), 0) AS tout, COALESCE(SUM(requests), 0) AS req
+                         FROM ai_usage_daily WHERE day >= CURDATE() - INTERVAL 30 DAY")->fetch(PDO::FETCH_ASSOC);
+        [$tin, $tout, $req] = [(float)($h['tin'] ?? 0), (float)($h['tout'] ?? 0), (float)($h['req'] ?? 0)];
+    } catch (Throwable $e) {
+        // no history: the defaults below
+    }
+    if ($tin + $tout >= 20000) {
+        $out['out_share'] = min(0.5, max(0.02, $tout / ($tin + $tout)));
+    }
+    if ($req >= 10) {
+        $out['avg_question'] = (int)max(500, round(($tin + $tout) / $req));
+    }
+    $perToken = ($out['price_in'] * (1 - $out['out_share']) + $out['price_out'] * $out['out_share']) / 1000000;
+    if ($perToken <= 0) {
+        $out['reason'] = $out['model'] . ' is priced at US$0, so no limit is needed to stay within the cap.';
+        return $out;
+    }
+    $out['per_token'] = $perToken;
+    // The daily limit is checked before each call, so a person can go past it by one whole question (at most the
+    // per-question limit): each slot's share pays for daily + turn. 10 % is kept back for the step already running
+    // when a limit is reached (review 2026-11-21).
+    $allow = $capUsd * 0.9 / $perToken / 31 / $out['slots'];
+    $out['turn'] = (int)max(5000, min(rh_ai_turn_token_cap(), floor($allow / 2 / 1000) * 1000));
+    $out['daily'] = (int)min(50000000, max(1000, floor(($allow - $out['turn']) / 1000) * 1000)); // the field's own range
+    $out['questions'] = (int)floor($out['daily'] / $out['avg_question']);
+    $out['month_max'] = round(($out['daily'] + $out['turn']) * $out['slots'] * 31 * $perToken, 2);
+    $out['ok'] = true;
+    return $out;
+}
+
 // The Models table choices and the refresh notice (fault 2026-11-20).
 require_once __DIR__ . '/ai-model-choices.php';
