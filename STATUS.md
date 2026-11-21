@@ -57,6 +57,10 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   "Nightly checks" in Usage, dashboard link as a button.
 - LATER: the 1,000-token floor can put a tiny cap over (shown as "over"); page is long (8 panels) - a jump bar if asked.
 
+## Shipped 2026-11-21: Import step 3 sizes - tidy table, mass set, per-row "Sold as" (owner FEATURE)
+- Liwonde 68e62fe, Rosalyn's port 6fb1abe. Sold as changes the menu side only (opening count, count measure and Drink
+  measures list untouched). Details and LATERs in Liwonde STATUS.md.
+
 ## Shipped 2026-11-21: Import step 4 Tick all / Untick all + step 3 Shot size (ml) (owner FEATURE)
 - Liwonde e4bbc37 + 9b776c5, Rosalyn's port 3c3b30e (owner OK to port). Details, LATERs and the ASSUMPTION (typed shot
   size is per import, never the hotel's Drink measures list) in Liwonde STATUS.md and `.claude/IMPORT_PLAN.md`.

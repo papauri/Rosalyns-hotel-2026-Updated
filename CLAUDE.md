@@ -42,7 +42,7 @@ do not re-derive plans or re-scan the repo ad hoc.
 - **ROSALYN'S IS LIVE (owner 2026-11-09)**: real guests and money. Extreme caution. No DB tests,
   writing scripts or test emails against Rosalyn's DB. Change Rosalyn's
   settings/data only when the owner asked for that exact change. Every dispatch brief must say this.
-  Flow (owner 2026-11-21): build and test at Liwonde, push, then port the change here. Enforced: `.claude/LIVE_REPO`
+  Flow (owner 2026-11-21): build and test at Liwonde, push, then port the change here (standing OK, owner 2026-11-21: port + push here without asking once Liwonde passed its ship gate). Enforced: `.claude/LIVE_REPO`
   makes the shared guard refuse test runs in this folder (scripts/tests, run_tests.php, smoke_test*.php, and
   `scripts/ship.php` unless `--tests=none`).
 - **LIWONDE IS THE DEDICATED TEST PLATFORM (owner 2026-11-12, replaces "Liwonde is live too")**: a mirror
