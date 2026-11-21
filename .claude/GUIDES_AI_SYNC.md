@@ -44,7 +44,7 @@ when prompted."
 - **Guides (POS till):** a bar / coffee-bar tile whose stock link is ONE stock item now says how one sale is served
   under the name ("Shot · 25 ml", "Glass of wine · 175 ml", "Bottle · 750 ml", "Can · 330 ml") and, in small under the
   price, the menu price of the same drink's other till items ("Bottle MWK 40,000" on the shot tile, "Shot MWK 4,000" on
-  the bottle tile; at most 3; 86'd items are left out). The cart line starts with the serving too. Wording comes from the
+  the bottle tile; at most 3; 86'd items are left out; in Room Service mode the Room Service items are listed, so a bottle sold on Room Service only shows there). The cart line starts with the serving too. Wording comes from the
   stock link (Menu Management) and Stock (bottle size, bottle/shot measure); nothing is shown when neither says.
 - **Assistant:** no table, setting or permission change. New read-only helper admin/includes/pos-drink-servings.php
   (rh_pos_drink_info). If asked "why does a tile not show shot/bottle", answer: link the drink to its stock item in

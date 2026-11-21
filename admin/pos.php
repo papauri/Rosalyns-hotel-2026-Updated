@@ -6825,8 +6825,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 /* Drinks: how one sale is served, and the same drink's other servings at their menu price (pos-drink-servings.php). */
                 const servingHtml = m.serving
                     ? `<div class="sv" title="How one sale is served, from the drink's stock link (Menu Management)">${escHtml(m.serving)}</div>` : '';
-                const othersHtml = (Array.isArray(m.others) && m.others.length)
-                    ? m.others.map(o => `<div class="sv-alt" title="The same drink as another item on the menu, at its menu price">${escHtml(o.name)} ${currencySymbol} ${fmtMoney(o.price)}</div>`).join('') : '';
+                /* Each other serving says where it is sold (show_pos / show_rs): list the ones for this mode only. */
+                const othersHere = Array.isArray(m.others) ? m.others.filter(o => menuItemVisibleInMode(o)) : [];
+                const othersHtml = othersHere.length
+                    ? othersHere.map(o => `<div class="sv-alt" title="The same drink as another item on the menu, at its menu price">${escHtml(o.name)} ${currencySymbol} ${fmtMoney(o.price)}</div>`).join('') : '';
 
                 const div = document.createElement('div');
                 const eightySixBadge = is86d ? `<span style="position:absolute;top:4px;right:4px;background:#c82333;color:#fff;font-size:9px;font-weight:800;padding:2px 5px;border-radius:4px;letter-spacing:.05em;">86</span>` : '';

@@ -105,10 +105,13 @@ if (!function_exists('rh_pos_serving_of')) {
 
     /**
      * Tile info from the drink items' stock links. $rows: one per till item with a single-line link:
-     *   ['key' => 'type:id', 'price' => float, 'sellable' => bool, 'ing_id' => int, 'line' => [...], 'ing' => [...]]
-     * 'sellable' = on the till and not 86'd (only those are listed as another serving).
-     * Returns key => ['serving' => "Shot · 25 ml", 'others' => [['name' => 'Bottle', 'price' => 40000.0], ...]],
-     * others biggest serving first, at most RH_POS_DRINK_OTHERS_MAX, the same name + price once.
+     *   ['key' => 'type:id', 'price' => float, 'available' => bool, 'pos' => bool, 'rs' => bool, 'ing_id' => int,
+     *    'line' => [...], 'ing' => [...]]
+     * available = not 86'd; pos / rs = shown on the till (Restaurant) / on Room Service. An 86'd item is never listed as
+     * another serving; one that is on Room Service only is listed for Room Service only (the till's mode decides).
+     * Returns key => ['serving' => "Shot · 25 ml", 'others' => [['name' => 'Bottle', 'price' => 40000.0, 'show_pos' => 1,
+     * 'show_rs' => 1], ...]]: biggest serving first, the same name + price once (its modes joined), and at most
+     * RH_POS_DRINK_OTHERS_MAX shown in each mode (show_pos / show_rs say where; pos.php filters with menuItemVisibleInMode).
      */
     function rh_pos_drink_tiles(array $rows, array $list): array
     {
@@ -124,7 +127,8 @@ if (!function_exists('rh_pos_serving_of')) {
                 'short' => rh_pos_serving_short($s),
                 'qty' => (float)($r['line']['quantity_per_portion'] ?? 0),
                 'price' => (float)$r['price'],
-                'sellable' => !empty($r['sellable']),
+                'pos' => !empty($r['available']) && !empty($r['pos']),
+                'rs' => !empty($r['available']) && !empty($r['rs']),
             ];
         }
         $out = [];
@@ -134,18 +138,32 @@ if (!function_exists('rh_pos_serving_of')) {
                 if ($it['label'] === '') {
                     continue;
                 }
-                $others = [];
-                $seen = [];
+                // The other servings, the same name + price once with its modes joined (biggest first)...
+                $merged = [];
                 foreach ($items as $o) {
-                    if ($o['key'] === $it['key'] || !$o['sellable'] || $o['short'] === '') {
+                    if ($o['key'] === $it['key'] || (!$o['pos'] && !$o['rs']) || $o['short'] === '') {
                         continue;
                     }
                     $k = mb_strtolower($o['short']) . '|' . number_format($o['price'], 2, '.', '');
-                    if (isset($seen[$k]) || count($others) >= RH_POS_DRINK_OTHERS_MAX) {
+                    if (!isset($merged[$k])) {
+                        $merged[$k] = ['name' => $o['short'], 'price' => $o['price'], 'pos' => false, 'rs' => false];
+                    }
+                    $merged[$k]['pos'] = $merged[$k]['pos'] || $o['pos'];
+                    $merged[$k]['rs'] = $merged[$k]['rs'] || $o['rs'];
+                }
+                // ... then at most RH_POS_DRINK_OTHERS_MAX for each mode.
+                $others = [];
+                $nPos = 0;
+                $nRs = 0;
+                foreach ($merged as $o) {
+                    $p = $o['pos'] && $nPos < RH_POS_DRINK_OTHERS_MAX;
+                    $s = $o['rs'] && $nRs < RH_POS_DRINK_OTHERS_MAX;
+                    if (!$p && !$s) {
                         continue;
                     }
-                    $seen[$k] = true;
-                    $others[] = ['name' => $o['short'], 'price' => $o['price']];
+                    $nPos += $p ? 1 : 0;
+                    $nRs += $s ? 1 : 0;
+                    $others[] = ['name' => $o['name'], 'price' => $o['price'], 'show_pos' => $p ? 1 : 0, 'show_rs' => $s ? 1 : 0];
                 }
                 $out[$it['key']] = ['serving' => $it['label'], 'others' => $others];
             }
@@ -192,7 +210,9 @@ if (!function_exists('rh_pos_serving_of')) {
             $rows[] = [
                 'key' => $key,
                 'price' => (float)$m['price'],
-                'sellable' => !empty($m['show_pos']) && (int)($m['is_available'] ?? 1) === 1,
+                'available' => (int)($m['is_available'] ?? 1) === 1,
+                'pos' => !empty($m['show_pos']),
+                'rs' => !empty($m['show_rs']),
                 'ing_id' => (int)$r['ingredient_id'],
                 'line' => $r,
                 'ing' => $r,

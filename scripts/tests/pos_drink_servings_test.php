@@ -67,8 +67,10 @@ $r = $lbl(['quantity_per_portion' => 1], ['name' => 'Malawi Gin <b>', 'unit' => 
 check($r === 'Bottle · 1,000 ml', 'Thousands get a comma ("1,000 ml")', $r);
 
 /* ---- 2. Grouping ---- */
-$row = static fn(string $key, float $price, bool $sell, int $ing, array $line, array $ingRow): array =>
-    ['key' => $key, 'price' => $price, 'sellable' => $sell, 'ing_id' => $ing, 'line' => $line, 'ing' => $ingRow];
+// $sell = not 86'd and on the till; $pos / $rs override where it is shown (Restaurant / Room Service).
+$row = static fn(string $key, float $price, bool $sell, int $ing, array $line, array $ingRow, ?bool $pos = null, bool $rs = false): array =>
+    ['key' => $key, 'price' => $price, 'available' => $sell, 'pos' => $pos ?? $sell, 'rs' => $rs, 'ing_id' => $ing, 'line' => $line, 'ing' => $ingRow];
+$o = static fn(string $name, float $price, int $pos = 1, int $rs = 0): array => ['name' => $name, 'price' => $price, 'show_pos' => $pos, 'show_rs' => $rs];
 $tiles = rh_pos_drink_tiles([
     $row('bar:1', 4000.0, true, 7, ['quantity_per_portion' => 0.033333], $brandy),
     $row('bar:2', 40000.0, true, 7, ['quantity_per_portion' => 1], $brandy),
@@ -76,11 +78,38 @@ $tiles = rh_pos_drink_tiles([
     $row('bar:4', 2500.0, true, 8, ['quantity_per_portion' => 1], ['name' => 'Coke 330ml', 'unit' => 'can']),
     $row('bar:5', 900.0, true, 9, ['quantity_per_portion' => 1], ['name' => 'Soda', 'unit' => 'each']),
 ], $list);
-check(($tiles['bar:1']['serving'] ?? '') === 'Shot · 25 ml' && ($tiles['bar:1']['others'] ?? null) === [['name' => 'Bottle', 'price' => 40000.0]],
+check(($tiles['bar:1']['serving'] ?? '') === 'Shot · 25 ml' && ($tiles['bar:1']['others'] ?? null) === [$o('Bottle', 40000.0)],
     'Shot tile: "Shot · 25 ml" and the bottle\'s price (the 86\'d double is not listed)', json_encode($tiles['bar:1'] ?? null));
-check(($tiles['bar:2']['others'] ?? null) === [['name' => 'Shot', 'price' => 4000.0]], 'Bottle tile lists the shot\'s price', json_encode($tiles['bar:2'] ?? null));
-check(($tiles['bar:3']['others'] ?? null) === [['name' => 'Bottle', 'price' => 40000.0], ['name' => 'Shot', 'price' => 4000.0]],
+check(($tiles['bar:2']['others'] ?? null) === [$o('Shot', 4000.0)], 'Bottle tile lists the shot\'s price', json_encode($tiles['bar:2'] ?? null));
+check(($tiles['bar:3']['others'] ?? null) === [$o('Bottle', 40000.0), $o('Shot', 4000.0)],
     'An 86\'d tile still shows its serving and the others, biggest first', json_encode($tiles['bar:3'] ?? null));
+
+// Room Service: a bottle sold on Room Service only is listed for Room Service only; an 86'd one never.
+$t = rh_pos_drink_tiles([
+    $row('d:1', 4000.0, true, 7, ['quantity_per_portion' => 0.033333], $brandy, true, true),
+    $row('d:2', 45000.0, true, 7, ['quantity_per_portion' => 1], $brandy, false, true),
+    $row('d:3', 7500.0, false, 7, ['quantity_per_portion' => 0.066667, 'entry_measure' => 'double', 'entry_qty' => 1], $brandy, false, true),
+], $list);
+check(($t['d:1']['others'] ?? null) === [$o('Bottle', 45000.0, 0, 1)], 'A Room-Service-only bottle is listed on the shot tile for Room Service only (86\'d double left out)', json_encode($t['d:1'] ?? null));
+check(($t['d:2']['others'] ?? null) === [$o('Shot', 4000.0, 1, 1)], 'The Room-Service bottle tile lists the shot (sold in both modes)', json_encode($t['d:2'] ?? null));
+$t = rh_pos_drink_tiles([
+    $row('e:1', 4000.0, true, 7, ['quantity_per_portion' => 0.033333], $brandy, true, true),
+    $row('e:2', 40000.0, true, 7, ['quantity_per_portion' => 1], $brandy, true, false),
+    $row('e:3', 40000.0, true, 7, ['quantity_per_portion' => 1], $brandy, false, true),
+], $list);
+check(($t['e:1']['others'] ?? null) === [$o('Bottle', 40000.0, 1, 1)], 'A till bottle and a Room-Service bottle at the same price are listed once, for both modes', json_encode($t['e:1'] ?? null));
+$t = rh_pos_drink_tiles([
+    $row('f:0', 1000.0, true, 7, ['quantity_per_portion' => 0.033333], $brandy, true, true),
+    $row('f:1', 40000.0, true, 7, ['quantity_per_portion' => 1], $brandy, true, false),
+    $row('f:2', 9000.0, true, 7, ['quantity_per_portion' => 0.2], $brandy, true, false),
+    $row('f:3', 8000.0, true, 7, ['quantity_per_portion' => 0.1], $brandy, true, false),
+    $row('f:4', 7000.0, true, 7, ['quantity_per_portion' => 0.066667], $brandy, true, false),
+    $row('f:5', 6000.0, true, 7, ['quantity_per_portion' => 0.05], $brandy, false, true),
+], $list);
+$pos = array_values(array_filter($t['f:0']['others'] ?? [], static fn(array $x): bool => $x['show_pos'] === 1));
+$rs = array_values(array_filter($t['f:0']['others'] ?? [], static fn(array $x): bool => $x['show_rs'] === 1));
+check(count($pos) === RH_POS_DRINK_OTHERS_MAX && count($rs) === 1 && $rs[0]['price'] === 6000.0,
+    'At most ' . RH_POS_DRINK_OTHERS_MAX . ' per mode: the Room Service one is still listed when the till has more', json_encode($t['f:0'] ?? null));
 check(($tiles['bar:4'] ?? null) === ['serving' => 'Can · 330 ml', 'others' => []], 'A drink with one serving: its serving, no others', json_encode($tiles['bar:4'] ?? null));
 check(!isset($tiles['bar:5']), 'A drink with nothing to say gets no entry');
 $many = [];
@@ -124,22 +153,30 @@ try {
     rh_menu_recipe_save($pdo, $cocktail['id'], $cocktail['slug'], null, null, [['ingredient_id' => $ingId, 'quantity' => round(1 / 30, 6), 'unit' => 'base'], ['ingredient_id' => $juice, 'quantity' => 0.1, 'unit' => 'base']], $adminId);
     rh_menu_recipe_save($pdo, $kitchen['id'], $kitchen['slug'], null, null, [['ingredient_id' => $ingId, 'quantity' => round(1 / 30, 6), 'unit' => 'base']], $adminId);
 
-    // The list as pos.php builds it (id, type, price, show_pos, is_available, station).
+    // The list as pos.php builds it (id, type, price, show_pos, show_rs, is_available, station).
     $menuList = [];
-    foreach ($pdo->query("SELECT mi.id, mc.slug AS type, mi.price, mi.show_pos, mi.is_available, COALESCE(mi.station, mc.default_station) AS station
+    foreach ($pdo->query("SELECT mi.id, mc.slug AS type, mi.price, mi.show_pos, mi.show_room_service, mi.is_available, COALESCE(mi.station, mc.default_station) AS station
                             FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mi.item_name LIKE 'ZZPD $run %'") as $m) {
         $menuList[] = ['id' => (int)$m['id'], 'type' => $m['type'], 'price' => (float)$m['price'], 'show_pos' => (int)$m['show_pos'],
-            'is_available' => (int)$m['is_available'], 'station' => $m['station']];
+            'show_rs' => (int)$m['show_room_service'], 'is_available' => (int)$m['is_available'], 'station' => $m['station']];
     }
+    $bottleName = rh_stock_measure_ready($pdo) ? 'Bottle' : '750 ml';
     $info = rh_pos_drink_info($pdo, $menuList);
     $kShot = $shot['slug'] . ':' . $shot['id'];
     $kBottle = $bottle['slug'] . ':' . $bottle['id'];
     $shotMl = rh_stock_measure_ready($pdo) ? 'Shot · 25 ml' : '25 ml';
     check(($info[$kShot]['serving'] ?? '') === $shotMl, 'Database: the shot item reads "' . $shotMl . '"', json_encode($info[$kShot] ?? null));
-    check(($info[$kShot]['others'] ?? null) === [['name' => rh_stock_measure_ready($pdo) ? 'Bottle' : '750 ml', 'price' => 40000.0]], 'Database: the shot tile lists the bottle at its menu price', json_encode($info[$kShot] ?? null));
+    check(($info[$kShot]['others'] ?? null) === [$o($bottleName, 40000.0)], 'Database: the shot tile lists the bottle at its menu price', json_encode($info[$kShot] ?? null));
     check(($info[$kBottle]['others'][0]['price'] ?? null) === 4000.0, 'Database: the bottle tile lists the shot at its menu price', json_encode($info[$kBottle] ?? null));
     check(!isset($info[$cocktail['slug'] . ':' . $cocktail['id']]), 'Database: a cocktail (two stock lines) gets nothing');
     check(!isset($info[$kitchen['slug'] . ':' . $kitchen['id']]), 'Database: a kitchen item gets nothing');
+
+    // The bottle moved to Room Service only (pos.php's show_rs): listed on the shot tile for Room Service only.
+    $pdo->prepare("UPDATE menu_items SET show_pos = 0, show_room_service = 1 WHERE id = ?")->execute([$bottle['id']]);
+    foreach ($menuList as &$m) { if ($m['id'] === $bottle['id']) { $m['show_pos'] = 0; $m['show_rs'] = 1; } }
+    unset($m);
+    $info = rh_pos_drink_info($pdo, $menuList);
+    check(($info[$kShot]['others'] ?? null) === [$o($bottleName, 40000.0, 0, 1)], 'Database: a Room-Service-only bottle is listed on the shot tile for Room Service', json_encode($info[$kShot] ?? null));
 
     $pdo->prepare("UPDATE menu_items SET is_available = 0 WHERE id = ?")->execute([$bottle['id']]);
     foreach ($menuList as &$m) { if ($m['id'] === $bottle['id']) { $m['is_available'] = 0; } }
