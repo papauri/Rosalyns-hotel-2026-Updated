@@ -1097,6 +1097,15 @@ foreach ($calendar_blocked_dates as $bd) {
     $blocked_dates_by_room[$roomIdKey][$blockedDate] = true;
 }
 
+// Nights on which every room of a type is off on its own (each room blocked, out of service or in a
+// maintenance window; for a joined type every pair): the type is as unsellable as a room-type block.
+require_once __DIR__ . '/includes/blocked-nights.php';
+foreach (rh_fully_blocked_type_nights($pdo, $calendar_start_date, $calendar_end_date) as $fullTypeId => $fullNights) {
+    foreach ($fullNights as $fullNight) {
+        $blocked_dates_by_room[(int)$fullTypeId][$fullNight] = true;
+    }
+}
+
 // Normalize to indexed arrays for JSON output
 $global_blocked_dates = array_keys($global_blocked_dates);
 foreach ($blocked_dates_by_room as $roomId => $datesMap) {

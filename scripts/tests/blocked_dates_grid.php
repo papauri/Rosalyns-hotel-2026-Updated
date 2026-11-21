@@ -167,15 +167,24 @@ check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the 
 echo "== Availability follows the blocks (one transaction, rolled back) ==\n";
 // The booking checks read the same rows the grid writes. A block is one NIGHT: a stay that checks out
 // on the blocked date is still fine.
-$d0 = date('Y-m-d', strtotime($d1 . ' -1 day'));
+// Find two free nights for the test room and its type (from +400 days on), so the checks never skip.
+$free = null;
+for ($k = 400; $k < 700 && $free === null; $k++) {
+    $a0 = date('Y-m-d', strtotime("+$k days"));
+    $a1 = date('Y-m-d', strtotime('+' . ($k + 1) . ' days'));
+    $a2 = date('Y-m-d', strtotime('+' . ($k + 2) . ' days'));
+    if (!empty(checkRoomAvailability($tid, $a1, $a2)['available']) && !empty(checkRoomAvailability($tid, $a0, $a1)['available'])
+        && !empty(checkIndividualRoomAvailability($rid, $a0, $a2)['available'])) {
+        $free = [$a0, $a1, $a2];
+    }
+}
 $pdo->beginTransaction();
 try {
-    $base = checkRoomAvailability($tid, $d1, $d2);
-    $baseRoom = checkIndividualRoomAvailability($rid, $d1, $d2);
-    $baseOut = checkIndividualRoomAvailability($rid, $d0, $d1);
-    if (empty($base['available']) || empty($baseRoom['available']) || empty($baseOut['available'])) {
-        echo "SKIP availability checks (the test room/type is not free on $d0..$d2)\n";
+    if ($free === null) {
+        bad('Fixture: two free nights for the test room and its type within +400..+700 days');
     } else {
+        [$d0, $d1, $d2] = $free;
+        $base = checkRoomAvailability($tid, $d1, $d2);
         blockIndividualRoomDate($rid, $d1, 'maintenance', $tag);
         $a = checkIndividualRoomAvailability($rid, $d1, $d2);
         check(empty($a['available']) && !empty($a['blocked_dates']), 'a room block makes that room unavailable for a stay sleeping on the night', json_encode($a['error'] ?? null));
@@ -199,6 +208,53 @@ try {
         $t = checkRoomAvailability($tid, $d1, $d2);
         check(empty($t['available']) && !empty($t['blocked_dates']), 'an all-rooms block takes every type off sale', json_encode($t['error'] ?? null));
         unblockRoomDate(null, $d1);
+
+        // Public booking calendar: a type whose rooms are ALL blocked one by one is greyed out that night.
+        require_once $root . '/includes/blocked-nights.php';
+        $typeRooms = array_map('intval', $pdo->query("SELECT id FROM individual_rooms WHERE is_active = 1 AND room_type_id = $tid ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
+        if (roomTypeHasActiveCombinations($tid)) {
+            echo "SKIP calendar greying for a room type (the test type sells joined pairs)\n";
+        } else {
+            $full = rh_fully_blocked_type_nights($pdo, $d0, $d2);
+            check(!in_array($d1, $full[$tid] ?? [], true), 'calendar: the type is not greyed out while a room is free');
+            foreach ($typeRooms as $x) {
+                blockIndividualRoomDate($x, $d1, 'maintenance', $tag);
+            }
+            $full = rh_fully_blocked_type_nights($pdo, $d0, $d2);
+            check(in_array($d1, $full[$tid] ?? [], true) && !in_array($d0, $full[$tid] ?? [], true) && !in_array($d2, $full[$tid] ?? [], true),
+                'calendar: every room of the type blocked one by one greys out exactly that night', json_encode($full[$tid] ?? []));
+            check(empty(checkRoomAvailability($tid, $d1, $d2)['available']), 'and the booking check agrees: the type cannot be booked that night');
+            unblockIndividualRoomDate($typeRooms[0], $d1);
+            $full = rh_fully_blocked_type_nights($pdo, $d0, $d2);
+            check(!in_array($d1, $full[$tid] ?? [], true), 'calendar: unblocking one room opens the night again');
+            if (count($typeRooms) > 1) {
+                $pdo->prepare("UPDATE individual_rooms SET status = 'out_of_order' WHERE id = ?")->execute([$typeRooms[0]]);
+                $full = rh_fully_blocked_type_nights($pdo, $d0, $d2);
+                check(in_array($d1, $full[$tid] ?? [], true) && !in_array($d0, $full[$tid] ?? [], true), 'calendar: the last free room out of order also greys the night (other nights stay open)', json_encode($full[$tid] ?? []));
+            }
+            foreach ($typeRooms as $x) {
+                unblockIndividualRoomDate($x, $d1);
+            }
+        }
+        // A joined type sells pairs: one blocked room of its only pair greys it out.
+        if ($p) {
+            foreach ($pairSeed as $sql) {
+                $pdo->exec($sql);
+            }
+            $ct = (int)$pdo->query("SELECT combined_room_type_id FROM room_combinations WHERE is_active = 1 AND room_a_id = {$p['room_a_id']} AND room_b_id = {$p['room_b_id']} LIMIT 1")->fetchColumn();
+            $pairCount = (int)$pdo->query("SELECT COUNT(*) FROM room_combinations WHERE is_active = 1 AND combined_room_type_id = $ct")->fetchColumn();
+            $pairFree = !empty(checkIndividualRoomAvailability($p['room_a_id'], $d0, $d2)['available']) && !empty(checkIndividualRoomAvailability($p['room_b_id'], $d0, $d2)['available']);
+            if ($ct > 0 && $pairCount === 1 && $pairFree) {
+                $full = rh_fully_blocked_type_nights($pdo, $d0, $d2);
+                check(!in_array($d1, $full[$ct] ?? [], true), 'calendar: a joined type with a free pair is not greyed out');
+                blockIndividualRoomDate($p['room_b_id'], $d1, 'maintenance', $tag);
+                $full = rh_fully_blocked_type_nights($pdo, $d0, $d2);
+                check(in_array($d1, $full[$ct] ?? [], true) && !in_array($d0, $full[$ct] ?? [], true), 'calendar: one blocked room of its only pair greys the joined type out that night', json_encode($full[$ct] ?? []));
+                unblockIndividualRoomDate($p['room_b_id'], $d1);
+            } else {
+                echo "SKIP joined-type calendar greying (pair type has $pairCount pairs or the pair is busy)\n";
+            }
+        }
     }
 } finally {
     if ($pdo->inTransaction()) {

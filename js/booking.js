@@ -40,6 +40,35 @@
             return Array.from(new Set([...blockedDates, ...bookedDates]));
         }
 
+        function ymdLocal(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        // The night a guest sleeps before checking out on dateObj (blocked/booked dates are NIGHTS).
+        function lastNightBefore(dateObj) {
+            return ymdLocal(new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate() - 1));
+        }
+
+        // Check-out is fine ON a blocked date (that night is not slept). A check-out date is closed when the
+        // night before it is unavailable, or, once a check-in is picked, when the stay would cross one.
+        function isCheckOutClosed(roomId, dateObj) {
+            const unavailable = new Set(getAllUnavailableDatesForRoom(roomId));
+            if (!unavailable.size) return false;
+            if (unavailable.has(lastNightBefore(dateObj))) return true;
+            const ci = checkInCalendar && checkInCalendar.selectedDates[0];
+            if (ci) {
+                const last = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate() - 1);
+                for (let n = new Date(ci.getFullYear(), ci.getMonth(), ci.getDate()); n < last; n.setDate(n.getDate() + 1)) {
+                    if (unavailable.has(ymdLocal(n))) return true;
+                }
+            }
+            return false;
+        }
+
+        function checkOutDisableRule(roomId) {
+            return [function(dateObj) { return isCheckOutClosed(roomId, dateObj); }];
+        }
+
         function getSelectedRoomData() {
             return selectedRoomId ? roomsData.find(room => room.id === selectedRoomId) : null;
         }
@@ -468,7 +497,7 @@
             }
 
             if (checkOutCalendar) {
-                checkOutCalendar.set('disable', allUnavailableDates);
+                checkOutCalendar.set('disable', checkOutDisableRule(roomId));
             }
         }
 
@@ -651,9 +680,9 @@
                         if (checkOutCalendar) {
                             checkOutCalendar.set('minDate', nextDay);
 
-                            // If check-out is before new min date, clear it
+                            // If check-out is before new min date, or the stay now crosses an unavailable night, clear it
                             const currentCheckOut = checkOutCalendar.selectedDates[0];
-                            if (currentCheckOut && currentCheckOut < nextDay) {
+                            if (currentCheckOut && (currentCheckOut < nextDay || isCheckOutClosed(selectedRoomId, currentCheckOut))) {
                                 checkOutCalendar.clear();
                             }
 
@@ -673,20 +702,18 @@
                 minDate: tomorrow,
                 maxDate: maxDate,
                 dateFormat: 'Y-m-d',
-                disable: getAllUnavailableDatesForRoom(selectedRoomId),
+                disable: checkOutDisableRule(selectedRoomId),
                 onDayCreate: function(dObj, dStr, fp, dayElem) {
-                    // Add custom class for blocked and booked dates
-                    const dateStr = fp.formatDate(dayElem.dateObj, 'Y-m-d');
+                    // Mark a check-out date by the night slept before it (checking out on a blocked date is fine)
+                    const nightStr = lastNightBefore(dayElem.dateObj);
                     const roomBlockedDates = getBlockedDatesForRoom(selectedRoomId);
                     const roomBookedDates = getBookedDatesForRoom(selectedRoomId);
 
-                    // Check if date is blocked (manually blocked from admin)
-                    if (roomBlockedDates.includes(dateStr)) {
+                    if (roomBlockedDates.includes(nightStr)) {
                         dayElem.classList.add('blocked-date');
                         dayElem.innerHTML += '<span class="blocked-indicator"></span>';
                     }
-                    // Check if date is booked (fully booked from availability check)
-                    else if (roomBookedDates.includes(dateStr)) {
+                    else if (roomBookedDates.includes(nightStr)) {
                         dayElem.classList.add('booked-date');
                         dayElem.innerHTML += '<span class="booked-indicator"></span>';
                     }
