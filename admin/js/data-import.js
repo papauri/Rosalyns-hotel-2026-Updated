@@ -115,10 +115,125 @@
             el.scrollIntoView({ block: 'start', behavior: 'smooth' });
         }
 
+        // ---------- layout helpers (screen only: step plan, fold panels, pinned footer) ----------
+        var mineFold = root.querySelector('#diMine');
+        /** "More about this": the long part of an intro, folded away behind one plain line. */
+        function moreFold(text) {
+            var d = h('details', 'di-details di-more');
+            d.appendChild(h('summary', null, 'More about this'));
+            d.appendChild(h('p', 'di-help', text));
+            return d;
+        }
+        var foldMem = {};       // the same choices kept in memory, for when the browser does not allow storage
+        function foldGet(key) {
+            if (foldMem[S.job + '|' + key] !== undefined) { return foldMem[S.job + '|' + key]; }
+            try { var o = JSON.parse(window.localStorage.getItem('diFold:' + S.job) || '{}'); return o[key]; } catch (e) { return undefined; }
+        }
+        function foldSet(key, open) {
+            foldMem[S.job + '|' + key] = open ? 1 : 0;
+            try { var k = 'diFold:' + S.job, o = JSON.parse(window.localStorage.getItem(k) || '{}'); o[key] = open ? 1 : 0; window.localStorage.setItem(k, JSON.stringify(o)); } catch (e) { /* works without it */ }
+        }
+        var FOLD_BADGE = { required: ['pending', 'Required'], optional: ['neutral', 'Optional'], done: ['success', 'Done'] };
+        /**
+         * A foldable panel (native details). o.badge = required | optional | done; o.summary = the one line shown while folded; o.open = the
+         * default when the person has not opened or folded it before (what they chose is remembered for this import). title may be a
+         * ready element (a heading whose text the caller updates later).
+         */
+        function foldPanel(parent, key, title, o) {
+            o = o || {};
+            var det = h('details', 'di-fold');
+            det.setAttribute('data-fold', key);
+            var sum = h('summary', 'di-fold-sum');
+            var chev = h('i', 'fas fa-chevron-right di-fold-chev'); chev.setAttribute('aria-hidden', 'true');
+            var tt = typeof title === 'string' ? h('span', 'di-fold-t', title) : title;
+            if (typeof title !== 'string') { tt.classList.add('di-fold-t'); }
+            var bd = h('span', 'di-fold-b'), sm = h('span', 'di-fold-s');
+            add(sum, chev, add(h('span', 'di-fold-main'), tt, bd), sm);
+            det.appendChild(sum);
+            var body = h('div', 'di-fold-body');
+            det.appendChild(body);
+            var stored = foldGet(key);
+            if (stored === undefined ? !!o.open : stored === 1) { det.open = true; }
+            sum.addEventListener('click', function () { window.setTimeout(function () { foldSet(key, det.open); }, 0); });
+            var fp = {
+                el: det, body: body, titleEl: tt,
+                set: function (c) {
+                    if (c.badge && FOLD_BADGE[c.badge]) { clear(bd); bd.appendChild(badge(FOLD_BADGE[c.badge][0], FOLD_BADGE[c.badge][1])); det.setAttribute('data-badge', c.badge); }
+                    if (c.summary !== undefined) { sm.textContent = c.summary; }
+                    if (c.warn !== undefined) { sm.classList.toggle('is-warn', !!c.warn); }
+                    if (c.title !== undefined) { tt.textContent = c.title; }
+                }
+            };
+            fp.set({ badge: o.badge || 'optional', summary: o.summary || '', warn: !!o.warn });
+            if (parent) { parent.appendChild(det); }
+            return fp;
+        }
+        function openFolds(el) {
+            for (var d = el && el.closest ? el.closest('details.di-fold') : null; d; d = d.parentElement ? d.parentElement.closest('details.di-fold') : null) { d.open = true; }
+        }
+        /** The "On this step" box: 2-4 numbered actions, each with a short live status; plus Open all / Fold all for the step's panels. */
+        function planBox(p, items) {
+            var box = h('div', 'di-plan'), top = h('div', 'di-plan-top');
+            var tools = h('div', 'di-plan-tools');
+            [['Open all', true], ['Fold all', false]].forEach(function (b) {
+                var bt = h('button', 'btn-secondary di-btn di-btn--small', b[0]); bt.type = 'button';
+                bt.addEventListener('click', function () {
+                    Array.prototype.forEach.call(p.querySelectorAll('details.di-fold'), function (d) { if (!d.hidden) { d.open = b[1]; foldSet(d.getAttribute('data-fold'), b[1]); } });
+                });
+                tools.appendChild(bt);
+            });
+            add(top, h('strong', 'di-plan-h', 'On this step'), tools);
+            var ol = h('ol', 'di-plan-list'), lis = [];
+            items.forEach(function (it) {
+                var li = h('li'), t = h('span', 'di-plan-t', it), st = h('span', 'di-plan-s');
+                add(li, t, st); ol.appendChild(li); lis.push({ li: li, st: st, t: t });
+            });
+            add(box, top, ol);
+            p.appendChild(box);
+            return {
+                el: box,
+                set: function (i, text, done) { var x = lis[i]; if (!x) { return; } x.st.textContent = text || ''; x.li.classList.toggle('is-done', !!done); },
+                show: function (i, on) { if (lis[i]) { lis[i].li.hidden = !on; } }
+            };
+        }
+        /** The step's main actions in a bar that stays at the bottom of the screen while the content is longer than the screen. */
+        function footBar(p, why) {
+            var ph = h('div', 'di-foot-ph'), bar = h('div', 'di-foot'), inn = h('div', 'di-foot-in');
+            if (why) { bar.appendChild(why); }
+            bar.appendChild(inn); ph.appendChild(bar); p.appendChild(ph);
+            S.foot = { ph: ph, bar: bar, panel: p };
+            if (window.__diFootRO) { window.__diFootRO.disconnect(); window.__diFootRO = null; }
+            if (window.ResizeObserver) { window.__diFootRO = new window.ResizeObserver(function () { placeFoot(); }); window.__diFootRO.observe(p); window.__diFootRO.observe(bar); }
+            placeFoot();
+            return inn;
+        }
+        function placeFoot() {
+            var f = S.foot;
+            if (!f || !document.body.contains(f.ph) || f.panel.hidden) { return; }
+            var z = pageZ(), pr = f.panel.getBoundingClientRect();
+            f.ph.style.minHeight = f.bar.offsetHeight + 'px';
+            var phr = f.ph.getBoundingClientRect();
+            var pin = phr.bottom > window.innerHeight + 1 && pr.width > 0;
+            f.bar.classList.toggle('is-fixed', pin);
+            if (pin) {
+                // sits above the "Install Admin App" bar while that shows
+                var ib = document.getElementById('admin-pwa-banner'), lift = 0;
+                if (ib && !ib.hidden && window.getComputedStyle(ib).display !== 'none') { var ir = ib.getBoundingClientRect(); lift = ir.height > 0 ? Math.max(0, (window.innerHeight - ir.top) / z) : 0; }
+                f.bar.style.left = (pr.left / z) + 'px'; f.bar.style.width = (pr.width / z) + 'px'; f.bar.style.bottom = lift + 'px';
+            } else { f.bar.style.left = ''; f.bar.style.width = ''; f.bar.style.bottom = ''; }
+        }
+        if (window.__diFootFn) { window.removeEventListener('scroll', window.__diFootFn, true); window.removeEventListener('resize', window.__diFootFn); }
+        window.__diFootFn = function () { placeFoot(); };
+        window.addEventListener('scroll', window.__diFootFn, { passive: true, capture: true });
+        window.addEventListener('resize', window.__diFootFn);
+        if (window.__diFootMO) { window.__diFootMO.disconnect(); }
+        if (window.MutationObserver) { window.__diFootMO = new window.MutationObserver(function () { placeFoot(); }); window.__diFootMO.observe(document.body, { childList: true }); }
+
         // ---------- steps ----------
         function showStep(n) {
             S.step = n;
             S.reach = Math.max(S.reach, n);
+            if (mineFold && mineFold.tagName === 'DETAILS') { mineFold.open = (n === 1); }
             [1, 2, 3, 4].forEach(function (i) { panels[i].hidden = (i !== n); });
             Array.prototype.forEach.call(steps.children, function (li) {
                 var i = Number(li.getAttribute('data-step'));
@@ -130,10 +245,12 @@
                 if (i === n) { li.setAttribute('aria-current', 'step'); } else { li.removeAttribute('aria-current'); }
             });
             msg('');
+            S.foot = null;
             if (n === 2) { renderFound(); }
             if (n === 3) { renderReview(); }
             if (n === 4) { if (S.result) { renderResult(); } else { renderConfirm(); } }
             window.scrollTo({ top: 0 });
+            placeFoot();
         }
         function stepClick(e) {
             var li = e.target.closest('li[data-step]');
@@ -801,7 +918,15 @@
             var p = clear(panels[2]);
             var s = S.sum, t = s.totals || {};
             add(p, h('h3', 'di-h', 'Step 2 · What we found in your file'));
-            add(p, helpLine('This is how the file was read. Nothing has been saved yet. Check each sheet: which columns were understood, which were left out, and which rows are headings or totals rather than stock items.'));
+            add(p, helpLine('This is how your file was read. Nothing has been saved yet.'));
+            p.appendChild(moreFold('Check each sheet: which columns were understood, which were left out, and which rows are headings or totals rather than stock items.'));
+            var open = {};
+            s.questions.forEach(function (q) { if (isStructural(q)) { (open[q.sheet] = open[q.sheet] || []).push(q); } });
+            var openQn = 0;
+            Object.keys(open).forEach(function (k) { open[k].forEach(function (q) { if (isOpenQ(q)) { openQn++; } }); });
+            var plan = planBox(p, ['Check each sheet: open it to see how its columns were read', 'Answer any sheet marked Required', 'Continue to review']);
+            plan.set(0, num(t.sheets_imported, 0) + ' of ' + num(t.sheets_total, 0) + ' sheet' + (t.sheets_total === 1 ? '' : 's') + ' will be read', false);
+            plan.set(1, openQn ? num(openQn, 0) + ' still to answer' : 'Nothing to answer', !openQn);
             var line = h('p', 'di-file-line');
             add(line, h('i', 'fas fa-file-excel'), ' ', h('strong', null, s.file && s.file.name ? s.file.name : s.job.file), s.file && s.file.size ? ' · ' + (s.file.size >= 1048576 ? (s.file.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(s.file.size / 1024)) + ' KB') : '');
             p.appendChild(line);
@@ -818,17 +943,20 @@
                 card('Items found', num(t.items_read, 0), 'Stock item rows read from those sheets, before any checking.'),
                 card('Categories', num(t.categories, 0), 'Heading rows (like "BEERS") that group the items below them. They are not items.'),
                 card('Total lines left out', num(t.skipped_totals_rows, 0), 'Rows such as "TOTAL" or "GRAND TOTAL". They are never imported.'),
-                card('Columns not imported', num(Math.max(0, (t.ignored_derived_columns || 0) - sellCols), 0),'Calculated columns (totals, days to expiry, status). We take the real numbers, not these.'));
-            p.appendChild(cards);
+                card('Columns not imported', num(Math.max(0, (t.ignored_derived_columns || 0) - sellCols), 0), 'Calculated columns (totals, days to expiry, status). We take the real numbers, not these.'));
+            var tot = foldPanel(p, 'found-totals', 'Totals for the whole file', { badge: 'done', open: false,
+                summary: num(t.sheets_total, 0) + ' sheet' + (t.sheets_total === 1 ? '' : 's') + ' · ' + num(t.items_read, 0) + ' items · ' + num(t.categories, 0) + ' categories' });
+            tot.body.appendChild(cards);
 
-            var open = {};
-            s.questions.forEach(function (q) { if (isStructural(q)) { (open[q.sheet] = open[q.sheet] || []).push(q); } });
             s.sheets.forEach(function (sh) {
                 var sc = h('div', 'di-sheet di-sheet--' + sh.action);
-                var head = h('div', 'di-sheet-head');
                 var label = sh.action === 'import' ? 'Will be read' : (sh.action === 'ask' ? 'Needs your answer' : 'Skipped');
-                add(head, h('h4', 'di-sheet-name', sh.name), badge(sh.action, label));
-                sc.appendChild(head);
+                var sheetOpenQ = (open[sh.name] || []).filter(isOpenQ).length;
+                var kind = (sh.action === 'ask' || sheetOpenQ) ? 'required' : (sh.action === 'import' ? 'done' : 'optional');
+                var c0 = sh.counts || {};
+                var one = label + (sh.action === 'import' ? ' · ' + num(c0.items, 0) + ' item' + (c0.items === 1 ? '' : 's') + ' · ' + num((sh.categories || []).length, 0) + ' categor' + ((sh.categories || []).length === 1 ? 'y' : 'ies') : (sh.reason ? ' · ' + sh.reason : ''));
+                var fp = foldPanel(p, 'sheet:' + sh.name, sh.name, { badge: kind, open: kind === 'required' || s.sheets.length === 1, summary: one });
+                fp.body.appendChild(sc);
                 if (sh.reason) { sc.appendChild(h('p', 'di-sheet-why', (sh.action === 'import' ? 'Note: ' : 'Why: ') + sh.reason)); }
                 if (sh.action !== 'import' && !sh.reason) { sc.appendChild(h('p', 'di-sheet-why', sh.hidden ? 'Why: this sheet is hidden in the workbook.' : 'Why: this sheet does not look like a stock list.')); }
                 if (sh.action === 'import') {
@@ -858,18 +986,16 @@
                     }
                 }
                 (open[sh.name] || []).forEach(function (q) { sc.appendChild(questionCard(q)); });
-                p.appendChild(sc);
             });
-            var nav = h('div', 'di-actions');
             var cancel = h('button', 'btn-secondary di-btn di-btn--quiet', 'Cancel this import');
             cancel.type = 'button';
             cancel.addEventListener('click', function () { cancelJob(S.job, true); });
+            p.appendChild(add(h('div', 'di-actions di-actions--start'), cancel));
             var next = h('button', 'btn-primary di-btn');
             next.type = 'button';
             add(next, 'Continue to review ', h('i', 'fas fa-arrow-right'));
             next.addEventListener('click', function () { showStep(3); });
-            add(nav, cancel, next);
-            p.appendChild(nav);
+            add(footBar(p), next);
         }
         function mappingTable(sh) {
             var wrap = h('div', 'di-tablewrap');
@@ -995,6 +1121,7 @@
         }
         function scrollToEl(el, focusInside) {
             if (!el) { return; }
+            openFolds(el);
             var y = el.getBoundingClientRect().top + window.pageYOffset - stickyOffset() - 10;
             window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
             if (focusInside) {
@@ -1023,8 +1150,11 @@
             var s = S.sum;
             S.R = {};
             add(p, h('h3', 'di-h', 'Step 3 · Review and answer'));
-            add(p, helpLine('Each line below is one stock item as it would be imported. The small grey tag under every value (like "BAR!C12") is the cell it was read from. Answer the questions that sit under an item; nothing is saved to stock until step 4.'));
-            var vcBox3 = valueCheckBlock(); if (vcBox3) { p.appendChild(vcBox3); }
+            add(p, helpLine('Each line is one stock item as it will be imported. Answer the questions marked Needs answer; nothing is saved to stock until step 4.'));
+            p.appendChild(moreFold('The small grey tag under every value (like "BAR!C12") is the cell it was read from. Answer the questions that sit under an item, one by one or for many items at once.'));
+            var vcBox3 = valueCheckBlock();
+            S.R.plan = planBox(p, ['Answer the questions marked Needs answer', 'Optional: add sizes so drinks can go on the menu', 'Continue to confirm']);
+            S.R.plan.set(1, 'Optional', false);
             var structOpen = s.questions.filter(function (q) { return isStructural(q) && isOpenQ(q) && q.blocking; });
             if (structOpen.length) {
                 var b = h('p', 'di-warn');
@@ -1032,6 +1162,11 @@
                 var go = h('button', 'btn-secondary di-btn', 'Go to step 2'); go.type = 'button'; go.addEventListener('click', function () { showStep(2); });
                 b.appendChild(go); p.appendChild(b);
             }
+            // panel 1: what still needs an answer (progress, jump, leave rows out, questions for a whole sheet, tick-all)
+            var ec0 = s.entry_counts || {}, pr0 = s.progress || { answered: 0, total: 0 };
+            var todoNow = (ec0['needs-answer'] || 0) + (ec0.blocked || 0), needNow = todoNow > 0 || (pr0.total - pr0.answered) > 0;
+            var fpA = foldPanel(p, 's3-answers', 'Answer what is unclear', { badge: 'required', open: needNow });
+            S.R.fpA = fpA;
             // progress + jump
             var prog = h('div', 'di-progress');
             S.R.progText = h('strong', 'di-progress-t'); S.R.progText.setAttribute('role', 'status'); S.R.progText.setAttribute('aria-live', 'polite');
@@ -1042,13 +1177,13 @@
             S.R.jump.addEventListener('click', jumpNext);
             add(prog, S.R.progText, track, S.R.jump,
                 h('small', 'di-fhelp', 'The bar counts questions you must answer before you can confirm; the button counts the items they belong to. The N key does the same as the button when you are not typing.'));
-            p.appendChild(prog);
+            fpA.body.appendChild(prog);
             // can't fix some rows now? leave the blocked / unanswered ones out and carry on (their own box, shown only while any are left)
-            S.R.cont = h('div', 'di-continue'); S.R.cont.hidden = true; S.R.cont.setAttribute('role', 'status'); S.R.cont.setAttribute('aria-live', 'polite'); p.appendChild(S.R.cont);
+            S.R.cont = h('div', 'di-continue'); S.R.cont.hidden = true; S.R.cont.setAttribute('role', 'status'); S.R.cont.setAttribute('aria-live', 'polite'); fpA.body.appendChild(S.R.cont);
             // questions that belong to a whole sheet (one answer for all its items)
-            S.R.sheetQs = h('div', 'di-qs di-sheetqs'); S.R.sheetQs.hidden = true; p.appendChild(S.R.sheetQs);
+            S.R.sheetQs = h('div', 'di-qs di-sheetqs'); S.R.sheetQs.hidden = true; fpA.body.appendChild(S.R.sheetQs);
             // items already in stock: tick / clear the opening stock quantity on all of them in one go
-            S.R.ticks = h('div', 'di-continue di-ticks'); S.R.ticks.hidden = true; p.appendChild(S.R.ticks);
+            S.R.ticks = h('div', 'di-continue di-ticks'); S.R.ticks.hidden = true; fpA.body.appendChild(S.R.ticks);
             // the filter bar
             var bar = h('div', 'di-fbar'); S.R.bar = bar; S.R.barWrap = h('div', 'di-fwrap'); S.R.barWrap.appendChild(bar);
             var top = h('div', 'di-fbar-top');
@@ -1129,25 +1264,31 @@
             dClose.addEventListener('click', function () { setDrawer(false, true); });
             S.R.done.addEventListener('click', function () { setDrawer(false, true); });
             bar.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !drawer.hidden) { e.stopPropagation(); setDrawer(false, true); } });
-            p.appendChild(S.R.barWrap);
+            // panel 2: the items themselves (filters, bulk answers, the list)
+            var fpB = foldPanel(p, 's3-items', 'All items', { badge: 'optional', open: todoNow > 0 });
+            S.R.fpB = fpB;
+            fpB.body.appendChild(S.R.barWrap);
             watchBar();
-            S.R.bulk = h('div', 'di-bulk'); S.R.bulk.hidden = true; p.appendChild(S.R.bulk);
+            S.R.bulk = h('div', 'di-bulk'); S.R.bulk.hidden = true; fpB.body.appendChild(S.R.bulk);
             // only this one line is announced when the list changes (a screen reader would otherwise re-read every row)
-            S.R.info = h('p', 'di-help di-resinfo'); S.R.info.setAttribute('role', 'status'); S.R.info.setAttribute('aria-live', 'polite'); p.appendChild(S.R.info);
-            p.appendChild(columnKey());
+            S.R.info = h('p', 'di-help di-resinfo'); S.R.info.setAttribute('role', 'status'); S.R.info.setAttribute('aria-live', 'polite'); fpB.body.appendChild(S.R.info);
+            fpB.body.appendChild(columnKey());
             S.R.results = h('div', 'di-tables'); S.R.results.id = 'diResults'; S.R.results.setAttribute('data-rh-results', '1');
             S.R.results.appendChild(h('p', 'di-muted di-loading', 'Loading the items…'));
-            p.appendChild(S.R.results);
-            sizesSection(p);
-            var nav = h('div', 'di-actions');
-            var back = h('button', 'btn-secondary di-btn'); back.type = 'button'; add(back, h('i', 'fas fa-arrow-left'), ' Back'); back.addEventListener('click', function () { showStep(2); });
+            fpB.body.appendChild(S.R.results);
             var dl = h('a', 'btn-secondary di-btn', ' Download what will be imported (CSV)');
             dl.href = page + '?action=csv&job=' + S.job; dl.setAttribute('download', '');
             dl.insertBefore(h('i', 'fas fa-download'), dl.firstChild);
+            fpB.body.appendChild(add(h('div', 'di-actions di-actions--start'), dl));
+            fpB.body.appendChild(helpLine('The download lists every item that is ready, with where it came from, so you can check it in Excel before you confirm.'));
+            sizesSection(p);
+            if (vcBox3) {
+                var fpV = foldPanel(p, 's3-values', 'Value check', { badge: 'optional', open: false, summary: valueSummary(S.sum.value_check) });
+                fpV.body.appendChild(vcBox3);
+            }
+            var back = h('button', 'btn-secondary di-btn'); back.type = 'button'; add(back, h('i', 'fas fa-arrow-left'), ' Back'); back.addEventListener('click', function () { showStep(2); });
             var next = h('button', 'btn-primary di-btn'); next.type = 'button'; add(next, 'Continue to confirm ', h('i', 'fas fa-arrow-right')); next.addEventListener('click', function () { showStep(4); });
-            add(nav, back, dl, next);
-            p.appendChild(nav);
-            p.appendChild(helpLine('The download lists every item that is ready, with where it came from, so you can check it in Excel before you confirm.'));
+            add(footBar(p), back, next);
             S.page = null;
             paintProgress();
             reload();
@@ -1207,6 +1348,11 @@
             var todo = (ec['needs-answer'] || 0) + (ec.blocked || 0);
             S.R.jump.disabled = todo === 0;
             S.R.jump.textContent = todo === 0 ? 'Nothing is waiting for an answer' : 'Jump to the next one that needs an answer (' + num(todo, 0) + ' item' + (todo === 1 ? '' : 's') + ' left)';
+            var need = todo > 0 || (pr.total - pr.answered) > 0;
+            var allN = ec.all !== undefined ? ec.all : sumN(ec);
+            if (S.R.fpA) { S.R.fpA.set({ badge: need ? 'required' : 'done', summary: num(pr.answered, 0) + ' of ' + num(pr.total, 0) + ' questions answered' + (todo ? ' · ' + num(todo, 0) + ' item' + (todo === 1 ? '' : 's') + ' still need an answer' : '') }); }
+            if (S.R.fpB) { S.R.fpB.set({ badge: todo > 0 ? 'required' : 'optional', summary: num(allN, 0) + ' item' + (allN === 1 ? '' : 's') + ' · ' + num(ec.ready || 0, 0) + ' ready · ' + num(todo, 0) + ' need an answer' + (ec.skipped ? ' · ' + num(ec.skipped, 0) + ' skipped' : '') }); }
+            if (S.R.plan) { S.R.plan.set(0, num(pr.answered, 0) + ' of ' + num(pr.total, 0) + ' questions answered' + (todo ? ', ' + num(todo, 0) + ' item' + (todo === 1 ? '' : 's') + ' left' : ''), !need); }
             paintContinue(ec);
         }
         function paintContinue(ec) {
@@ -1412,6 +1558,7 @@
         // ---------- jump to the next question ----------
         function jumpNext() {
             if (!S.R || !S.R.results) { return; }
+            openFolds(S.R.results);
             var rows = Array.prototype.slice.call(S.R.results.querySelectorAll('tr.di-row[data-open="1"]'));
             var off = stickyOffset() + 40;
             var nxt = null;
@@ -1798,6 +1945,15 @@
         }
 
         // ---------- step 4: confirm ----------
+        /** One folded line for the "Value check" panel (the full text is inside it). */
+        function valueSummary(vc) {
+            if (!vc) { return ''; }
+            var bits = [];
+            if (vc.differ) { bits.push(rowsN(vc.differ) + ' differ from Quantity × Unit Cost'); }
+            if (vc.missing_n) { bits.push(num(vc.missing_n, 0) + ' item' + (vc.missing_n === 1 ? '' : 's') + ' with stock but no unit cost'); }
+            if ((vc.selling || []).length) { bits.push('a column valued at the selling price'); }
+            return bits.length ? bits.join(' · ') + '. A warning only: it does not stop the import.' : 'Nothing to check.';
+        }
         function renderConfirm() {
             var p = clear(panels[4]);
             var s = S.sum;
@@ -1805,7 +1961,13 @@
             var c = { skipped: cf.skipped || 0 };
             var toAnswer = cf.to_answer || 0;
             add(p, h('h3', 'di-h', 'Step 4 · Confirm'));
-            add(p, helpLine('Last check. These are the numbers for the whole file. Importing is one all-or-nothing step: if anything goes wrong, nothing is saved.'));
+            add(p, helpLine('Last check. Nothing is saved to your stock until you press Confirm and import.'));
+            p.appendChild(moreFold('These are the numbers for the whole file. Importing is one all-or-nothing step: if anything goes wrong, nothing is saved.'));
+            var plan = planBox(p, ['Check the numbers below', 'Optional: tick the drinks that should go on the menu', 'Press Confirm and import']);
+            S.plan = plan;
+            plan.set(0, toAnswer ? num(toAnswer, 0) + ' row' + (toAnswer === 1 ? '' : 's') + ' still need an answer' : 'Everything is answered', !toAnswer);
+            plan.set(1, 'Checking…', false);
+            plan.set(2, s.can_confirm ? 'Ready' : 'Not yet: finish step 3 first', false);
             var cards = h('div', 'di-cards');
             add(cards,
                 card('New ingredients', num(cf.creates || 0, 0), 'Items not in your stock yet. They will be created.', 'good'),
@@ -1816,9 +1978,10 @@
                 card('Fixed for you', num(s.heal_total || 0, 0), 'Small spelling or format fixes made while reading the file, each with the cell it came from (list below, with Undo).'),
                 s.case_auto ? card('Read as case prices', num(s.case_auto, 0), 'Prices this hotel\'s own data shows are for a whole case (the item\'s own pack size, with its cost in stock, deliveries or menu selling price). The cost is the price divided by the pack size. Each question in step 3 says why and can be changed.') : null,
                 card('Still need an answer', num(toAnswer, 0), 'Questions or blocked rows to sort out before you can confirm.', toAnswer ? 'bad' : 'good'));
-            p.appendChild(cards);
+            var fpN = foldPanel(p, 's4-numbers', 'The numbers for the whole file', { badge: toAnswer ? 'required' : 'done', open: true,
+                summary: num(cf.creates || 0, 0) + ' new · ' + num(cf.updates || 0, 0) + ' updated · ' + num(cf.in_count || 0, 0) + ' in the opening count · ' + num(toAnswer, 0) + ' still need an answer' });
+            fpN.body.appendChild(cards);
             var what = h('div', 'di-what');
-            add(what, h('h4', 'di-h4', 'What happens when you press Confirm'));
             var ul = h('ul', 'di-facts');
             var menuLi = h('li', null, 'Nothing is deleted and recipes are not touched. Stock quantities only change once the opening count is approved.');
             [
@@ -1835,14 +1998,25 @@
             drinksSection(p, menuLi);
             var cws = cf.cost_with_stock || 0, cwsNames = cf.cost_with_stock_names || [];
             if (cws) {
-                what.appendChild(h('p', 'di-warn', num(cws, 0) + ' cost change' + (cws === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + cwsNames.join(', ') + (cws > cwsNames.length ? ' and ' + num(cws - cwsNames.length, 0) + ' more' : '') + '.'));
+                p.appendChild(h('p', 'di-warn', num(cws, 0) + ' cost change' + (cws === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + cwsNames.join(', ') + (cws > cwsNames.length ? ' and ' + num(cws - cwsNames.length, 0) + ' more' : '') + '.'));
             }
-            p.appendChild(what);
             fixedSections(p);
             // right before the Import button: the stock that will NOT be in the opening count, by its true reason (worked out on the server)
-            var vcBox4 = valueCheckBlock(); if (vcBox4) { p.appendChild(vcBox4); }
+            var vcBox4 = valueCheckBlock();
+            if (vcBox4) {
+                var fpV4 = foldPanel(p, 's4-values', 'Value check', { badge: 'optional', open: false, summary: valueSummary(s.value_check) });
+                fpV4.body.appendChild(vcBox4);
+            }
             var ncBox = notCountedBlock(cf.not_counted, cf.qty_tick, cf.cost_tick);
-            if (ncBox) { p.appendChild(ncBox); }
+            if (ncBox) {
+                var ncTotal = (cf.not_counted && cf.not_counted.total) || 0;
+                var fpNc = foldPanel(p, 's4-notcounted', 'Stock not in the opening count', { badge: 'optional', open: false, warn: true,
+                    summary: itemsWord(ncTotal) + ' with stock will NOT be in the opening count. Open to see why, and to fix it.' });
+                fpNc.body.appendChild(ncBox);
+            }
+            var fpW = foldPanel(p, 's4-what', 'What happens when you press Confirm and import', { badge: 'optional', open: false,
+                summary: 'Nothing is deleted. Stock quantities are filed as an opening count that another manager approves.' });
+            fpW.body.appendChild(what);
             var why = h('p', 'di-why');
             var btn = h('button', 'btn-primary di-btn di-confirm');
             btn.type = 'button';
@@ -1867,17 +2041,17 @@
                     showStep(4); loadMine();
                 });
             });
-            var nav = h('div', 'di-actions');
             var back = h('button', 'btn-secondary di-btn'); back.type = 'button'; add(back, h('i', 'fas fa-arrow-left'), ' Back to review'); back.addEventListener('click', function () { showStep(3); });
             var cancel = h('button', 'btn-secondary di-btn di-btn--quiet', 'Cancel this import'); cancel.type = 'button'; cancel.addEventListener('click', function () { cancelJob(S.job, true); });
-            add(nav, back, cancel);
+            p.appendChild(add(h('div', 'di-actions di-actions--start'), cancel));
+            var nav = footBar(p, why);
+            add(nav, back);
             if (!s.can_confirm && toAnswer > 0) {
                 var cont = h('button', 'btn-primary di-btn', 'Continue without them…'); cont.type = 'button';
                 cont.addEventListener('click', function () { cont.disabled = true; skipRows('open', [], { thenStep4: true, title: 'Continue without ' + num(toAnswer, 0) + ' item' + (toAnswer === 1 ? '' : 's') + '?' }).then(function () { if (document.body.contains(cont)) { cont.disabled = false; } }); });
                 nav.appendChild(cont);
             }
             nav.appendChild(btn);
-            add(p, why, nav);
         }
         /**
          * Step 4 "Drinks for the menu": rows of the file with a selling price, worked out on the server (includes/import/drinks.php).
@@ -1928,9 +2102,11 @@
             var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
             var info = h('p', 'di-help'); info.setAttribute('role', 'status');
             var pgBox = h('div');
-            add(sec, head, intro, key, perm, ctrl, tickDone, dlCats, info, wrap, pgBox, note);
-            sec.hidden = true;
-            p.appendChild(sec);
+            add(sec, intro, key, perm, ctrl, tickDone, dlCats, info, wrap, pgBox, note);
+            var fp = foldPanel(p, 's4-drinks', head, { badge: 'optional', open: false });
+            fp.el.hidden = true;
+            fp.body.appendChild(sec);
+            var planRef = S.plan;
             var money = function (cur, x) { return x === null || x === undefined ? '—' : cur + num(x, 2); };
             var setMenuLi = function (c) {
                 var n = (c && c.ticked) || 0;
@@ -1940,9 +2116,11 @@
             var draw = function (r) {
                 var cur = r.currency ? r.currency + ' ' : '';
                 var c = r.counts || {};
-                sec.hidden = !(c.listed || r.waiting);
+                fp.el.hidden = !(c.listed || r.waiting);
                 setMenuLi(c);
                 head.textContent = 'Drinks for the menu (' + num(c.ticked || 0, 0) + ' of ' + num(c.listed || 0, 0) + ' ticked)';
+                fp.set({ summary: (c.ticked ? num(c.add || 0, 0) + ' new on the menu · ' + num(c.update || 0, 0) + ' price change' + (c.update === 1 ? '' : 's') : 'Nothing ticked: nothing is added to the menu') + (c.below ? ' · ' + num(c.below, 0) + ' sell below cost' : ''), warn: !!c.below });
+                if (planRef) { planRef.set(1, c.listed ? num(c.ticked || 0, 0) + ' of ' + num(c.listed || 0, 0) + ' ticked' : 'No drinks with a selling price in this file', !c.listed); }
                 perm.hidden = !!r.can_menu;
                 perm.textContent = 'Your account cannot change the menu (it needs the Menu permission), so these drinks cannot be ticked. The stock part of the import is not affected.';
                 clear(dlCats);
@@ -2062,7 +2240,9 @@
             var sel = {};           // ticked drinks (item key -> true), kept across pages, searches and filters
             var shownKeys = [];     // every drink the list shows now (search + Show + Group, all pages), from the server
             var head = h('h4', 'di-h4', 'Optional: add sizes so these can go on the menu');
-            var intro = helpLine('These drinks are sold by a measure (a shot, a glass of milk, juice or wine). To work out the cost of one sale we need how many ml one shot or glass holds, and how many ml one bottle, carton or casket holds. Type a size once for a group, on one row, or for many ticked drinks at once. Leave it blank if you are not sure: the import still works, those drinks just cannot be put on the menu in step 4.');
+            var intro = h('div');
+            add(intro, helpLine('These drinks are sold by a measure (a shot, a glass). Add how many ml they hold so the cost of one sale can be worked out. Leave it blank if you are not sure: the import still works.'),
+                moreFold('To work out the cost of one sale we need how many ml one shot or glass holds, and how many ml one bottle, carton or casket holds. Type a size once for a group, on one row, or for many ticked drinks at once. A drink with no size just cannot be put on the menu in step 4.'));
             var shotIntro = helpLine('Shot size: already filled in from your Drink measures list (or your file), so you only change it if this hotel pours a different shot. It is used for the menu only: the cost of one shot and how much of the bottle each sale takes off stock. Your opening stock count, the shots-per-bottle count on an item and your Drink measures list do not change.');
             shotIntro.hidden = true;
             var key = h('details', 'di-details di-colkey');
@@ -2115,9 +2295,11 @@
             var allBox = document.createElement('input'); allBox.type = 'checkbox'; allBox.setAttribute('aria-label', 'Tick all drinks shown, on every page');
             var info = h('p', 'di-help'); info.setAttribute('role', 'status');
             var pgBox = h('div');
-            add(sec, head, intro, shotIntro, key, groupsBox, ctrl, bulk, info, wrap, pgBox);
-            sec.hidden = true;
-            p.appendChild(sec);
+            add(sec, intro, shotIntro, key, groupsBox, ctrl, bulk, info, wrap, pgBox);
+            var fp = foldPanel(p, 's3-sizes', head, { badge: 'optional', open: false });
+            fp.el.hidden = true;
+            fp.body.appendChild(sec);
+            var planRef = S.R && S.R.plan;
             var mlText = function (x) { return num(x, x % 1 ? 2 : 0) + ' ml'; };
             var has = function (v) { return v !== null && v !== undefined; };
             var sizeInput = function (val, label, editable, onSave, ph) {
@@ -2209,8 +2391,10 @@
                 var opts = r.sold_options || [];
                 shownKeys = r.keys || [];
                 shotIntro.hidden = !(r.groups || []).some(function (g) { return g.shot_q; });
-                sec.hidden = !c.need;
+                fp.el.hidden = !c.need;
                 head.textContent = 'Optional: add sizes so these can go on the menu (' + num(c.filled || 0, 0) + ' of ' + num(c.need || 0, 0) + ' have them)';
+                fp.set({ badge: (c.need && c.filled >= c.need) ? 'done' : 'optional', summary: num(c.filled || 0, 0) + ' of ' + num(c.need || 0, 0) + ' drinks have a size. Drinks without one cannot go on the menu in step 4.' });
+                if (planRef) { planRef.set(1, c.need ? num(c.filled || 0, 0) + ' of ' + num(c.need || 0, 0) + ' drinks have a size' : 'No drinks need a size', !c.need || c.filled >= c.need); }
                 clear(groupsBox);
                 (r.groups || []).forEach(function (g) {
                     var row = h('div', 'di-size-group');
@@ -2416,9 +2600,8 @@
             var s = S.sum || {};
             var skippedN = (s.confirm && s.confirm.skipped) || 0;
             if (skippedN > 0) {
-                var sec = h('div', 'di-what di-skipped');
-                add(sec, h('h4', 'di-h4', 'Rows left out (' + num(skippedN, 0) + ')'),
-                    helpLine('These rows will not be imported. Each shows what was wrong with it. Bring one back to answer it again, or download them all to fix in Excel and import later. After you confirm, the uploaded copy of your file is deleted, so download them first if you want them.'));
+                var sec = h('div', 'di-skipped');
+                add(sec, helpLine('These rows will not be imported. Each shows what was wrong with it. Bring one back to answer it again, or download them all to fix in Excel and import later. After you confirm, the uploaded copy of your file is deleted, so download them first if you want them.'));
                 var dl = h('div', 'di-actions');
                 [['csv', 'Download skipped rows (CSV)'], ['xlsx', 'Download skipped rows (Excel)']].forEach(function (f) {
                     var a = h('a', 'btn-secondary di-btn', ' ' + f[1]); a.href = page + '?action=skipped&job=' + S.job + '&format=' + f[0]; a.setAttribute('download', '');
@@ -2437,7 +2620,9 @@
                     }
                     add(tr, t1, t2, t3, t4);
                 }));
-                p.appendChild(sec);
+                var fpS = foldPanel(p, 's4-left', 'Rows left out (' + num(skippedN, 0) + ')', { badge: 'optional', open: false,
+                    summary: num(skippedN, 0) + ' row' + (skippedN === 1 ? '' : 's') + ' will not be imported. Open to bring one back or download them.' });
+                fpS.body.appendChild(sec);
             }
             var hd = s.handled || {};
             if ((hd.sections || 0) + (hd.totals || 0) + (hd.notes || 0) > 0) {
@@ -2445,9 +2630,8 @@
             }
             var healN = (s.heal_total || 0) + (s.heals_undone || 0);
             if (healN > 0) {
-                var hs = h('div', 'di-what di-healed');
-                add(hs, h('h4', 'di-h4', 'Fixed for you (' + num(s.heal_total || 0, 0) + ')'),
-                    helpLine('Small format fixes made while reading your file: a unit spelled another way ("btl" for bottle) or a quantity typed together with its unit ("12 pcs"). Only spelling and format change, never a number or a name. Undo puts the value back as written and asks again.'));
+                var hs = h('div', 'di-healed');
+                add(hs, helpLine('Small format fixes made while reading your file: a unit spelled another way ("btl" for bottle) or a quantity typed together with its unit ("12 pcs"). Only spelling and format change, never a number or a name. Undo puts the value back as written and asks again.'));
                 hs.appendChild(listBox('heals', ['What was fixed', 'Cell', 'Before', 'After', ''], function (r, tr) {
                     var t1 = cell('What was fixed'); add(t1, h('strong', null, r.label), r.item ? h('div', 'di-small', r.item) : null, h('div', 'di-small', r.text));
                     var t2 = cell('Cell'); add(t2, src(r.source));
@@ -2468,7 +2652,9 @@
                     }
                     add(tr, t1, t2, t3, t4, t5);
                 }));
-                p.appendChild(hs);
+                var fpH = foldPanel(p, 's4-fixed', 'Fixed for you (' + num(s.heal_total || 0, 0) + ')', { badge: 'optional', open: false,
+                    summary: num(s.heal_total || 0, 0) + ' small spelling or format fix' + (s.heal_total === 1 ? '' : 'es') + ' made while reading your file. Each can be undone.' });
+                fpH.body.appendChild(hs);
             }
         }
         /** A server-side list (search, reason filter, paging) of Step 4. kind: skipped | heals. */

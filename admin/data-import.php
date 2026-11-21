@@ -666,20 +666,28 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
              data-can-stock-reports="<?php echo (function_exists('rhCanLinkTo') && rhCanLinkTo($uid, 'stock-reports.php')) ? '1' : '0'; ?>"
              data-page="data-import.php">
 
-            <p class="di-intro">Bring a stock list in from Excel or CSV. You will see exactly how each column and row will be read, answer anything that is unclear, and only then confirm. Nothing is saved to your stock until you press Confirm.</p>
+            <p class="di-intro">Bring a stock list in from Excel or CSV in four steps. Nothing is saved to your stock until you press Confirm and import on the last step.</p>
 
             <ol class="di-steps" id="diSteps" aria-label="Import steps">
-                <li data-step="1" class="is-current"><span class="di-step-n">1</span><span class="di-step-t">Upload<small>Choose your file</small></span></li>
+                <li data-step="1" class="is-current"><span class="di-step-n">1</span><span class="di-step-t">Upload<small>Pick your file</small></span></li>
                 <li data-step="2"><span class="di-step-n">2</span><span class="di-step-t">What we found<small>Check how it was read</small></span></li>
-                <li data-step="3"><span class="di-step-n">3</span><span class="di-step-t">Review &amp; answer<small>Fix anything unclear</small></span></li>
-                <li data-step="4"><span class="di-step-n">4</span><span class="di-step-t">Confirm<small>Import and finish</small></span></li>
+                <li data-step="3"><span class="di-step-n">3</span><span class="di-step-t">Review and answer<small>Answer what is unclear</small></span></li>
+                <li data-step="4"><span class="di-step-n">4</span><span class="di-step-t">Confirm<small>Check and import</small></span></li>
             </ol>
 
             <div id="diMsg" class="di-msg" role="status" aria-live="polite" hidden></div>
 
             <section class="di-panel" id="diStep1" data-panel="1">
                 <h3 class="di-h">Step 1 &middot; Upload your stock list</h3>
-                <p class="di-help">Pick the spreadsheet you keep your stock in. It is only read, never changed, and the copy kept on the server is deleted when you finish, cancel, or after a few days.</p>
+                <p class="di-help">Pick the spreadsheet you keep your stock in. It is only read, never changed.</p>
+                <div class="di-plan">
+                    <div class="di-plan-top"><strong class="di-plan-h">On this step</strong></div>
+                    <ol class="di-plan-list">
+                        <li><span class="di-plan-t">Choose your Excel or CSV file</span></li>
+                        <li><span class="di-plan-t">Press &ldquo;Upload and read the file&rdquo;</span></li>
+                        <li><span class="di-plan-t">Nothing is saved yet: you check everything in the next steps</span></li>
+                    </ol>
+                </div>
                 <div class="di-drop" id="diDrop" tabindex="0" role="button" aria-label="Choose a file or drop it here">
                     <i class="fas fa-file-import" aria-hidden="true"></i>
                     <strong>Drop your file here</strong>
@@ -688,12 +696,16 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
                     <input type="file" id="diFile" class="di-file" accept=".xlsx,.xlsm,.csv,.tsv">
                     <span class="di-file-name" id="diFileName" aria-live="polite"></span>
                 </div>
+                <details class="di-details di-more">
+                <summary>What files can I upload?</summary>
                 <ul class="di-facts">
                     <li><strong>Accepted:</strong> Excel (.xlsx, .xlsm) and CSV / TSV text files.</li>
                     <li><strong>Not supported yet:</strong> Word and PDF files, and old Excel (.xls) files &mdash; open them in Excel and use Save As &gt; Excel Workbook (.xlsx).</li>
                     <li><strong>Largest file:</strong> <?php echo htmlspecialchars(di_mb_text($maxBytes)); ?>.</li>
                     <li><strong>Macros:</strong> never run. Formulas are read only as the value they last showed.</li>
+                    <li><strong>Your file:</strong> the copy kept on the server is deleted when you finish, cancel, or after a few days.</li>
                 </ul>
+                </details>
                 <?php if ($canReimport): ?>
                     <label class="di-check"><input type="checkbox" id="diReimport"> <span>Import again &mdash; tick this only if you really mean to bring in a file that was already imported (administrators only).</span></label>
                 <?php endif; ?>
@@ -706,11 +718,13 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
             <section class="di-panel" id="diStep3" data-panel="3" hidden></section>
             <section class="di-panel" id="diStep4" data-panel="4" hidden></section>
 
-            <section class="di-panel di-mine" id="diMine" aria-labelledby="diMineH">
-                <h3 class="di-h" id="diMineH">My imports</h3>
-                <p class="di-help">Imports you started in the last 30 days. Open one to carry on where you stopped, or cancel one you no longer need.</p>
-                <div id="diMineList" class="di-list"><p class="di-muted">Loading&hellip;</p></div>
-            </section>
+            <details class="di-mine di-fold" id="diMine" open>
+                <summary class="di-fold-sum"><i class="fas fa-chevron-right di-fold-chev" aria-hidden="true"></i><span class="di-fold-main"><h3 class="di-h di-fold-t" id="diMineH">My imports</h3></span><span class="di-fold-s">Carry on where you stopped, or cancel one you no longer need.</span></summary>
+                <div class="di-fold-body">
+                    <p class="di-help">Imports you started in the last 30 days. Open one to carry on where you stopped, or cancel one you no longer need.</p>
+                    <div id="diMineList" class="di-list"><p class="di-muted">Loading&hellip;</p></div>
+                </div>
+            </details>
             <?php if ($canDeleteHistory):
                 /* Delete from Import history: inside #di-root (so inside #rh-admin-page) or the SPA drops it. Text from the job is filled in with textContent. */
                 require_once __DIR__ . '/../includes/modal.php';
