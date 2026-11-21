@@ -1914,16 +1914,21 @@
             var allIn = document.createElement('input'); allIn.type = 'text'; allIn.className = 'di-fin'; allIn.maxLength = 100; allIn.setAttribute('list', listId); allIn.setAttribute('aria-label', 'Category for every new drink');
             var allBtn = h('button', 'btn-secondary di-btn', 'Set for all'); allBtn.type = 'button';
             var allWrap = h('div', 'di-drinks-all'); add(allWrap, allIn, allBtn);
+            var tickAllBtn = h('button', 'btn-secondary di-btn', 'Tick all'); tickAllBtn.type = 'button';
+            var untickAllBtn = h('button', 'btn-secondary di-btn', 'Untick all'); untickAllBtn.type = 'button';
+            var tickWrap = h('div', 'di-drinks-all'); add(tickWrap, tickAllBtn, untickAllBtn);
+            var tickDone = h('p', 'di-small'); tickDone.setAttribute('role', 'status'); tickDone.hidden = true;
             add(ctrl, ctlWrap('Search', si, 'Finds a drink, a category or a cell such as F12.'), ctlWrap('Show', sh, 'Only some of the drinks.'),
                 ctlWrap('Rows per page', sz, 'How many drinks to show at once.'),
-                ctlWrap('Category for all new drinks', allWrap, 'Puts every drink that would be added in this category. Drinks already on the menu keep theirs.'));
+                ctlWrap('Category for all new drinks', allWrap, 'Puts every drink that would be added in this category. Drinks already on the menu keep theirs.'),
+                ctlWrap('Put on the menu', tickWrap, 'Ticks (or unticks) every drink in the list as it is now, on every page, after Search and Show. Drinks that cannot go on the menu stay unticked.'));
             var wrap = h('div', 'di-tablewrap'), tb = h('table', 'di-table di-lt'), thead = h('thead'), htr = h('tr');
             DRINK_HEADS.forEach(function (c) { var th = h('th', null, c[0]); th.title = c[1]; htr.appendChild(th); });
             thead.appendChild(htr); tb.appendChild(thead);
             var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
             var info = h('p', 'di-help'); info.setAttribute('role', 'status');
             var pgBox = h('div');
-            add(sec, head, intro, key, perm, ctrl, dlCats, info, wrap, pgBox, note);
+            add(sec, head, intro, key, perm, ctrl, tickDone, dlCats, info, wrap, pgBox, note);
             sec.hidden = true;
             p.appendChild(sec);
             var money = function (cur, x) { return x === null || x === undefined ? '—' : cur + num(x, 2); };
@@ -1944,6 +1949,7 @@
                 (r.cats || []).forEach(function (x) { var op = document.createElement('option'); op.value = x; dlCats.appendChild(op); });
                 if (!allIn.value) { allIn.value = r.default_category || 'Bar'; }
                 allBtn.disabled = !r.can_menu; allIn.disabled = !r.can_menu;
+                tickAllBtn.disabled = !r.can_menu; untickAllBtn.disabled = !r.can_menu;
                 note.textContent = (r.waiting ? num(r.waiting, 0) + ' more item' + (r.waiting === 1 ? '' : 's') + ' with a selling price will show here once answered in step 3. ' : '') + (c.below ? num(c.below, 0) + ' drink' + (c.below === 1 ? ' sells' : 's sell') + ' below what one costs (marked). ' : '');
                 note.hidden = !note.textContent;
                 clear(body);
@@ -2001,15 +2007,29 @@
                     draw(r);
                 });
             };
-            var save = function (data, cb) {
+            var save = function (data, cb, after) {
                 if (cb) { cb.disabled = true; }
+                tickDone.hidden = true;
                 var d = q(); Object.keys(data).forEach(function (k) { d[k] = data[k]; });
                 post('drinks_set', d).then(function (r) {
                     if (!r.ok) { msg(r.error || 'That could not be saved.'); load(); return; }
                     msg('');
                     if (r.list && r.list.ok) { draw(r.list); } else { load(); }
+                    if (after) { after(r); }
                 });
             };
+            var tickAll = function (on) {
+                tickAllBtn.disabled = true; untickAllBtn.disabled = true;
+                st.q = si.value.trim();     // the search as typed now, even within the 300 ms before the list updates
+                save({ mode: 'tick_all', on: on ? '1' : '0' }, null, function (r) {
+                    var n = r.changed || 0, below = r.list && r.list.counts ? (r.list.counts.below || 0) : 0;
+                    tickDone.textContent = num(n, 0) + ' drink' + (n === 1 ? '' : 's') + (on ? ' ticked.' : ' unticked.')
+                        + (on && below ? ' Check the ones marked "Sells below cost" before you import.' : '');
+                    tickDone.hidden = false;
+                });
+            };
+            tickAllBtn.addEventListener('click', function () { tickAll(true); });
+            untickAllBtn.addEventListener('click', function () { tickAll(false); });
             si.addEventListener('input', debounce(function () { st.q = si.value.trim(); st.page = 1; load(); }, 300));
             sh.addEventListener('change', function () { st.show = sh.value; st.page = 1; load(); });
             sz.addEventListener('change', function () { st.size = parseInt(sz.value, 10) || 10; st.page = 1; load(); });
@@ -2030,6 +2050,7 @@
             ['Drink', 'The item name from your file, with the cell it came from.'],
             ['Sold as', 'One sale: the "served by" cell of your file.'],
             ['Glass size (ml)', 'For drinks sold by the glass (milk, juice, wine): how many ml one glass holds. Type a size for this drink only, or leave it blank to use the group\'s size. Under it: where the size in use comes from.'],
+            ['Shot size (ml)', 'For drinks sold by the shot (or tot): how many ml one shot holds. It sets the cost of one shot and how much of the bottle each sale takes off stock. It does NOT change your opening stock count or your Drink measures list. Filled in from your Drink measures list, your file or the group\'s size; type a size for this drink only, or clear yours to go back to the one under it.'],
             ['Bottle or container size (ml)', 'How many ml one bottle, carton, casket or jug holds. Type a size for this drink only, or leave it blank to use the group\'s size. Under it: where the size in use comes from.'],
             ['Menu in step 4', 'Whether this drink can be ticked for the menu in step 4 with the sizes it has now.']
         ];
@@ -2037,7 +2058,9 @@
             var sec = h('div', 'di-what di-drinks di-sizes');
             var st = { q: '', show: 'all', group: '', page: 1, size: 10 };
             var head = h('h4', 'di-h4', 'Optional: add sizes so these can go on the menu');
-            var intro = helpLine('These drinks are sold by a measure (a shot, a glass of milk, juice or wine), but neither your file nor your stock says how many ml one glass or one bottle, carton or casket holds, so the cost of one sale cannot be worked out. Type a size once for a group, or a different one on any row. Leave it blank if you are not sure: the import still works, those drinks just cannot be put on the menu in step 4.');
+            var intro = helpLine('These drinks are sold by a measure (a shot, a glass of milk, juice or wine). To work out the cost of one sale we need how many ml one shot or glass holds, and how many ml one bottle, carton or casket holds. Type a size once for a group, or a different one on any row. Leave it blank if you are not sure: the import still works, those drinks just cannot be put on the menu in step 4.');
+            var shotIntro = helpLine('Shot size: already filled in from your Drink measures list (or your file), so you only change it if this hotel pours a different shot. It is used for the menu only: the cost of one shot and how much of the bottle each sale takes off stock. Your opening stock count, the shots-per-bottle count on an item and your Drink measures list do not change.');
+            shotIntro.hidden = true;
             var key = h('details', 'di-details di-colkey');
             key.appendChild(h('summary', null, 'What the columns mean'));
             var kdl = h('dl', 'di-colkey-list');
@@ -2060,7 +2083,7 @@
             var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
             var info = h('p', 'di-help'); info.setAttribute('role', 'status');
             var pgBox = h('div');
-            add(sec, head, intro, key, groupsBox, ctrl, info, wrap, pgBox);
+            add(sec, head, intro, shotIntro, key, groupsBox, ctrl, info, wrap, pgBox);
             sec.hidden = true;
             p.appendChild(sec);
             var mlText = function (x) { return num(x, x % 1 ? 2 : 0) + ' ml'; };
@@ -2092,9 +2115,29 @@
                 }
                 return d;
             };
+            /* where the shot size in use comes from (owner 2026-11-21); the source is plain text (textContent) */
+            var shotLine = function (x, edit) {
+                var d = h('div', 'di-small');
+                var ml = x.shot_ml, s = x.shot_src ? ' (' + x.shot_src + ')' : '';
+                d.textContent = x.shot_from === 'row' ? 'Your answer for this row: ' + mlText(ml)
+                    : x.shot_from === 'group' ? 'Your answer for this group: ' + mlText(ml)
+                    : x.shot_from === 'cell' ? 'Read from your file: ' + mlText(ml) + s
+                    : x.shot_from === 'ai' ? 'Read by the Assistant: ' + mlText(ml) + s
+                    : x.shot_from === 'count' ? 'From the item\'s count measure (' + num(x.shot_count_n || 0, 0) + ' in one bottle)' + (ml !== null && ml !== undefined ? ': ' + mlText(ml) : '')
+                    : x.shot_from === 'list' ? 'From your Drink measures list (' + mlText(ml) + ')'
+                    : 'Blank: no shot size yet';
+                if (x.shot_from === 'ai' && edit) {
+                    var b = h('button', 'btn-secondary di-btn di-btn--quiet di-size-clear', 'Clear');
+                    b.type = 'button'; b.title = 'Clear what was read here; the size under it is used instead (the group\'s or your Drink measures list).';
+                    b.addEventListener('click', function () { b.disabled = true; save({ mode: 'row', key: x.key, field: 'shot', value: '' }); });
+                    d.appendChild(document.createTextNode(' ')); d.appendChild(b);
+                }
+                return d;
+            };
             var draw = function (r) {
                 var c = r.counts || {};
                 var edit = !!(r.editable && r.drink_ready);
+                shotIntro.hidden = !(r.groups || []).some(function (g) { return g.shot_q; });
                 sec.hidden = !c.need;
                 head.textContent = 'Optional: add sizes so these can go on the menu (' + num(c.filled || 0, 0) + ' of ' + num(c.need || 0, 0) + ' have them)';
                 clear(groupsBox);
@@ -2109,13 +2152,26 @@
                         add(gw, h('span', 'di-small', 'One glass holds:'), sizeInput(g.glass, 'Glass size in ml for: ' + g.label, edit, function (v, i) { save({ mode: 'group', key: g.key, field: 'glass', value: v }, i); }, 'e.g. 250'));
                         ins.appendChild(gw);
                     }
+                    if (g.shot_q) {
+                        var sw = h('div', 'di-size-field');
+                        add(sw, h('span', 'di-small', 'One shot holds:'), sizeInput(g.shot, 'Shot size in ml for: ' + g.label, edit, function (v, i) { save({ mode: 'group', key: g.key, field: 'shot', value: v }, i); },
+                            g.shot_list_ml ? 'list: ' + num(g.shot_list_ml, g.shot_list_ml % 1 ? 2 : 0) : 'e.g. 25'));
+                        sw.title = 'Leave blank to use ' + (g.shot_list_ml ? 'the ' + mlText(g.shot_list_ml) + ' shot on your Drink measures list' : 'the size in your file') + '. Used for the menu only, never for the opening count.';
+                        ins.appendChild(sw);
+                    }
                     if (g.cont) {
                         var cw = h('div', 'di-size-field');
                         add(cw, h('span', 'di-small', 'One ' + (g.word || 'bottle') + ' holds:'), sizeInput(g.ml, (g.word === 'bottle' ? 'Bottle' : 'Container') + ' size in ml for: ' + g.label, edit, function (v, i) { save({ mode: 'group', key: g.key, field: 'ml', value: v }, i); }, g.word === 'bottle' ? 'e.g. 750' : 'e.g. 1000'));
                         ins.appendChild(cw);
                     }
                     row.appendChild(ins);
-                    row.appendChild(h('small', 'di-fhelp', (g.ml !== null || g.glass !== null) ? 'Used for every drink in this group, except one with its own size below, in its name or in your file. Clear it to leave them blank.' : 'Blank: these drinks stay off the menu list in step 4. A size typed on a row below, or read from your file, wins over this one.'));
+                    var gHas = g.ml !== null || g.glass !== null || (g.shot !== null && g.shot !== undefined);
+                    var gHelp = gHas ? 'Used for every drink in this group, except one with its own size below, in its name or in your file. Clear it to leave them blank.'
+                        : (g.cont || g.glass_q) ? 'Blank: these drinks stay off the menu list in step 4. A size typed on a row below, or read from your file, wins over this one.' : '';
+                    if (g.shot_q) {
+                        gHelp += (gHelp ? ' ' : '') + 'A blank shot size uses the size in your file, or else the shot on your Drink measures list' + (g.shot_list_ml ? ' (' + mlText(g.shot_list_ml) + ')' : '') + ' or the item\'s own shots-per-bottle count.';
+                    }
+                    row.appendChild(h('small', 'di-fhelp', gHelp));
                     groupsBox.appendChild(row);
                 });
                 if (!r.drink_ready) { groupsBox.appendChild(h('p', 'di-warn', 'This hotel\'s database cannot keep a bottle size yet, so sizes cannot be typed here.')); }
@@ -2143,8 +2199,20 @@
                     } else {
                         t3.appendChild(h('span', 'di-small', 'Not sold by the glass.'));
                     }
+                    var t3s = cell('Shot size (ml)');
+                    if (x.shot_need) {
+                        t3s.appendChild(sizeInput(x.shot_row_ml, 'Shot size in ml for ' + x.name, edit, function (v, i) { save({ mode: 'row', key: x.key, field: 'shot', value: v }, i); },
+                            x.shot_ml !== null && x.shot_ml !== undefined ? String(x.shot_ml) : 'e.g. 25'));
+                        t3s.appendChild(shotLine(x, edit));
+                    } else {
+                        t3s.appendChild(h('span', 'di-small', 'Not sold by the shot.'));
+                    }
                     var t4 = cell('Bottle or container size (ml)');
-                    if (x.cont_need) {
+                    if (x.cont_need && x.cont_optional && (x.ml === null || x.ml === undefined)) {
+                        // its own count measure gives one shot: a bottle size is only needed to use a different shot size
+                        t4.appendChild(sizeInput(x.row_ml, 'Bottle size in ml for ' + x.name, edit, function (v, i) { save({ mode: 'row', key: x.key, field: 'ml', value: v }, i); }, 'e.g. 750'));
+                        t4.appendChild(h('div', 'di-small', 'Not needed: its count measure gives one shot. Add it only to use a different shot size.'));
+                    } else if (x.cont_need) {
                         t4.appendChild(sizeInput(x.row_ml, (x.word === 'bottle' ? 'Bottle' : 'Container') + ' size in ml for ' + x.name, edit, function (v, i) { save({ mode: 'row', key: x.key, field: 'ml', value: v }, i); }, x.word === 'bottle' ? 'e.g. 750' : 'e.g. 1000'));
                         t4.appendChild(fromLine(x.from, x.ml, x.from === 'name' ? x.name_source : x.src, edit, function () { save({ mode: 'row', key: x.key, field: 'ml', value: '' }); }));
                     } else if (x.from === 'own') {
@@ -2155,7 +2223,7 @@
                     var t5 = cell('Menu in step 4');
                     t5.appendChild(h('span', 'di-small', x.tickable ? 'Can be ticked in step 4' : (x.why_not || 'Cannot be ticked.')));
                     if (x.warn) { t5.appendChild(h('div', 'di-warn', x.warn)); }
-                    add(tr, t1, t2, t3, t4, t5); body.appendChild(tr);
+                    add(tr, t1, t2, t3, t3s, t4, t5); body.appendChild(tr);
                 });
                 info.textContent = r.total ? num(r.total, 0) + ' drink' + (r.total === 1 ? '' : 's') + ' in this list.' : 'Nothing matches.';
                 clear(pgBox);

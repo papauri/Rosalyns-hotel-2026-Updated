@@ -31,7 +31,9 @@ if (!function_exists('import_default_aliases')) {
             // v7 (2026-11-20, glass + container sizes): glass_words ("Glass", "Gls", "Tumbler": a served glass of any drink, its ml optional) and
             // pour_containers (carton, box, casket, jug, can, tetra ...: a container a drink is poured from by the glass, its ml optional); "gls" as a portion word.
             // v8 (2026-11-20, review): quantity_words (half, double, dbl, triple ...) reach hotels already seeded at v7 through the top-up.
-            'version' => 8,
+            // v9 (2026-11-21, shot size in step 3): shot_words ("shot", "tot"): a drink sold by one of these is a SHOT row in step 3, whose shot size
+            // (ml) can be set in advance for the menu link and the cost of one shot (never the opening count, never the Drink measures list).
+            'version' => 9,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -163,6 +165,10 @@ if (!function_exists('import_default_aliases')) {
             // v7: words for a served GLASS of any drink (milk, juice, wine). "Glass 175", "250ml glass", "Gls 200": the number is the glass size in ml,
             // shown as read from the file and changeable; no number = asked in step 3 (optional, never guessed). A hotel's own Drink measures list wins.
             'glass_words' => ['glass', 'glasses', 'gls', 'glas', 'tumbler', 'tumblers'],
+            // v9: words for ONE SHOT of a spirit. A drink sold by a measure of this name (the hotel's "shot" on its Drink measures list, or "Tot 35ml"
+            // written in the served-by cell) gets an optional shot size in step 3, pre-filled from that list or the file. A word alone never reads as
+            // a measure the hotel does not have ("Tot" with no ml and no "tot" on the list stays as written).
+            'shot_words' => ['shot', 'shots', 'tot', 'tots'],
             // v7: stock units a drink is POURED from by the glass (a carton of juice, a casket of wine): their size in ml (optional) is asked in step 3.
             // Crates, cases and packs are not here: they hold bottles, and a size in the name is one bottle.
             'pour_containers' => [

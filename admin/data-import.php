@@ -564,9 +564,9 @@ if ($isAjax) {
     if ($action === 'drinks_list') {
         di_json(import_job_drinks_view($pdo, $jobId, $uid, $drinksQuery()));
     }
-    if ($action === 'drinks_set') {      // mode tick (key, on) | category (key, value) | category_all (value); needs the Menu permission too
+    if ($action === 'drinks_set') {      // mode tick (key, on) | category (key, value) | category_all (value) | tick_all (on, q, show); needs the Menu permission too
         $r = import_job_drinks_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''),
-            'on' => ($_POST['on'] ?? '0') === '1', 'value' => (string)($_POST['value'] ?? '')]);
+            'on' => ($_POST['on'] ?? '0') === '1', 'value' => (string)($_POST['value'] ?? ''), 'q' => (string)($_POST['q'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all')]);
         if (!empty($r['ok'])) {
             $r['list'] = import_job_drinks_view($pdo, $jobId, $uid, $drinksQuery());
         }
@@ -578,7 +578,7 @@ if ($isAjax) {
         di_json(import_job_sizes_view($pdo, $jobId, $uid, ['q' => (string)($_POST['q'] ?? ''), 'group' => (string)($_POST['group'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'),
             'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 10)]));
     }
-    if ($action === 'sizes_set') {      // mode group (key = group) | row (key = item key); field ml (bottle / container size) | glass (glass size) | served (row, clear); value = ml or ''
+    if ($action === 'sizes_set') {      // mode group (key = group) | row (key = item key); field ml (bottle / container size) | glass (glass size) | shot (shot size) | served (row, clear); value = ml or ''
         di_json(import_job_sizes_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''), 'value' => (string)($_POST['value'] ?? ''),
             'field' => (string)($_POST['field'] ?? 'ml')]));
     }

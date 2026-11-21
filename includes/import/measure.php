@@ -534,6 +534,69 @@ if (!function_exists('import_measure_words')) {
         return $q > 0 ? $q : null;
     }
 
+    /** The numbers written in a cell, in ml when a volume unit is written with one ("Shot 35" -> [35], "Tot 3.5cl" -> [35], "2 x 25ml" -> [2, 25]). */
+    function import_cell_numbers(string $cell): array
+    {
+        $out = [];
+        foreach (import_cell_number_tokens($cell)[1] as $x) {
+            $out[] = $x['ml'];
+        }
+        return $out;
+    }
+
+    /** [the cell, lower case, digits and letters apart, [['text','ml'], ...]] (helper of import_cell_numbers / import_cell_strip_size). */
+    function import_cell_number_tokens(string $cell): array
+    {
+        $t = mb_strtolower((string)preg_replace('/(?<=\d)(?=\p{L})|(?<=\p{L})(?=\d)/u', ' ', $cell));
+        $toks = [];
+        if (preg_match_all('/(?<![\d.,])(\d+(?:[.,]\d+)?)(?:\s*(ml|mls|cl|l|lt|ltrs?|litres?|liters?)(?![\p{L}]))?/u', $t, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                $v = (float)str_replace(',', '.', $x[1]);
+                $u = (string)($x[2] ?? '');
+                $toks[] = ['text' => $x[0], 'ml' => $u === '' || $u[0] === 'm' ? $v : ($u[0] === 'c' ? $v * 10 : $v * 1000)];
+            }
+        }
+        return [$t, $toks];
+    }
+
+    /**
+     * The cell with each written number equal to $ml taken out ("Shot 35" with 35 -> "shot"). Used ONLY to check the other words of a cell whose
+     * size is checked on its own (a shot read together with its size from one cell); never shown, never stored.
+     */
+    function import_cell_strip_size(string $cell, float $ml): string
+    {
+        [$t, $toks] = import_cell_number_tokens($cell);
+        foreach ($toks as $x) {
+            if (abs($x['ml'] - $ml) < 0.005) {
+                $t = str_replace($x['text'], ' ', $t);
+            }
+        }
+        return trim((string)preg_replace('/\s+/u', ' ', $t));
+    }
+
+    /**
+     * Does the cell itself show this shot size? True when it writes at least one number besides a plain 1 and every such number is $ml
+     * ("Shot 35", "35ml tot"); false for "Shot" (nothing written: a size from elsewhere is not "read from the file"), "Shot 30" read as 35,
+     * "2 x 25ml", "½ tot". An optional reading of a shot size is kept only when this holds.
+     */
+    function import_cell_shows_size(string $cell, float $ml): bool
+    {
+        if (preg_match('/\p{No}/u', $cell)) {
+            return false;               // "½", "¼": part of a measure, never one size
+        }
+        $seen = false;
+        foreach (import_cell_numbers($cell) as $v) {
+            if (abs($v - 1.0) < 1e-9) {
+                continue;
+            }
+            if (abs($v - $ml) >= 0.005) {
+                return false;
+            }
+            $seen = true;
+        }
+        return $seen;
+    }
+
     /**
      * Optional help reading what the plain rules could not (wiring only; the Assistant side is the AI lead's). $ask = [['key','name','unit','served']],
      * $allowed = [key => [field => true]] (only the blanks of that row: served_by | portion_ml | container_ml), $fn = the suggester or null (off / missing).

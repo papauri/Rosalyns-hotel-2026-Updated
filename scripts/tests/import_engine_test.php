@@ -2019,8 +2019,15 @@ $t($fits('Double', 'double') && !$fits('Double tot', 'double') && !$fits('Double
     && $fits('Tumbler', 'glass') && !$fits('Pint glass', 'shot') && !$fits('Shot glass', 'double') && !$fits('Dbl', 'triple') && !$fits('Whatever', '2 shots')
     && isset($vSet['pint'], $vSet['scoop'], $vSet['tot']) && !$fits('Pint', 'shot') && !$fits('Scoop', 'shot') && !$fits('Tot', 'glass') && !$fits('½ tot', 'shot') && !$fits('Can', 'glass'),
     'reading vs cell: kept only when the cell agrees ("Double" = the hotel\'s Double; "Single shot" = shot; "Tumbler" = glass); "Double tot" / "Double pint" / "Double glass" / "Double can" / "Double measure" (another served word next to the quantity), "Dbl tot", "Tot measure", "Pint", "Scoop", "Can" (an alias served/unit word that is not the reading), "½ tot" or another count is dropped and left for the person');
-$t(strpos($drPhp, "!empty(\$answers['_sizes']['ai_done'])") !== false && strpos($drPhp, "\$a['_sizes']['ai_done'] = 1;") !== false && strpos($drPhp, 'import_served_ai_fits($served, $aiServed, $unit, $list, $synonyms, $glassSet, $qtySet, $vocabSet)') !== false,
-    'optional reader: one call per import (job marker claimed under the row lock before asking); its served-by reading must fit the cell first');
+$t(strpos($drPhp, "!empty(\$answers['_sizes']['ai_done'])") !== false && strpos($drPhp, "\$a['_sizes']['ai_done'] = 1;") !== false && strpos($drPhp, 'import_served_ai_fits($fitCell, $aiServed, $unit, $list, $synonyms, $glassSet, $qtySet, $vocabSet)') !== false
+    && strpos($drPhp, '$fitCell = $served;') !== false && strpos($drPhp, 'import_cell_shows_size($served, $aiPortion) && import_cell_strip_size($served, $aiPortion) !== \'\'') !== false,
+    'optional reader: one call per import (job marker claimed under the row lock before asking); its served-by reading must fit the cell first (only a shot size the cell itself writes is set aside for that check)');
+// shot size helpers (owner 2026-11-21): the numbers a cell writes, and whether it shows one shot size
+$t(import_cell_numbers('Tot 3.5cl') === [35.0] && import_cell_numbers('Shot 35') === [35.0] && import_cell_numbers('2 x 25ml') === [2.0, 25.0]
+    && import_cell_shows_size('Shot 35', 35) && import_cell_shows_size('35ml tot', 35) && import_cell_shows_size('1 shot 35', 35) && !import_cell_shows_size('Shot', 35)
+    && !import_cell_shows_size('Shot 30', 35) && !import_cell_shows_size('2 x 35ml', 35) && !import_cell_shows_size('½ tot 35', 35)
+    && import_cell_strip_size('Shot 35', 35) === 'shot' && import_cell_strip_size('35', 35) === '',
+    'shot size: a cell shows a shot size only when every number it writes (besides a plain 1) is that size; "Shot", "Shot 30" (read as 35), "2 x 35ml", "½ tot 35" do not');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
