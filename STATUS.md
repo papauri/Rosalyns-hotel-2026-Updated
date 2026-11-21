@@ -59,7 +59,7 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
 
 ## Shipped 2026-11-22: Put stock items on the drinks menu (owner FEATURE)
 - Liwonde 49ddf7d, Rosalyn's port (this commit). New page admin/stock-to-menu.php; Stock Items "Put N on the menu";
-  Menu Management "Add from stock". Details and LATERs in Liwonde STATUS.md.
+  Menu Management "Add from stock". Details and LATERs in Liwonde STATUS.md. Minor fixes: Liwonde 17d28dc, port fb2cf48.
 
 ## Shipped 2026-11-21: Stock quantities shown as "bottles + shots" (owner FEATURE, display only)
 - Liwonde dced1a0, Rosalyn's port (this commit; config/database.php got only this change's hunk via git apply, its RBH
