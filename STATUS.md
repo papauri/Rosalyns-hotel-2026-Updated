@@ -46,6 +46,17 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   - The schema is locked: any DDL is the owner's decision.
 - `.claude/TASKS.md` has uncommitted edits from another session. Do not stage them with unrelated work.
 
+## Shipped 2026-11-21: Assistant Settings "Fit limits to the cap" + layout fixes (owner FEATURE)
+- Liwonde 57e21db, Rosalyn's port 1b96445. Owner: "for Budgets and limits be able to auto set to the best capacity to fit
+  budget and fix the UI in assistant settings".
+- Budgets and limits: Monthly cap first; "Fit limits to the cap" fills Daily limit per person + Most tokens for one question
+  (rh_ai_fit_limits): people with access + nightly checks, 31 days, one question past the daily limit, Primary price,
+  10% kept back. Shows what the current limits could cost (Liwonde now: 2,000,000/day = up to ~US$106/month vs US$5 cap).
+  Nothing saved until Save limits. The cap itself still never stops chat (owner decision).
+- UI: pickers no longer cut off, sub-headings in the panel font, Models table readable and fits, prices $0.30,
+  "Nightly checks" in Usage, dashboard link as a button.
+- LATER: the 1,000-token floor can put a tiny cap over (shown as "over"); page is long (8 panels) - a jump bar if asked.
+
 ## Shipped 2026-11-21: Import step 4 Tick all / Untick all + step 3 Shot size (ml) (owner FEATURE)
 - Liwonde e4bbc37 + 9b776c5, Rosalyn's port 3c3b30e (owner OK to port). Details, LATERs and the ASSUMPTION (typed shot
   size is per import, never the hotel's Drink measures list) in Liwonde STATUS.md and `.claude/IMPORT_PLAN.md`.
