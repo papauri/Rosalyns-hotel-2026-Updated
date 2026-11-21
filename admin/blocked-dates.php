@@ -98,7 +98,8 @@ function rh_block_grid_targets(PDO $pdo, $rawJson, int &$pastSkipped = 0)
     }
     $targets = [];
     $nights = 0;
-    $hadPast = false;
+    $pastSeen = []; // row key => past night => true (a night posted twice for one row counts once)
+    $today = date('Y-m-d');
     foreach ($items as $it) {
         if (!is_array($it)) {
             return 'The selection could not be read. Reload the page and try again.';
@@ -107,17 +108,24 @@ function rh_block_grid_targets(PDO $pdo, $rawJson, int &$pastSkipped = 0)
         $id = isset($it['id']) && $it['id'] !== null && $it['id'] !== '' ? (int)$it['id'] : null;
         $rawDates = is_array($it['d'] ?? null) ? $it['d'] : [];
         $dates = rh_clean_block_dates($rawDates);
-        // Valid nights before today are dropped (never saved); count them so the message can say so.
-        $pastHere = [];
+        // Valid nights before today are dropped (never saved); count them once per row so the message can say so.
+        // A joined room is one row whichever of its rooms was posted.
+        if ($t === 'all') {
+            $rowKey = 'all';
+        } elseif ($t === 'type' && $id !== null && $id > 0) {
+            $rowKey = 'type:' . $id;
+        } elseif ($t === 'room' && $id !== null && $id > 0) {
+            $keyIds = rh_block_room_ids((string)$id);
+            sort($keyIds);
+            $rowKey = 'room:' . ($keyIds ? implode('+', $keyIds) : $id);
+        } else {
+            return 'The selection could not be read. Reload the page and try again.';
+        }
         foreach ($rawDates as $x) {
             $n = is_string($x) ? rh_normalize_block_date($x) : null;
-            if ($n !== null && $n < date('Y-m-d')) {
-                $pastHere[$n] = true;
+            if ($n !== null && $n < $today) {
+                $pastSeen[$rowKey][$n] = true;
             }
-        }
-        if ($pastHere) {
-            $hadPast = true;
-            $pastSkipped += count($pastHere);
         }
         if (!$dates) {
             continue;
@@ -166,13 +174,19 @@ function rh_block_grid_targets(PDO $pdo, $rawJson, int &$pastSkipped = 0)
             return 'Too many nights at once (over 5000). Select fewer and try again.';
         }
     }
+    foreach ($pastSeen as $seen) {
+        $pastSkipped += count($seen);
+    }
     if (!$targets) {
-        return $hadPast ? 'Past nights cannot be blocked or unblocked. Select nights from today onwards.' : 'Select at least one night on the calendar.';
+        return $pastSkipped > 0 ? 'Past nights cannot be blocked or unblocked. Select nights from today onwards.' : 'Select at least one night on the calendar.';
     }
     return array_values($targets);
 }
 
-/** Nights (from $dates) on which this target already has its OWN block row. */
+/**
+ * Nights (from $dates) on which this target already has its OWN block row: night => how many of its
+ * rooms hold that row (a joined room has two; a room type / all-rooms row counts as 1).
+ */
 function rh_block_grid_direct_nights(PDO $pdo, array $target, array $dates): array
 {
     if (!$dates) {
@@ -181,18 +195,18 @@ function rh_block_grid_direct_nights(PDO $pdo, array $target, array $dates): arr
     $ph = implode(',', array_fill(0, count($dates), '?'));
     if ($target['scope'] === 'room') {
         $rph = implode(',', array_fill(0, count($target['room_ids']), '?'));
-        $st = $pdo->prepare("SELECT DISTINCT block_date FROM individual_room_blocked_dates WHERE individual_room_id IN ($rph) AND block_date IN ($ph)");
+        $st = $pdo->prepare("SELECT block_date, COUNT(DISTINCT individual_room_id) FROM individual_room_blocked_dates WHERE individual_room_id IN ($rph) AND block_date IN ($ph) GROUP BY block_date");
         $st->execute(array_merge($target['room_ids'], $dates));
     } elseif ($target['scope'] === 'type') {
-        $st = $pdo->prepare("SELECT DISTINCT block_date FROM blocked_dates WHERE room_id = ? AND block_date IN ($ph)");
+        $st = $pdo->prepare("SELECT block_date, 1 FROM blocked_dates WHERE room_id = ? AND block_date IN ($ph) GROUP BY block_date");
         $st->execute(array_merge([$target['id']], $dates));
     } else {
-        $st = $pdo->prepare("SELECT DISTINCT block_date FROM blocked_dates WHERE room_id IS NULL AND block_date IN ($ph)");
+        $st = $pdo->prepare("SELECT block_date, 1 FROM blocked_dates WHERE room_id IS NULL AND block_date IN ($ph) GROUP BY block_date");
         $st->execute($dates);
     }
     $out = [];
-    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $d) {
-        $out[substr((string)$d, 0, 10)] = true;
+    foreach ($st->fetchAll(PDO::FETCH_NUM) as [$d, $n]) {
+        $out[substr((string)$d, 0, 10)] = (int)$n;
     }
     return $out;
 }
@@ -250,7 +264,8 @@ function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $block
                         } elseif (!blockRoomDate($tg['scope'] === 'type' ? $tg['id'] : null, $d, $blockType, $reason, $by)) {
                             throw new RuntimeException('Could not block ' . $tg['label'] . ' on ' . $d . '.');
                         }
-                        isset($direct[$d]) ? $updated++ : $added++;
+                        // "Updated" only when every room of the row was already blocked (half a joined room counts as new).
+                        ($direct[$d] ?? 0) >= max(1, count($tg['room_ids'])) ? $updated++ : $added++;
                     }
                 } else {
                     $inherited = rh_block_grid_inherited_nights($pdo, $tg, $tg['dates']);
@@ -315,7 +330,8 @@ function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $block
         }
 
         if ($removed === 0 && $stillBlocked === 0) {
-            return ['ok' => false, 'message' => 'None of the selected nights were blocked, so nothing was changed.'];
+            return ['ok' => false, 'message' => 'None of the selected nights were blocked, so nothing was changed.'
+                . ($pastSkipped > 0 ? ' ' . $pastSkipped . ' past night(s) in the selection were skipped (past nights cannot be changed).' : '')];
         }
         $msg = 'Unblocked ' . $removed . ' night(s).';
         if ($pastSkipped > 0) {

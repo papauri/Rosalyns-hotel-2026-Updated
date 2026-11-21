@@ -105,6 +105,16 @@ if ($p) {
     $sp = array_merge($pairSeed, ["INSERT INTO individual_room_blocked_dates (individual_room_id, block_date, block_type, reason) VALUES ({$p['room_a_id']}, '$d1', 'manual', '$tag'), ({$p['room_b_id']}, '$d1', 'manual', '$tag')"]);
     $r = grid([['t' => 'room', 'id' => $p['room_a_id'], 'd' => [$d1]]], 'unblock', $sp, [$cPair]);
     check(($r['json']['success'] ?? false) === true && c($r) === 0 && strpos(msg($r), 'unblocked 1 night') !== false, 'unblocking a joined room frees both rooms', json_encode($r['json'] ?? null));
+    // Half a joined room blocked (old data): blocking it completes the pair and counts as newly blocked, not "already blocked".
+    $half = array_merge($pairSeed, ["INSERT INTO individual_room_blocked_dates (individual_room_id, block_date, block_type, reason) VALUES ({$p['room_a_id']}, '$d1', 'manual', '$tag')"]);
+    $r = grid([['t' => 'room', 'id' => $p['room_a_id'], 'd' => [$d1]]], 'block', $half, [$cPair]);
+    check(($r['json']['success'] ?? false) === true && c($r) === 2 && strpos(msg($r), 'blocked 1 night') !== false && strpos(msg($r), 'already blocked') === false, 'a half-blocked joined room is completed and counted as newly blocked', json_encode($r['json'] ?? null));
+    // Unblocking a half-blocked joined room removes the leftover half.
+    $r = grid([['t' => 'room', 'id' => $p['room_b_id'], 'd' => [$d1]]], 'unblock', $half, [$cPair]);
+    check(($r['json']['success'] ?? false) === true && c($r) === 0 && strpos(msg($r), 'unblocked 1 night') !== false, 'unblocking a half-blocked joined room clears it', json_encode($r['json'] ?? null));
+    // Both members posted with the same past night: one row, so the past night is counted once.
+    $r = grid([['t' => 'room', 'id' => $p['room_a_id'], 'd' => [$past, $d1]], ['t' => 'room', 'id' => $p['room_b_id'], 'd' => [$past]]], 'block', $pairSeed, [$cPair]);
+    check(($r['json']['success'] ?? false) === true && c($r) === 2 && strpos(msg($r), ' 1 past night(s)') !== false, 'a joined room posted as both members counts a past night once', json_encode($r['json'] ?? null));
 } else {
     echo "SKIP joined-room checks (no type with two spare rooms)\n";
 }
@@ -114,6 +124,8 @@ $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past]]], 'block', [], [$cInd])
 check(($r['json']['success'] ?? true) === false && c($r) === 0 && strpos(msg($r), 'past nights') !== false, 'past nights are refused', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past, $d1]]], 'block', [], [$cInd, "SELECT COUNT(*) AS c FROM individual_room_blocked_dates WHERE reason = '$tag' AND block_date < CURDATE()"]);
 check(($r['json']['success'] ?? false) === true && c($r) === 1 && c($r, 1) === 0 && strpos(msg($r), '1 past night(s) in the selection were skipped') !== false, 'a past night mixed into a selection is skipped and the message says so', json_encode($r['json'] ?? null));
+$r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past, $d1]], ['t' => 'room', 'id' => $rid, 'd' => [$past]]], 'block', [], [$cInd]);
+check(($r['json']['success'] ?? false) === true && c($r) === 1 && strpos(msg($r), ' 1 past night(s)') !== false, 'the same past night posted twice for one row is counted once', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]], ['t' => 'type', 'id' => 99999999, 'd' => [$d1]]], 'block', [], [$cInd]);
 check(($r['json']['success'] ?? true) === false && c($r) === 0, 'an unknown room type refuses the whole save (the valid room is not blocked either)', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]]], 'block', ["UPDATE individual_rooms SET is_active = 0 WHERE id = $rid"], [$cInd]);
@@ -149,6 +161,52 @@ $r = grid([['t' => 'type', 'id' => $tid, 'd' => [$d1]]], 'unblock', [$seedType],
 check(($r['json']['success'] ?? false) === true && c($r) === 0 && strpos(msg($r), 'still blocked') === false && strpos(msg($r), 'unblocked 1 night') !== false, 'unblocking the type row removes the type block (and does not call its own block a wider one)', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]]], 'unblock', [], [$cInd]);
 check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the selected nights were blocked') !== false, 'unblocking open nights changes nothing and says so', json_encode($r['json'] ?? null));
+$r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past, $d1]]], 'unblock', [], [$cInd]);
+check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the selected nights were blocked') !== false && strpos(msg($r), '1 past night(s) in the selection were skipped') !== false, 'unblocking open nights with a past night also says the past night was skipped', json_encode($r['json'] ?? null));
+
+echo "== Availability follows the blocks (one transaction, rolled back) ==\n";
+// The booking checks read the same rows the grid writes. A block is one NIGHT: a stay that checks out
+// on the blocked date is still fine.
+$d0 = date('Y-m-d', strtotime($d1 . ' -1 day'));
+$pdo->beginTransaction();
+try {
+    $base = checkRoomAvailability($tid, $d1, $d2);
+    $baseRoom = checkIndividualRoomAvailability($rid, $d1, $d2);
+    $baseOut = checkIndividualRoomAvailability($rid, $d0, $d1);
+    if (empty($base['available']) || empty($baseRoom['available']) || empty($baseOut['available'])) {
+        echo "SKIP availability checks (the test room/type is not free on $d0..$d2)\n";
+    } else {
+        blockIndividualRoomDate($rid, $d1, 'maintenance', $tag);
+        $a = checkIndividualRoomAvailability($rid, $d1, $d2);
+        check(empty($a['available']) && !empty($a['blocked_dates']), 'a room block makes that room unavailable for a stay sleeping on the night', json_encode($a['error'] ?? null));
+        $a = checkIndividualRoomAvailability($rid, $d0, $d1);
+        check(!empty($a['available']), 'a stay that checks out on the blocked date is still allowed');
+        $t = checkRoomAvailability($tid, $d1, $d2);
+        if (isset($base['remaining_rooms'], $t['remaining_rooms'])) {
+            check((int)$t['remaining_rooms'] === (int)$base['remaining_rooms'] - 1, 'a room block takes exactly one room off the room type count (the type stays on sale if others are free)', json_encode([$base['remaining_rooms'], $t['remaining_rooms']]));
+        }
+        unblockIndividualRoomDate($rid, $d1);
+        check(!empty(checkIndividualRoomAvailability($rid, $d1, $d2)['available']), 'unblocking puts the room back on sale');
+
+        blockRoomDate($tid, $d1, 'event', $tag);
+        $t = checkRoomAvailability($tid, $d1, $d2);
+        check(empty($t['available']) && !empty($t['blocked_dates']), 'a room-type block takes the whole type off sale', json_encode($t['error'] ?? null));
+        check(!empty(checkRoomAvailability($tid, $d0, $d1)['available']), 'a type stay that checks out on the blocked date is still allowed');
+        unblockRoomDate($tid, $d1);
+        check(!empty(checkRoomAvailability($tid, $d1, $d2)['available']), 'unblocking the type puts it back on sale');
+
+        blockRoomDate(null, $d1, 'event', $tag);
+        $t = checkRoomAvailability($tid, $d1, $d2);
+        check(empty($t['available']) && !empty($t['blocked_dates']), 'an all-rooms block takes every type off sale', json_encode($t['error'] ?? null));
+        unblockRoomDate(null, $d1);
+    }
+} finally {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+}
+$left = (int)$pdo->query("SELECT (SELECT COUNT(*) FROM blocked_dates WHERE reason = " . $pdo->quote($tag) . ") + (SELECT COUNT(*) FROM individual_room_blocked_dates WHERE reason = " . $pdo->quote($tag) . ")")->fetchColumn();
+check($left === 0, 'availability checks left nothing behind');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);
