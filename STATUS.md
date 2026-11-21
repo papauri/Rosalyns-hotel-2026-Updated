@@ -46,6 +46,11 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   - The schema is locked: any DDL is the owner's decision.
 - `.claude/TASKS.md` has uncommitted edits from another session. Do not stage them with unrelated work.
 
+## Shipped 2026-11-21: Import step 4 Tick all / Untick all + step 3 Shot size (ml) (owner FEATURE)
+- Liwonde e4bbc37 + 9b776c5, Rosalyn's port 3c3b30e (owner OK to port). Details, LATERs and the ASSUMPTION (typed shot
+  size is per import, never the hotel's Drink measures list) in Liwonde STATUS.md and `.claude/IMPORT_PLAN.md`.
+- Import aliases seed v9 (shot_words) tops up on first use via INSERT IGNORE, same as v7/v8; no DDL.
+
 ## Shipped 2026-11-21: Assistant Settings model prices automatic, "Monthly cap" (owner FEATURE)
 - Liwonde 0637b87, Rosalyn's port 74871bb. Owner: "Check AI selector in AI settings and no need for us to set AI prices,
   you do it automatically, we just set max cap"; owner chose the cap stays information only (never stops chat).
