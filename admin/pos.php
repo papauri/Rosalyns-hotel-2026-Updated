@@ -1509,6 +1509,25 @@ foreach ($allMenuItems as $item) {
 }
 $categories['__ALL__']['count'] = $posVisibleCount;
 
+/* Drink tiles (owner 2026-11-21): how one sale is served ("Shot · 25 ml") and, in small, the menu price of the same drink's
+   other servings (the bottle on the shot tile, the shot on the bottle tile). See includes/pos-drink-servings.php.
+   Display only: a failure here never stops the till. */
+$posDrinkTiles = [];
+try {
+    require_once __DIR__ . '/includes/pos-drink-servings.php';
+    $posDrinkTiles = rh_pos_drink_info($pdo, $menuList);
+} catch (Throwable $e) {
+    error_log('POS drink servings: ' . $e->getMessage());
+}
+foreach ($menuList as &$posMenuRow) {
+    $posDrinkKey = $posMenuRow['type'] . ':' . $posMenuRow['id'];
+    if (isset($posDrinkTiles[$posDrinkKey])) {
+        $posMenuRow['serving'] = $posDrinkTiles[$posDrinkKey]['serving'];
+        $posMenuRow['others'] = $posDrinkTiles[$posDrinkKey]['others'];
+    }
+}
+unset($posMenuRow, $posDrinkKey);
+
 $stockSnapshot = [];
 $snap = $pdo->query("
     SELECT sr.menu_item_id, sr.menu_type,
@@ -6803,6 +6822,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     stockStr = remain + ' avail';
                 }
 
+                /* Drinks: how one sale is served, and the same drink's other servings at their menu price (pos-drink-servings.php). */
+                const servingHtml = m.serving
+                    ? `<div class="sv" title="How one sale is served, from the drink's stock link (Menu Management)">${escHtml(m.serving)}</div>` : '';
+                const othersHtml = (Array.isArray(m.others) && m.others.length)
+                    ? m.others.map(o => `<div class="sv-alt" title="The same drink as another item on the menu, at its menu price">${escHtml(o.name)} ${currencySymbol} ${fmtMoney(o.price)}</div>`).join('') : '';
+
                 const div = document.createElement('div');
                 const eightySixBadge = is86d ? `<span style="position:absolute;top:4px;right:4px;background:#c82333;color:#fff;font-size:9px;font-weight:800;padding:2px 5px;border-radius:4px;letter-spacing:.05em;">86</span>` : '';
                 const barcodeBadge = (m.barcode && posCanAssignBarcode) ? `<span title="Barcode: ${escHtml(m.barcode)}" style="position:absolute;bottom:4px;right:4px;color:#4ade80;font-size:10px;"><i class="fas fa-barcode"></i></span>` : '';
@@ -6816,6 +6841,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div>
                     <div class="badge">${escHtml(m.type)}</div>
                     <div class="nm">${escHtml(m.name)}</div>
+                    ${servingHtml}
                 </div>
                 <div>
                     <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
@@ -6830,9 +6856,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div>
                     <div class="badge">${escHtml(m.type)}</div>
                     <div class="nm">${escHtml(m.name)}</div>
+                    ${servingHtml}
                 </div>
                 <div>
                     <div class="pr">${currencySymbol} ${fmtMoney(m.price)}</div>
+                    ${othersHtml}
                     <div class="st ${low}">${stockStr}</div>
                 </div>
                 ${eightySixBadge}${barcodeBadge}`;
@@ -7604,7 +7632,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             <div class="cline">
                 <button type="button" class="cline-info" onclick="openNote(${i})" aria-label="${l.note ? 'Edit' : 'Add'} note for ${escHtml(l.name)}">
                     <span class="nm">${escHtml(l.name)}</span>
-                    <span class="ln-meta">@ ${fmtMoney(l.price)}<i class="fas fa-comment-dots${l.note ? ' has-note' : ''}"></i></span>
+                    <span class="ln-meta">${l.serving ? escHtml(l.serving) + ' · ' : ''}@ ${fmtMoney(l.price)}<i class="fas fa-comment-dots${l.note ? ' has-note' : ''}"></i></span>
                     ${l.note ? `<span class="cline-note">${escHtml(l.note)}</span>` : ''}
                 </button>
                 <div class="qty">

@@ -40,6 +40,17 @@ when prompted."
 - **Assistant:** built by the AI lead; nothing more to sync.
 - **Manager Guides:** none.
 
+### POS drink tiles show the serving and the other servings' prices (2026-11-21, owner FEATURE) - commit "POS drink tiles" in both repos
+- **Guides (POS till):** a bar / coffee-bar tile whose stock link is ONE stock item now says how one sale is served
+  under the name ("Shot · 25 ml", "Glass of wine · 175 ml", "Bottle · 750 ml", "Can · 330 ml") and, in small under the
+  price, the menu price of the same drink's other till items ("Bottle MWK 40,000" on the shot tile, "Shot MWK 4,000" on
+  the bottle tile; at most 3; 86'd items are left out). The cart line starts with the serving too. Wording comes from the
+  stock link (Menu Management) and Stock (bottle size, bottle/shot measure); nothing is shown when neither says.
+- **Assistant:** no table, setting or permission change. New read-only helper admin/includes/pos-drink-servings.php
+  (rh_pos_drink_info). If asked "why does a tile not show shot/bottle", answer: link the drink to its stock item in
+  Menu Management (one line) and set the bottle size / bottle-shot measure in Stock.
+- **Manager Guides:** POS & Kitchen Screens - one line on the drink tile wording.
+
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 
 ### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md

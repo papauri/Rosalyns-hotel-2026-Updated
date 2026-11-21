@@ -7879,3 +7879,22 @@ html.page-zoomed body.pos-screen.rh-pwa-bar-on .till-wrap {
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
+
+/* Drink tiles (owner 2026-11-21): how one sale is served under the name, the same drink's other servings in small under
+   the price. Set by admin/includes/pos-drink-servings.php. */
+#grid .item .sv {
+    margin-top: 0.15rem;
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--color-text-secondary, #5E554D);
+}
+
+#grid .item .sv-alt {
+    font-size: 0.68rem;
+    line-height: 1.25;
+    color: var(--color-text-secondary, #5E554D);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
