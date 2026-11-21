@@ -616,6 +616,167 @@ try {
             && (int)$col("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_measures_list_changed'") === $listLogs, $listBefore);
         $ck('shot import: the stock quantity and cost of Whisky are not changed by its shot size', abs((float)$col('SELECT cost_per_unit FROM stock_ingredients WHERE id = ?', [$whIng]) - 20000) < 0.000001
             && abs((float)$col('SELECT current_quantity FROM stock_ingredients WHERE id = ?', [$whIng])) < 0.000001);
+
+        // ---- file H: mass set in step 3 + "Sold as" (owner 2026-11-21: "mass set like if default shot size is 30ml ... or even change within
+        // whether by glass or shot"). Row answers in one save, the one-row checks per drink, menu side only (never the opening count).
+        $listBeforeH = (string)$col("SELECT setting_value FROM site_settings WHERE setting_key = 'stock_measures_list'");
+        $mkIng($n('Gin H1'), 20000, 750);
+        $mkIng($n('Gin H2'), 20000, 750);
+        $mkIng($n('Gin H3'), 20000, 750);
+        $mkIng($n('Vodka H4'), 20000, null);
+        $mkIng($n('Mini H5'), 2000, 50);
+        $mkIng($n('Wine H6'), 15000, 750);
+        $coHIng = $mkIng($n('Cognac H10'), 20000, 750);
+        if ($measureOn) {
+            $pdo->prepare("UPDATE stock_ingredients SET measure_big_name = 'bottle', measure_small_name = 'shot', measure_per_big = 30, measure_stock_side = 'big' WHERE id = ?")->execute([$coHIng]);
+        }
+
+        $rowsH = [
+            [$n('Gin H1'), 'bottle', '20000', '2', '2500', 'Shot'],
+            [$n('Gin H2'), 'bottle', '20000', '2', '2500', 'Shot'],
+            [$n('Gin H3'), 'bottle', '20000', '2', '2500', 'Shot'],
+            [$n('Vodka H4'), 'bottle', '20000', '2', '2500', 'Shot'],
+            [$n('Mini H5'), 'bottle', '2000', '2', '1000', 'Shot'],
+            [$n('Wine H6'), 'bottle', '15000', '2', '3000', 'Glass'],
+            [$n('Brandy H9 750ml'), 'bottle', '20000', '66 shots', '3000', 'Shot'],
+            [$n('Cognac H10'), 'bottle', '20000', '2', '3000', 'Shot'],
+        ];
+        for ($i = 1; $i <= 12; $i++) {       // twelve glass drinks: more than one page of 10
+            $mkIng($n('Juice H' . sprintf('%02d', $i)), 1000, 1000);
+            $rowsH[] = [$n('Juice H' . sprintf('%02d', $i)), 'bottle', '1000', '2', '500', 'Glass'];
+        }
+        $jH = $start($file(['Item Name', 'Unit', 'Unit Price', 'Balance', 'Selling Price', 'Served By'], $rowsH, 'h.csv'), 'zzd-h-' . $run . '.csv');
+        $sizesH = function (array $p = []) use ($pdo, &$jH, $admin) {
+            $v = import_job_sizes_view($pdo, $jH, $admin, $p + ['size' => 100, 'ai' => false]);
+            $by = [];
+            foreach ((array)($v['rows'] ?? []) as $r) { $by[$r['name']] = $r; }
+            return [$v, $by];
+        };
+        $countH = function () use ($pdo, &$jH, $n) {
+            foreach ((array)(import_job_state($pdo, $jH)['res']['items'] ?? []) as $it) {
+                if (($it['name'] ?? '') === $n('Brandy H9 750ml')) { return ['balance' => $it['balance'] ?? null, 'measure_save' => $it['measure_save'] ?? null, 'qty_how' => $it['qty_how'] ?? null, 'served_by' => $it['served_by'] ?? null]; }
+            }
+            return null;
+        };
+        $countH0 = $countH();
+        [$svH0, $SH0] = $sizesH();
+        $kH = function (string $nm) use (&$SH0, $n) { return (string)($SH0[$n($nm)]['key'] ?? ''); };
+        $optV = array_column((array)($svH0['sold_options'] ?? []), 'v');
+        $ck('mass: the list gives the "Sold as" choices (shot, glass, one whole unit, the Drink measures list) and a short menu status per row',
+            in_array('shot', $optV, true) && in_array('glass', $optV, true) && in_array('unit', $optV, true) && in_array('m:double', $optV, true)
+            && ($SH0[$n('Gin H1')]['menu_status'] ?? '') === 'Ready for step 4' && ($SH0[$n('Vodka H4')]['menu_status'] ?? '') === 'Needs bottle size'
+            && ($SH0[$n('Juice H01')]['menu_status'] ?? '') === 'Needs glass size' && !empty($svH0['cols']['glass']) && !empty($svH0['cols']['shot']), json_encode([$optV, $SH0[$n('Vodka H4')] ?? null]));
+
+        // bulk shot 30 on Gin H1..H3 + Mini H5 (a 50 ml bottle: 60 refused for it only)
+        $bBad = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Gin H1')], 'shot' => 'abc']);
+        $ck('mass: text is refused for all and nothing is changed', empty($bBad['ok']) && strpos((string)($bBad['error'] ?? ''), 'Shot size must be a number') === 0, json_encode($bBad));
+        $b30 = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Gin H1'), $kH('Gin H2'), $kH('Gin H3')], 'shot' => '30']);
+        [, $SH1] = $sizesH();
+        [, $DH1] = $view($jH, $admin);
+        $ok30 = true;
+        foreach (['Gin H1', 'Gin H2', 'Gin H3'] as $nm) {
+            $ok30 = $ok30 && ($SH1[$n($nm)]['shot_from'] ?? '') === 'row' && (float)($SH1[$n($nm)]['shot_ml'] ?? 0) === 30.0
+                && abs((float)($DH1[$n($nm)]['cost'] ?? 0) - 20000 * 30 / 750) <= BALANCE_TOLERANCE && ($DH1[$n($nm)]['measure'] ?? '') === '30 ml (shot)';
+        }
+        $ck('mass: shot 30 ml on three ticked drinks: each a row answer, cost 20000 x 30 / 750 = 800, "30 ml (shot)"; "3 changed"',
+            !empty($b30['ok']) && (int)($b30['changed'] ?? -1) === 3 && (int)($b30['skipped'] ?? -1) === 0 && $ok30, json_encode([$b30, $SH1[$n('Gin H1')] ?? null, $DH1[$n('Gin H1')] ?? null]));
+        $b60 = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Gin H3'), $kH('Mini H5')], 'shot' => '60']);
+        [, $SH2] = $sizesH();
+        $ck('mass: a shot bigger than one drink\'s bottle (60 ml > Mini 50 ml) skips only that drink, with the reason; the other is changed',
+            !empty($b60['ok']) && (int)$b60['changed'] === 1 && (int)$b60['skipped'] === 1 && strpos((string)($b60['reasons'][0]['why'] ?? ''), 'more than one whole bottle (50 ml)') !== false
+            && in_array($n('Mini H5'), (array)($b60['reasons'][0]['names'] ?? []), true) && ($SH2[$n('Mini H5')]['shot_from'] ?? '') === 'list' && (float)($SH2[$n('Gin H3')]['shot_ml'] ?? 0) === 60.0, json_encode([$b60, $SH2[$n('Mini H5')] ?? null]));
+        import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Gin H3')], 'shot' => '30']);
+        // bulk bottle 750 + shot 30 on Vodka H4 (no bottle size): one save
+        $b750 = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Vodka H4'), $kH('Gin H1')], 'ml' => '750', 'shot' => '30']);
+        [, $SH3] = $sizesH();
+        [, $DH3] = $view($jH, $admin);
+        $ck('mass: bottle 750 + shot 30 together: Vodka (no size) gets both (cost 800, tickable); Gin H1 (size saved on the item) takes only the shot, "1 already had these"',
+            !empty($b750['ok']) && (int)$b750['changed'] === 1 && (int)$b750['same'] === 1 && ($SH3[$n('Vodka H4')]['from'] ?? '') === 'row' && (float)($SH3[$n('Vodka H4')]['ml'] ?? 0) === 750.0
+            && abs((float)($DH3[$n('Vodka H4')]['cost'] ?? 0) - 800) <= BALANCE_TOLERANCE && !empty($DH3[$n('Vodka H4')]['tickable']) && ($SH3[$n('Gin H1')]['from'] ?? '') === 'own',
+            json_encode([$b750, $SH3[$n('Vodka H4')] ?? null]));
+        $bNa = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Gin H1')], 'glass' => '200']);
+        $ck('mass: a size a drink does not use (a glass size on a shot drink) is not put on it: skipped "not sold by the glass"',
+            !empty($bNa['ok']) && (int)$bNa['skipped'] === 1 && strpos((string)($bNa['reasons'][0]['why'] ?? ''), 'not sold by the glass') !== false, json_encode($bNa));
+
+        // Tick all shown with a group filter: every glass drink (12, more than one page), no shot drink
+        [$svG10] = $sizesH(['group' => 'gl:bottle', 'size' => 10]);
+        $bAll = import_job_sizes_bulk($pdo, $jH, $admin, ['all' => true, 'group' => 'gl:bottle', 'q' => '', 'show' => 'all', 'glass' => '250']);
+        [, $SH4] = $sizesH();
+        $glassOk = true;
+        for ($i = 1; $i <= 12; $i++) { $glassOk = $glassOk && ($SH4[$n('Juice H' . sprintf('%02d', $i))]['glass_from'] ?? '') === 'row' && (float)($SH4[$n('Juice H' . sprintf('%02d', $i))]['glass_ml'] ?? 0) === 250.0; }
+        $ck('mass: "tick all shown" with the glass group filter covers every page (13 keys on a 10-row page) and changes only that group (Gin H2 untouched)',
+            count((array)($svG10['keys'] ?? [])) === 13 && count((array)($svG10['rows'] ?? [])) === 10 && !empty($bAll['ok']) && (int)$bAll['changed'] === 13 && $glassOk
+            && ($SH4[$n('Wine H6')]['glass_from'] ?? '') === 'row' && ($SH4[$n('Gin H2')]['glass_need'] ?? true) === false && (float)($SH4[$n('Gin H2')]['shot_ml'] ?? 0) === 30.0,
+            json_encode([count((array)($svG10['keys'] ?? [])), $bAll]));
+
+        // Sold as: Gin H2 shot -> glass (+ glass 200); Wine H6 glass -> shot; then Wine H6 back to the file's cell
+        $bSg = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Gin H2')], 'sold' => 'glass', 'glass' => '200']);
+        $bWs = import_job_sizes_set($pdo, $jH, $admin, ['mode' => 'row', 'key' => $kH('Wine H6'), 'field' => 'sold', 'value' => 'shot']);
+        [, $SH5] = $sizesH();
+        [, $DH5] = $view($jH, $admin);
+        $g2 = $SH5[$n('Gin H2')] ?? [];
+        $w6 = $SH5[$n('Wine H6')] ?? [];
+        $ck('sold as: Gin H2 shot -> glass with glass 200 in the same save: glass group, "Your answer" (file cell still shown), cost 20000 x 200 / 750; its shot answer no longer used',
+            !empty($bSg['ok']) && ($g2['sold'] ?? '') === 'glass' && ($g2['measure_from'] ?? '') === 'answer' && ($g2['served_cell'] ?? '') === 'Shot' && ($g2['group'] ?? '') === 'gl:bottle'
+            && empty($g2['shot_need']) && (float)($g2['glass_ml'] ?? 0) === 200.0 && abs((float)($DH5[$n('Gin H2')]['cost'] ?? 0) - 20000 * 200 / 750) <= BALANCE_TOLERANCE,
+            json_encode([$bSg, $g2, $DH5[$n('Gin H2')] ?? null]));
+        $ck('sold as: Wine H6 glass -> shot: shot group, the list shot, cost 15000 x ' . $shotMl . ' / 750, "1 shot"',
+            !empty($bWs['ok']) && ($w6['sold'] ?? '') === 'shot' && ($w6['group'] ?? '') === 'm:shot|bottle' && !empty($w6['shot_need']) && empty($w6['glass_need'])
+            && abs((float)($DH5[$n('Wine H6')]['cost'] ?? 0) - 15000 * $shotMl / 750) <= BALANCE_TOLERANCE && ($DH5[$n('Wine H6')]['measure'] ?? '') === '1 shot', json_encode([$bWs, $w6, $DH5[$n('Wine H6')] ?? null]));
+        $bBadSold = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Wine H6')], 'sold' => 'm:nothing such']);
+        $ck('sold as: a choice that is not on the list is refused', empty($bBadSold['ok']), json_encode($bBadSold));
+        $bWf = import_job_sizes_set($pdo, $jH, $admin, ['mode' => 'row', 'key' => $kH('Wine H6'), 'field' => 'sold', 'value' => '']);
+        [, $SH6] = $sizesH();
+        [, $DH6] = $view($jH, $admin);
+        $ck('sold as: cleared, Wine H6 goes back to the file\'s cell ("Glass"; its row glass 250 applies again): cost 15000 x 250 / 750',
+            !empty($bWf['ok']) && ($SH6[$n('Wine H6')]['sold'] ?? 'x') === '' && ($SH6[$n('Wine H6')]['measure_from'] ?? '') === 'cell' && !empty($SH6[$n('Wine H6')]['glass_need'])
+            && abs((float)($DH6[$n('Wine H6')]['cost'] ?? 0) - 15000 * 250 / 750) <= BALANCE_TOLERANCE, json_encode([$bWf, $SH6[$n('Wine H6')] ?? null, $DH6[$n('Wine H6')] ?? null]));
+        // Brandy H9 (count measure 30 shots, "66 shots" counted): sold as glass 150 -> the menu changes, the opening count does not
+        $bBr = import_job_sizes_bulk($pdo, $jH, $admin, ['keys' => [$kH('Brandy H9 750ml'), $kH('Cognac H10')], 'sold' => 'glass', 'glass' => '150']);
+        [, $DH7] = $view($jH, $admin);
+        $countH1 = $countH();
+        $ck('sold as: Brandy H9 (counted "66 shots") sold as a 150 ml glass costs 20000 x 150 / 750; the opening count, count measure and the file\'s served-by cell the count reads are unchanged',
+            !empty($bBr['ok']) && abs((float)($DH7[$n('Brandy H9 750ml')]['cost'] ?? 0) - 20000 * 150 / 750) <= BALANCE_TOLERANCE && $countH0 !== null && $countH0 === $countH1
+            && ($countH1['served_by'] ?? '') === 'Shot' && abs((float)($countH1['balance'] ?? 0) - 2.2) < 0.0000005, json_encode([$bBr, $countH0, $countH1, $DH7[$n('Brandy H9 750ml')] ?? null]));
+
+        // permissions unchanged: sizes need Import only (as a one-row save); ticking still needs the Menu permission
+        $bMgr = import_job_sizes_bulk($pdo, $jH, $mgrNoMenu, ['keys' => [$kH('Gin H3')], 'shot' => '30']);
+        $tMgr = import_job_drinks_set($pdo, $jH, $mgrNoMenu, ['mode' => 'tick', 'key' => $kH('Gin H1'), 'on' => true]);
+        $ck('permission: mass set follows the one-row size save (no Menu permission needed); ticking for the menu still needs it',
+            !empty($bMgr['ok']) && empty($tMgr['ok']) && stripos((string)($tMgr['error'] ?? ''), 'Menu permission') !== false, json_encode([$bMgr, $tMgr]));
+
+        // import: tick Gin H1 (30 ml shot), Gin H2 (glass 200), Brandy H9 (glass 150), Wine H6 (glass 250)
+        foreach (['Gin H1', 'Gin H2', 'Brandy H9 750ml', 'Wine H6'] as $nm) {
+            $r = import_job_drinks_set($pdo, $jH, $admin, ['mode' => 'tick', 'key' => $kH($nm), 'on' => true]);
+            if (empty($r['ok'])) { $ck('mass: tick ' . $nm, false, json_encode([$r, $DH7[$n($nm)] ?? null])); }
+        }
+        $cH = import_commit_stock($pdo, $jH, $admin);
+        $l1 = $lineOf($n('Gin H1'));
+        $l2 = $lineOf($n('Gin H2'));
+        $l9 = $lineOf($n('Brandy H9 750ml'));
+        $ck('mass import: Gin H1 links 30 ml a sale (30 / 750), Gin H2 sold as a glass links 200 ml (200 / 750), Brandy H9 150 ml (150 / 750)',
+            !empty($cH['ok']) && $l1 && $l1['entry_measure'] === 'ml' && abs((float)$l1['entry_qty'] - 30) < 0.000001 && abs((float)$l1['quantity_per_portion'] - round(30 / 750, 6)) < 0.0000005
+            && $l2 && abs((float)$l2['quantity_per_portion'] - round(200 / 750, 6)) < 0.0000005 && $l9 && abs((float)$l9['quantity_per_portion'] - round(150 / 750, 6)) < 0.0000005,
+            json_encode([$cH['ok'] ?? null, $cH['error'] ?? null, $l1, $l2, $l9]));
+        $brHIng = (int)$col('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Brandy H9 750ml')]);
+        $brLine = $col('SELECT scl.actual_quantity FROM stock_count_lines scl WHERE scl.ingredient_id = ? ORDER BY scl.id DESC LIMIT 1', [$brHIng]);
+        $ck('mass import: the opening count of Brandy H9 ("66 shots") is 2.2 bottles, whatever it is sold as', $brLine !== false && abs((float)$brLine - 2.2) < 0.000001, json_encode($brLine));
+        if ($measureOn) {
+            $ck('mass import: Cognac H10 (its own count measure, 30 shots) sold as a glass keeps its count measure: measure_per_big still 30, shot side',
+                abs((float)$col('SELECT measure_per_big FROM stock_ingredients WHERE id = ?', [$coHIng]) - 30) < 0.000001 && (string)$col('SELECT measure_small_name FROM stock_ingredients WHERE id = ?', [$coHIng]) === 'shot'
+                && abs((float)$col('SELECT current_quantity FROM stock_ingredients WHERE id = ?', [$coHIng])) < 0.000001);
+        }
+        $msH = $countH0['measure_save'] ?? null;
+        if ($measureOn && is_array($msH)) {
+            $ck('mass import: Brandy H9 gets the count measure the file gave (' . $msH['n'] . ' ' . $msH['small'] . ' in one ' . $msH['big'] . '), not one from its "Sold as" glass: measure_per_big as before',
+                abs((float)$col('SELECT measure_per_big FROM stock_ingredients WHERE id = ?', [$brHIng]) - (float)$msH['n']) < 0.000001
+                && (string)$col('SELECT measure_small_name FROM stock_ingredients WHERE id = ?', [$brHIng]) === (string)$msH['small'], json_encode($msH));
+        }
+        $ck('mass import: the hotel\'s Drink measures list is unchanged by mass set and Sold as', (string)$col("SELECT setting_value FROM site_settings WHERE setting_key = 'stock_measures_list'") === $listBeforeH
+            && (int)$col("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_measures_list_changed'") === $listLogs);
+        $ck('mass import: the typed bottle size is saved on Vodka H4 (750), none is put on an item that has one',
+            (float)$col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Vodka H4')]) === 750.0
+            && (float)$col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Mini H5')]) === 50.0);
     }
 } catch (Throwable $e) {
     $ck('child ran without an exception', false, $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());

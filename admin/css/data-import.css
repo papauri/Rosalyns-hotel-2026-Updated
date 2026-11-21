@@ -480,11 +480,77 @@
 }
 /* Step 3 sizes (optional): glass size + bottle / container size, one per group, a different one per row; same list look as the drinks list */
 .di-sizes .di-bulk-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); }
-.di-sizes .di-lt th:nth-child(1) { width: 24%; }
-.di-sizes .di-lt th:nth-child(2) { width: 15%; }
-.di-sizes .di-lt th:nth-child(3) { width: 18%; }
-.di-sizes .di-lt th:nth-child(4) { width: 18%; }
-.di-sizes .di-lt th:nth-child(5) { width: 25%; }
+/* owner 2026-11-21 "fix the UI table": balanced columns (a size column no drink needs is left out), all left-aligned, compact rows;
+   a quiet dash where a size does not apply; the long "why" sits behind a ? */
+.di-sizes .di-lt { table-layout: fixed; }
+.di-sizes .di-lt th.di-c-sel { width: 44px; }
+.di-sizes .di-lt th.di-c-drink { width: 22%; }
+.di-sizes .di-lt th.di-c-sold { width: 19%; }
+.di-sizes .di-lt th.di-c-glass, .di-sizes .di-lt th.di-c-shot { width: 15%; }
+.di-sizes .di-lt th.di-c-cont { width: 16%; }
+.di-sizes .di-lt th.di-c-menu { width: 15%; }
+.di-sizes .di-lt th, .di-sizes .di-lt td, .di-sizes .di-lt th:last-child, .di-sizes .di-lt td:last-child { text-align: left; }
+.di-sizes .di-lt th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.di-sizes .di-lt th.di-c-cont, .di-sizes .di-lt th.di-c-menu { white-space: normal; }
+.di-sizes .di-lt td { padding: 6px 10px; vertical-align: top; }
+.di-sizes .di-lt td.di-c-sel, .di-sizes .di-lt th.di-c-sel { padding: 10px 6px 6px 12px; }
+.di-sizes .di-lt input[type="checkbox"] { width: 18px; height: 18px; margin: 0; cursor: pointer; accent-color: var(--admin-accent, #766550); }
+.di-size-sel { display: inline-flex; align-items: center; gap: 8px; min-height: 24px; cursor: pointer; }
+.di-size-sel-txt { display: none; font-size: 12px; color: var(--admin-muted, #5f6b7c); }
+.di-sizes .di-lt .di-size-wrap .di-fin { max-width: 110px; min-height: 36px; padding: 4px 8px; }
+.di-sizes .di-lt .di-size-sold { width: 100%; min-width: 0; max-width: 260px; min-height: 36px; padding: 4px 8px; box-sizing: border-box; }
+.di-size-from { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.di-size-from .di-src { vertical-align: 1px; }
+.di-size-from .di-size-clear { min-height: 28px; margin: 2px 0 0; padding: 2px 8px; }
+.di-size-fixed { display: inline-block; min-height: 36px; line-height: 36px; font-weight: 600; }
+.di-na { display: inline-block; min-height: 36px; line-height: 36px; color: var(--admin-muted, #5f6b7c); }
+.di-size-status { display: flex; align-items: center; gap: 4px; min-height: 36px; }
+.di-size-status .help { margin-left: 2px; }
+.di-size-status .badge { white-space: normal; text-align: left; }
+.di-sizes .di-warnline .help { margin-left: 4px; }
+/* change several drinks at once: one solid box above the list */
+.di-size-bulk { box-sizing: border-box; margin: 10px 0 6px; padding: 10px 12px; background: #fff; border: 1px solid var(--admin-surface-border, #d7dde6); border-radius: 8px; min-width: 0; }
+.di-size-bulk-h { margin: 0 0 2px; font-size: 14px; font-weight: 600; color: var(--tbl-head-color, #5E554D); }
+.di-size-bulk > .di-small { margin: 0 0 8px; }
+.di-size-selline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 8px; }
+.di-size-seltxt { flex: 1 1 220px; min-width: 0; font-weight: 600; font-size: 13px; }
+.di-size-bulk-fields { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) auto; gap: 8px 14px; align-items: start; }
+.di-size-bulk-fields .di-select { width: 100%; box-sizing: border-box; min-width: 0; }
+.di-size-bulk-fields .di-size-wrap .di-fin { max-width: none; }
+.di-size-apply { justify-content: flex-start; padding-top: 19px; }
+.di-size-apply .di-btn { white-space: nowrap; }
+.di-size-bulk-res { margin-top: 8px; padding: 8px 10px; border-left: 4px solid var(--admin-success-border, #3f8f5a); background: #f6faf7; font-size: 13px; line-height: 1.45; }
+.di-size-bulk-res.is-skipped { border-left-color: #d9b25c; background: var(--gold-light, #F3ECE4); }
+.di-size-bulk-res p { margin: 0 0 4px; }
+.di-size-bulk-why { margin: 0 0 4px; padding-left: 18px; }
+@media (max-width: 1100px) {
+    .di-size-bulk-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .di-size-apply { grid-column: 1 / -1; padding-top: 0; }
+}
+@media (max-width: 560px) {
+    .di-size-bulk-fields { grid-template-columns: minmax(0, 1fr); }
+    .di-size-apply .di-btn { width: 100%; }
+    .di-size-selline .di-btn { flex: 1 1 auto; }
+}
+/* phone / narrow: one card per drink; a size that does not apply is left out of the card */
+@container ditbl (max-width: 899px) {
+    .di-sizes .di-lt { table-layout: auto; }
+    /* the drink across the top (its tick box in the corner), then Sold as, the sizes it uses and the status side by side */
+    .di-sizes .di-lt tr.di-row { position: relative; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .di-sizes .di-lt tr.di-row td.di-td-na { display: none; }
+    .di-sizes .di-lt tr.di-row td.di-c-sel { position: absolute; top: 8px; right: 10px; left: auto; width: auto; padding: 0; border: 0; background: none; }
+    .di-sizes .di-lt tr.di-row td.di-c-drink { grid-column: 1 / -1; border-top: 0; background: var(--tbl-head-bg, #F7F3EE); padding-right: 130px; }
+    .di-sizes .di-lt tr.di-row td.di-c-menu { grid-column: auto; }
+    .di-sizes .di-size-sel-txt { display: inline; }
+    .di-size-from { white-space: normal; }
+    .di-sizes .di-lt .di-size-wrap .di-fin { max-width: none; min-height: 44px; }
+    .di-sizes .di-lt .di-size-sold { max-width: none; min-height: 44px; }
+    .di-sizes .di-lt input[type="checkbox"] { width: 22px; height: 22px; }
+}
+@container ditbl (max-width: 559px) {
+    .di-sizes .di-lt tr.di-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .di-sizes .di-lt tr.di-row td.di-c-sold, .di-sizes .di-lt tr.di-row td.di-c-menu { grid-column: 1 / -1; }
+}
 .di-size-groups { display: grid; gap: 10px; margin: 10px 0 14px; }
 .di-size-group { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--admin-surface-border, #d7dde6); border-radius: 8px; background: #fff; }
 .di-size-ins { display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }

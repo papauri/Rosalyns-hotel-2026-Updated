@@ -578,7 +578,12 @@ if ($isAjax) {
         di_json(import_job_sizes_view($pdo, $jobId, $uid, ['q' => (string)($_POST['q'] ?? ''), 'group' => (string)($_POST['group'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'),
             'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 10)]));
     }
-    if ($action === 'sizes_set') {      // mode group (key = group) | row (key = item key); field ml (bottle / container size) | glass (glass size) | shot (shot size) | served (row, clear); value = ml or ''
+    if ($action === 'sizes_bulk') {     // several drinks at once: keys[] (ticked) or all=1 + q / group / show (every page); sold, shot, glass, ml (blank = left as it is)
+        di_json(import_job_sizes_bulk($pdo, $jobId, $uid, ['keys' => is_array($_POST['keys'] ?? null) ? array_values(array_filter($_POST['keys'], 'is_string')) : [],
+            'all' => ($_POST['all'] ?? '0') === '1', 'q' => (string)($_POST['q'] ?? ''), 'group' => (string)($_POST['group'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'),
+            'sold' => (string)($_POST['sold'] ?? ''), 'shot' => (string)($_POST['shot'] ?? ''), 'glass' => (string)($_POST['glass'] ?? ''), 'ml' => (string)($_POST['ml'] ?? '')]));
+    }
+    if ($action === 'sizes_set') {      // mode group (key = group) | row (key = item key); field ml (bottle / container size) | glass (glass size) | shot (shot size) | served (row, clear) | sold (row: a "Sold as" choice, '' = the file's cell); value = ml or ''
         di_json(import_job_sizes_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''), 'value' => (string)($_POST['value'] ?? ''),
             'field' => (string)($_POST['field'] ?? 'ml')]));
     }
