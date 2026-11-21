@@ -111,6 +111,10 @@ if (!$error) {
             if ($b['supplier_id'] === 0) return -1;
             return strcasecmp($a['supplier'], $b['supplier']);
         });
+        // Display only: count measures so the quantities read "2 bottles + 7 shots" (the posted order lines are unchanged).
+        foreach ($groups as $gk => $gv) {
+            $groups[$gk]['items'] = rh_stock_measure_attach($pdo, $gv['items']);
+        }
     } catch (Throwable $e) {
         $error = 'Failed to build reorder report: ' . $e->getMessage();
     }
@@ -248,10 +252,10 @@ $csrf_token = generateCsrfToken();
                         <?php foreach ($g['items'] as $it): ?>
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($it['name']); ?></strong> <span style="color:#8a8172;">(<?php echo htmlspecialchars($it['unit']); ?>)</span><?php if (!empty($it['never'])): ?> <span style="color:#1e3a8a;font-size:.75rem;" title="Opening stock has not been recorded for this item">not yet stocked</span><?php endif; ?></td>
-                                <td class="num low"><?php echo number_format($it['on_hand'], 3); ?></td>
-                                <td class="num"><?php echo number_format($it['reorder'], 3); ?></td>
-                                <td class="num"><?php echo number_format($it['par'], 3); ?></td>
-                                <td class="num"><?php echo number_format($it['on_order'], 3); ?></td>
+                                <td class="num low"<?php echo rh_stock_qty_sort_attr((float)$it['on_hand']); ?>><?php echo rh_stock_qty_html((float)$it['on_hand'], $it, (string)$it['unit']); ?></td>
+                                <td class="num"<?php echo rh_stock_qty_sort_attr((float)$it['reorder']); ?>><?php echo rh_stock_qty_html((float)$it['reorder'], $it, (string)$it['unit']); ?></td>
+                                <td class="num"<?php echo rh_stock_qty_sort_attr((float)$it['par']); ?>><?php echo rh_stock_qty_html((float)$it['par'], $it, (string)$it['unit']); ?></td>
+                                <td class="num"<?php echo rh_stock_qty_sort_attr((float)$it['on_order']); ?>><?php echo rh_stock_qty_html((float)$it['on_order'], $it, (string)$it['unit']); ?></td>
                                 <td class="num"><?php if ($it['packs'] !== null): ?><strong>Buy <?php echo (int)$it['packs']; ?> <?php echo htmlspecialchars(rh_pack_label($it['pack_name'], (float)$it['packs'])); ?></strong><br><span style="color:#8a8172;font-size:.78rem;">(<?php echo htmlspecialchars(rh_pack_num($it['suggest']) . ' ' . rh_unit_label($it['unit'], $it['suggest'])); ?>)</span><?php else: ?><strong><?php echo number_format($it['suggest'], 3); ?></strong><?php endif; ?></td>
                                 <td class="num"><?php echo htmlspecialchars($currency_symbol) . number_format($it['line_cost'], 2); ?></td>
                             </tr>

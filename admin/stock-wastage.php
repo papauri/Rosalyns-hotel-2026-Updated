@@ -212,6 +212,7 @@ if (!$error || strpos($error, 'not yet') === false) {
             ORDER BY w.recorded_date DESC, w.created_at DESC
             LIMIT 2000
         ")->fetchAll(PDO::FETCH_ASSOC);
+        $entries = rh_stock_measure_attach($pdo, $entries, 'ingredient_id'); // display only: "2 bottles + 7 shots"
 
         $stmt = $pdo->query("SELECT MAX(recorded_date) FROM stock_wastage");
         $last = $stmt->fetchColumn();
@@ -224,7 +225,7 @@ if (!$error || strpos($error, 'not yet') === false) {
         $totalLastMonth = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE YEAR(recorded_date) = YEAR(CURDATE() - INTERVAL 1 MONTH) AND MONTH(recorded_date) = MONTH(CURDATE() - INTERVAL 1 MONTH)")->fetchColumn();
 
         $topWastedItems = $pdo->query("
-            SELECT i.name, i.unit, SUM(w.quantity) AS total_qty, SUM(w.wastage_cost) AS total_cost
+            SELECT i.id, i.name, i.unit, SUM(w.quantity) AS total_qty, SUM(w.wastage_cost) AS total_cost
             FROM stock_wastage w
             INNER JOIN stock_ingredients i ON i.id = w.ingredient_id
             WHERE w.recorded_date > DATE_SUB(CURDATE(), INTERVAL 30 DAY)
@@ -232,6 +233,7 @@ if (!$error || strpos($error, 'not yet') === false) {
             ORDER BY total_cost DESC
             LIMIT 5
         ")->fetchAll(PDO::FETCH_ASSOC);
+        $topWastedItems = rh_stock_measure_attach($pdo, $topWastedItems); // display only
     } catch (Throwable $e) {
         $error = 'Failed to load: ' . $e->getMessage();
     }
@@ -374,7 +376,7 @@ $csrf_token = generateCsrfToken();
                     <?php foreach ($topWastedItems as $t): ?>
                         <tr>
                             <td><?php echo htmlspecialchars($t['name']); ?></td>
-                            <td class="wastage-mini-table__muted"><?php echo number_format((float)$t['total_qty'], 3) . ' ' . htmlspecialchars($t['unit']); ?></td>
+                            <td class="wastage-mini-table__muted"<?php echo rh_stock_qty_sort_attr((float)$t['total_qty']); ?>><?php echo rh_stock_qty_html((float)$t['total_qty'], $t, (string)$t['unit']); ?></td>
                             <td class="wastage-mini-table__cost"><?php echo $currency_symbol . ' ' . number_format((float)$t['total_cost'], 2); ?></td>
                         </tr>
                     <?php endforeach; ?>
@@ -423,7 +425,7 @@ $csrf_token = generateCsrfToken();
                         <tr>
                             <td><?php echo htmlspecialchars($e['recorded_date']); ?></td>
                             <td><?php echo htmlspecialchars($e['ingredient_name']); ?></td>
-                            <td style="text-align:right;"><?php echo number_format((float)$e['quantity'], 3) . ' ' . htmlspecialchars($e['unit']); ?></td>
+                            <td style="text-align:right;"<?php echo rh_stock_qty_sort_attr((float)$e['quantity']); ?>><?php echo rh_stock_qty_html((float)$e['quantity'], $e, (string)$e['unit']); ?></td>
                             <td style="text-align:right;font-weight:600;"><?php echo $currency_symbol . ' ' . number_format((float)$e['wastage_cost'], 2); ?></td>
                             <td><?php echo htmlspecialchars($e['reason']); ?></td>
                             <td style="font-size:12px; color:#6c757d;"><?php echo htmlspecialchars($e['recorded_by_name'] ?: '—'); ?></td>

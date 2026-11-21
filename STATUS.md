@@ -57,6 +57,13 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   "Nightly checks" in Usage, dashboard link as a button.
 - LATER: the 1,000-token floor can put a tiny cap over (shown as "over"); page is long (8 panels) - a jump bar if asked.
 
+## Shipped 2026-11-21: Stock quantities shown as "bottles + shots" (owner FEATURE, display only)
+- Liwonde dced1a0, Rosalyn's port (this commit; config/database.php got only this change's hunk via git apply, its RBH
+  lines kept). Stored figures, inputs, exports and logs unchanged. Details in Liwonde STATUS.md.
+
+## Shipped 2026-11-21: Import page UI - step plan, foldable sections, pinned footer (owner FEATURE, UI only)
+- Liwonde 79d0a4a, Rosalyn's port d14bca5. No request or flow change. Details in Liwonde STATUS.md.
+
 ## Shipped 2026-11-21: Import step 3 sizes - tidy table, mass set, per-row "Sold as" (owner FEATURE)
 - Liwonde 68e62fe, Rosalyn's port 6fb1abe. Sold as changes the menu side only (opening count, count measure and Drink
   measures list untouched). Details and LATERs in Liwonde STATUS.md.

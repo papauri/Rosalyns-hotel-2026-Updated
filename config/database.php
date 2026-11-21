@@ -14127,6 +14127,120 @@ function rh_stock_measure_label(string $mode, $big, $small, array $m): string
 }
 
 /**
+ * A stock quantity in words for screens (owner 2026-11-21: "show bottles + shots"). DISPLAY ONLY: never feed it back
+ * into an input, an export or a sum. An item with a count measure ($ing carries the four measure columns; a row read
+ * before migration 088 has none, so this falls back by itself) shows whole bigs + the rest in smalls, the small part
+ * rounded to 1 dp ("2 bottles + 7 shots", "7 shots", "2 bottles"; 6.9999 -> 7; 29.99 of 30 -> the next bottle).
+ * Below zero the whole figure is wrapped: "short by 1 bottle + 3 shots". $signed (count differences): above zero
+ * "over by ...", below zero "short by ...". No measure: the number at most 2 dp, trailing zeros dropped, + $unit as
+ * stored ("2.23 bottle", "-1.5 kg"; signed: "+1.5 kg").
+ */
+function rh_stock_qty_words(float $qty, array $ing, string $unit = '', bool $signed = false): string
+{
+    $m = rh_stock_measure_get($ing);
+    if ($m === null) {
+        $r = round($qty, 2);
+        if (abs($r) < 0.005) {
+            $r = 0.0;
+        }
+        $num = rh_stock_qty_fmt($r, 0);
+        if ($signed && $r > 0) {
+            $num = '+' . $num;
+        }
+        return $unit !== '' ? $num . ' ' . $unit : $num;
+    }
+    $n = (float)$m['n'];
+    $smalls = round(abs($m['side'] === 'big' ? $qty * $n : $qty), 1);
+    $bigs = (int)floor($smalls / $n + 1e-9);
+    $rest = round($smalls - $bigs * $n, 1);
+    if ($rest < 0.05) {
+        $rest = 0.0;
+    } elseif ($rest >= round($n, 1) - 1e-9) { // e.g. 29.99 of 30 shots after rounding
+        $bigs++;
+        $rest = 0.0;
+    }
+    $part = static fn(float $q, string $name): string => rh_stock_qty_fmt($q, 0) . ' ' . rh_stock_measure_plural($name, $q);
+    if ($bigs === 0 && $rest <= 0.0) {
+        return $part(0.0, $m['side'] === 'big' ? $m['big'] : $m['small']);
+    }
+    $parts = [];
+    if ($bigs > 0) {
+        $parts[] = $part((float)$bigs, $m['big']);
+    }
+    if ($rest > 0.0) {
+        $parts[] = $part($rest, $m['small']);
+    }
+    $text = implode(' + ', $parts);
+    if ($qty < 0) {
+        return 'short by ' . $text;
+    }
+    return $signed ? 'over by ' . $text : $text;
+}
+
+/**
+ * rh_stock_qty_words() as escaped HTML, the exact stored figure (6 dp, trailing zeros dropped) on hover. A narrow column
+ * wraps only at the "+" ("2 bottles +" / "7 shots"), never between a number and its name.
+ */
+function rh_stock_qty_html(float $qty, array $ing, string $unit = '', bool $signed = false): string
+{
+    $exact = rh_stock_qty_fmt($qty, 0) . ($unit !== '' ? ' ' . $unit : '');
+    $words = str_replace('&nbsp;+&nbsp;', ' + ', str_replace(' ', '&nbsp;', htmlspecialchars(rh_stock_qty_words($qty, $ing, $unit, $signed), ENT_QUOTES, 'UTF-8')));
+    return '<span class="rh-qty" title="' . htmlspecialchars('Exact: ' . $exact, ENT_QUOTES, 'UTF-8') . '">' . $words . '</span>';
+}
+
+/**
+ * ' data-sort-value="2.233333"' for the <td> that holds rh_stock_qty_html(): the shared table sorter (admin-main.js) then
+ * sorts on the raw stock-unit figure (signed), never on the words ("2 bottles + 7 shots" would read as 27).
+ */
+function rh_stock_qty_sort_attr(float $qty): string
+{
+    return ' data-sort-value="' . number_format($qty, 6, '.', '') . '"';
+}
+
+/**
+ * Adds the four count-measure fields to each row, looked up by the ingredient id in $row[$idKey], so a list can show
+ * rh_stock_qty_words(). For screens only: the list queries stay as they are, so CSV exports built from them never
+ * gain columns. Rows come back unchanged before migration 088 or when the lookup fails.
+ */
+function rh_stock_measure_attach(PDO $pdo, array $rows, string $idKey = 'id'): array
+{
+    if ($rows === [] || !rh_stock_measure_ready($pdo)) {
+        return $rows;
+    }
+    $ids = [];
+    foreach ($rows as $r) {
+        $id = (int)($r[$idKey] ?? 0);
+        if ($id > 0) {
+            $ids[$id] = $id;
+        }
+    }
+    if ($ids === []) {
+        return $rows;
+    }
+    $map = [];
+    try {
+        foreach (array_chunk(array_values($ids), 500) as $chunk) {
+            $st = $pdo->prepare('SELECT id, measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')');
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
+                $map[(int)$m['id']] = $m;
+            }
+        }
+    } catch (Throwable $e) {
+        return $rows;
+    }
+    foreach ($rows as $k => $r) {
+        $m = $map[(int)($r[$idKey] ?? 0)] ?? null;
+        if ($m !== null) {
+            foreach (['measure_big_name', 'measure_small_name', 'measure_per_big', 'measure_stock_side'] as $f) {
+                $rows[$k][$f] = $m[$f];
+            }
+        }
+    }
+    return $rows;
+}
+
+/**
  * Read and check the four measure fields from a form ($in keys measure_big_name, measure_small_name, measure_per_big,
  * measure_stock_side). All four empty = remove the measure. Returns [?array measure, ?string error].
  */

@@ -2070,10 +2070,10 @@ $csrf_token = generateCsrfToken();
                                         <?php endif; ?>
                                     </td>
                                     <?php if (!$blindCount): ?>
-                                    <td class="col-optional-md" data-label="In stock at start" style="text-align:right;"><?php echo rh_stock_qty_fmt($sys, 4); ?></td>
-                                    <td class="col-optional-md" data-label="Should be there" style="text-align:right;"><?php echo $expectedAt === null ? '—' : rh_stock_qty_fmt($expectedAt, 4); ?></td>
+                                    <td class="col-optional-md" data-label="In stock at start" style="text-align:right;"<?php echo rh_stock_qty_sort_attr($sys); ?>><?php echo rh_stock_qty_html($sys, $ln, (string)$ln['unit']); ?></td>
+                                    <td class="col-optional-md" data-label="Should be there" style="text-align:right;"<?php echo $expectedAt === null ? '' : rh_stock_qty_sort_attr((float)$expectedAt); ?>><?php echo $expectedAt === null ? '—' : rh_stock_qty_html((float)$expectedAt, $ln, (string)$ln['unit']); ?></td>
                                     <?php endif; ?>
-                                    <td data-label="Counted" style="text-align:right;">
+                                    <td data-label="Counted" style="text-align:right;"<?php echo $lineCounted ? rh_stock_qty_sort_attr($act) : ''; ?>>
                                         <?php if ($editable): ?>
                                             <?php if ($lm): ?>
                                             <div class="sc-measure" data-mode="<?php echo htmlspecialchars($lmMode); ?>" data-n="<?php echo htmlspecialchars(rh_stock_qty_fmt($lm['n'], 0, '')); ?>" data-side="<?php echo htmlspecialchars($lm['side']); ?>"
@@ -2109,7 +2109,7 @@ $csrf_token = generateCsrfToken();
                                             </div>
                                             <?php endif; ?>
                                         <?php else: ?>
-                                            <?php echo $lineCounted ? rh_stock_qty_fmt($act, 4) : '<span style="color:#6c757d;">not counted</span>'; ?>
+                                            <?php echo $lineCounted ? rh_stock_qty_html($act, $ln, (string)$ln['unit']) : '<span style="color:#6c757d;">not counted</span>'; ?>
                                             <?php if ($lineCounted && $lm && $lmMode !== 'stock'): ?><div class="sc-mnote" title="What the counter typed; the figure above is that worked out in <?php echo htmlspecialchars((string)$ln['unit']); ?>">counted as <?php echo htmlspecialchars(scLineTypedLabel($ln, $lm, (string)$ln['unit'])); ?></div><?php endif; ?>
                                         <?php endif; ?>
                                     </td>
@@ -2124,7 +2124,7 @@ $csrf_token = generateCsrfToken();
                                     </td>
                                     <?php endif; ?>
                                     <?php if (!$blindCount): ?>
-                                    <td data-label="Difference" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? rh_stock_qty_fmt($var, 4) : '—'; ?></td>
+                                    <td data-label="Difference" style="text-align:right;" class="var <?php echo $varClass; ?>" data-qty-unit="<?php echo htmlspecialchars((string)$ln['unit'], ENT_QUOTES, 'UTF-8'); ?>"<?php if ($lm): ?> data-m-big="<?php echo htmlspecialchars($lm['big'], ENT_QUOTES, 'UTF-8'); ?>" data-m-small="<?php echo htmlspecialchars($lm['small'], ENT_QUOTES, 'UTF-8'); ?>" data-m-n="<?php echo htmlspecialchars(rh_stock_qty_fmt((float)$lm['n'], 0, ''), ENT_QUOTES, 'UTF-8'); ?>" data-m-side="<?php echo htmlspecialchars($lm['side'], ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?><?php echo $lineCounted ? rh_stock_qty_sort_attr($var) : ''; ?>><?php echo $lineCounted ? rh_stock_qty_html($var, $ln, (string)$ln['unit'], true) : '—'; ?></td>
                                     <td data-label="Value" style="text-align:right;" class="col-optional-md varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
                                     <?php endif; ?>
                                     <td data-label="Reason">
@@ -2234,6 +2234,32 @@ $csrf_token = generateCsrfToken();
                     tr.dataset.filterVariance = Math.abs(variance) < 0.0001 ? 'balanced' : (variance > 0 ? 'surplus' : 'shortage');
                 }
 
+                /* Same rules as rh_stock_qty_words() in config/database.php (display only): an item with a count measure shows whole
+                 * bigs + the rest in smalls (small part 1 dp, a full big rolls up), "over by" / "short by" for a difference; no measure =
+                 * the number at most 2 dp + the unit. d = the Difference cell's dataset (qtyUnit, mBig, mSmall, mN, mSide). */
+                function scQtyWords(qty, d, signed) {
+                    const fmt = function (v, dp) { return Number(v).toLocaleString('en-US', { maximumFractionDigits: dp }); };
+                    const plural = function (name, q) { return (Math.abs(q - 1) < 0.0000005 || name === '') ? name : name + (/(s|x|z|ch|sh)$/i.test(name) ? 'es' : 's'); };
+                    const n = parseFloat(d.mN || '');
+                    if (!d.mBig || !d.mSmall || !(n >= 1) || (d.mSide !== 'big' && d.mSide !== 'small')) {
+                        let r = Math.round(qty * 100) / 100;
+                        if (Math.abs(r) < 0.005) r = 0;
+                        const num = (signed && r > 0 ? '+' : '') + fmt(r, 2);
+                        return d.qtyUnit ? num + ' ' + d.qtyUnit : num;
+                    }
+                    const smalls = Math.round(Math.abs(d.mSide === 'big' ? qty * n : qty) * 10) / 10;
+                    let bigs = Math.floor(smalls / n + 1e-9);
+                    let rest = Math.round((smalls - bigs * n) * 10) / 10;
+                    if (rest < 0.05) { rest = 0; } else if (rest >= Math.round(n * 10) / 10 - 1e-9) { bigs++; rest = 0; }
+                    const part = function (q, name) { return fmt(q, 6) + ' ' + plural(name, q); };
+                    if (bigs === 0 && rest <= 0) return part(0, d.mSide === 'big' ? d.mBig : d.mSmall);
+                    const parts = [];
+                    if (bigs > 0) parts.push(part(bigs, d.mBig));
+                    if (rest > 0) parts.push(part(rest, d.mSmall));
+                    const text = parts.join(' + ');
+                    if (qty < 0) return 'short by ' + text;
+                    return signed ? 'over by ' + text : text;
+                }
                 function recalcRow(input) {
                     const tr = input.closest('tr');
                     const touchedEl = tr.querySelector('.touched');
@@ -2247,6 +2273,8 @@ $csrf_token = generateCsrfToken();
                     const cells = tr.querySelectorAll('.var, .varCost');
                     if (input.value.trim() === '') {
                         cells[0].textContent = '—';
+                        cells[0].dataset.sortValue = '';
+                        cells[0].title = '';
                         cells[1].textContent = '—';
                         cells[0].className = 'var var-zero';
                         cells[1].className = 'varCost var-zero';
@@ -2256,7 +2284,9 @@ $csrf_token = generateCsrfToken();
                     const act = parseFloat(input.value) || 0;
                     const variance = act - sys;
                     const varCost = variance * cost;
-                    cells[0].textContent = (function (n) { var t = n.toFixed(6).replace(/0+$/, ''); var d = t.length - t.indexOf('.') - 1; return d < 4 ? n.toFixed(4) : t; })(variance);
+                    cells[0].textContent = scQtyWords(variance, cells[0].dataset, true);
+                    cells[0].dataset.sortValue = variance.toFixed(6);
+                    cells[0].title = 'Exact: ' + (+variance.toFixed(6)) + (cells[0].dataset.qtyUnit ? ' ' + cells[0].dataset.qtyUnit : '');
                     cells[1].textContent = currency + ' ' + Number(varCost || 0).toLocaleString('en-US', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2

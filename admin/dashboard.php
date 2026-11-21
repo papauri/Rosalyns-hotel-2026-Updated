@@ -361,6 +361,7 @@ if (!$is_card_insight_ajax) {
                 $r['min_quantity'] = $r['threshold']; // effective reorder threshold
                 return $r;
             }, array_slice(array_merge($stockAlerts['out_items'], $stockAlerts['low_items']), 0, 8));
+            $stock['low_items']        = rh_stock_measure_attach($pdo, $stock['low_items']); // display only: "2 bottles + 7 shots"
         } catch (Throwable $e) { /* fine */ }
     }
 
@@ -1574,7 +1575,7 @@ if ($is_card_insight_ajax) {
                 $expiredCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
                 $wastageToday = (float)$pdo->query("SELECT COALESCE(SUM(quantity * COALESCE(cost_per_unit,0)), 0) FROM stock_wastage WHERE DATE(created_at) = CURDATE()")->fetchColumn();
 
-                $lowItemRows = array_slice(array_merge($stockAlertsCard['out_items'], $stockAlertsCard['low_items']), 0, 3);
+                $lowItemRows = rh_stock_measure_attach($pdo, array_slice(array_merge($stockAlertsCard['out_items'], $stockAlertsCard['low_items']), 0, 3)); // display only
                 $expiringRows = $pdo->query("SELECT i.name, b.expiry_date
                                              FROM stock_batches b
                                              INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
@@ -1589,7 +1590,7 @@ if ($is_card_insight_ajax) {
                 if ($lowItemRows !== []) {
                     $lowParts = [];
                     foreach ($lowItemRows as $itemRow) {
-                        $lowParts[] = (string)$itemRow['name'] . ' (' . number_format((float)($itemRow['current_quantity'] ?? 0), 1) . '/' . number_format((float)($itemRow['min_quantity'] ?? 0), 1) . ')';
+                        $lowParts[] = (string)$itemRow['name'] . ' (' . rh_stock_qty_words((float)($itemRow['current_quantity'] ?? 0), $itemRow, (string)($itemRow['unit'] ?? '')) . ' / ' . rh_stock_qty_words((float)($itemRow['min_quantity'] ?? 0), $itemRow, (string)($itemRow['unit'] ?? '')) . ')';
                     }
                     $lowDetail = implode(' · ', $lowParts);
                 }
@@ -2919,7 +2920,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php foreach (array_slice($stock['low_items'], 0, 5) as $li): $pct = (float)$li['min_quantity'] > 0 ? min(100, (float)$li['current_quantity'] / (float)$li['min_quantity'] * 100) : 0; ?>
                     <li>
                         <span class="ck-levels__name"><?php echo htmlspecialchars($li['name']); ?></span>
-                        <span class="ck-levels__qty"><?php echo number_format((float)$li['current_quantity'], 1); ?> / <?php echo number_format((float)$li['min_quantity'], 1); ?> <?php echo htmlspecialchars($li['unit']); ?></span>
+                        <span class="ck-levels__qty"><?php echo rh_stock_qty_html((float)$li['current_quantity'], $li, (string)$li['unit']); ?> / <?php echo rh_stock_qty_html((float)$li['min_quantity'], $li, (string)$li['unit']); ?></span>
                         <span class="ck-meter ck-meter--<?php echo $pct < 34 ? 'red' : 'amber'; ?>"><span style="width:<?php echo round($pct); ?>%"></span></span>
                     </li>
                     <?php endforeach; ?>

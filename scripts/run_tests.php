@@ -37,6 +37,7 @@ $suites = [
     'API payment delete'    => 'scripts/tests/api_payment_delete.php',
     'Stock budget'          => 'scripts/tests/stock_budget.php',
     'Stock packs'           => 'scripts/tests/stock_packs.php',
+    'Stock quantity in words (bottles + shots; no DB writes)' => 'scripts/tests/stock_qty_words_test.php',
     'Data import engine'    => 'scripts/tests/import_engine_test.php',
     'Data import stock'     => 'scripts/tests/import_stock_test.php',
     'Data import export'    => 'scripts/tests/import_export_test.php',

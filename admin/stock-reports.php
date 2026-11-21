@@ -591,6 +591,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     exit;
 }
 
+// Screen only (after the CSV above, which keeps its columns): count measures so quantities read "2 bottles + 7 shots".
+if (in_array($tab, ['stock_in', 'wastage', 'expiry', 'profit'], true)) {
+    $rows = rh_stock_measure_attach($pdo, $rows, 'ingredient_id');
+} elseif (in_array($tab, ['usage', 'yield'], true)) {
+    $rows = rh_stock_measure_attach($pdo, $rows, 'id');
+}
+
 $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
 ?>
 <!DOCTYPE html>
@@ -805,7 +812,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             <tr>
                                 <td <?php echo stock_reports_label_attr('Ingredient'); ?>><?php echo htmlspecialchars($r['name']); ?></td>
                                 <td <?php echo stock_reports_label_attr('Category'); ?>><?php echo htmlspecialchars($r['category']); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Current qty'); ?>><?php echo number_format((float)$r['current_quantity'], 3) . ' ' . htmlspecialchars($r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Current qty'); ?><?php echo rh_stock_qty_sort_attr((float)$r['current_quantity']); ?>><?php echo rh_stock_qty_html((float)$r['current_quantity'], $r, (string)$r['unit']); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Cost / unit'); ?>><?php echo $currency_symbol . ' ' . number_format((float)$r['cost_per_unit'], 4); ?></td>
                                 <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Stock value'); ?>><?php echo $currency_symbol . ' ' . number_format((float)$r['stock_value'], 2); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Active batches'); ?>><?php echo (int)$r['active_batches']; ?></td>
@@ -831,7 +838,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                                 <td class="stock-table__muted" <?php echo stock_reports_label_attr('Date'); ?>><?php echo htmlspecialchars(date('Y-m-d H:i', strtotime($r['created_at']))); ?></td>
                                 <td <?php echo stock_reports_label_attr('Ingredient'); ?>><?php echo htmlspecialchars($r['ingredient_name']); ?></td>
                                 <td <?php echo stock_reports_label_attr('Batch'); ?>><?php echo htmlspecialchars($r['batch_number'] ?: '—'); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Qty'); ?>><?php echo number_format((float)$r['quantity'], 3) . ' ' . htmlspecialchars($r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Qty'); ?><?php echo rh_stock_qty_sort_attr((float)$r['quantity']); ?>><?php echo rh_stock_qty_html((float)$r['quantity'], $r, (string)$r['unit']); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Unit cost'); ?>><?php echo $currency_symbol . ' ' . number_format((float)$r['cost_per_unit'], 4); ?></td>
                                 <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Total'); ?>><?php echo $currency_symbol . ' ' . number_format((float)$r['cost_total'], 2); ?></td>
                                 <td <?php echo stock_reports_label_attr('Supplier'); ?>><?php echo htmlspecialchars($r['supplier_name'] ?: '—'); ?></td>
@@ -851,7 +858,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                         <?php foreach ($rows as $r): ?>
                             <tr>
                                 <td <?php echo stock_reports_label_attr('Ingredient'); ?>><?php echo htmlspecialchars($r['name']); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Quantity used'); ?>><?php echo number_format((float)$r['total_used'], 3) . ' ' . htmlspecialchars($r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Quantity used'); ?><?php echo rh_stock_qty_sort_attr((float)$r['total_used']); ?>><?php echo rh_stock_qty_html((float)$r['total_used'], $r, (string)$r['unit']); ?></td>
                                 <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Cost'); ?>><?php echo $currency_symbol . ' ' . number_format((float)$r['total_cost'], 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
@@ -872,7 +879,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             <tr>
                                 <td <?php echo stock_reports_label_attr('Date'); ?>><?php echo htmlspecialchars($r['recorded_date']); ?></td>
                                 <td <?php echo stock_reports_label_attr('Ingredient'); ?>><?php echo htmlspecialchars($r['ingredient_name']); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Qty'); ?>><?php echo number_format((float)$r['quantity'], 3) . ' ' . htmlspecialchars($r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Qty'); ?><?php echo rh_stock_qty_sort_attr((float)$r['quantity']); ?>><?php echo rh_stock_qty_html((float)$r['quantity'], $r, (string)$r['unit']); ?></td>
                                 <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Cost'); ?>><?php echo $currency_symbol . ' ' . number_format((float)$r['wastage_cost'], 2); ?></td>
                                 <td <?php echo stock_reports_label_attr('Reason'); ?>><?php echo htmlspecialchars($r['reason']); ?></td>
                                 <td class="stock-table__muted" <?php echo stock_reports_label_attr('By'); ?>><?php echo htmlspecialchars($r['recorded_by_name'] ?: '—'); ?></td>
@@ -901,9 +908,9 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                         ?>
                             <tr>
                                 <td <?php echo stock_reports_label_attr('Ingredient'); ?>><?php echo htmlspecialchars($r['name']); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Used'); ?>><?php echo number_format($used, 3) . ' ' . htmlspecialchars($r['unit']); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Wasted'); ?>><?php echo number_format($wasted, 3); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Expired'); ?>><?php echo number_format($expired, 3); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Used'); ?><?php echo rh_stock_qty_sort_attr($used); ?>><?php echo rh_stock_qty_html($used, $r, (string)$r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Wasted'); ?><?php echo rh_stock_qty_sort_attr($wasted); ?>><?php echo rh_stock_qty_html($wasted, $r, (string)$r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Expired'); ?><?php echo rh_stock_qty_sort_attr($expired); ?>><?php echo rh_stock_qty_html($expired, $r, (string)$r['unit']); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Yield %'); ?>><span class="<?php echo stock_reports_yield_class($yieldPct); ?>"><?php echo number_format($yieldPct, 1); ?>%</span></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Loss cost'); ?>><?php echo $currency_symbol . ' ' . number_format($lossCost, 2); ?></td>
                             </tr>
@@ -954,7 +961,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                                 <td <?php echo stock_reports_label_attr('Ingredient'); ?>><?php echo htmlspecialchars($r['ingredient_name']); ?></td>
                                 <td <?php echo stock_reports_label_attr('Expiry date'); ?>><?php echo htmlspecialchars($r['expiry_date']); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Days left'); ?>><span class="<?php echo stock_reports_days_left_class($d); ?>"><?php echo $d < 0 ? 'Expired ' . abs($d) . 'd ago' : $d . 'd left'; ?></span></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Remaining'); ?>><?php echo number_format((float)$r['quantity_remaining'], 3) . ' ' . htmlspecialchars($r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Remaining'); ?><?php echo rh_stock_qty_sort_attr((float)$r['quantity_remaining']); ?>><?php echo rh_stock_qty_html((float)$r['quantity_remaining'], $r, (string)$r['unit']); ?></td>
                                 <td <?php echo stock_reports_label_attr('Status'); ?>><?php echo htmlspecialchars(ucfirst($r['status'])); ?></td>
                             </tr>
                         <?php endforeach; ?>
@@ -975,7 +982,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             <tr>
                                 <td <?php echo stock_reports_label_attr('Stock item'); ?>><?php echo htmlspecialchars($r['stock_name']); ?></td>
                                 <td <?php echo stock_reports_label_attr('Category'); ?>><?php echo htmlspecialchars($r['category']); ?></td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('On hand'); ?>><?php echo htmlspecialchars(rh_stock_qty_fmt((float)$r['on_hand'], 0) . ' ' . $r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('On hand'); ?><?php echo rh_stock_qty_sort_attr((float)$r['on_hand']); ?>><?php echo rh_stock_qty_html((float)$r['on_hand'], $r, (string)$r['unit']); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Stock cost'); ?>><?php echo $r['stock_cost'] !== null ? htmlspecialchars(stock_reports_money((float)$r['stock_cost'], $currency_symbol)) : '<span class="spp-flag spp-flag--muted">Cost not known</span>'; ?></td>
                                 <td <?php echo stock_reports_label_attr('Menu'); ?>><span class="spp-flag spp-flag--muted">No selling price yet</span> <a class="spp-link" href="menu-management.php">Menu page</a></td>
                             </tr>
@@ -1003,7 +1010,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                                         <span class="spp-sub"><?php echo htmlspecialchars($r['stock_name'] . ' · one sale = ' . $r['sale']); ?></span>
                                     </span>
                                 </td>
-                                <td class="stock-table__num" <?php echo stock_reports_label_attr('On hand'); ?>><?php echo htmlspecialchars(rh_stock_qty_fmt((float)$r['on_hand'], 0) . ' ' . $r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('On hand'); ?><?php echo rh_stock_qty_sort_attr((float)$r['on_hand']); ?>><?php echo rh_stock_qty_html((float)$r['on_hand'], $r, (string)$r['unit']); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Measures per unit'); ?>><?php echo htmlspecialchars(rh_stock_qty_fmt(round((float)$r['per_unit'], 2), 0)); ?></td>
                                 <td class="stock-table__num" <?php echo stock_reports_label_attr('Selling price'); ?>><span class="spp-drink"><?php echo htmlspecialchars(stock_reports_money((float)$r['price'], $currency_symbol)); ?><?php if ($sppT['vat_out']): ?><span class="spp-sub"><?php echo htmlspecialchars(stock_reports_money((float)$r['price_gross'], $currency_symbol)); ?> with VAT</span><?php endif; ?></span></td>
                                 <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Projected sales'); ?>><?php echo htmlspecialchars(stock_reports_money((float)$r['sales'], $currency_symbol)); ?></td>

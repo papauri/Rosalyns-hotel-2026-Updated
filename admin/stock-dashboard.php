@@ -181,7 +181,7 @@ if (!$error) {
 
     try {
         $mostWastedIngredients = $pdo->query("
-            SELECT i.name, i.unit, SUM(w.quantity) AS total_qty, SUM(w.wastage_cost) AS total_cost, COUNT(*) AS entries
+            SELECT i.id, i.name, i.unit, SUM(w.quantity) AS total_qty, SUM(w.wastage_cost) AS total_cost, COUNT(*) AS entries
             FROM stock_wastage w
             INNER JOIN stock_ingredients i ON i.id = w.ingredient_id
             WHERE w.recorded_date > DATE_SUB(CURDATE(), INTERVAL 30 DAY)
@@ -204,7 +204,7 @@ if (!$error) {
         $criticalIng = $alertSummary['out_items'];
 
         $expiringSoon = $pdo->query("
-            SELECT b.batch_number, i.name, b.expiry_date, b.quantity_remaining, b.cost_per_unit, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
+            SELECT b.batch_number, i.name, i.unit, b.ingredient_id, b.expiry_date, b.quantity_remaining, b.cost_per_unit, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
             FROM stock_batches b
             INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
             WHERE b.status = 'active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)
@@ -212,7 +212,7 @@ if (!$error) {
         ")->fetchAll(PDO::FETCH_ASSOC);
 
         $expiredBatches = $pdo->query("
-            SELECT b.batch_number, i.name, b.expiry_date, b.quantity_remaining,
+            SELECT b.batch_number, i.name, i.unit, b.ingredient_id, b.expiry_date, b.quantity_remaining,
                    ABS(DATEDIFF(b.expiry_date, CURDATE())) AS days_expired
             FROM stock_batches b
             INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
@@ -224,6 +224,13 @@ if (!$error) {
             $r['min_quantity'] = $r['threshold']; // the list shows the effective reorder threshold
             return $r;
         }, $alertSummary['low_items']);
+
+        // Display only: lets these lists show "2 bottles + 7 shots" for items with a count measure.
+        $criticalIng = rh_stock_measure_attach($pdo, $criticalIng);
+        $lowStock = rh_stock_measure_attach($pdo, $lowStock);
+        $expiringSoon = rh_stock_measure_attach($pdo, $expiringSoon, 'ingredient_id');
+        $expiredBatches = rh_stock_measure_attach($pdo, $expiredBatches, 'ingredient_id');
+        $mostWastedIngredients = rh_stock_measure_attach($pdo, $mostWastedIngredients);
 
         // Real totals (the lists above are capped for display); never-stocked items add nothing.
         $totalAlerts = $alertSummary['out'] + $alertSummary['low']
@@ -509,7 +516,7 @@ $csrf_token = generateCsrfToken();
                     <div class="sdash-alert-item">
                         <div class="sdash-alert-item__info">
                             <span class="sdash-alert-item__name"><?php echo htmlspecialchars($i['name']); ?></span>
-                            <span class="sdash-alert-item__detail"><?php echo htmlspecialchars((string)$i['current_quantity']); ?> <?php echo htmlspecialchars($i['unit']); ?> available</span>
+                            <span class="sdash-alert-item__detail"><?php echo rh_stock_qty_html((float)$i['current_quantity'], $i, (string)$i['unit']); ?> available</span>
                         </div>
                         <div class="sdash-alert-item__actions">
                             <a href="purchase-orders.php" class="sdash-btn sdash-btn--sm sdash-btn--primary" title="Create a purchase order to restock">
@@ -543,7 +550,7 @@ $csrf_token = generateCsrfToken();
                                 elseif ($dl === 1) echo '<strong style="color:#c82333">expires tomorrow</strong>';
                                 else echo 'expires in ' . $dl . ' days';
                                 ?>
-                                &middot; <?php echo number_format((float)$b['quantity_remaining'], 1); ?> remaining
+                                &middot; <?php echo rh_stock_qty_html((float)$b['quantity_remaining'], $b, (string)$b['unit']); ?> remaining
                             </span>
                         </div>
                         <div class="sdash-alert-item__actions">
@@ -572,7 +579,7 @@ $csrf_token = generateCsrfToken();
                             <span class="sdash-alert-item__detail">
                                 Batch <?php echo htmlspecialchars($b['batch_number']); ?> &mdash;
                                 <strong style="color:#c82333">expired <?php echo (int)$b['days_expired']; ?> day<?php echo (int)$b['days_expired'] !== 1 ? 's' : ''; ?> ago</strong>
-                                &middot; <?php echo number_format((float)$b['quantity_remaining'], 1); ?> remaining
+                                &middot; <?php echo rh_stock_qty_html((float)$b['quantity_remaining'], $b, (string)$b['unit']); ?> remaining
                             </span>
                         </div>
                         <div class="sdash-alert-item__actions">
@@ -602,8 +609,8 @@ $csrf_token = generateCsrfToken();
                         <div class="sdash-alert-item__info sdash-alert-item__info--bar">
                             <span class="sdash-alert-item__name"><?php echo htmlspecialchars($i['name']); ?></span>
                             <span class="sdash-alert-item__detail">
-                                <?php echo number_format((float)$i['current_quantity'], 1); ?> <?php echo htmlspecialchars($i['unit']); ?>
-                                &nbsp;/&nbsp; min <?php echo number_format((float)$i['min_quantity'], 1); ?> <?php echo htmlspecialchars($i['unit']); ?>
+                                <?php echo rh_stock_qty_html((float)$i['current_quantity'], $i, (string)$i['unit']); ?>
+                                &nbsp;/&nbsp; min <?php echo rh_stock_qty_html((float)$i['min_quantity'], $i, (string)$i['unit']); ?>
                             </span>
                             <div class="sdash-mini-bar">
                                 <div class="sdash-mini-bar__fill sdash-mini-bar__fill--warn" style="width:<?php echo $pct; ?>%"></div>
@@ -752,7 +759,7 @@ $csrf_token = generateCsrfToken();
                         <?php foreach ($mostWastedIngredients as $idx => $w): ?>
                         <tr style="border-bottom:1px solid #f0ece6;<?php echo $idx % 2 === 0 ? '' : 'background:#faf8f5;'; ?>">
                             <td style="padding:8px;font-weight:500;"><?php echo htmlspecialchars($w['name']); ?></td>
-                            <td style="padding:8px;text-align:right;"><?php echo number_format((float)$w['total_qty'], 2); ?> <?php echo htmlspecialchars($w['unit']); ?></td>
+                            <td style="padding:8px;text-align:right;"<?php echo rh_stock_qty_sort_attr((float)$w['total_qty']); ?>><?php echo rh_stock_qty_html((float)$w['total_qty'], $w, (string)$w['unit']); ?></td>
                             <td style="padding:8px;text-align:right;color:#c62828;font-weight:600;"><?php echo $currency_symbol . ' ' . number_format((float)$w['total_cost'], 0); ?></td>
                             <td style="padding:8px;text-align:right;color:#888;"><?php echo (int)$w['entries']; ?></td>
                         </tr>

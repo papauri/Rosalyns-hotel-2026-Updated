@@ -249,6 +249,7 @@ if (!$error || strpos($error, 'not yet') === false) {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $batches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $batches = rh_stock_measure_attach($pdo, $batches, 'ingredient_id'); // display only: "2 bottles + 7 shots"
         // At the cap, count every match (same WHERE) so the page says "Showing 2,000 of N".
         $batchesCounted = null;
         if (count($batches) >= rh_stock_batch_list_cap()) {
@@ -533,8 +534,8 @@ function expiry_tier(?string $expiry, ?int $days): array
                         <tr>
                             <td><strong><?php echo htmlspecialchars($b['batch_number']); ?></strong></td>
                             <td><?php echo htmlspecialchars($b['ingredient_name']); ?></td>
-                            <td style="text-align:right;"><?php echo number_format((float)$b['quantity_received'], 3) . ' ' . htmlspecialchars($b['unit']); ?></td>
-                            <td style="text-align:right;font-weight:600;"><?php echo number_format((float)$b['quantity_remaining'], 3) . ' ' . htmlspecialchars($b['unit']); ?></td>
+                            <td style="text-align:right;"<?php echo rh_stock_qty_sort_attr((float)$b['quantity_received']); ?>><?php echo rh_stock_qty_html((float)$b['quantity_received'], $b, (string)$b['unit']); ?></td>
+                            <td style="text-align:right;font-weight:600;"<?php echo rh_stock_qty_sort_attr((float)$b['quantity_remaining']); ?>><?php echo rh_stock_qty_html((float)$b['quantity_remaining'], $b, (string)$b['unit']); ?></td>
                             <td style="text-align:right;"><?php echo $currency_symbol . ' ' . number_format((float)$b['cost_per_unit'], 4); ?></td>
                             <td>
                                 <?php echo htmlspecialchars($b['supplier_name'] ?: '—'); ?>
