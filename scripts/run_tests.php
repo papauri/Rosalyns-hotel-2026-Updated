@@ -34,6 +34,7 @@ $suites = [
     'Assistant document numbers' => 'scripts/tests/ai_doc_numbers_test.php',
     'Gym linked data'       => 'scripts/tests/linked_gym.php',
     'Block Rooms permission' => 'scripts/tests/block_rooms.php',
+    'Blocked Dates calendar grid' => 'scripts/tests/blocked_dates_grid.php',
     'API payment delete'    => 'scripts/tests/api_payment_delete.php',
     'Stock budget'          => 'scripts/tests/stock_budget.php',
     'Stock packs'           => 'scripts/tests/stock_packs.php',

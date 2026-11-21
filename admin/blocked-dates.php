@@ -86,8 +86,9 @@ function rh_block_grid_month($raw): string
  *
  * @return array<int,array{scope:string,id:?int,room_ids:int[],type_id:?int,label:string,dates:string[]}>|string
  */
-function rh_block_grid_targets(PDO $pdo, $rawJson)
+function rh_block_grid_targets(PDO $pdo, $rawJson, int &$pastSkipped = 0)
 {
+    $pastSkipped = 0;
     $items = is_string($rawJson) ? json_decode($rawJson, true) : null;
     if (!is_array($items) || !$items) {
         return 'Select at least one night on the calendar.';
@@ -106,8 +107,17 @@ function rh_block_grid_targets(PDO $pdo, $rawJson)
         $id = isset($it['id']) && $it['id'] !== null && $it['id'] !== '' ? (int)$it['id'] : null;
         $rawDates = is_array($it['d'] ?? null) ? $it['d'] : [];
         $dates = rh_clean_block_dates($rawDates);
-        if (count($dates) < count(array_filter($rawDates, static fn($x) => is_string($x) && rh_normalize_block_date($x) !== null))) {
+        // Valid nights before today are dropped (never saved); count them so the message can say so.
+        $pastHere = [];
+        foreach ($rawDates as $x) {
+            $n = is_string($x) ? rh_normalize_block_date($x) : null;
+            if ($n !== null && $n < date('Y-m-d')) {
+                $pastHere[$n] = true;
+            }
+        }
+        if ($pastHere) {
             $hadPast = true;
+            $pastSkipped += count($pastHere);
         }
         if (!$dates) {
             continue;
@@ -217,9 +227,9 @@ function rh_block_grid_inherited_nights(PDO $pdo, array $target, array $dates): 
  *
  * @return array{ok:bool,message:string}
  */
-function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $blockType, ?string $reason, ?int $by): array
+function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $blockType, ?string $reason, ?int $by, int $pastSkipped = 0): array
 {
-    $result = rh_block_locked($pdo, function () use ($pdo, $op, $targets, $blockType, $reason, $by) {
+    $result = rh_block_locked($pdo, function () use ($pdo, $op, $targets, $blockType, $reason, $by, $pastSkipped) {
         $added = 0;
         $updated = 0;
         $removed = 0;
@@ -278,6 +288,9 @@ function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $block
 
         if ($op === 'block') {
             $msg = 'Blocked ' . $added . ' night(s).';
+            if ($pastSkipped > 0) {
+                $msg .= ' ' . $pastSkipped . ' past night(s) in the selection were skipped (past nights cannot be changed).';
+            }
             if ($updated > 0) {
                 $msg .= ' ' . $updated . ' night(s) were already blocked and now show the new block type and reason.';
             }
@@ -305,6 +318,9 @@ function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $block
             return ['ok' => false, 'message' => 'None of the selected nights were blocked, so nothing was changed.'];
         }
         $msg = 'Unblocked ' . $removed . ' night(s).';
+        if ($pastSkipped > 0) {
+            $msg .= ' ' . $pastSkipped . ' past night(s) in the selection were skipped (past nights cannot be changed).';
+        }
         if ($stillBlocked > 0) {
             $msg .= ' ' . $stillBlocked . ' selected night(s) are still blocked by a room-type or all-rooms block; unblock those on the "All ... rooms" or "All rooms" row.';
         }
@@ -397,13 +413,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'grid_apply') {
         // Calendar grid: block or unblock any mix of rooms, room types and the all-rooms row in one save.
         $gridOp = (string)($_POST['op'] ?? '');
+        $gridPast = 0;
         $targets = in_array($gridOp, ['block', 'unblock'], true)
-            ? rh_block_grid_targets($pdo, $_POST['items'] ?? '')
+            ? rh_block_grid_targets($pdo, $_POST['items'] ?? '', $gridPast)
             : 'Unknown action.';
         $out = is_string($targets)
             ? ['ok' => false, 'message' => $targets]
             : rh_block_grid_apply($pdo, $gridOp, $targets, rh_normalize_block_type($_POST['block_type'] ?? 'manual'),
-                rh_normalize_block_reason(isset($_POST['reason']) ? (string)$_POST['reason'] : null), isset($user['id']) ? (int)$user['id'] : null);
+                rh_normalize_block_reason(isset($_POST['reason']) ? (string)$_POST['reason'] : null), isset($user['id']) ? (int)$user['id'] : null, $gridPast);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['success' => $out['ok'], 'message' => $out['message']]);
         exit;

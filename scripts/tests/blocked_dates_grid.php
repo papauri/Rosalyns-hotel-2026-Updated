@@ -112,6 +112,8 @@ if ($p) {
 echo "== Refusals (nothing written) ==\n";
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past]]], 'block', [], [$cInd]);
 check(($r['json']['success'] ?? true) === false && c($r) === 0 && strpos(msg($r), 'past nights') !== false, 'past nights are refused', json_encode($r['json'] ?? null));
+$r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past, $d1]]], 'block', [], [$cInd, "SELECT COUNT(*) AS c FROM individual_room_blocked_dates WHERE reason = '$tag' AND block_date < CURDATE()"]);
+check(($r['json']['success'] ?? false) === true && c($r) === 1 && c($r, 1) === 0 && strpos(msg($r), '1 past night(s) in the selection were skipped') !== false, 'a past night mixed into a selection is skipped and the message says so', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]], ['t' => 'type', 'id' => 99999999, 'd' => [$d1]]], 'block', [], [$cInd]);
 check(($r['json']['success'] ?? true) === false && c($r) === 0, 'an unknown room type refuses the whole save (the valid room is not blocked either)', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]]], 'block', ["UPDATE individual_rooms SET is_active = 0 WHERE id = $rid"], [$cInd]);
