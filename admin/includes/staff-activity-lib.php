@@ -463,6 +463,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             'stock_cost_correction' => 'Corrected a crate price', // Stock > Fix crate prices (admin/includes/stock-cost-fix-lib.php)
             'stock_main_unit_changed' => 'Changed the main unit of a stock item', // Stock Items > Change main unit (admin/includes/stock-unit-change-lib.php)
             'menu_items_bulk_deleted' => 'Deleted selected menu items', 'menu_items_all_deleted' => 'Deleted all menu items', // Menu Management bulk delete (owner 2026-11-21)
+            'room_block' => 'Blocked rooms', 'room_unblock' => 'Unblocked rooms', // Blocked Dates screen + API (includes/block-log.php): rooms, nights, bookings
         ];
         $text = $names[$action] ?? ucfirst(rh_sa_prettify($action));
         if (!in_array($action, ['login_success', 'logout', 'login_failed', 'login_blocked'], true) && trim($details) !== '') {
@@ -473,7 +474,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             if ($d !== '') {
                 // Most details are a short hint (140 characters). A crate-price correction or a main-unit change is a full
                 // before/after record (value, batches, purchase order lines), so it keeps its whole text; the page escapes it.
-                $max = in_array($action, ['stock_cost_correction', 'stock_main_unit_changed', 'menu_items_bulk_deleted', 'menu_items_all_deleted'], true) ? 4000 : 140;
+                $max = in_array($action, ['stock_cost_correction', 'stock_main_unit_changed', 'menu_items_bulk_deleted', 'menu_items_all_deleted', 'room_block', 'room_unblock'], true) ? 4000 : 140;
                 $text .= ': ' . (function_exists('mb_substr') ? mb_substr($d, 0, $max) : substr($d, 0, $max));
             }
         }

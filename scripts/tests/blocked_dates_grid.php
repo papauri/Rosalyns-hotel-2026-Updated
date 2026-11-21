@@ -179,6 +179,51 @@ check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the 
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past, $d1]]], 'unblock', [], [$cInd]);
 check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the selected nights were blocked') !== false && strpos(msg($r), '1 past night(s) in the selection were skipped') !== false, 'unblocking open nights with a past night also says the past night was skipped', json_encode($r['json'] ?? null));
 
+echo "== Logs: Staff activity + Booking History ==\n";
+$cLogBlock = "SELECT COUNT(*) AS c FROM admin_activity_log WHERE action = 'room_block' AND details LIKE '%$tag%'";
+$cLogUnblock = "SELECT COUNT(*) AS c FROM admin_activity_log WHERE action = 'room_unblock' AND details LIKE '%" . addslashes($roomText) . "%' AND created_at >= NOW() - INTERVAL 1 MINUTE";
+$r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1, $d2]]], 'block', [], [$cLogBlock, "SELECT details AS c FROM admin_activity_log WHERE action = 'room_block' AND details LIKE '%$tag%' LIMIT 1"]);
+$det = strtolower((string)($r['verify'][1][0]['c'] ?? ''));
+check(($r['json']['success'] ?? false) === true && c($r) === 1 && strpos($det, $roomText . ' on ' . strtolower($rangeText)) !== false && strpos($det, 'type: maintenance') !== false,
+    'a calendar block writes ONE Staff activity row naming the room, nights, type and reason', json_encode([$r['verify'] ?? null]));
+$r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]]], 'unblock', [$seedInd], [$cLogUnblock]);
+check(($r['json']['success'] ?? false) === true && c($r) === 1, 'a calendar unblock writes a Staff activity row', json_encode([$r['json'] ?? null, $r['verify'] ?? null]));
+$r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]], ['t' => 'type', 'id' => 99999999, 'd' => [$d1]]], 'block', [], [$cLogBlock]);
+check(($r['json']['success'] ?? true) === false && c($r) === 0, 'a refused save writes no log row');
+$r = run(['post' => ['action' => 'block_date', 'block_scope' => 'individual', 'individual_room_id' => (string)$rid, 'block_date' => $d1, 'block_type' => 'event', 'reason' => $tag], 'ajax' => true, 'verify' => [$cLogBlock]]);
+check(($r['json']['success'] ?? false) === true && c($r) === 1, 'the List-view form block is logged too', json_encode($r['verify'] ?? null));
+$bulkId = 2000000000 + random_int(1, 99999);
+$r = run(['post' => ['action' => 'bulk_unblock', 'bulk_ids' => ['individual-' . $bulkId]], 'setup' => ["INSERT INTO individual_room_blocked_dates (id, individual_room_id, block_date, block_type, reason) VALUES ($bulkId, $rid, '$d1', 'manual', '$tag')"], 'verify' => [$cLogUnblock, $cInd]]);
+check(c($r, 0) === 1 && c($r, 1) === 0, 'the List-view bulk unblock is logged', json_encode($r['verify'] ?? null));
+
+// A booking that already sleeps in a room: blocking that room on one of its nights warns first (preview, nothing saved),
+// and the booking gets a History note. Uses a real future stay; everything is rolled back.
+$bk = $pdo->query("SELECT b.id, b.booking_reference, b.individual_room_id, GREATEST(b.check_in_date, CURDATE()) AS night
+    FROM bookings b JOIN individual_rooms ir ON ir.id = b.individual_room_id AND ir.is_active = 1
+    WHERE b.status IN ('confirmed', 'checked-in') AND b.check_out_date > GREATEST(b.check_in_date, CURDATE()) ORDER BY b.check_in_date DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if (!$bk) {
+    bad('Fixture: a confirmed or in-house booking with a room and a night from today on');
+} else {
+    $bNight = (string)$bk['night'];
+    $bItems = [['t' => 'room', 'id' => (int)$bk['individual_room_id'], 'd' => [$bNight]]];
+    $cBlocksHere = "SELECT COUNT(*) AS c FROM individual_room_blocked_dates WHERE block_date = '$bNight' AND reason = '$tag'";
+    $r = run(['post' => ['action' => 'preview_block', 'items' => json_encode($bItems)], 'ajax' => true, 'verify' => [$cBlocksHere]]);
+    check(($r['json']['success'] ?? false) === true && (int)($r['json']['booking_count'] ?? 0) >= 1 && strpos((string)($r['json']['bookings'] ?? ''), (string)$bk['booking_reference']) !== false && c($r) === 0,
+        'preview lists the booking already on that night and saves nothing', json_encode([$r['json'] ?? null, $r['verify'] ?? null]));
+    $cNote = "SELECT COUNT(*) AS c FROM booking_timeline_logs WHERE booking_id = " . (int)$bk['id'] . " AND action = 'Room blocked on a night of this stay' AND description LIKE '%$tag%'";
+    $r = grid($bItems, 'block', [], [$cNote, $cLogBlock]);
+    check(($r['json']['success'] ?? false) === true && c($r, 0) === 1 && c($r, 1) === 1 && strpos((string)($r['json']['message'] ?? ''), (string)$bk['booking_reference']) !== false,
+        'blocking a night a booking sleeps on adds a note to that booking\'s History and names it in the message', json_encode([$r['json'] ?? null, $r['verify'] ?? null]));
+    $cNote2 = "SELECT COUNT(*) AS c FROM booking_timeline_logs WHERE booking_id = " . (int)$bk['id'] . " AND action = 'Block removed from a night of this stay' AND created_at >= NOW() - INTERVAL 1 MINUTE";
+    $seedB = "INSERT INTO individual_room_blocked_dates (individual_room_id, block_date, block_type, reason) VALUES (" . (int)$bk['individual_room_id'] . ", '$bNight', 'manual', '$tag')";
+    $r = grid($bItems, 'unblock', [$seedB], [$cNote2]);
+    check(($r['json']['success'] ?? false) === true && c($r) === 1, 'unblocking that night notes it on the booking too', json_encode([$r['json'] ?? null, $r['verify'] ?? null]));
+}
+if ($u ?? null) {
+    $r = run(['post' => ['action' => 'preview_block', 'items' => json_encode([['t' => 'room', 'id' => $rid, 'd' => [$d1]]])], 'ajax' => true, 'setup' => $deny, 'as_username' => $u['username']]);
+    check(($r['json']['success'] ?? true) === false, 'without Block Rooms the preview is refused too', json_encode($r['json'] ?? null));
+}
+
 echo "== Availability follows the blocks (one transaction, rolled back) ==\n";
 // The booking checks read the same rows the grid writes. A block is one NIGHT: a stay that checks out
 // on the blocked date is still fine.

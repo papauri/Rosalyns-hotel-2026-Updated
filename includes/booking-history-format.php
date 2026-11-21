@@ -405,7 +405,9 @@ if (!function_exists('rh_hist_tol')) {
                 if ($type === 'reminder') $keys[] = 'reminder';
                 $ev = rh_hist_ev($at, $who, $action !== '' ? $action : 'Email sent', $desc, 'email', $keys, 1);
             } elseif ($type === 'note') {
-                $ev = rh_hist_ev($at, $who, 'Note added', $desc, 'note', ['note:' . md5(trim($desc))], 1);
+                // Blocked Dates notes (includes/block-log.php) keep their own title so the front desk sees what happened.
+                $noteTitle = in_array($action, ['Room blocked on a night of this stay', 'Block removed from a night of this stay'], true) ? $action : 'Note added';
+                $ev = rh_hist_ev($at, $who, $noteTitle, $desc, 'note', ['note:' . md5(trim($desc))], 1);
             } elseif ($type === 'date_adjustment') {
                 $lines = [];
                 $o = rh_hist_json($r['old_value'] ?? null);

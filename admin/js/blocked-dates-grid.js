@@ -13,6 +13,7 @@
     var anchor = null;        // last clicked cell, for shift-click
     var drag = null;          // {start, mode, base, moved}
     var busy = false;
+    var asking = false; // a Block / Unblock confirm (or its booking check) is open
     var lastPointer = 'mouse'; // Safari fires plain MouseEvent clicks, so remember the last pointer type
 
     function table() { return document.getElementById('bdgTable'); }
@@ -298,23 +299,50 @@
         return Promise.resolve(true); // no dialog on this page: the buttons are explicit enough
     }
 
+    /** Read-only server check of the selection: {success, booking_count, bookings} or null on a network error. */
+    function preview(items) {
+        var fd = new FormData();
+        fd.append('action', 'preview_block');
+        fd.append('items', JSON.stringify(items));
+        var tok = document.querySelector('meta[name="csrf-token"]');
+        if (tok) fd.append('csrf_token', tok.getAttribute('content'));
+        return fetch(window.location.pathname, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd, credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; });
+    }
+
     function save(op) {
         var cells = selectedCells();
-        if (!cells.length || busy) return;
+        if (!cells.length || busy || asking) return;
+        asking = true;
         var grouped = groupCells(cells);
         var items = grouped.map(function (g) { return { t: g.t, id: g.id, d: g.d }; });
         var wide = grouped.filter(function (g) { return g.t !== 'room'; }).map(function (g) { return g.label; });
         var where = whereText(grouped, 8);
-        var msg = op === 'block'
+        var baseMsg = op === 'block'
             ? 'Block ' + where + '? Guests will not be able to book them.'
               + (wide.length ? ' ' + wide.join(' and ') + (wide.length === 1 ? ' blocks every room under it.' : ' block every room under them.') : '')
             : 'Unblock ' + where + '? Nights blocked by a room type or All rooms stay blocked; unblock those on that line.';
-        confirmAsk({
-            title: op === 'block' ? 'Block nights' : 'Unblock nights',
-            message: msg,
-            confirmText: op === 'block' ? 'Block' : 'Unblock',
-            icon: op === 'block' ? 'fa-ban' : 'fa-unlock'
+        // Blocking: ask the server first which bookings already sleep on these nights (nothing is saved), so the
+        // decision is made before the rooms go off sale. Unblocking needs no check.
+        var ask = op === 'block' ? preview(items).then(function (p) {
+            if (!p) return baseMsg;
+            if (p.success === false) { feedback(false, p.message || 'The selection could not be checked.'); return null; }
+            return baseMsg + (p.booking_count > 0
+                ? ' Warning: ' + p.booking_count + ' booking(s) already sleep on these nights and will NOT be moved or cancelled: '
+                  + p.bookings + '. Each booking\'s History will get a note.'
+                : ' No bookings sleep on these nights.');
+        }) : Promise.resolve(baseMsg);
+        ask.then(function (msg) {
+            if (msg === null) return false;
+            return confirmAsk({
+                title: op === 'block' ? 'Block nights' : 'Unblock nights',
+                message: msg,
+                confirmText: op === 'block' ? 'Block' : 'Unblock',
+                icon: op === 'block' ? 'fa-ban' : 'fa-unlock'
+            });
         }).then(function (ok) {
+            asking = false;
             if (!ok) return;
             busy = true;
             summary();

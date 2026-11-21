@@ -43,6 +43,15 @@ if (!defined('API_ACCESS_ALLOWED') || !isset($auth) || !isset($client)) {
 // Get authenticated API client (used in place of $admin_user for created_by tracking)
 $admin_user = $client;
 
+// Every block / unblock made through the API is recorded like a staff change (System Logs > Staff activity, and a
+// note on each booking that sleeps on the nights), naming the API client. includes/block-log.php.
+require_once __DIR__ . '/../includes/block-log.php';
+$apiBlockLog = static function (string $op, array $entries, ?string $type = null, ?string $reason = null) use ($pdo, $client): void {
+    $who = 'API: ' . (string)($client['client_name'] ?? 'unknown client');
+    rh_block_log_change($pdo, $op, $entries, ['block_type' => rh_normalize_block_type($type), 'reason' => rh_normalize_block_reason($reason),
+        'user_id' => 0, 'user_name' => $who, 'actor_type' => 'api', 'via' => 'the integration API (' . (string)($client['client_name'] ?? 'unknown client') . ')']);
+};
+
 /**
  * Send JSON response
  */
@@ -264,8 +273,9 @@ switch ($method) {
                 }
                 
                 $result = blockIndividualRoomDate($individual_room_id, $block_date, $block_type, $reason, $created_by);
-                
+
                 if ($result) {
+                    $apiBlockLog('block', [rh_block_entry($pdo, 'room', null, [$individual_room_id], [$block_date])], $block_type, $reason);
                     $blocked_dates = getIndividualRoomBlockedDates($individual_room_id, $block_date, $block_date);
                     $created_date = !empty($blocked_dates) ? $blocked_dates[0] : null;
                     
@@ -282,8 +292,9 @@ switch ($method) {
                 // Room type blocking
                 $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : null;
                 $result = blockRoomDate($room_id, $block_date, $block_type, $reason, $created_by);
-                
+
                 if ($result) {
+                    $apiBlockLog('block', [rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], [$block_date])], $block_type, $reason);
                     $blocked_dates = getBlockedDates($room_id, $block_date, $block_date);
                     $created_date = !empty($blocked_dates) ? $blocked_dates[0] : null;
                     
@@ -338,8 +349,9 @@ switch ($method) {
                 }
                 
                 $blocked_count = blockIndividualRoomDates($individual_room_id, $valid_dates, $block_type, $reason, $created_by);
-                
+
                 if ($blocked_count > 0) {
+                    $apiBlockLog('block', [rh_block_entry($pdo, 'room', null, [$individual_room_id], array_filter(array_map(static fn($d) => rh_normalize_block_date((string)$d), $valid_dates)))], $block_type, $reason);
                     sendResponse([
                         'success' => true,
                         'message' => "Successfully blocked {$blocked_count} date(s) for individual room",
@@ -357,8 +369,9 @@ switch ($method) {
                 // Room type blocking
                 $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : null;
                 $blocked_count = blockRoomDates($room_id, $valid_dates, $block_type, $reason, $created_by);
-                
+
                 if ($blocked_count > 0) {
+                    $apiBlockLog('block', [rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], array_filter(array_map(static fn($d) => rh_normalize_block_date((string)$d), $valid_dates)))], $block_type, $reason);
                     sendResponse([
                         'success' => true,
                         'message' => "Successfully blocked {$blocked_count} date(s)",
@@ -407,46 +420,47 @@ switch ($method) {
         $reason = $input['reason'] ?? $current_date['reason'];
         $created_by = $admin_user['id'];
         
-        // First delete the old one
-        if ($block_scope === 'individual' && !empty($current_date['individual_room_id'])) {
-            unblockIndividualRoomDate($current_date['individual_room_id'], $current_date['block_date']);
-            
-            // Then create the new one
-            $individual_room_id = $current_date['individual_room_id'];
-            $result = blockIndividualRoomDate($individual_room_id, $block_date, $block_type, $reason, $created_by);
-            
-            if ($result) {
-                $updated_dates = getIndividualRoomBlockedDates($individual_room_id, $block_date, $block_date);
-                $updated_date = !empty($updated_dates) ? $updated_dates[0] : null;
-                
-                sendResponse([
-                    'success' => true,
-                    'message' => 'Blocked date updated successfully',
-                    'data' => $updated_date
-                ]);
+        // Delete the old block and create the new one in ONE transaction: if the new one cannot be saved, the old
+        // block stays (before, a failed create left the room open for sale with the old block already gone).
+        $oldDate = substr((string)$current_date['block_date'], 0, 10);
+        $pdo->beginTransaction();
+        try {
+            if ($block_scope === 'individual' && !empty($current_date['individual_room_id'])) {
+                $individual_room_id = (int)$current_date['individual_room_id'];
+                $ok = unblockIndividualRoomDate($individual_room_id, $oldDate)
+                    && blockIndividualRoomDate($individual_room_id, $block_date, $block_type, $reason, $created_by);
+                $oldEntry = rh_block_entry($pdo, 'room', null, [$individual_room_id], [$oldDate]);
+                $newEntry = rh_block_entry($pdo, 'room', null, [$individual_room_id], [(string)rh_normalize_block_date((string)$block_date)]);
             } else {
-                sendError('Failed to update blocked date', 500);
+                $oldTypeId = ($current_date['room_id'] ?? null) === null || $current_date['room_id'] === '' ? null : (int)$current_date['room_id'];
+                $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : $oldTypeId;
+                $ok = unblockRoomDate($oldTypeId, $oldDate) && blockRoomDate($room_id, $block_date, $block_type, $reason, $created_by);
+                $oldEntry = rh_block_entry($pdo, $oldTypeId === null ? 'all' : 'type', $oldTypeId, [], [$oldDate]);
+                $newEntry = rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], [(string)rh_normalize_block_date((string)$block_date)]);
             }
-        } else {
-            unblockRoomDate($current_date['room_id'], $current_date['block_date']);
-            
-            // Then create the new one
-            $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : $current_date['room_id'];
-            $result = blockRoomDate($room_id, $block_date, $block_type, $reason, $created_by);
-            
-            if ($result) {
-                $updated_dates = getBlockedDates($room_id, $block_date, $block_date);
-                $updated_date = !empty($updated_dates) ? $updated_dates[0] : null;
-                
-                sendResponse([
-                    'success' => true,
-                    'message' => 'Blocked date updated successfully',
-                    'data' => $updated_date
-                ]);
-            } else {
-                sendError('Failed to update blocked date', 500);
+            if (!$ok) {
+                throw new RuntimeException('block update failed');
             }
+            $apiBlockLog('unblock', [$oldEntry]);
+            $apiBlockLog('block', [$newEntry], $block_type, $reason);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('api blocked-dates PUT: ' . $e->getMessage());
+            sendError('Failed to update blocked date; the old block was kept', 500);
         }
+        if ($block_scope === 'individual' && !empty($current_date['individual_room_id'])) {
+            $updated_dates = getIndividualRoomBlockedDates((int)$current_date['individual_room_id'], $block_date, $block_date);
+        } else {
+            $updated_dates = getBlockedDates($room_id, $block_date, $block_date);
+        }
+        sendResponse([
+            'success' => true,
+            'message' => 'Blocked date updated successfully',
+            'data' => !empty($updated_dates) ? $updated_dates[0] : null
+        ]);
         break;
         
     case 'DELETE':
@@ -472,6 +486,10 @@ switch ($method) {
             }
             
             if ($result) {
+                $delTypeId = ($target_date['room_id'] ?? null) === null || $target_date['room_id'] === '' ? null : (int)$target_date['room_id'];
+                $apiBlockLog('unblock', [$block_scope === 'individual' && !empty($target_date['individual_room_id'])
+                    ? rh_block_entry($pdo, 'room', null, [(int)$target_date['individual_room_id']], [$target_date['block_date']])
+                    : rh_block_entry($pdo, $delTypeId === null ? 'all' : 'type', $delTypeId, [], [$target_date['block_date']])]);
                 sendResponse([
                     'success' => true,
                     'message' => 'Blocked date removed successfully'
@@ -485,15 +503,34 @@ switch ($method) {
         elseif (isset($input['dates']) && is_array($input['dates'])) {
             $block_scope = $input['block_scope'] ?? 'type';
             
+            // Only nights that really had a block are recorded as unblocked.
+            $delDates = array_values(array_unique(array_filter(array_map(static fn($d) => rh_normalize_block_date((string)$d), $input['dates']))));
             if ($block_scope === 'individual') {
                 $individual_room_id = isset($input['individual_room_id']) ? (int)$input['individual_room_id'] : null;
+                // This room's OWN blocks only (getIndividualRoomBlockedDates also returns room-type / All rooms rows).
+                $hadBlock = [];
+                if ($delDates && $individual_room_id) {
+                    $hbPh = implode(',', array_fill(0, count($delDates), '?'));
+                    $hbSt = $pdo->prepare("SELECT block_date FROM individual_room_blocked_dates WHERE individual_room_id = ? AND block_date IN ($hbPh)");
+                    $hbSt->execute(array_merge([(int)$individual_room_id], $delDates));
+                    $hadBlock = array_map(static fn($d) => substr((string)$d, 0, 10), $hbSt->fetchAll(PDO::FETCH_COLUMN));
+                }
                 $unblocked_count = unblockIndividualRoomDates($individual_room_id, $input['dates']);
+                $delEntry = rh_block_entry($pdo, 'room', null, [(int)$individual_room_id], array_values(array_intersect($delDates, $hadBlock)));
             } else {
                 $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : null;
+                $hadBlock = [];
+                foreach (getBlockedDates($room_id) as $bdRow) {
+                    if (($bdRow['block_scope'] ?? 'type') === 'type' && (($bdRow['room_id'] === null && $room_id === null) || (int)$bdRow['room_id'] === (int)$room_id && $room_id !== null)) {
+                        $hadBlock[] = substr((string)$bdRow['block_date'], 0, 10);
+                    }
+                }
                 $unblocked_count = unblockRoomDates($room_id, $input['dates']);
+                $delEntry = rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], array_values(array_intersect($delDates, $hadBlock)));
             }
-            
+
             if ($unblocked_count > 0) {
+                $apiBlockLog('unblock', [$delEntry]);
                 sendResponse([
                     'success' => true,
                     'message' => "Successfully unblocked {$unblocked_count} date(s)",

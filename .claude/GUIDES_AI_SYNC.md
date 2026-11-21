@@ -80,6 +80,13 @@ when prompted."
   Block/Unblock confirm and result message now name each room and its nights ("Blocked 6 night(s): Villa 2 on 3 to 5 Jan
   2028; ..."), never "rows"; the List-view forms say e.g. "Room 101 blocked on 12 Dec 2026". Guides: update any screenshot
   text that shows the old "N nights on N rows" wording. Assistant: no change.
+- **Follow-up (2026-11-22, owner PATCH "proper logic and logs ... it works directly with bookings"):** every block and
+  unblock (calendar, List view, bulk unblock, integration API) is recorded in System Logs > Staff activity as "Blocked
+  rooms" / "Unblocked rooms" (who, rooms, nights, type, reason, bookings already on those nights), and each booking that
+  sleeps on such a night gets a History entry "Room blocked on a night of this stay" / "Block removed from a night of this
+  stay". Before blocking, the confirm lists bookings that will NOT be moved. Guides: one line each in Blocked Dates and
+  Booking History. Assistant: new admin_activity_log actions room_block / room_unblock; new booking_timeline_logs note
+  actions (no table/setting change).
 
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 
