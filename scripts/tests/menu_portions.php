@@ -585,8 +585,8 @@ if ($nonAdmin !== '') {
     check($clean($r) && ($r['json']['success'] ?? true) === false && $near($qty($r, 0), 1) && $near($qty($r, 3), 1) && $near($qty($r, 7), 0), 'Bulk: a non-administrator is refused and nothing is deleted or logged', json_encode($r['json'] ?? $r['raw'] ?? $r));
     $r = $runAs($cfgAs(['action' => 'menu_delete_all', 'scope' => 'food', 'confirm_text' => 'DELETE']));
     check($clean($r) && ($r['json']['success'] ?? true) === false && $near($qty($r, 0), 1) && $near($qty($r, 8), 0), 'Bulk: a non-administrator cannot use Delete all', json_encode($r['json'] ?? $r['raw'] ?? $r));
-    $r = $runAs($cfgAs([], ['id="mmBulk"', 'class="mm-sel"'], 'GET'));
-    check($clean($r) && isset($r['found']) && !in_array(true, $r['found'], true) && ($r['bytes'] ?? 0) > 5000, 'Bulk: a non-administrator sees no tick boxes and no Delete selected / Delete all bar', json_encode($r['found'] ?? $r['raw'] ?? $r));
+    $r = $runAs($cfgAs([], ['id="mmBulkDel"', 'id="mmDelAll"'], 'GET'));
+    check($clean($r) && isset($r['found']) && !in_array(true, $r['found'], true) && ($r['bytes'] ?? 0) > 5000, 'Bulk: a non-administrator sees no Delete selected / Delete all buttons (Move to category is open to them)', json_encode($r['found'] ?? $r['raw'] ?? $r));
 } else {
     echo "SKIP non-administrator checks: no active non-admin account\n";
 }

@@ -51,6 +51,16 @@ when prompted."
   Menu Management (one line) and set the bottle size / bottle-shot measure in Stock.
 - **Manager Guides:** POS & Kitchen Screens - one line on the drink tile wording.
 
+- 2026-11-21 Menu Management: Room Service tab + drink categories (owner FEATURE; commit "Menu Management: Room Service tab...", Liwonde then Rosalyn's port).
+- **Guides:** Menu Management has a third tab "Room service": every food and drink item by category with an "On room
+  service" switch (saves at once; filter On / Not on / All). The Drinks tab has category buttons (All, Beer, Wine...)
+  and "Move selected to category" (tick drinks, pick or type a category, Move); the till copy and stock link move too.
+  Anyone with Menu Management can move drinks; food moves and Delete selected/all stay with Clear Stock Data holders.
+- **Assistant:** no table/column/setting change. New POST actions in admin/menu-management.php: toggle_room_service
+  (food_menu/drink_menu.show_room_service + menu_items room service flag), menu_move_category (category change via
+  rh_menu_pos_sync_item). Page URL admin/menu-management.php?tab=room-service.
+- **Manager Guides:** Menu/Restaurant guide - one line on the Room service tab and moving drinks into categories.
+
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 
 ### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md

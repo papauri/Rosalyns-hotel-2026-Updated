@@ -1423,3 +1423,186 @@ tr.drag-over > td {
         color: var(--mm-muted);
     }
 }
+
+/* ============================================================
+   Drinks category buttons, Move selected to category, Room service tab (owner 2026-11-21)
+   ============================================================ */
+.mm-tag[hidden],
+.mm-bulk[hidden],
+.mm-move [hidden],
+.category-section.mm-cathide {
+    display: none !important;
+}
+
+.mm-catbar,
+.mm-rs-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 14px;
+}
+
+.mm-catbtn.is-active,
+.mm-rsf.is-active {
+    background: var(--mm-accent);
+    border-color: var(--mm-accent);
+    color: #fff;
+}
+
+.mm-move {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.mm-move-lbl {
+    font-size: 13px;
+    color: var(--mm-text);
+}
+
+.mm-move select,
+.mm-move input[type="text"] {
+    padding: 5px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    border: 1px solid var(--mm-border-strong);
+    border-radius: var(--mm-radius);
+    background: var(--mm-bg);
+    color: var(--mm-text);
+    max-width: 220px;
+}
+
+.mm-move .mm-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mm-rs-head {
+    margin: 0 0 6px;
+}
+
+.mm-rs-group {
+    margin: 0 0 22px;
+}
+
+.mm-rs-group-title {
+    margin: 0 0 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--mm-text);
+}
+
+.mm-rs-section .category-header {
+    font-size: 13px;
+    padding: 9px 14px;
+}
+
+.mm-rs-table tbody td {
+    vertical-align: middle;
+}
+
+/* On / off switch (role="switch"): solid track, one accent when on */
+.mm-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 12px;
+    color: var(--mm-muted);
+    cursor: pointer;
+}
+
+.mm-switch-track {
+    position: relative;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: var(--mm-border-strong);
+    transition: background .15s;
+}
+
+.mm-switch-track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform .15s;
+}
+
+.mm-switch[aria-checked="true"] {
+    color: var(--mm-text);
+}
+
+.mm-switch[aria-checked="true"] .mm-switch-track {
+    background: var(--mm-accent);
+}
+
+.mm-switch[aria-checked="true"] .mm-switch-track::after {
+    transform: translateX(16px);
+}
+
+.mm-switch:focus-visible {
+    outline: 2px solid var(--mm-accent);
+    outline-offset: 2px;
+    border-radius: var(--mm-radius);
+}
+
+.mm-switch:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mm-switch-track,
+    .mm-switch-track::after {
+        transition: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .mm-restaurant .mm-move {
+        flex: 1 1 100%;
+    }
+
+    .mm-restaurant .mm-move select,
+    .mm-restaurant .mm-move input[type="text"] {
+        flex: 1 1 160px;
+        max-width: none;
+        min-height: 36px;
+    }
+
+    .mm-restaurant .mm-move .mm-btn {
+        min-height: 36px;
+    }
+
+    .mm-restaurant .mm-rs-table tbody td.mm-rs-cat {
+        display: none;
+    }
+
+    .mm-restaurant .mm-rs-table tbody td.mm-rs-avail {
+        grid-column: 1;
+        align-self: center;
+    }
+
+    .mm-restaurant .mm-rs-table tbody td.mm-rs-sw {
+        grid-column: 2;
+        justify-self: end;
+    }
+
+    .mm-restaurant .mm-rs-table tbody td.actions-cell {
+        grid-column: 1 / -1;
+    }
+
+    .mm-restaurant .mm-switch {
+        min-height: 36px;
+    }
+}

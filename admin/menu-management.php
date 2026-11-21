@@ -16,7 +16,7 @@ $user = [
 $message = '';
 $error = '';
 $current_page = basename($_SERVER['PHP_SELF']);
-$current_tab = (($_GET['tab'] ?? 'food') === 'drinks') ? 'drinks' : 'food';
+$current_tab = in_array((string)($_GET['tab'] ?? 'food'), ['drinks', 'room-service'], true) ? (string)$_GET['tab'] : 'food';
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 // Non-restaurant presets (gym, retail, supermarket…) manage the POS product
@@ -90,6 +90,89 @@ function rh_mm_delete_one(PDO $pdo, string $table, int $itemId): array
         'mode' => $res['mode'], 'name' => (string)$webRow['item_name'], 'open_lines' => (int)$res['open_lines'],
         'deals' => (int)$res['deals'], 'stock_removed' => $res['mode'] === 'deleted' && $pos && $twins === 0,
     ];
+}
+
+/**
+ * Room service on/off for one website menu row and its till copy, in one transaction.
+ * $value null = flip. A NULL column counts as on (as the rows show it). Returns ['name', 'show_room_service', 'till'] or null when gone.
+ */
+function rh_mm_set_room_service(PDO $pdo, string $table, int $itemId, ?int $value = null): ?array
+{
+    $rowStmt = $pdo->prepare("SELECT item_name, category, show_room_service FROM `{$table}` WHERE id = ?");
+    $rowStmt->execute([$itemId]);
+    $webRow = $rowStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$webRow) {
+        return null;
+    }
+    $isOn = $webRow['show_room_service'] === null || (int)$webRow['show_room_service'] === 1;
+    $new = $value === null ? ($isOn ? 0 : 1) : ($value ? 1 : 0);
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("UPDATE `{$table}` SET show_room_service = ? WHERE id = ?")->execute([$new, $itemId]);
+        $pos = rh_menu_pos_find($pdo, (string)$webRow['item_name'], (string)$webRow['category']);
+        if ($pos) {
+            $pdo->prepare("UPDATE menu_items SET show_room_service = ? WHERE id = ?")->execute([$new, $pos['id']]);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+    return ['name' => (string)$webRow['item_name'], 'show_room_service' => $new, 'till' => $pos !== null];
+}
+
+/**
+ * Move one website menu row to another category, the way the Edit form's save does it: duplicate name in the target
+ * category = skipped, display_order = end of the target category, then the till copy (and its stock link, keyed by the
+ * category slug) follow through rh_menu_pos_sync_item with the old name + category. Own transaction.
+ * Returns ['mode' => moved|same|duplicate|blocked|gone, 'name', 'reason'].
+ */
+function rh_mm_move_category(PDO $pdo, string $menuType, int $itemId, string $category): array
+{
+    $table = $menuType === 'food' ? 'food_menu' : 'drink_menu';
+    $curStmt = $pdo->prepare("SELECT * FROM `{$table}` WHERE id = ?");
+    $curStmt->execute([$itemId]);
+    $cur = $curStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$cur) {
+        return ['mode' => 'gone', 'name' => '', 'reason' => ''];
+    }
+    $name = (string)$cur['item_name'];
+    if ((string)$cur['category'] === $category) {
+        return ['mode' => 'same', 'name' => $name, 'reason' => ''];
+    }
+    if (rh_find_duplicate($pdo, $table, 'item_name', $name, ['category' => $category], $itemId)) {
+        return ['mode' => 'duplicate', 'name' => $name, 'reason' => 'an item with this name is already in "' . $category . '"'];
+    }
+    $pdo->beginTransaction();
+    try {
+        $ord = $pdo->prepare("SELECT COALESCE(MAX(display_order), 0) + 1 FROM `{$table}` WHERE category = ?");
+        $ord->execute([$category]);
+        $displayOrder = (int)$ord->fetchColumn();
+        $pdo->prepare("UPDATE `{$table}` SET category = ?, display_order = ? WHERE id = ?")->execute([$category, $displayOrder, $itemId]);
+        rh_menu_pos_sync_item($pdo, $menuType, [
+            'item_name' => $name, 'description' => (string)($cur['description'] ?? ''), 'price' => $cur['price'],
+            'category' => $category, 'station' => $cur['station'] ?? '',
+            'is_available' => null, // a move leaves the till's own availability as it is
+            'display_order' => $displayOrder,
+            'show_pos' => !isset($cur['show_pos']) || (int)$cur['show_pos'] === 1 ? 1 : 0,
+            'show_room_service' => !isset($cur['show_room_service']) || (int)$cur['show_room_service'] === 1 ? 1 : 0,
+            'tags' => (string)($cur['tags'] ?? ''),
+        ], ['item_name' => $name, 'category' => (string)$cur['category']], null);
+        $pdo->commit();
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['mode' => 'blocked', 'name' => $name, 'reason' => $e->getMessage()];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+    return ['mode' => 'moved', 'name' => $name, 'reason' => ''];
 }
 
 // Handle menu item actions
@@ -415,6 +498,110 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
             $message = $newAvail ? 'Item is available again.' : 'Item marked unavailable: hidden from the till, room service and the guest menu.';
             $jsonExtra = ['is_available' => $newAvail];
+        } elseif ($action === 'toggle_room_service') {
+            // Room service tab switch: the website row and the till copy together. 'value' 0/1 sets it, absent flips it.
+            $itemId = (int)($_POST['id'] ?? 0);
+            $rawVal = (string)($_POST['value'] ?? '');
+            $res = rh_mm_set_room_service($pdo, $table, $itemId, $rawVal === '' ? null : (int)($rawVal === '1'));
+            if (!$res) {
+                throw new RuntimeException('This item no longer exists. Reload the page.');
+            }
+            $message = $res['show_room_service']
+                ? '"' . $res['name'] . '" is on room service.'
+                : '"' . $res['name'] . '" is off room service.';
+            $jsonExtra = ['show_room_service' => $res['show_room_service']];
+        } elseif ($action === 'menu_move_category') {
+            // Move selected to category: anyone who may edit items here (same page permission as the Edit form).
+            // Drinks for everyone with page access; food moves stay with Clear Stock Data holders (owner asked for drinks).
+            if ($menu_type === 'food' && !$canBulkDelete) {
+                if (function_exists('rh_sa_hook_mark_refused')) {
+                    rh_sa_hook_mark_refused();
+                }
+                http_response_code(403);
+                throw new RuntimeException('Only an administrator with the "Clear Stock Data" permission can move food items in bulk. Use Edit on each item instead.');
+            }
+            $ids = $_POST['ids'] ?? [];
+            $ids = is_array($ids) ? array_values(array_unique(array_filter(array_map('intval', $ids), static function ($v) { return $v > 0; }))) : [];
+            if (!$ids) {
+                throw new RuntimeException('Tick at least one item first.');
+            }
+            if (count($ids) > 5000) {
+                throw new RuntimeException('Too many items in one go. Move them in smaller groups.');
+            }
+            $category = rh_clean_text($_POST['category'] ?? '');
+            if ($category === '__new__') {
+                $category = rh_clean_text($_POST['new_category'] ?? '');
+            }
+            if ($category === '' || mb_strlen($category) > 100) {
+                throw new RuntimeException('Pick the category to move to (or type a new one, 100 characters maximum).');
+            }
+            // Other capitals than a category already on this menu join that one (no "Beer" and "beer").
+            $sameCat = $pdo->prepare("SELECT category FROM `{$table}` WHERE LOWER(TRIM(category)) = LOWER(?) ORDER BY id ASC LIMIT 1");
+            $sameCat->execute([$category]);
+            $existingCat = $sameCat->fetchColumn();
+            if ($existingCat !== false && trim((string)$existingCat) !== '') {
+                $category = (string)$existingCat;
+            }
+
+            // Same lock as add / edit / bulk delete.
+            $menuLockName = substr('rh_form_menu_item_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+            if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($menuLockName) . ', 10)')->fetchColumn() !== 1) {
+                $menuLockName = '';
+                throw new RuntimeException('Someone else is saving a menu item right now. Please try again in a moment.');
+            }
+            if (function_exists('set_time_limit')) {
+                @set_time_limit(300);
+            }
+            $done = ['moved' => [], 'duplicate' => [], 'blocked' => [], 'same' => []];
+            $failed = 0;
+            $blockReason = '';
+            foreach ($ids as $id) {
+                try {
+                    $r = rh_mm_move_category($pdo, $menu_type, (int)$id, $category);
+                } catch (Throwable $e) {
+                    error_log('menu-management move category #' . (int)$id . ': ' . $e->getMessage());
+                    $failed++;
+                    continue;
+                }
+                if ($r['mode'] === 'gone') {
+                    continue;
+                }
+                $done[$r['mode']][] = $r['name'];
+                if ($r['mode'] === 'blocked' && $blockReason === '') {
+                    $blockReason = $r['reason'];
+                }
+            }
+            $nMov = count($done['moved']);
+            $nDup = count($done['duplicate']);
+            $nBlk = count($done['blocked']);
+            $nSame = count($done['same']);
+            $plural = static function (int $n, string $one, string $many): string { return $n . ' ' . ($n === 1 ? $one : $many); };
+            $parts = [$plural($nMov, 'item', 'items') . ' moved to "' . $category . '".'];
+            if ($nDup > 0) {
+                $parts[] = 'Skipped (an item with the same name is already in "' . $category . '"): ' . implode(', ', $done['duplicate']) . '.';
+            }
+            if ($nBlk > 0) {
+                $parts[] = 'Left where ' . ($nBlk === 1 ? 'it is' : 'they are') . ': ' . implode(', ', $done['blocked']) . ' (' . rtrim($blockReason, '.') . ').';
+            }
+            if ($nSame > 0) {
+                $parts[] = $plural($nSame, 'item was', 'items were') . ' already in "' . $category . '".';
+            }
+            if ($failed > 0) {
+                $parts[] = $plural($failed, 'item', 'items') . ' could not be moved (nothing changed for ' . ($failed === 1 ? 'it' : 'them') . '). Please try again.';
+            }
+            $message = implode(' ', $parts);
+            if ($nMov + $nDup + $nBlk + $failed > 0) {
+                $logDetails = ($menu_type === 'food' ? 'Food' : 'Drink') . ' menu, to "' . $category . '": ' . $nMov . ' moved, ' . $nDup . ' skipped (same name there), '
+                    . $nBlk . ' left (open orders)' . ($failed > 0 ? ', ' . $failed . ' failed' : '') . '.'
+                    . ($nMov > 0 ? ' Moved: ' . implode(', ', $done['moved']) . '.' : '')
+                    . ($nDup > 0 ? ' Skipped: ' . implode(', ', $done['duplicate']) . '.' : '')
+                    . ($nBlk > 0 ? ' Left: ' . implode(', ', $done['blocked']) . '.' : '');
+                if (mb_strlen($logDetails) > 3990) {
+                    $logDetails = mb_substr($logDetails, 0, 3980) . ' (more)';
+                }
+                logActivity((int)$user['id'], 'menu_items_category_moved', $logDetails);
+            }
+            $jsonExtra = ['moved' => $nMov, 'skipped' => $nDup, 'skipped_names' => $done['duplicate'], 'left' => $nBlk, 'left_names' => $done['blocked'], 'failed' => $failed, 'category' => $category];
         } else {
             throw new RuntimeException('Unknown action.');
         }
@@ -510,12 +697,48 @@ foreach (array_merge($food_items, $drink_items) as $it) {
 }
 ksort($filterCats, SORT_NATURAL | SORT_FLAG_CASE);
 
+/** What the Edit form needs for one row (data-item JSON), shared by the Food / Drinks rows and the Room service rows. */
+$mmItemData = static function (string $tab, array $item) use ($posMap): array {
+    $pos = $posMap[rh_menu_pos_key((string)$item['item_name'], (string)$item['category'])] ?? null;
+    $station = $item['station'] ?? ($tab === 'food' ? 'kitchen' : 'bar');
+    return [
+        'id' => (int)$item['id'], 'type' => $tab, 'name' => $item['item_name'], 'category' => $item['category'],
+        'description' => (string)($item['description'] ?? ''), 'price' => (float)$item['price'], 'tags' => (string)($item['tags'] ?? ''),
+        'station' => $station,
+        'show_pos' => (!isset($item['show_pos']) || (int)$item['show_pos'] === 1) ? 1 : 0,
+        'show_rs' => (!isset($item['show_room_service']) || (int)$item['show_room_service'] === 1) ? 1 : 0,
+        'avail' => (int)$item['is_available'] === 1 ? 1 : 0,
+        'barcode' => $pos && $pos['barcode'] !== null ? (string)$pos['barcode'] : '', 'pos_id' => $pos ? $pos['id'] : 0, 'slug' => $pos ? $pos['slug'] : '',
+    ];
+};
+$mmJsonAttr = static function (array $data): string {
+    return htmlspecialchars(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8');
+};
+
 /** One menu tab: a card per category with a readable table of its items. */
-$mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $recipeBy, $currencySymbol, $stationLabels, $fb_menu_posting_on, $fb_share_attrs, $canBulkDelete): void {
+$mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $recipeBy, $currencySymbol, $stationLabels, $fb_menu_posting_on, $fb_share_attrs, $canBulkDelete, $mmItemData, $mmJsonAttr): void {
     $menuType = $tab === 'food' ? 'food' : 'drink';
+    // Tick boxes: Delete selected needs Clear Stock Data; on Drinks they also serve "Move selected to category", which
+    // anyone who can edit items here may use (owner 2026-11-21).
+    $canTick = $canBulkDelete || $tab === 'drinks';
     if (!$grouped) {
         echo '<div class="empty-state mm-empty-all"><p>No ' . ($tab === 'food' ? 'food' : 'drink') . ' items yet. Use "Add item" to create the first one.</p></div>';
         return;
+    }
+    if ($tab === 'drinks') {
+        // Category buttons: show one category's section at a time (a view, not a filter: ticked rows outside it are unticked).
+        $all = 0;
+        foreach ($grouped as $items) {
+            $all += count($items);
+        }
+        ?>
+        <div class="mm-catbar" role="group" aria-label="Show one drink category">
+            <button type="button" class="mm-btn mm-btn-sm mm-catbtn is-active" data-catbtn="" aria-pressed="true" onclick="mmShowDrinkCat('')">All (<?= (int)$all ?>)</button>
+            <?php foreach ($grouped as $category => $items): ?>
+                <button type="button" class="mm-btn mm-btn-sm mm-catbtn" data-catbtn="<?= htmlspecialchars((string)$category, ENT_QUOTES) ?>" aria-pressed="false" onclick="mmShowDrinkCat(this.dataset.catbtn)"><?= htmlspecialchars((string)$category) ?> (<?= count($items) ?>)</button>
+            <?php endforeach; ?>
+        </div>
+        <?php
     }
     foreach ($grouped as $category => $items) {
         $catId = $tab . '-cat-' . preg_replace('/[^a-z0-9]+/', '-', strtolower((string)$category));
@@ -529,7 +752,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 <table class="menu-table">
                     <thead>
                         <tr>
-                            <?php if ($canBulkDelete): ?>
+                            <?php if ($canTick): ?>
                                 <th class="mm-sel-col"><input type="checkbox" class="mm-sel-cat" aria-label="Select every item shown in <?= htmlspecialchars((string)$category, ENT_QUOTES) ?>"></th>
                             <?php endif; ?>
                             <th class="drag-col" title="Drag to reorder"></th>
@@ -555,18 +778,13 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                             $avail = (int)$item['is_available'] === 1;
                             $station = $item['station'] ?? ($menuType === 'food' ? 'kitchen' : 'bar');
                             $barcode = $pos && $pos['barcode'] !== null ? (string)$pos['barcode'] : '';
-                            $data = [
-                                'id' => (int)$item['id'], 'type' => $tab, 'name' => $item['item_name'], 'category' => $item['category'],
-                                'description' => (string)($item['description'] ?? ''), 'price' => $price, 'tags' => (string)($item['tags'] ?? ''),
-                                'station' => $station, 'show_pos' => $showPos ? 1 : 0, 'show_rs' => $showRs ? 1 : 0, 'avail' => $avail ? 1 : 0,
-                                'barcode' => $barcode, 'pos_id' => $pos ? $pos['id'] : 0, 'slug' => $pos ? $pos['slug'] : '',
-                            ];
+                            $data = $mmItemData($tab, $item);
                             $search = mb_strtolower($item['item_name'] . ' ' . $item['category'] . ' ' . $barcode);
                             ?>
                             <tr id="<?= $menuType ?>-row-<?= (int)$item['id'] ?>" class="mm-row" data-tab="<?= $tab ?>" data-cat="<?= htmlspecialchars((string)$item['category'], ENT_QUOTES) ?>"
                                 data-search="<?= htmlspecialchars($search, ENT_QUOTES) ?>" data-rs="<?= $showRs ? 1 : 0 ?>" data-avail="<?= $avail ? 1 : 0 ?>" data-stock="<?= $lines ? 1 : 0 ?>"
-                                data-item="<?= htmlspecialchars(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8') ?>">
-                                <?php if ($canBulkDelete): ?>
+                                data-item="<?= $mmJsonAttr($data) ?>">
+                                <?php if ($canTick): ?>
                                     <td class="mm-sel-col">
                                         <label class="mm-sel-lbl"><input type="checkbox" class="mm-sel" value="<?= (int)$item['id'] ?>" aria-label="Select <?= htmlspecialchars((string)$item['item_name'], ENT_QUOTES) ?>"><span class="mm-sel-txt">Select</span></label>
                                     </td>
@@ -590,8 +808,8 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                                 <td data-label="Shown in">
                                     <span class="mm-tag"><?= htmlspecialchars($stationLabels[$station] ?? 'Kitchen') ?></span>
                                     <?php if ($showPos): ?><span class="mm-tag">Till</span><?php endif; ?>
-                                    <?php if ($showRs): ?><span class="mm-tag">Room service</span><?php endif; ?>
-                                    <?php if (!$showPos && !$showRs): ?><span class="mm-tag mm-tag-off">Website only</span><?php endif; ?>
+                                    <span class="mm-tag mm-tag-rs"<?= $showRs ? '' : ' hidden' ?>>Room service</span>
+                                    <span class="mm-tag mm-tag-off mm-tag-web" data-pos="<?= $showPos ? 1 : 0 ?>"<?= (!$showPos && !$showRs) ? '' : ' hidden' ?>>Website only</span>
                                     <?php if ($avail && $pos && (int)$pos['is_available'] === 0): ?><span class="mm-tag mm-tag-off" title="Switched off from the till (86). Marking it unavailable and available again here puts it back.">Off at the till</span><?php endif; ?>
                                 </td>
                                 <td data-label="Uses from stock" class="mm-c-stock">
@@ -633,6 +851,91 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         </div>
         <?php
     }
+};
+
+// Room service tab: how many items are on it now (food + drinks). A NULL flag counts as on, as the rows show it.
+$rsCount = 0;
+foreach (array_merge($food_items, $drink_items) as $it) {
+    if (!isset($it['show_room_service']) || (int)$it['show_room_service'] === 1) {
+        $rsCount++;
+    }
+}
+
+/** Room service tab: every food and drink item, grouped by category, with an on/off switch that saves at once. */
+$mmRenderRs = static function (array $groups) use ($currencySymbol, $recipeBy, $mmItemData, $mmJsonAttr): void {
+    ?>
+    <div class="mm-rs-head">
+        <div class="mm-rs-filter" role="group" aria-label="Which items to show">
+            <button type="button" class="mm-btn mm-btn-sm mm-rsf is-active" data-rsf="on" aria-pressed="true" onclick="mmRsFilter('on')">On room service</button>
+            <button type="button" class="mm-btn mm-btn-sm mm-rsf" data-rsf="off" aria-pressed="false" onclick="mmRsFilter('off')">Not on room service</button>
+            <button type="button" class="mm-btn mm-btn-sm mm-rsf" data-rsf="all" aria-pressed="false" onclick="mmRsFilter('all')">All</button>
+        </div>
+        <p class="mm-hint">Switch an item on or off for the room service menu. It saves straight away, on the website menu and the till.</p>
+    </div>
+    <div class="mm-nomatch" id="mmRsEmpty" hidden>
+        <p id="mmRsEmptyText">No items to show.</p>
+    </div>
+    <?php foreach (['food' => 'Food', 'drinks' => 'Drinks'] as $tab => $label):
+        $grouped = $groups[$tab] ?? [];
+        $menuType = $tab === 'food' ? 'food' : 'drink';
+        ?>
+        <div class="mm-rs-group" data-rs-group="<?= $tab ?>">
+            <h3 class="mm-rs-group-title"><?= $label ?></h3>
+            <?php if (!$grouped): ?>
+                <p class="mm-sub mm-rs-none">No <?= $tab === 'food' ? 'food' : 'drink' ?> items yet.</p>
+            <?php endif; ?>
+            <?php foreach ($grouped as $category => $items): ?>
+                <div class="category-section mm-rs-section" data-cat="<?= htmlspecialchars((string)$category, ENT_QUOTES) ?>">
+                    <h4 class="category-header">
+                        <span><?= htmlspecialchars((string)$category) ?> <span class="cat-count">(<?= count($items) ?>)</span></span>
+                    </h4>
+                    <div class="table-responsive">
+                        <table class="menu-table mm-rs-table">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Category</th>
+                                    <th>Price (<?= htmlspecialchars($currencySymbol) ?>)</th>
+                                    <th>Available <i class="help" data-tip="Whether the item can be ordered at all (till, room service and the guest menu). Change it on the Food or Drinks tab.">?</i></th>
+                                    <th>On room service <i class="help" data-tip="Shows the item on the room service menu (website and till). Saves as soon as you switch it. Items that are unavailable stay hidden until they are available again.">?</i></th>
+                                    <th><span class="mm-sr">Actions</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($items as $item):
+                                    $data = $mmItemData($tab, $item);
+                                    $on = $data['show_rs'] === 1;
+                                    $avail = $data['avail'] === 1;
+                                    $hasStock = $data['pos_id'] && !empty($recipeBy[$data['pos_id'] . '|' . $data['slug']]);
+                                    $search = mb_strtolower($item['item_name'] . ' ' . $item['category'] . ' ' . $data['barcode']);
+                                    ?>
+                                    <tr id="rs-<?= $menuType ?>-row-<?= (int)$item['id'] ?>" class="mm-rs-row" data-type="<?= $tab ?>" data-id="<?= (int)$item['id'] ?>"
+                                        data-cat="<?= htmlspecialchars((string)$item['category'], ENT_QUOTES) ?>" data-search="<?= htmlspecialchars($search, ENT_QUOTES) ?>"
+                                        data-rs="<?= $on ? 1 : 0 ?>" data-avail="<?= $avail ? 1 : 0 ?>" data-stock="<?= $hasStock ? 1 : 0 ?>" data-item="<?= $mmJsonAttr($data) ?>">
+                                        <td class="mm-c-name" data-label="Item"><strong class="mm-item-name"><?= htmlspecialchars((string)$item['item_name']) ?></strong></td>
+                                        <td class="mm-rs-cat" data-label="Category"><?= htmlspecialchars((string)$item['category']) ?></td>
+                                        <td class="mm-c-price" data-label="Price"><?= (float)$item['price'] > 0 ? number_format((float)$item['price'], 2) : '<span class="mm-tag">Free</span>' ?></td>
+                                        <td class="mm-rs-avail" data-label="Available"><span class="mm-tag<?= $avail ? '' : ' mm-tag-off' ?>"><?= $avail ? 'Available' : 'Unavailable' ?></span></td>
+                                        <td class="mm-rs-sw" data-label="On room service">
+                                            <button type="button" role="switch" class="mm-switch" aria-checked="<?= $on ? 'true' : 'false' ?>"
+                                                aria-label="On room service: <?= htmlspecialchars((string)$item['item_name'], ENT_QUOTES) ?>" onclick="mmRsToggle(this)">
+                                                <span class="mm-switch-track" aria-hidden="true"></span><span class="mm-switch-txt"><?= $on ? 'On' : 'Off' ?></span>
+                                            </button>
+                                        </td>
+                                        <td class="actions-cell">
+                                            <div class="action-buttons">
+                                                <button type="button" class="btn-action btn-edit" onclick="mmOpenEdit(this)">Edit</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endforeach;
 };
 ?>
 <!DOCTYPE html>
@@ -726,20 +1029,31 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             <button type="button" role="tab" id="mmTabDrinks" class="menu-type-tab <?php echo $current_tab === 'drinks' ? 'active' : ''; ?>" onclick="switchTab('drinks')">
                 Drinks <span class="mm-tab-n" data-tab-count="drinks"><?= count($drink_items) ?></span>
             </button>
+            <button type="button" role="tab" id="mmTabRs" class="menu-type-tab <?php echo $current_tab === 'room-service' ? 'active' : ''; ?>" onclick="switchTab('room-service')">
+                Room service <span class="mm-tab-n" id="mmRsCount" title="Items on room service now (food and drinks)"><?= (int)$rsCount ?></span>
+            </button>
         </div>
 
-        <?php if ($canBulkDelete): ?>
-            <!-- Delete selected / Delete all: administrators with the Clear Stock Data permission only -->
-            <div class="mm-bulk" id="mmBulk">
-                <label class="mm-checkbox-line mm-bulk-all"><input type="checkbox" id="mmSelAll"> <span>Select all shown</span></label>
-                <span class="mm-bulk-n" id="mmBulkN" aria-live="polite">0 selected</span>
-                <i class="help" data-tip="Ticked items on this tab that your search and filters show. Hidden items are never deleted. An item that has been sold is hidden instead of deleted, so past orders stay readable; an item on an open order is left alone.">?</i>
+        <!-- Ticked items: Move selected to category (anyone who can edit items here; Drinks tab, and Food for administrators
+             with Clear Stock Data) and Delete selected / Delete all (administrators with Clear Stock Data only). Never on Room service. -->
+        <div class="mm-bulk" id="mmBulk"<?= $current_tab === 'room-service' || ($current_tab === 'food' && !$canBulkDelete) ? ' hidden' : '' ?>>
+            <label class="mm-checkbox-line mm-bulk-all"><input type="checkbox" id="mmSelAll"> <span>Select all shown</span></label>
+            <span class="mm-bulk-n" id="mmBulkN" aria-live="polite">0 selected</span>
+            <i class="help" data-tip="Ticked items on this tab that your search, filters and category buttons show. Hidden items are never moved or deleted.<?= $canBulkDelete ? ' Delete: an item that has been sold is hidden instead of deleted, so past orders stay readable; an item on an open order is left alone.' : '' ?>">?</i>
+            <span class="mm-move" id="mmMove">
+                <label for="mmMoveCat" class="mm-move-lbl">Move selected to</label>
+                <select id="mmMoveCat" aria-label="Category to move the ticked items to"></select>
+                <input type="text" id="mmMoveNew" maxlength="100" placeholder="New category name" aria-label="New category name" hidden>
+                <button type="button" class="mm-btn mm-btn-sm" id="mmMoveBtn" onclick="mmBulkMove()" disabled>Move</button>
+                <i class="help" data-tip="Moves the ticked items to that category on the website menu and the till; what they use from stock moves with them. An item whose name is already in that category is skipped and named in the message. An item on an open order stays where it is.">?</i>
+            </span>
+            <?php if ($canBulkDelete): ?>
                 <span class="mm-bulk-actions">
                     <button type="button" class="btn-action btn-delete" id="mmBulkDel" onclick="mmBulkDelete()" disabled>Delete selected</button>
                     <button type="button" class="btn-action btn-delete" id="mmDelAll" onclick="mmDeleteAll()">Delete all menu items</button>
                 </span>
-            </div>
-        <?php endif; ?>
+            <?php endif; ?>
+        </div>
 
         <div id="mmCats" hidden data-food="<?= htmlspecialchars(json_encode($food_categories), ENT_QUOTES, 'UTF-8') ?>" data-drinks="<?= htmlspecialchars(json_encode($drink_categories), ENT_QUOTES, 'UTF-8') ?>"></div>
 
@@ -758,6 +1072,11 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             <!-- Drinks Menu Tab Content -->
             <div class="tab-content <?php echo $current_tab === 'drinks' ? 'active' : ''; ?>" id="drinks-tab">
                 <?php $mmRenderTab('drinks', $grouped_drinks); ?>
+            </div>
+
+            <!-- Room service Tab Content -->
+            <div class="tab-content <?php echo $current_tab === 'room-service' ? 'active' : ''; ?>" id="room-service-tab">
+                <?php $mmRenderRs(['food' => $grouped_food, 'drinks' => $grouped_drinks]); ?>
             </div>
         </div>
 
@@ -962,7 +1281,9 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             changed: false, // stock section touched (only then is it sent on save)
             ready: false, // existing stock link loaded, so saving it is safe
             editing: null, // the row being edited, or null when adding
-            busy: false
+            busy: false,
+            rsFilter: 'on', // Room service tab: 'on' | 'off' | 'all'
+            drinkCat: '' // Drinks tab category button ('' = all)
         };
 
         function mmEl(id) {
@@ -990,15 +1311,156 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
 
         /* ---------- Tabs ---------- */
         function switchTab(tab) {
-            MM_STATE.tab = tab === 'drinks' ? 'drinks' : 'food';
+            MM_STATE.tab = (tab === 'drinks' || tab === 'room-service') ? tab : 'food';
             const url = new URL(window.location);
             url.searchParams.set('tab', MM_STATE.tab);
             window.history.replaceState({}, '', url);
             mmEl('mmTabFood').classList.toggle('active', MM_STATE.tab === 'food');
             mmEl('mmTabDrinks').classList.toggle('active', MM_STATE.tab === 'drinks');
+            mmEl('mmTabRs').classList.toggle('active', MM_STATE.tab === 'room-service');
             mmEl('food-tab').classList.toggle('active', MM_STATE.tab === 'food');
             mmEl('drinks-tab').classList.toggle('active', MM_STATE.tab === 'drinks');
+            mmEl('room-service-tab').classList.toggle('active', MM_STATE.tab === 'room-service');
+            mmMoveFill();
             mmApplyFilters(false);
+        }
+
+        /* ---------- Drinks tab: category buttons (show one category's section; a view, not a filter) ---------- */
+        function mmShowDrinkCat(cat, scroll) {
+            const tab = mmEl('drinks-tab');
+            let found = cat === '';
+            tab.querySelectorAll('.category-section').forEach(function(sec) {
+                if (sec.dataset.cat === cat) found = true;
+            });
+            MM_STATE.drinkCat = found ? cat : '';
+            let target = null;
+            tab.querySelectorAll('.category-section').forEach(function(sec) {
+                const hide = MM_STATE.drinkCat !== '' && sec.dataset.cat !== MM_STATE.drinkCat;
+                sec.classList.toggle('mm-cathide', hide);
+                if (!hide && MM_STATE.drinkCat !== '') target = sec;
+            });
+            tab.querySelectorAll('.mm-catbtn').forEach(function(b) {
+                const on = b.dataset.catbtn === MM_STATE.drinkCat;
+                b.classList.toggle('is-active', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+            mmBulkSync();
+            if (scroll !== false) mmScrollTo(target || tab.querySelector('.mm-catbar'));
+        }
+
+        function mmScrollTo(el) {
+            if (!el) return;
+            const tb = mmEl('mmToolbar').getBoundingClientRect();
+            const r = el.getBoundingClientRect();
+            window.scrollTo({
+                top: Math.max(0, window.pageYOffset + r.top - Math.max(tb.height + 80, 120)),
+                behavior: 'smooth'
+            });
+        }
+
+        /* ---------- Room service tab ---------- */
+        function mmRsFilter(f) {
+            MM_STATE.rsFilter = (f === 'off' || f === 'all') ? f : 'on';
+            document.querySelectorAll('#room-service-tab .mm-rsf').forEach(function(b) {
+                const on = b.dataset.rsf === MM_STATE.rsFilter;
+                b.classList.toggle('is-active', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+            mmApplyFilters(false);
+        }
+
+        function mmRsRowOk(tr) {
+            if (MM_STATE.rsFilter === 'on') return tr.dataset.rs === '1';
+            if (MM_STATE.rsFilter === 'off') return tr.dataset.rs !== '1';
+            return true;
+        }
+
+        /* Sections, groups, the empty note and the badge of the Room service tab (rows already marked by mmApplyFilters). */
+        function mmRsApply(filtering) {
+            const root = mmEl('room-service-tab');
+            if (!root) return;
+            let shown = 0;
+            root.querySelectorAll('.mm-rs-section').forEach(function(sec) {
+                const rows = sec.querySelectorAll('.mm-rs-row');
+                let n = 0;
+                rows.forEach(function(r) {
+                    if (!r.classList.contains('mm-hide')) n++;
+                });
+                shown += n;
+                sec.classList.toggle('mm-hide', n === 0);
+                const c = sec.querySelector('.cat-count');
+                if (c) c.textContent = n === rows.length ? '(' + rows.length + ')' : '(' + n + ' of ' + rows.length + ')';
+            });
+            root.querySelectorAll('.mm-rs-group').forEach(function(g) {
+                g.classList.toggle('mm-hide', !!g.querySelector('.mm-rs-row') && !g.querySelector('.mm-rs-section:not(.mm-hide)'));
+            });
+            const empty = mmEl('mmRsEmpty');
+            if (empty) {
+                empty.hidden = shown > 0 || root.querySelectorAll('.mm-rs-row').length === 0;
+                mmEl('mmRsEmptyText').textContent = filtering ? 'No items here match your search and filters.' :
+                    (MM_STATE.rsFilter === 'on' ? 'Nothing is on room service yet. Choose "Not on room service" to switch items on.' : 'Every item is on room service.');
+            }
+            let on = 0;
+            root.querySelectorAll('.mm-rs-row').forEach(function(r) {
+                if (r.dataset.rs === '1') on++;
+            });
+            const badge = mmEl('mmRsCount');
+            if (badge) badge.textContent = String(on);
+        }
+
+        async function mmRsToggle(btn) {
+            const tr = btn.closest('.mm-rs-row');
+            if (!tr || btn.disabled) return;
+            const want = tr.dataset.rs === '1' ? 0 : 1;
+            btn.disabled = true;
+            try {
+                const res = await mmPost({
+                    action: 'toggle_room_service',
+                    id: tr.dataset.id,
+                    menu_type: tr.dataset.type,
+                    value: want
+                });
+                if (!res.success) {
+                    Alert.show(mmTxt(res.message || 'Could not change room service.'), 'error');
+                    return;
+                }
+                mmRsMark(tr.dataset.type, tr.dataset.id, Number(res.show_room_service) === 1 ? 1 : 0);
+                Alert.show(mmTxt(res.message || 'Saved.'), 'success');
+                mmApplyFilters(false);
+            } catch (e) {
+                Alert.show('Could not change room service. Please try again.', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        /* After a switch: the Room service row, the Food / Drinks row (tag, data-rs, Edit form data) and the badge. No reload. */
+        function mmRsMark(type, id, on) {
+            const kind = type === 'drinks' ? 'drink' : 'food';
+            const setItem = function(tr) {
+                try {
+                    const it = JSON.parse(tr.dataset.item);
+                    it.show_rs = on;
+                    tr.dataset.item = JSON.stringify(it);
+                } catch (e) {}
+            };
+            const rs = mmEl('rs-' + kind + '-row-' + id);
+            if (rs) {
+                rs.dataset.rs = String(on);
+                setItem(rs);
+                const sw = rs.querySelector('.mm-switch');
+                sw.setAttribute('aria-checked', on ? 'true' : 'false');
+                sw.querySelector('.mm-switch-txt').textContent = on ? 'On' : 'Off';
+            }
+            const row = mmEl(kind + '-row-' + id);
+            if (row) {
+                row.dataset.rs = String(on);
+                setItem(row);
+                const tag = row.querySelector('.mm-tag-rs');
+                if (tag) tag.hidden = !on;
+                const web = row.querySelector('.mm-tag-web');
+                if (web) web.hidden = !(!on && web.dataset.pos === '0');
+            }
         }
 
         /* ---------- Search and filters ---------- */
@@ -1039,7 +1501,12 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 tr.classList.toggle('mm-hide', !ok);
                 if (ok) shown[tab]++;
             });
-            document.querySelectorAll('#mmResults .category-section').forEach(function(sec) {
+            // Room service rows: the same search, category and status filters, plus the tab's own on / off / all choice.
+            document.querySelectorAll('#mmResults .mm-rs-row').forEach(function(tr) {
+                tr.classList.toggle('mm-hide', !(mmRowMatches(tr, tokens) && mmRsRowOk(tr)));
+            });
+            mmRsApply(filtering);
+            document.querySelectorAll('#mmResults .category-section:not(.mm-rs-section)').forEach(function(sec) {
                 const rows = sec.querySelectorAll('.mm-row');
                 let n = 0;
                 rows.forEach(function(r) {
@@ -1060,7 +1527,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             const other = cur === 'food' ? 'drinks' : 'food';
             const box = mmEl('mmNoMatch');
             const sw = mmEl('mmNoMatchSwitch');
-            const noMatch = filtering && total[cur] > 0 && shown[cur] === 0;
+            const noMatch = cur !== 'room-service' && filtering && total[cur] > 0 && shown[cur] === 0;
             box.hidden = !noMatch;
             if (noMatch) {
                 const label = MM_FILTER.q ? ' "' + MM_FILTER.q + '"' : '';
@@ -1082,7 +1549,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
 
             if (scroll) {
                 // Results must land in view: bring the first match (or the no-match note) up under the toolbar.
-                const target = noMatch ? box : document.querySelector('#mmResults .tab-content.active .mm-row:not(.mm-hide)');
+                const target = noMatch ? box : document.querySelector('#mmResults .tab-content.active .mm-row:not(.mm-hide), #mmResults .tab-content.active .mm-rs-row:not(.mm-hide)');
                 if (target) {
                     const r = target.getBoundingClientRect();
                     if (r.top < 60 || r.top > window.innerHeight * 0.75) {
@@ -2418,16 +2885,22 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         /* ---------- Delete selected / Delete all (administrators with the Clear Stock Data permission only) ---------- */
         /* Rows on the active tab that the search and filters show: the only rows "Delete selected" can send. */
         function mmBulkRows() {
-            return Array.prototype.slice.call(document.querySelectorAll('#' + MM_STATE.tab + '-tab .mm-row:not(.mm-hide)'));
+            if (MM_STATE.tab === 'room-service') return [];
+            return Array.prototype.slice.call(document.querySelectorAll('#' + MM_STATE.tab + '-tab .mm-row:not(.mm-hide)')).filter(function(tr) {
+                return !tr.closest('.mm-cathide'); // a category the Drinks buttons hide
+            });
         }
 
         function mmBulkSync() {
-            if (!mmEl('mmBulk')) return;
-            // A ticked row that is now hidden or on the other tab is never deleted: untick it so the count is honest.
+            const bar = mmEl('mmBulk');
+            if (!bar) return;
+            // A ticked row that is now hidden or on another tab is never moved or deleted: untick it so the count is honest.
             document.querySelectorAll('#mmResults .mm-sel:checked').forEach(function(cb) {
                 const tr = cb.closest('.mm-row');
-                if (!tr || tr.classList.contains('mm-hide') || tr.dataset.tab !== MM_STATE.tab) cb.checked = false;
+                if (!tr || tr.classList.contains('mm-hide') || tr.closest('.mm-cathide') || tr.dataset.tab !== MM_STATE.tab) cb.checked = false;
             });
+            // The bar shows only where rows can be ticked (never on Room service).
+            bar.hidden = MM_STATE.tab === 'room-service' || !document.querySelector('#' + MM_STATE.tab + '-tab .mm-sel');
             const rows = mmBulkRows();
             let n = 0;
             rows.forEach(function(tr) {
@@ -2435,8 +2908,12 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 if (cb && cb.checked) n++;
             });
             mmEl('mmBulkN').textContent = n + ' selected';
-            mmEl('mmBulkDel').disabled = n === 0;
-            mmEl('mmBulkDel').textContent = n > 0 ? 'Delete selected (' + n + ')' : 'Delete selected';
+            if (mmEl('mmBulkDel')) {
+                mmEl('mmBulkDel').disabled = n === 0;
+                mmEl('mmBulkDel').textContent = n > 0 ? 'Delete selected (' + n + ')' : 'Delete selected';
+            }
+            mmEl('mmMoveBtn').disabled = n === 0 || MM_STATE.moving === true;
+            mmEl('mmMoveBtn').textContent = n > 0 ? 'Move ' + n : 'Move';
             const all = mmEl('mmSelAll');
             all.checked = rows.length > 0 && n === rows.length;
             all.indeterminate = n > 0 && n < rows.length;
@@ -2452,7 +2929,78 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 head.checked = vis.length > 0 && c === vis.length;
                 head.indeterminate = c > 0 && c < vis.length;
             });
-            mmEl('mmDelAll').disabled = document.querySelectorAll('#mmResults .mm-row').length === 0;
+            if (mmEl('mmDelAll')) mmEl('mmDelAll').disabled = document.querySelectorAll('#mmResults .mm-row').length === 0;
+        }
+
+        /* ---------- Move selected to category ---------- */
+        function mmMoveFill() {
+            const sel = mmEl('mmMoveCat');
+            if (!sel) return;
+            const tab = MM_STATE.tab === 'food' ? 'food' : 'drinks';
+            const keep = sel.dataset.tab === tab ? sel.value : '';
+            sel.innerHTML = '';
+            const first = document.createElement('option');
+            first.value = '';
+            first.textContent = 'Choose a category';
+            sel.appendChild(first);
+            (MM_CATS[tab] || []).forEach(function(c) {
+                const o = document.createElement('option');
+                o.value = c;
+                o.textContent = c;
+                sel.appendChild(o);
+            });
+            const n = document.createElement('option');
+            n.value = '__new__';
+            n.textContent = 'New category…';
+            sel.appendChild(n);
+            sel.dataset.tab = tab;
+            sel.value = keep;
+            if (sel.value !== keep) sel.value = '';
+            mmEl('mmMoveNew').hidden = sel.value !== '__new__';
+        }
+
+        async function mmBulkMove() {
+            const ids = [];
+            mmBulkRows().forEach(function(tr) {
+                const cb = tr.querySelector('.mm-sel');
+                if (cb && cb.checked) ids.push(cb.value);
+            });
+            if (!ids.length || MM_STATE.moving) return;
+            const sel = mmEl('mmMoveCat');
+            const nw = mmEl('mmMoveNew');
+            if (!sel.value || (sel.value === '__new__' && !nw.value.trim())) {
+                Alert.show('Choose the category to move to, or type the name of a new one.', 'error');
+                (sel.value === '__new__' ? nw : sel).focus();
+                return;
+            }
+            const fd = new FormData();
+            fd.append('action', 'menu_move_category');
+            fd.append('menu_type', MM_STATE.tab);
+            fd.append('category', sel.value);
+            if (sel.value === '__new__') fd.append('new_category', nw.value.trim());
+            ids.forEach(function(id) {
+                fd.append('ids[]', id);
+            });
+            const btn = mmEl('mmMoveBtn');
+            MM_STATE.moving = true;
+            btn.disabled = true;
+            btn.textContent = 'Moving…';
+            try {
+                const res = await mmBulkPost(fd);
+                Alert.show(mmTxt(res.message || 'Done'), res.success ? 'success' : 'error');
+                if (res.success) {
+                    nw.value = '';
+                    sel.value = '';
+                    nw.hidden = true;
+                    await mmRefresh();
+                }
+            } catch (e) {
+                Alert.show('The move could not finish. The list has been reloaded to show what changed.', 'error');
+                await mmRefresh();
+            } finally {
+                MM_STATE.moving = false;
+                mmBulkSync();
+            }
         }
 
         function mmBulkWire() {
@@ -2625,7 +3173,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 })
                 .then(function(html) {
                     const doc = new DOMParser().parseFromString(html, 'text/html');
-                    ['food-tab', 'drinks-tab'].forEach(function(id) {
+                    ['food-tab', 'drinks-tab', 'room-service-tab'].forEach(function(id) {
                         const next = doc.getElementById(id);
                         const cur = mmEl(id);
                         if (next && cur) cur.innerHTML = next.innerHTML;
@@ -2637,9 +3185,11 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                         if (mmEl('mmCatFilter').value !== MM_FILTER.cat) MM_FILTER.cat = '';
                     }
                     mmReadCats(doc);
+                    mmMoveFill();
                     mmInitDrag();
                     mmWireNameChecks();
-                    mmApplyFilters(false);
+                    mmRsFilter(MM_STATE.rsFilter); // re-marks the new Room service buttons, then applies the filters
+                    mmShowDrinkCat(MM_STATE.drinkCat, false); // a category that no longer exists falls back to All
                 }).catch(function() {});
         }
 
@@ -2793,6 +3343,18 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         function mmInit() {
             mmBulkWire();
             mmReadCats(document);
+            mmMoveFill();
+            mmEl('mmMoveCat').addEventListener('change', function() {
+                const isNew = this.value === '__new__';
+                mmEl('mmMoveNew').hidden = !isNew;
+                if (isNew) mmEl('mmMoveNew').focus();
+            });
+            mmEl('mmMoveNew').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    mmBulkMove();
+                }
+            });
             mmInitFilters();
             mmInitDrag();
             mmWireNameChecks();
