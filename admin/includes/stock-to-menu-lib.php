@@ -13,8 +13,10 @@
  * Menu permission required, every change logged (who, what, old -> new price). Cost over price warns, never blocks.
  *
  *   stm_can_menu($uid)                   Menu permission
+ *   stm_can_see_cost($uid)               Stock permission (stock_management): cost of one, profit and the cost warning are only for them
+ *   stm_parse_ids($raw)                  "1,2,3" from Stock Items -> unique ids; over STM_MAX_ITEMS is said, never cut
  *   stm_items($pdo, ?array $ids)          stock items to show (ids given: those; null: every item not archived and not kept by weight)
- *   stm_build($pdo, array $inputs)        the rows as the screen shows them (nothing written)
+ *   stm_build($pdo, array $inputs, bool $showCost)   the rows as the screen shows them (nothing written; no costs unless $showCost)
  *   stm_save($pdo, int $uid, array $inputs)   writes the ticked rows that are ready; ['ok', 'error', 'added', 'updated', 'skipped']
  */
 
@@ -22,9 +24,38 @@ require_once dirname(__DIR__, 2) . '/includes/import/drinks.php';
 
 if (!function_exists('stm_build')) {
 
+    /** Most stock items the screen opens at once (Stock Items sends them in one field; more is refused with a message, never cut). */
+    define('STM_MAX_ITEMS', 5000);
+    define('STM_PRICE_COMMA_MSG', 'Use a dot for decimals, e.g. 1.50, and commas only between thousands, e.g. 1,500.');
+
     function stm_can_menu(int $userId): bool
     {
         return import_drinks_can_menu($userId);
+    }
+
+    /** Cost of one, profit and "costs more than its price" are stock costs: only for people with the Stock permission (as Stock Items). */
+    function stm_can_see_cost(int $userId): bool
+    {
+        return $userId > 0 && function_exists('hasPermission') && hasPermission($userId, 'stock_management');
+    }
+
+    /**
+     * The ticked ids from Stock Items: one comma-joined field (or a list). Whole numbers above 0, each once, order kept.
+     * @return array{ids:int[], count:int, over:bool}  over = more than STM_MAX_ITEMS (ids is then empty: the caller says so)
+     */
+    function stm_parse_ids($raw): array
+    {
+        $parts = is_array($raw) ? $raw : explode(',', (string)$raw);
+        $ids = [];
+        foreach ($parts as $p) {
+            $p = trim((string)$p);
+            if ($p !== '' && ctype_digit($p) && strlen($p) <= 10 && (int)$p > 0) {
+                $ids[(int)$p] = true;
+            }
+        }
+        $ids = array_keys($ids);
+        $over = count($ids) > STM_MAX_ITEMS;
+        return ['ids' => $over ? [] : $ids, 'count' => count($ids), 'over' => $over];
     }
 
     /** Stock items for the screen: the ids asked for (any state, so the screen can say why one cannot go), else every live drink-like item. */
@@ -38,7 +69,9 @@ if (!function_exists('stm_build')) {
             if (!$ids) {
                 return [];
             }
-            $ids = array_slice($ids, 0, 1000);
+            if (count($ids) > STM_MAX_ITEMS) {
+                throw new InvalidArgumentException('More than ' . number_format(STM_MAX_ITEMS) . ' stock items were asked for. Tick fewer and try again.');
+            }
             $in = implode(',', array_fill(0, count($ids), '?'));
             $st = $pdo->prepare("SELECT $cols FROM stock_ingredients WHERE id IN ($in) ORDER BY category, name");
             $st->execute($ids);
@@ -53,12 +86,25 @@ if (!function_exists('stm_build')) {
         return $out;
     }
 
-    /** "1,500.50" / "1500" -> 1500.5 (2 dp); null when blank; false when not a price. */
+    /** A comma that is not between thousands ("1,50", "15,0", "1,5000", "0,500"): refused with STM_PRICE_COMMA_MSG, never read as 150 / 500. */
+    function stm_price_comma_wrong($raw): bool
+    {
+        $s = trim(str_replace(' ', '', (string)$raw));
+        return strpos($s, ',') !== false && !preg_match('/^[1-9]\d{0,2}(,\d{3})+(\.\d{1,2})?$/', $s);
+    }
+
+    /** "1,500.50" / "12,500.50" / "1500" -> 1500.5 (2 dp); null when blank; false when not a price. Commas only as thousands groups. */
     function stm_parse_price($raw)
     {
-        $s = trim(str_replace([',', ' '], '', (string)$raw));
+        $s = trim(str_replace(' ', '', (string)$raw));
         if ($s === '') {
             return null;
+        }
+        if (strpos($s, ',') !== false) {
+            if (stm_price_comma_wrong($s)) {
+                return false;
+            }
+            $s = str_replace(',', '', $s);
         }
         if (!preg_match('/^\d{1,8}(\.\d{1,2})?$/', $s)) {
             return false;
@@ -115,9 +161,10 @@ if (!function_exists('stm_build')) {
 
     /**
      * The rows as the screen shows them. $inputs: [{ing_id, name?, sold?, price?, category?, tick?}] (missing = the default).
+     * $showCost: stm_can_see_cost() of the person. Without it cost, cost_note, profit, below and warn are left empty (never sent).
      * @return array{rows:array, cats:array}
      */
-    function stm_build(PDO $pdo, array $inputs): array
+    function stm_build(PDO $pdo, array $inputs, bool $showCost = false): array
     {
         $byId = [];
         foreach ($inputs as $in) {
@@ -206,7 +253,7 @@ if (!function_exists('stm_build')) {
             $cost = $existingLink !== null ? $existingLink : ($o['cost'] ?? null);
             $action = $why !== '' ? 'none' : ($menu ? (($price && abs((float)$menu['price'] - $price) <= BALANCE_TOLERANCE) ? 'same' : 'update') : 'add');
             if ($why === '' && $price === false) {
-                $why = 'The price must be a number above 0 with at most 2 decimals (VAT included).';
+                $why = stm_price_comma_wrong($priceRaw) ? STM_PRICE_COMMA_MSG : 'The price must be a number above 0 with at most 2 decimals (VAT included).';
                 $action = 'none';
             }
             $rows[] = [
@@ -261,6 +308,13 @@ if (!function_exists('stm_build')) {
                 $r['status_text'] = 'Cannot go on the menu: ' . $r['why_not'];
             }
             $r['warn'] = $r['below'] ? 'It costs more than its price. It can still be saved.' : '';
+            if (!$showCost) {           // no Stock permission: no stock cost leaves the server
+                $r['cost'] = null;
+                $r['cost_note'] = '';
+                $r['profit'] = null;
+                $r['below'] = false;
+                $r['warn'] = '';
+            }
         }
         unset($r);
         $cats = array_values($db['cats']);
@@ -306,7 +360,7 @@ if (!function_exists('stm_build')) {
                         $res['skipped'][] = ['name' => $r['name'], 'why' => $r['status'] === 'same' ? 'Already on the menu at this price.' : ($r['why_not'] !== '' ? $r['why_not'] : $r['status_text'])];
                         continue;
                     }
-                    $w = import_drinks_menu_write($pdo, $r, (int)$r['ing_id'], $userId, $drinkReady, 'VAT included');
+                    $w = import_drinks_menu_write($pdo, $r, (int)$r['ing_id'], $userId, $drinkReady, 'VAT included', '');     // '': " Nothing was saved." is added below
                     if (function_exists('logActivity')) {
                         logActivity($userId, 'drink_menu_from_stock', 'Put on the menu from stock item "' . $r['stock_name'] . '": ' . $w['what'] . '.');
                     }

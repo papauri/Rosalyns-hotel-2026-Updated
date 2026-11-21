@@ -1413,7 +1413,7 @@ if (!function_exists('import_drinks_build')) {
                 $ingId = (int)$find->fetchColumn();
             }
             if ($ingId <= 0) {
-                throw new RuntimeException('"' . $r['name'] . '": its stock item was not found, so its bottle size could not be saved. Nothing was imported.');
+                throw new RuntimeException('"' . $r['name'] . '": its stock item was not found, so its bottle size could not be saved.');
             }
             $cur->execute([$ingId]);
             $v = $cur->fetchColumn();
@@ -1445,11 +1445,12 @@ if (!function_exists('import_drinks_build')) {
      * makes for a ticked row, shared with Stock Items > Put on the menu (admin/includes/stock-to-menu-lib.php) so both write the same way.
      * The caller holds the transaction and the menu lock and has checked the Menu permission. $r: action 'add' | 'update', name, price
      * (VAT included, written exactly to 2 dp), category (add only; an update keeps the drink's own), measure (words), menu_id + menu_name
-     * (update), link ({kind, qty, name, ml}) for a new stock link. $priceNote goes in the log text ("VAT included" ...).
+     * (update), link ({kind, qty, name, ml}) for a new stock link. $priceNote goes in the log text ("VAT included" ...). $stopped ends the
+     * missing-stock-item error: none by default (the import's commit already starts it with "Nothing was imported: "); Put on the menu adds its own "Nothing was saved.".
      * @return array{action:string, linked:bool, what:string, pos:array, menu_id:int, old_price:?string, price:string}
      * @throws RuntimeException
      */
-    function import_drinks_menu_write(PDO $pdo, array $r, int $ingId, int $userId, bool $drinkReady, string $priceNote): array
+    function import_drinks_menu_write(PDO $pdo, array $r, int $ingId, int $userId, bool $drinkReady, string $priceNote, string $stopped = ''): array
     {
         static $hasLink = null, $hasLinkPdo = null;
         if ($hasLink === null || $hasLinkPdo !== $pdo) {
@@ -1504,7 +1505,7 @@ if (!function_exists('import_drinks_build')) {
         $hasLink->execute([$pos['id'], $pos['slug']]);
         if ((int)$hasLink->fetchColumn() === 0) {
             if ($ingId <= 0 || !$r['link']) {
-                throw new RuntimeException('"' . $r['name'] . '": its stock item was not found, so its stock link could not be made. Nothing was saved.');
+                throw new RuntimeException('"' . $r['name'] . '": its stock item was not found, so its stock link could not be made.' . ($stopped !== '' ? ' ' . $stopped : ''));
             }
             rh_menu_recipe_save($pdo, (int)$pos['id'], (string)$pos['slug'], null, null, [import_drinks_link_line($ingId, $r['link'], $drinkReady)], $userId > 0 ? $userId : null);
             $linked = true;

@@ -3,8 +3,11 @@
 /**
  * Put stock items on the drinks menu (owner 2026-11-22).
  *
- * Opened from Stock Items (tick rows > "Put on the menu": ?ids=1,2,3, those rows ticked) and from Menu Management > Drinks >
- * "Add from stock" (no ids: every stock item not archived and not kept by weight, showing the ones not on the drinks menu yet).
+ * Opened from Stock Items (tick rows > "Put on the menu": a POST with action=open, the ids in ONE comma-joined field "ids" and the
+ * security token, so neither the URL length nor max_input_vars can cut the list; those rows ticked; over STM_MAX_ITEMS is refused with
+ * a message) and from Menu Management > Drinks > "Add from stock" (a plain GET: every stock item not archived and not kept by weight,
+ * showing the ones not on the drinks menu yet).
+ * Cost of one, profit and the cost warning only for people with the Stock permission (stock_management); others see "—".
  * One row per item: drink name, Sold as, price (VAT included), category, cost of one, profit, status. "Add N to the menu" writes
  * the ticked rows that are ready. Logic, rules and writes: admin/includes/stock-to-menu-lib.php (the same writes as Import step 4).
  * Permission: menu (it writes the drinks menu); modules: pos + stock.
@@ -14,14 +17,31 @@ require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/stock-to-menu-lib.php';
 
 $uid = (int)($_SESSION['admin_user_id'] ?? 0);
+$showCost = stm_can_see_cost($uid);
 $currency_symbol = (string)getSetting('currency_symbol');
 $error = '';
 if (!ensureStockTablesExist()) {
     $error = 'Stock tables not yet created.';
 }
 
+// ---- opened from Stock Items: the ticked ids in one POST field (renders the screen below, not JSON)
+$fromStock = false;
+$ids = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'open') {
+    $fromStock = true;
+    $ids = [];
+    if (!validateCsrfToken((string)($_POST['csrf_token'] ?? ''))) {
+        $error = $error !== '' ? $error : 'Security token invalid. Go back to Stock items, reload and tick the items again.';
+    } else {
+        $picked = stm_parse_ids($_POST['ids'] ?? '');
+        if ($picked['over']) {
+            $error = $error !== '' ? $error : 'You ticked ' . number_format($picked['count']) . ' stock items. At most ' . number_format(STM_MAX_ITEMS)
+                . ' can be opened here at once. Go back to Stock items and tick fewer (for example one category at a time).';
+        }
+        $ids = $picked['ids'];
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ---- JSON: preview (nothing saved) and save
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     $out = ['ok' => false, 'error' => ''];
@@ -31,11 +51,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $out['error'] = 'Security token invalid. Please reload the page.';
     } elseif ($error !== '') {
         $out['error'] = $error;
-    } elseif (!is_array($rows) || count($rows) > 1000) {
+    } elseif (!is_array($rows)) {
         $out['error'] = 'Nothing to check. Please reload the page.';
+    } elseif (count($rows) > STM_MAX_ITEMS) {
+        $out['error'] = number_format(count($rows)) . ' rows are ticked. At most ' . number_format(STM_MAX_ITEMS) . ' can be checked or saved at once. Untick some and try again.';
     } elseif ($action === 'preview') {
         try {
-            $out = ['ok' => true, 'error' => ''] + stm_build($pdo, $rows);
+            $out = ['ok' => true, 'error' => '', 'show_cost' => $showCost] + stm_build($pdo, $rows, $showCost);
         } catch (Throwable $e) {
             error_log('stock-to-menu preview: ' . $e->getMessage());
             $out['error'] = 'The rows could not be checked. Please try again.';
@@ -50,8 +72,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ---- the screen
-$fromStock = isset($_GET['ids']);
-$ids = $fromStock ? array_slice(array_filter(array_map('intval', explode(',', (string)$_GET['ids']))), 0, 1000) : null;
 $built = ['rows' => [], 'cats' => []];
 if ($error === '') {
     try {
@@ -59,7 +79,7 @@ if ($error === '') {
         foreach (stm_items($pdo, $ids) as $it) {
             $inputs[] = ['ing_id' => (int)$it['id'], 'tick' => $fromStock];
         }
-        $built = stm_build($pdo, $inputs);
+        $built = stm_build($pdo, $inputs, $showCost);
         foreach ($built['rows'] as &$br) {      // arrived ticked from Stock Items: a row that cannot go, or has nothing to change, starts unticked
             if (in_array($br['status'], ['blocked', 'same'], true)) {
                 $br['tick'] = false;
@@ -170,8 +190,13 @@ $h = function ($s) {
                                 </td>
                                 <td><input type="text" class="stm-in-price" inputmode="decimal" autocomplete="off" placeholder="0.00" value="" aria-label="Price, VAT included"></td>
                                 <td><input type="text" class="stm-in-cat" maxlength="100" list="stm-cats" value="<?php echo $h($r['category']); ?>" aria-label="Category"></td>
-                                <td class="num stm-cost"></td>
-                                <td class="num stm-profit"></td>
+                                <?php if ($showCost): ?>
+                                    <td class="num stm-cost"></td>
+                                    <td class="num stm-profit"></td>
+                                <?php else: ?>
+                                    <td class="num stm-cost">&mdash; <i class="help" data-tip="Costs show for people with the Stock permission.">?</i></td>
+                                    <td class="num stm-profit">&mdash; <i class="help" data-tip="Costs show for people with the Stock permission.">?</i></td>
+                                <?php endif; ?>
                                 <td class="stm-status"></td>
                             </tr>
                         <?php endforeach; ?>
@@ -192,7 +217,7 @@ $h = function ($s) {
             <button type="button" class="stm-btn stm-btn--primary" id="stm-save" disabled><i class="fas fa-plus"></i> <span id="stm-save-text">Add to the menu</span></button>
         </div>
         <?php endif; ?>
-        <script type="application/json" id="stm-data"><?php echo json_encode(['rows' => $built['rows'], 'currency' => $currency_symbol, 'csrf' => $csrf_token], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?></script>
+        <script type="application/json" id="stm-data"><?php echo json_encode(['rows' => $built['rows'], 'currency' => $currency_symbol, 'csrf' => $csrf_token, 'show_cost' => $showCost], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?></script>
         <?php endif; ?>
     </div>
 

@@ -51,7 +51,7 @@ try {
     $rowsOf = function (array $b) { $o = []; foreach ($b['rows'] as $r) { $o[$r['ing_id']] = $r; } return $o; };
 
     // ---- build: Sold as choices, cost of one, defaults, statuses
-    $B = $rowsOf(stm_build($pdo, [['ing_id' => $gin], ['ing_id' => $vodka], ['ing_id' => $lager], ['ing_id' => $cola], ['ing_id' => $sugar], ['ing_id' => $rum, 'sold' => 'm:shot']]));
+    $B = $rowsOf(stm_build($pdo, [['ing_id' => $gin], ['ing_id' => $vodka], ['ing_id' => $lager], ['ing_id' => $cola], ['ing_id' => $sugar], ['ing_id' => $rum, 'sold' => 'm:shot']], true));
     $optV = function ($r) { return array_column($r['sold_options'], 'v'); };
     $ck('build: a bottle with a size can be sold as 1 bottle, a shot (25 ml) or a glass of wine; default 1 bottle', $B[$gin]['sold'] === 'unit'
         && $optV($B[$gin]) === ['unit', 'm:shot', 'm:glass of wine'] && abs((float)$B[$gin]['cost'] - 15000) < 0.0001, json_encode($B[$gin]));
@@ -65,9 +65,40 @@ try {
     $ck('build: an item kept by weight cannot go on the menu, with the reason', $B[$sugar]['status'] === 'blocked' && stripos($B[$sugar]['why_not'], 'kept by weight') !== false, $B[$sugar]['why_not']);
     $ck('build: a bottle with no size cannot be sold by the shot: refused with what to set', $B[$rum]['status'] === 'blocked'
         && strpos($B[$rum]['why_not'], 'cannot be sold by "shot"') !== false && stripos($B[$rum]['why_not'], 'size in ml') !== false && $optV($B[$rum]) === ['unit'], $B[$rum]['why_not']);
-    $P = $rowsOf(stm_build($pdo, [['ing_id' => $gin, 'sold' => 'm:shot', 'price' => '100', 'tick' => 1], ['ing_id' => $lager, 'price' => 'abc', 'tick' => 1]]));
+    $P = $rowsOf(stm_build($pdo, [['ing_id' => $gin, 'sold' => 'm:shot', 'price' => '100', 'tick' => 1], ['ing_id' => $lager, 'price' => 'abc', 'tick' => 1]], true));
     $ck('build: cost over price warns and stays ready (shot cost 500 > price 100)', $P[$gin]['below'] && $P[$gin]['ready'] && $P[$gin]['warn'] !== '' && abs((float)$P[$gin]['cost'] - 500) < 0.005, json_encode($P[$gin]));
     $ck('build: a price that is not a number is refused', !$P[$lager]['ready'] && stripos($P[$lager]['why_not'], 'price must be a number') !== false, $P[$lager]['why_not']);
+
+    // ---- price commas: only between thousands ("1,50" is never 150)
+    $ck('price: "1,500" = 1500, "12,500.50" = 12500.50, "1,234,567.5" and "1500" read too', stm_parse_price('1,500') === 1500.0 && stm_parse_price('12,500.50') === 12500.5
+        && stm_parse_price('1,234,567.5') === 1234567.5 && stm_parse_price('1500') === 1500.0 && stm_parse_price('1.50') === 1.5,
+        json_encode([stm_parse_price('1,500'), stm_parse_price('12,500.50'), stm_parse_price('1,234,567.5')]));
+    $C = $rowsOf(stm_build($pdo, [['ing_id' => $gin, 'price' => '1,50', 'tick' => 1], ['ing_id' => $lager, 'price' => '15,0', 'tick' => 1], ['ing_id' => $vodka, 'price' => '1,5000', 'tick' => 1]], true));
+    $commaOk = true;
+    foreach ([$gin, $lager, $vodka] as $cid) {
+        $commaOk = $commaOk && $C[$cid]['ready'] === false && $C[$cid]['price'] === null && $C[$cid]['why_not'] === STM_PRICE_COMMA_MSG;
+    }
+    $ck('price: "1,50", "15,0" and "1,5000" are refused with "Use a dot for decimals, e.g. 1.50, and commas only between thousands, e.g. 1,500."', $commaOk
+        && stm_parse_price('1,50') === false && stm_parse_price('15,0') === false && stm_parse_price('1,5000') === false
+        && stm_parse_price('0,500') === false && stm_price_comma_wrong('0,500') && stm_parse_price('100,000') === 100000.0,
+        json_encode([$C[$gin]['why_not'], $C[$lager]['why_not'], $C[$vodka]['why_not']]));
+    $K = $rowsOf(stm_build($pdo, [['ing_id' => $gin, 'price' => '12,500.50', 'tick' => 1]], true));
+    $ck('price: "12,500.50" previews as 12500.50, ready', $K[$gin]['ready'] && abs((float)$K[$gin]['price'] - 12500.5) < 0.001, json_encode($K[$gin]['price']));
+
+    // ---- the ids from Stock Items: one field, every id reaches the screen; over the cap is said, never cut
+    $many = [];
+    for ($i = 1; $i <= 1200; $i++) { $many[] = $i; }
+    $pi = stm_parse_ids(implode(',', $many) . ',5,abc,-3,0,' . $gin);
+    $ck('ids: 1200 ids in one field all come through (duplicates and junk dropped)', !$pi['over'] && count($pi['ids']) === $pi['count'] && $pi['count'] === ($gin > 1200 ? 1201 : 1200) && $pi['ids'][1199] === 1200, (string)$pi['count']);
+    $big = [];
+    for ($i = 1; $i <= STM_MAX_ITEMS + 1; $i++) { $big[] = $i; }
+    $po = stm_parse_ids(implode(',', $big));
+    $ck('ids: more than ' . STM_MAX_ITEMS . ' is flagged as over (the page says so), never silently cut', $po['over'] && $po['ids'] === [] && $po['count'] === STM_MAX_ITEMS + 1);
+
+    // ---- costs only with the Stock permission
+    $H = $rowsOf(stm_build($pdo, [['ing_id' => $gin, 'sold' => 'm:shot', 'price' => '100', 'tick' => 1]], false));
+    $ck('cost: without the Stock permission no cost, profit or cost warning is sent; the row is still ready', $H[$gin]['cost'] === null && $H[$gin]['profit'] === null
+        && $H[$gin]['below'] === false && $H[$gin]['warn'] === '' && $H[$gin]['cost_note'] === '' && $H[$gin]['ready'] === true, json_encode($H[$gin]));
     $D = $rowsOf(stm_build($pdo, [['ing_id' => $same1, 'name' => $n('Same'), 'price' => '10', 'tick' => 1], ['ing_id' => $same2, 'name' => $n('Same'), 'price' => '10', 'tick' => 1]]));
     $ck('build: two ticked rows that are the same drink: neither goes', !$D[$same1]['ready'] && !$D[$same2]['ready'] && strpos($D[$same1]['why_not'], 'Untick one') !== false, json_encode([$D[$same1]['why_not'], $D[$same2]['why_not']]));
 
@@ -147,6 +178,33 @@ try {
     $s3 = stm_save($pdo, $admin, [['ing_id' => $rum, 'name' => $n('Rum'), 'price' => '700', 'tick' => 1], ['ing_id' => $same1, 'name' => $n('Lager'), 'price' => '1', 'tick' => 1]]);
     $ck('save: a row matched to an existing drink by name is a price change, not a second drink', $s3['ok'] && count($s3['added']) === 1 && count($s3['updated']) === 1
         && (int)$col('SELECT COUNT(*) FROM drink_menu') === $before + 1 && (string)$dm($n('Lager'))['price'] === '1.00', json_encode($s3));
+
+    // ---- a Menu-only user (no Stock permission) and a Menu + Stock user (both made up, rolled back)
+    $mkUser = function (string $tag, array $perms) use ($pdo, $n) {
+        $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, ?, 'x', ?, 'receptionist', 1)")
+            ->execute([substr($n($tag), 0, 90), strtolower(preg_replace('/\W+/', '', $n($tag))) . '@example.invalid', $n($tag)]);
+        $u = (int)$pdo->lastInsertId();
+        foreach ($perms as $k => $g) {
+            $pdo->prepare('INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)')->execute([$u, $k, $g]);
+        }
+        return $u;
+    };
+    $menuOnly = $mkUser('menuonly', ['menu' => 1, 'stock_management' => 0]);
+    $menuStock = $mkUser('menustock', ['menu' => 1, 'stock_management' => 1]);
+    $ck('users: Menu-only may change the menu but not see costs; Menu + Stock sees them', stm_can_menu($menuOnly) && !stm_can_see_cost($menuOnly) && stm_can_menu($menuStock) && stm_can_see_cost($menuStock),
+        json_encode([stm_can_menu($menuOnly), stm_can_see_cost($menuOnly), stm_can_menu($menuStock), stm_can_see_cost($menuStock)]));
+    $s4 = stm_save($pdo, $menuOnly, [['ing_id' => $same2, 'name' => $n('Menu Only Drink'), 'sold' => 'unit', 'price' => '1,250', 'category' => 'Bar', 'tick' => 1]]);
+    $mo = $dm($n('Menu Only Drink'));
+    $ck('save: a Menu-only user can still save (price 1,250 -> 1250.00), no cost in what comes back', $s4['ok'] && count($s4['added']) === 1 && $mo && (string)$mo['price'] === '1250.00'
+        && strpos(json_encode($s4), 'cost') === false, json_encode($s4));
+
+    // ---- the writer's missing-stock-item wording: no ending by default (the import's commit starts it with "Nothing was imported: ");
+    // Put on the menu adds its own "Nothing was saved."
+    $e1 = $e2 = '';
+    try { import_drinks_menu_write($pdo, ['action' => 'add', 'name' => $n('Gone A'), 'price' => 10, 'category' => $n('Err'), 'measure' => '1 bottle', 'link' => null], 0, $admin, false, 'test'); } catch (RuntimeException $e) { $e1 = $e->getMessage(); }
+    try { import_drinks_menu_write($pdo, ['action' => 'add', 'name' => $n('Gone B'), 'price' => 10, 'category' => $n('Err'), 'measure' => '1 bottle', 'link' => null], 0, $admin, false, 'test', ''); } catch (RuntimeException $e) { $e2 = $e->getMessage(); }
+    $ck('writer: no ending by default (the import prefixes "Nothing was imported: " once); Put on the menu passes no ending (its save adds "Nothing was saved." once)', substr($e1, -18) === 'could not be made.' && strpos($e1, 'Nothing') === false
+        && substr($e2, -18) === 'could not be made.' && strpos($e2, 'Nothing') === false, json_encode([$e1, $e2]));
 } catch (Throwable $e) {
     $ck('child ran without an exception', false, $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());
 }

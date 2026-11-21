@@ -778,6 +778,18 @@ try {
             (float)$col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Vodka H4')]) === 750.0
             && (float)$col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Mini H5')]) === 50.0);
     }
+    // the import's own wording when a drink's stock item is gone (49ddf7d had made it "Nothing was saved.", the Put on the menu wording)
+    $linkErr = '';
+    try {
+        import_drinks_menu_write($pdo, ['action' => 'add', 'name' => $n('No Stock Link'), 'price' => 100, 'category' => $n('Link Err'), 'measure' => '1 bottle', 'link' => null],
+            0, $admin, false, 'test');
+    } catch (RuntimeException $e) {
+        $linkErr = $e->getMessage();
+    }
+    // the import's commit (includes/import/commit-stock.php) starts every stop with "Nothing was imported: ", so the writer adds no ending: said once
+    $shown = 'Nothing was imported: ' . $linkErr;
+    $ck('import: a ticked drink whose stock item is gone stops with "Nothing was imported: ... could not be made." (said once)', substr($linkErr, -strlen('could not be made.')) === 'could not be made.'
+        && substr_count($shown, 'Nothing was imported') === 1, $shown);
 } catch (Throwable $e) {
     $ck('child ran without an exception', false, $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());
 } finally {

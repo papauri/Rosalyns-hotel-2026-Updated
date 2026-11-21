@@ -12,6 +12,7 @@
         var data;
         try { data = JSON.parse(dataEl.textContent || '{}'); } catch (e) { return; }
         var cur = data.currency ? data.currency + ' ' : '';
+        var showCost = data.show_cost !== false;      // no Stock permission: the server sends no costs and the cells keep their "—" + ?
         var rowsEl = Array.prototype.slice.call(table.querySelectorAll('tr.stm-row'));
         var state = {};          // ing id -> last row the server sent
         (data.rows || []).forEach(function (r) { state[r.ing_id] = r; });
@@ -53,8 +54,10 @@
             var status = tr.querySelector('.stm-status');
             var cat = tr.querySelector('.stm-in-cat');
             var sold = tr.querySelector('.stm-in-sold');
-            cost.innerHTML = r.cost === null ? '<span class="stm-muted">Not known</span>' : esc(num(r.cost)) + (r.cost_note ? '<span class="stm-muted stm-small">' + esc(r.cost_note) + '</span>' : '');
-            profit.innerHTML = r.profit === null ? '<span class="stm-muted">-</span>' : '<span class="' + (r.profit < 0 ? 'stm-neg' : '') + '">' + esc(num(r.profit)) + '</span>';
+            if (showCost) {
+                cost.innerHTML = r.cost === null ? '<span class="stm-muted">Not known</span>' : esc(num(r.cost)) + (r.cost_note ? '<span class="stm-muted stm-small">' + esc(r.cost_note) + '</span>' : '');
+                profit.innerHTML = r.profit === null ? '<span class="stm-muted">-</span>' : '<span class="' + (r.profit < 0 ? 'stm-neg' : '') + '">' + esc(num(r.profit)) + '</span>';
+            }
             var cls = { 'new': 'stm-pill--new', 'update': 'stm-pill--update', 'same': 'stm-pill--same', 'blocked': 'stm-pill--blocked' }[r.status] || '';
             var html = '<span class="stm-pill ' + cls + '">' + esc(r.status_text) + '</span>';
             if (r.status === 'update' || r.status === 'same') {

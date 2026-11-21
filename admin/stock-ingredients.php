@@ -2185,9 +2185,22 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             });
             stmCount();
         }
+        // the ids go by POST in ONE field (never the URL, never one field each): no URL length or max_input_vars limit can cut the list
         function stmPutOnMenu() {
             const ids = Array.from(document.querySelectorAll('.ing-row .stm-tick:checked')).map(b => b.value);
-            if (ids.length) window.location.href = 'stock-to-menu.php?ids=' + encodeURIComponent(ids.join(','));
+            if (!ids.length) return;
+            const f = document.createElement('form');
+            f.method = 'post';
+            f.action = 'stock-to-menu.php';
+            [['action', 'open'], ['ids', ids.join(',')], ['csrf_token', <?php echo json_encode((string)$csrf_token); ?>]].forEach(([k, v]) => {
+                const i = document.createElement('input');
+                i.type = 'hidden';
+                i.name = k;
+                i.value = v;
+                f.appendChild(i);
+            });
+            document.body.appendChild(f);
+            f.submit();
         }
 
         function filterTable() {
