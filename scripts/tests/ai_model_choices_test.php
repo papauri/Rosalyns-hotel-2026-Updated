@@ -38,6 +38,12 @@ rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
         $GLOBALS['stub_page_calls']++;
         return $GLOBALS['stub_page'] !== null ? ['http' => 200, 'body' => $GLOBALS['stub_page'], 'error' => ''] : ['http' => 503, 'body' => '', 'error' => 'unavailable'];
     }
+    if ($method === 'GET' && strpos($url, 'model_prices_and_context_window.json') !== false) { // the public price list (2026-11-21)
+        $GLOBALS['stub_pricelist_calls'] = ($GLOBALS['stub_pricelist_calls'] ?? 0) + 1;
+        $GLOBALS['stub_pricelist_headers'] = $headers;
+        $pl = $GLOBALS['stub_pricelist'] ?? null;
+        return $pl !== null ? ['http' => 200, 'body' => $pl, 'error' => ''] : ['http' => 503, 'body' => '', 'error' => 'unavailable'];
+    }
     if ($method === 'GET' && preg_match('#/models(\?|$)#', $url)) {
         $GLOBALS['stub_calls']++;
         $models = array_map(static fn($m) => ['name' => 'models/' . $m[0], 'displayName' => $m[1], 'supportedGenerationMethods' => ['generateContent'], 'inputTokenLimit' => 1048576], $GLOBALS['stub_list']);
@@ -152,8 +158,34 @@ try {
         && rh_ai_model_is_big(['model_id' => 'gemini-4-argon', 'price_out' => $rd($parsed, 'gemini-4-argon', '2026-12-01')[1]]),
         'Argon is not big at US$10 out; from 1 Dec (US$20 out) it is big by price and no longer suggested');
 
+    // Owner 2026-11-21 ("no need for us to set AI prices, you do it automatically"): the other providers read the public price list.
+    $listJson = json_encode([
+        'sample_spec' => ['input_cost_per_token' => 0, 'output_cost_per_token' => 0],
+        'claude-haiku-5-5' => ['litellm_provider' => 'anthropic', 'mode' => 'chat', 'input_cost_per_token' => 0.0000000999999, 'output_cost_per_token' => 0.0000005],
+        'claude-opus-5-5' => ['litellm_provider' => 'anthropic', 'mode' => 'chat', 'input_cost_per_token' => 0.000004, 'output_cost_per_token' => 0.00002],
+        'anthropic/claude-opus-5-5' => ['litellm_provider' => 'bedrock', 'mode' => 'chat', 'input_cost_per_token' => 0.000009, 'output_cost_per_token' => 0.00009],
+        'claude-embed-1' => ['litellm_provider' => 'anthropic', 'mode' => 'embedding', 'input_cost_per_token' => 0.000001, 'output_cost_per_token' => 0],
+        'claude-no-out' => ['litellm_provider' => 'anthropic', 'mode' => 'chat', 'input_cost_per_token' => 0.000001],
+        'xai/grok-5' => ['litellm_provider' => 'xai', 'mode' => 'chat', 'input_cost_per_token' => 0.000003, 'output_cost_per_token' => 0.000015],
+        'gpt-6-sol' => ['litellm_provider' => 'openai', 'mode' => 'responses', 'input_cost_per_token' => 0.000002, 'output_cost_per_token' => 0.00001],
+        'gemini/gemini-4-neon' => ['litellm_provider' => 'gemini', 'mode' => 'chat', 'input_cost_per_token' => 0.000003, 'output_cost_per_token' => 0.000015],
+        'gemini/gemma-4-31b-it' => ['litellm_provider' => 'gemini', 'mode' => 'chat', 'input_cost_per_token' => 0, 'output_cost_per_token' => 0],
+        'gemini/gemini-3.9-flash' => ['litellm_provider' => 'gemini', 'mode' => 'chat', 'input_cost_per_token' => 0.000009, 'output_cost_per_token' => 0.000009],
+    ]);
+    $an = rh_ai_price_list_parse($listJson, 'anthropic');
+    $an1 = rh_ai_price_page_prices(null, 'anthropic'); // no DB: empty, never throws
+    check(array_keys($an) === ['claude-haiku-5-5', 'claude-opus-5-5'] && $an['claude-haiku-5-5']['in'][0][0] === 0.1 && $an['claude-haiku-5-5']['out'][0][0] === 0.5
+        && $an['claude-opus-5-5']['in'][0][0] === 4.0 && $an['claude-opus-5-5']['out'][0][0] === 20.0 && $an1 === [],
+        'price list: Anthropic chat models only (US$ per million, rounded; another host, an embedding and a model with no out price are skipped)', json_encode($an));
+    check(array_keys(rh_ai_price_list_parse($listJson, 'xai')) === ['grok-5'] && array_keys(rh_ai_price_list_parse($listJson, 'openai')) === ['gpt-6-sol']
+        && array_keys(rh_ai_price_list_parse($listJson, 'google')) === ['gemini-4-neon', 'gemini-3.9-flash'] && rh_ai_price_list_parse('not json', 'anthropic') === [],
+        'price list: the "xai/" and "gemini/" prefixes are dropped; a Responses model counts; a US$0/US$0 free tier is not a price; a broken list reads as nothing');
+    check(rh_ai_price_page_url('google') !== rh_ai_price_page_url('anthropic') && strpos(rh_ai_price_page_url('anthropic'), 'model_prices_and_context_window.json') !== false
+        && rh_ai_price_page_url('nobody') === '', 'price sources: Google its page, every other provider the public list, an unknown provider none');
+
     $GLOBALS['stub_page'] = $page;
-    $GLOBALS['stub_list'] = array_merge($base, [['gemini-3.8-flash', 'Gemini 3.8 Flash'], ['gemini-3.9-flash', 'Gemini 3.9 Flash'], ['gemini-4-argon', 'Gemini 4 Argon'], ['gemini-flash-latest', 'Gemini Flash Latest']]);
+    $GLOBALS['stub_pricelist'] = $listJson;
+    $GLOBALS['stub_list'] = array_merge($base, [['gemini-3.8-flash', 'Gemini 3.8 Flash'], ['gemini-3.9-flash', 'Gemini 3.9 Flash'], ['gemini-4-argon', 'Gemini 4 Argon'], ['gemini-flash-latest', 'Gemini Flash Latest'], ['gemini-4-neon', 'Gemini 4 Neon'], ['gemma-4-31b-it', 'Gemma 4 31B']]);
     $pdo->exec("UPDATE ai_models SET price_in_per_mtok = 0.31, price_out_per_mtok = 2.51, price_edited = 1 WHERE provider = 'google' AND model_id = 'gemini-3.5-flash-lite'");
     $calls = $GLOBALS['stub_page_calls'];
     $r6 = rh_ai_refresh_provider($pdo, 'google');
@@ -165,8 +197,17 @@ try {
     check(abs((float)$r39['price_in_per_mtok'] - $today['gemini-3.9-flash'][0]) < 0.0001 && abs((float)$r39['price_out_per_mtok'] - $today['gemini-3.9-flash'][1]) < 0.0001 && (int)$r39['is_new'] === 0,
         'price page: a new model with no built-in price gets the page price and stops waiting for one', json_encode($r39));
     $r35 = $row('gemini-3.5-flash-lite');
-    check(abs((float)$r35['price_in_per_mtok'] - 0.31) < 0.0001 && abs((float)$r35['price_out_per_mtok'] - 2.51) < 0.0001 && (int)$r35['price_edited'] === 1,
-        'price page: a price typed by hand is never overwritten', json_encode($r35));
+    // Owner 2026-11-21 ("no need for us to set AI prices, you do it automatically"): the automatic price replaces an old typed one.
+    check($r35['price_in_per_mtok'] !== null && $r35['price_out_per_mtok'] !== null
+        && !(abs((float)$r35['price_in_per_mtok'] - 0.31) < 0.0001 && abs((float)$r35['price_out_per_mtok'] - 2.51) < 0.0001) && (int)$r35['price_edited'] === 0,
+        'prices are automatic: an old price typed by hand is replaced by the known price (page or built-in list)', json_encode($r35));
+    $rNeon = $row('gemini-4-neon');
+    $rGemma = $row('gemma-4-31b-it');
+    $plHeaders = strtolower(implode("\n", (array)($GLOBALS['stub_pricelist_headers'] ?? [])));
+    check(abs((float)$rNeon['price_in_per_mtok'] - 3) < 0.0001 && abs((float)$rNeon['price_out_per_mtok'] - 15) < 0.0001 && $rGemma['price_in_per_mtok'] === null
+        && abs((float)$r39['price_in_per_mtok'] - 9) >= 0.0001 && strpos((string)$r6['message'], 'from the public model price list') !== false
+        && strpos($plHeaders, 'key') === false && strpos($plHeaders, 'authorization') === false,
+        'Google: the public list fills a model its page does not show (Gemini 4 Neon); the page price wins; a free Gemma stays unpriced; no key is sent to the list', json_encode([$rNeon, $rGemma, (string)$r6['message']]));
     $c6 = rh_ai_model_choices($pdo, 'google');
     $shown6 = $ids($c6['rows']);
     check(in_array('gemini-4-argon', $shown6, true) && !rh_ai_model_banned('gemini-4-argon') && !in_array('gemini-flash-latest', $shown6, true),

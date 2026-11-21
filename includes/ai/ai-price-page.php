@@ -10,17 +10,92 @@
  *    200k" line, text rather than audio). A dated price ("until 30 Nov 2026, then ...") is kept with its dates, so the
  *    price in effect is worked out on the day it is used, even when the page cannot be read that day.
  *  - Saved in site_settings (ai_price_page_<provider>: when read + the prices per id). rh_ai_sync_models lays these
- *    over the list it saves; a price typed by hand (price_edited = 1) always wins.
+ *    over the list it saves (owner 2026-11-21: prices are never typed; a page price replaces any old typed one).
  *  - The page cannot be read or no price is found: the last prices stay, one notice for the Assistant Settings people,
  *    and the page never breaks.
  */
 
 require_once __DIR__ . '/ai-providers.php';
 
-/** The price pages read automatically, per provider. */
+/**
+ * The price source read automatically, per provider. Google: its own price page (it also carries dated prices).
+ * Every other provider (owner 2026-11-21: "no need for us to set AI prices, you do it automatically"): the public
+ * price list kept by the open-source LiteLLM project, keyed by the provider's exact model ids (its Google figures
+ * matched Google's own page when this was added). Read the same way: daily, through rh_ai_http, no key sent.
+ */
 function rh_ai_price_page_url(string $provider): string
 {
-    return $provider === 'google' ? 'https://ai.google.dev/gemini-api/docs/pricing' : '';
+    if ($provider === 'google') {
+        return 'https://ai.google.dev/gemini-api/docs/pricing';
+    }
+    return isset(rh_ai_price_list_providers()[$provider]) ? rh_ai_price_list_url() : '';
+}
+
+/** The public model price list (LiteLLM, JSON, about 5 MB). */
+function rh_ai_price_list_url(): string
+{
+    return 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
+}
+
+/**
+ * Where each provider's models sit in the public price list: [list provider name, id prefix]. Google is here too: after
+ * a good read of its own page, the list fills only the ids the page does not show (the page always wins).
+ */
+function rh_ai_price_list_providers(): array
+{
+    return [
+        'anthropic' => ['anthropic', ''],
+        'openai'    => ['openai', ''],
+        'google'    => ['gemini', 'gemini/'],
+        'xai'       => ['xai', 'xai/'],
+        'deepseek'  => ['deepseek', 'deepseek/'],
+    ];
+}
+
+/** Plain name of a provider's automatic price source, for the page and notices. */
+function rh_ai_price_source_label(string $provider): string
+{
+    return $provider === 'google' ? 'Google\'s price page (or the public model price list for a model the page does not show)' : 'the public model price list';
+}
+
+/**
+ * Read the public price list (JSON) for one provider, in the same shape as rh_ai_price_page_parse (one undated price
+ * window each). Only chat models with both prices; US$ per token turned into US$ per million, 4 decimals.
+ * @return array<string,array{in:list<array>,out:list<array>,label:string}>
+ */
+function rh_ai_price_list_parse(string $json, string $provider): array
+{
+    $map = rh_ai_price_list_providers()[$provider] ?? null;
+    $j = $map ? json_decode($json, true) : null;
+    if (!is_array($j)) {
+        return [];
+    }
+    [$listName, $prefix] = $map;
+    $out = [];
+    foreach ($j as $key => $v) {
+        if (!is_array($v) || (string)($v['litellm_provider'] ?? '') !== $listName) {
+            continue;
+        }
+        $mode = (string)($v['mode'] ?? 'chat');
+        if ($mode !== 'chat' && $mode !== 'responses') {
+            continue;
+        }
+        $id = strtolower((string)$key);
+        if ($prefix !== '' && strpos($id, $prefix) === 0) {
+            $id = substr($id, strlen($prefix));
+        }
+        if ($id === '' || strpos($id, '/') !== false || !is_numeric($v['input_cost_per_token'] ?? null) || !is_numeric($v['output_cost_per_token'] ?? null)) {
+            continue;
+        }
+        $in = round((float)$v['input_cost_per_token'] * 1000000, 4);
+        $o = round((float)$v['output_cost_per_token'] * 1000000, 4);
+        // US$0 both ways (a free tier, e.g. Gemma) is not a paid price: left unknown so cost is never under-counted.
+        if ($in < 0 || $o < 0 || $in > 1000 || $o > 1000 || ($in == 0 && $o == 0)) {
+            continue;
+        }
+        $out[$id] = ['in' => [[$in, null, null]], 'out' => [[$o, null, null]], 'label' => ''];
+    }
+    return $out;
 }
 
 /** Plain text of a bit of HTML: line breaks kept, tags dropped, entities decoded, spaces tidied. */
@@ -250,20 +325,40 @@ function rh_ai_price_page_refresh(PDO $db, string $provider): array
     }
     $label = rh_ai_provider_list()[$provider]['label'] ?? $provider;
     $found = [];
+    $isPage = $provider === 'google';
+    $fromList = 0;
+    $ua = 'User-Agent: Mozilla/5.0 (compatible; HotelAssistantPrices/1.0)';
     try {
-        $r = rh_ai_http('GET', $url, ['Accept: text/html', 'User-Agent: Mozilla/5.0 (compatible; HotelAssistantPrices/1.0)'], null, 10);
-        if ($r['http'] === 200 && $r['body'] !== '' && strlen($r['body']) <= 6000000) {
-            $found = rh_ai_price_page_parse($r['body']);
+        if ($isPage) {
+            $r = rh_ai_http('GET', $url, ['Accept: text/html', $ua], null, 10);
+            if ($r['http'] === 200 && $r['body'] !== '' && strlen($r['body']) <= 6000000) {
+                $found = rh_ai_price_page_parse($r['body']);
+            }
+        }
+        // The public list: the source for the other providers; for Google only after a good page read (a failed page
+        // read keeps the last saved page prices with their dates, never a list-only set).
+        if (isset(rh_ai_price_list_providers()[$provider]) && (!$isPage || $found)) {
+            $r = rh_ai_http('GET', rh_ai_price_list_url(), ['Accept: application/json', $ua], null, 20);
+            if ($r['http'] === 200 && $r['body'] !== '' && strlen($r['body']) <= 15000000) { // about 5 MB
+                foreach (rh_ai_price_list_parse($r['body'], $provider) as $id => $p) {
+                    if (!isset($found[$id])) {
+                        $found[$id] = $p;
+                        $fromList++;
+                    }
+                }
+            }
         }
     } catch (Throwable $e) {
-        $found = [];
+        $found = $isPage ? $found : [];
     }
     if (!$found) {
         $saved = rh_ai_price_page_saved($db, $provider);
         $since = $saved['at'] !== '' ? ' (last read ' . date('j M Y', (int)strtotime($saved['at'])) . ')' : '';
-        $msg = $label . '\'s price page could not be read today, so the last known prices were kept' . $since . '.';
+        $msg = $isPage
+            ? $label . '\'s price page could not be read today, so the last known prices were kept' . $since . '.'
+            : 'The ' . $label . ' prices could not be read today from the public model price list, so the last known prices were kept' . $since . '.';
         if (function_exists('rh_ai_notify_settings')) {
-            rh_ai_notify_settings($db, 'price_page', $msg . ' Check the prices in Assistant Settings > Models if a model looks wrong.');
+            rh_ai_notify_settings($db, 'price_page', $msg . ' Prices are filled in automatically again once it can be read.');
         }
         return ['ok' => false, 'count' => 0, 'message' => $msg];
     }
@@ -274,5 +369,6 @@ function rh_ai_price_page_refresh(PDO $db, string $provider): array
         error_log('Assistant: could not save the price page read: ' . $e->getMessage());
     }
     $n = count($found);
-    return ['ok' => true, 'count' => $n, 'message' => 'Prices read from ' . $label . '\'s price page on ' . date('j M Y') . ' (' . $n . ' model id' . ($n === 1 ? '' : 's') . ').'];
+    return ['ok' => true, 'count' => $n, 'message' => 'Prices read from ' . ($isPage ? $label . '\'s price page' : 'the public model price list') . ' on ' . date('j M Y') . ' (' . $n . ' model id' . ($n === 1 ? '' : 's')
+        . ($isPage && $fromList > 0 ? ', ' . $fromList . ' of them from the public model price list' : '') . ').'];
 }

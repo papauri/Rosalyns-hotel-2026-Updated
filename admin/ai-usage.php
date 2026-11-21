@@ -96,9 +96,9 @@ $cs = ($ls !== null && function_exists('rh_ai_claim_stats')) ? rh_ai_claim_stats
 
         <div class="ai-usage-cards" id="ai-usage-cards">
             <div class="ai-stat">
-                <span class="ai-stat__label">This month's estimated cost <i class="help" data-tip="Every Assistant reply since the 1st of this month, priced with the model prices on Assistant Settings, next to the monthly aim. Information only: nothing pauses or warns when the aim is passed.">?</i></span>
+                <span class="ai-stat__label">This month's estimated cost <i class="help" data-tip="Every Assistant reply since the 1st of this month, priced with the model prices on Assistant Settings (filled in automatically), next to the monthly cap. Information only: nothing pauses when the cap is passed.">?</i></span>
                 <span class="ai-stat__value"><?php echo $h($money($u['month_cost'])); ?></span>
-                <span class="ai-stat__sub"><?php echo $u['budget'] > 0 ? $h('monthly aim ' . $money($u['budget']) . ' (' . number_format((float)$u['budget_pct'], 1) . '% of it)') : 'No monthly aim set'; ?></span>
+                <span class="ai-stat__sub"><?php echo $u['budget'] > 0 ? $h('monthly cap ' . $money($u['budget']) . ' (' . number_format((float)$u['budget_pct'], 1) . '% of it)') : 'No monthly cap set'; ?></span>
             </div>
             <div class="ai-stat">
                 <span class="ai-stat__label">Answers <i class="help" data-tip="Replies the Assistant gave in the chosen days, including quick lookups and the daily briefing. Heavy answers used more than 8,000 input tokens: they are not stopped, only counted, so you can see if the Assistant is getting less efficient.">?</i></span>

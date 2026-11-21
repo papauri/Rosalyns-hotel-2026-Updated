@@ -280,7 +280,7 @@ function rh_ai_model_choices_notice(array $ch, int $listed, array $newIds = []):
         if ($st === 'top') {
             $choice[] = $label . (in_array($id, $newIds, true) ? ' (new)' : '');
         } elseif ($st === 'new_price') {
-            $choice[] = $label . ' (new - type its price before it can be used)';
+            $choice[] = $label . ' (new - no price yet, cannot be used until one is found)';
         } elseif ($st === 'older') {
             $older[] = $label . ' (' . $roleName((string)$m['role']) . ')';
         } elseif ($st === 'retired') {

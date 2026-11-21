@@ -7,7 +7,7 @@
  * Ranking (plan Phase 1 "Model discovery"):
  *  - a model in the catalog keeps the catalog rank, label and prices;
  *  - an unknown id is ranked from its family and version (e.g. a newer "opus" sits just above the
- *    newest known opus) and its created date, and is flagged "new - set price" (prices editable);
+ *    newest known opus) and its created date, and is flagged new until a price is found automatically;
  *  - the top 5 are offered pre-ticked; nothing is saved until a person clicks Save.
  */
 
@@ -311,7 +311,13 @@ function rh_ai_model_roles(): array
 
 // ── ai_models table ───────────────────────────────────────────────────────────
 
-/** Save a ranked list for a provider; keeps chosen models and hand-edited prices. */
+/**
+ * Save a ranked list for a provider; keeps chosen models.
+ * Prices are automatic (owner 2026-11-21: "no need for us to set AI prices, you do it automatically, we just set max
+ * cap"): a known price (provider price page, else the built-in list) always replaces the stored one, also one typed
+ * by hand before this change (price_edited goes back to 0). With no known price the stored one stays (the last known
+ * price, never wiped to blank).
+ */
 function rh_ai_sync_models(PDO $db, string $provider, array $ranked): void
 {
     $up = $db->prepare(
@@ -319,15 +325,18 @@ function rh_ai_sync_models(PDO $db, string $provider, array $ranked): void
                                 capability_rank, source, is_new, sort, last_seen_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
          ON DUPLICATE KEY UPDATE label = VALUES(label), released_at = VALUES(released_at), context_tokens = VALUES(context_tokens),
-             price_in_per_mtok = IF(price_edited = 1, price_in_per_mtok, VALUES(price_in_per_mtok)),
-             price_out_per_mtok = IF(price_edited = 1, price_out_per_mtok, VALUES(price_out_per_mtok)),
+             price_edited = IF(VALUES(price_in_per_mtok) IS NOT NULL AND VALUES(price_out_per_mtok) IS NOT NULL, 0, price_edited),
+             is_new = IF(VALUES(price_in_per_mtok) IS NOT NULL AND VALUES(price_out_per_mtok) IS NOT NULL, VALUES(is_new),
+                         IF(price_in_per_mtok IS NOT NULL AND price_out_per_mtok IS NOT NULL, 0, VALUES(is_new))),
+             price_in_per_mtok = IF(VALUES(price_in_per_mtok) IS NOT NULL AND VALUES(price_out_per_mtok) IS NOT NULL, VALUES(price_in_per_mtok), price_in_per_mtok),
+             price_out_per_mtok = IF(VALUES(price_in_per_mtok) IS NOT NULL AND VALUES(price_out_per_mtok) IS NOT NULL, VALUES(price_out_per_mtok), price_out_per_mtok),
              capability_rank = VALUES(capability_rank), source = IF(source = 'gone', 'gone', VALUES(source)),
-             is_new = IF(price_edited = 1, 0, VALUES(is_new)), sort = VALUES(sort), last_seen_at = NOW()"
+             sort = VALUES(sort), last_seen_at = NOW()"
     );
     $ids = [];
     $ranked = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)($m['model_id'] ?? '')))); // a banned model (none at present) is never stored
     // Prices read from the provider's own price page (owner 2026-11-20), in effect today, laid over the built-in list.
-    // Every save keeps them (also when today's read failed); a price typed by hand still wins (price_edited = 1 below).
+    // Every save keeps them (also when today's read failed). Nothing typed by hand wins any more (owner 2026-11-21).
     $pagePrices = rh_ai_price_page_prices($db, $provider);
     if ($pagePrices) {
         foreach ($ranked as $i => $m) {
@@ -389,10 +398,10 @@ function rh_ai_models_for(PDO $db, string $provider): array
  * Save the chosen models (up to 5) for one provider and make it the provider in use. Every other
  * provider's choice is cleared (one provider at a time).
  * @param array<string,string> $roles model_id => role
- * @param array<string,array{0:?string,1:?string}> $prices model_id => [in, out] as typed ('' = unknown)
+ * Prices are never typed (owner 2026-11-21): they come from rh_ai_sync_models only.
  * @throws RuntimeException with a plain message when the choice is not valid
  */
-function rh_ai_save_selection(PDO $db, string $provider, array $roles, array $prices = []): void
+function rh_ai_save_selection(PDO $db, string $provider, array $roles): void
 {
     if (!rh_ai_is_provider($provider)) {
         throw new RuntimeException('Unknown provider.');
@@ -426,34 +435,10 @@ function rh_ai_save_selection(PDO $db, string $provider, array $roles, array $pr
             throw new RuntimeException('One of the chosen models is not offered by this provider any more. Click Check for newer models.');
         }
     }
-    $num = static function ($v): ?float {
-        $v = trim((string)$v);
-        if ($v === '') {
-            return null;
-        }
-        if (!is_numeric($v) || (float)$v < 0 || (float)$v > 10000) {
-            throw new RuntimeException('Prices must be numbers between 0 and 10000 (US dollars per million tokens).');
-        }
-        return round((float)$v, 4);
-    };
     $db->prepare("UPDATE ai_models SET is_selected = 0, role = NULL")->execute();
     $sel = $db->prepare("UPDATE ai_models SET is_selected = 1, role = ? WHERE provider = ? AND model_id = ?");
     foreach ($roles as $id => $role) {
         $sel->execute([$role, $provider, $id]);
-    }
-    $pr = $db->prepare("UPDATE ai_models SET price_in_per_mtok = ?, price_out_per_mtok = ?, price_edited = 1, is_new = 0 WHERE provider = ? AND model_id = ?");
-    foreach ($prices as $id => $pair) {
-        if (!isset($known[$id])) {
-            continue;
-        }
-        $in = $num($pair[0] ?? '');
-        $out = $num($pair[1] ?? '');
-        $oldIn = $known[$id]['price_in_per_mtok'] !== null ? round((float)$known[$id]['price_in_per_mtok'], 4) : null;
-        $oldOut = $known[$id]['price_out_per_mtok'] !== null ? round((float)$known[$id]['price_out_per_mtok'], 4) : null;
-        if ($in === $oldIn && $out === $oldOut) {
-            continue; // unchanged: keep following the catalog
-        }
-        $pr->execute([$in, $out, $provider, $id]);
     }
     rh_ai_save_settings(['ai_provider' => $roles ? $provider : ''], $db);
 }
@@ -569,7 +554,7 @@ function rh_ai_refresh_provider(PDO $db, string $provider): array
         $unpriced = array_values(array_intersect($ch['new_unpriced'], $newIds));
         if ($unpriced) {
             rh_ai_notify_settings($db, 'model_new_price', 'New ' . $pLabel . ' model(s) offered as a choice but with no price yet: '
-                . implode(', ', $unpriced) . '. They are not used until a price is typed in Assistant Settings > Models (New - set price).');
+                . implode(', ', $unpriced) . '. They are not used until a price is found; prices are read automatically each day (no need to type one).');
         }
         if ($ch['retired']) {
             rh_ai_notify_settings($db, 'model_retired', $pLabel . ' no longer offers ' . implode(', ', $ch['retired'])

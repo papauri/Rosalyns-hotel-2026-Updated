@@ -682,6 +682,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides: guide 08 already updated in this ship (chips example). Other guides that mention yield (recipes/menu, KB answers) should use the same example: 10 kg potatoes peeled to 8 kg = 80 %; 250 g chips plate takes 313 g raw; sack makes 32 plates, not 40; type the plate amount; rice/pasta dry amount at 100 %.
 - Assistant: if it explains yield, use the same example and rule (raw taken off = plate amount / yield).
 
+### Assistant Settings: model prices automatic, "Monthly cap" (2026-11-21, owner FEATURE)
+- Owner: "no need for us to set AI prices, you do it automatically, we just set max cap" (cap stays information only, never stops chat).
+- Guides (Assistant Settings > Models): no Price in / Price out boxes any more; prices are read automatically each day (Google's own price page; the public model price list for Anthropic, OpenAI, xAI, DeepSeek, and for Google models its page does not show) and on Test connection / Check for newer models. A model with "No price yet" cannot be ticked until a price is found. "New - set price" is gone.
+- Guides (Budgets and limits, Usage): "Monthly aim" is now "Monthly cap (US$)"; still information only.
+- Assistant: settings key unchanged (`ai_monthly_budget_usd`); if it mentions the figure, call it the monthly cap. `rh_ai_save_selection()` takes no prices.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)

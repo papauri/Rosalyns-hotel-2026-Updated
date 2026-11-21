@@ -1,7 +1,7 @@
 <?php
 /**
  * Daily: refresh the Assistant's model lists from each provider that has a saved key, so newer
- * models show up in Assistant Settings ("new - set price"). Chosen models are never changed.
+ * models show up in Assistant Settings ("No price yet" until a price is found). Chosen models are never changed.
  *
  * Exits straight away, without any network call, when the Assistant is off
  * (rh_ai_enabled() is fail-closed: setting, module row and migration must all be in place).

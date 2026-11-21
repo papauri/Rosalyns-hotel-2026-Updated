@@ -573,16 +573,18 @@ if (!$schemaReady) {
         $e3 = '';
         try { rh_ai_save_selection($pdo, 'anthropic', ['claude-nope' => 'primary']); } catch (RuntimeException $e) { $e3 = $e->getMessage(); }
         check($e3 !== '', 'a model the provider does not offer is refused');
-        rh_ai_save_selection($pdo, 'anthropic', ['claude-opus-5-5' => 'primary', 'claude-haiku-5-5' => 'fast', 'claude-opus-6' => 'fallback'], ['claude-opus-6' => ['6', '30'], 'claude-opus-5-5' => ['4', '20']]);
+        rh_ai_save_selection($pdo, 'anthropic', ['claude-opus-5-5' => 'primary', 'claude-haiku-5-5' => 'fast', 'claude-opus-6' => 'fallback']);
         $sel = $pdo->query("SELECT model_id, role, price_edited, price_in_per_mtok, is_new FROM ai_models WHERE is_selected = 1 ORDER BY model_id")->fetchAll(PDO::FETCH_ASSOC);
         check(count($sel) === 3, 'three models chosen');
         $sb = array_column($sel, null, 'model_id');
-        check((int)$sb['claude-opus-6']['price_edited'] === 1 && abs((float)$sb['claude-opus-6']['price_in_per_mtok'] - 6) < 0.0001 && (int)$sb['claude-opus-6']['is_new'] === 0, 'a typed price is kept and clears "set price"');
-        check((int)$sb['claude-opus-5-5']['price_edited'] === 0, 'an unchanged price keeps following the catalog');
+        check($sb['claude-opus-6']['price_in_per_mtok'] === null && (int)$sb['claude-opus-6']['price_edited'] === 0, 'saving models never writes a price (prices are automatic, owner 2026-11-21)');
         check($pdo->query("SELECT setting_value FROM site_settings WHERE setting_key = 'ai_provider'")->fetchColumn() === 'anthropic' && rh_ai_active_provider() === 'anthropic', 'saving models makes that provider the one in use');
+        // An old price typed before 2026-11-21: replaced by the known price; with none known the last price stays.
+        $pdo->exec("UPDATE ai_models SET price_in_per_mtok = 6, price_out_per_mtok = 30, price_edited = 1 WHERE model_id IN ('claude-opus-6', 'claude-opus-5-5')");
         rh_ai_sync_models($pdo, 'anthropic', $t['ranked']);
-        $p6 = (float)$pdo->query("SELECT price_in_per_mtok FROM ai_models WHERE model_id = 'claude-opus-6'")->fetchColumn();
-        check(abs($p6 - 6) < 0.0001, 'a later refresh keeps the hand-typed price');
+        $pr = array_column($pdo->query("SELECT model_id, price_in_per_mtok, price_edited FROM ai_models WHERE model_id IN ('claude-opus-6', 'claude-opus-5-5')")->fetchAll(PDO::FETCH_ASSOC), null, 'model_id');
+        check(abs((float)$pr['claude-opus-5-5']['price_in_per_mtok'] - 4) < 0.0001 && (int)$pr['claude-opus-5-5']['price_edited'] === 0, 'a later refresh replaces an old typed price with the known one');
+        check(abs((float)$pr['claude-opus-6']['price_in_per_mtok'] - 6) < 0.0001, 'a model with no known price keeps its last price (never wiped)');
         rh_ai_sync_models($pdo, 'anthropic', array_values(array_filter($t['ranked'], static fn($m) => $m['model_id'] !== 'claude-opus-6' && $m['model_id'] !== 'claude-mystery-1')));
         $left = $pdo->query("SELECT model_id FROM ai_models WHERE provider = 'anthropic'")->fetchAll(PDO::FETCH_COLUMN);
         check(in_array('claude-opus-6', $left, true) && !in_array('claude-mystery-1', $left, true), 'a dropped model stays only if it was chosen');
@@ -592,7 +594,11 @@ if (!$schemaReady) {
         check(rh_ai_enabled($pdo), 'master switch on sets the setting and the module row');
         $GLOBALS['ai_calls'] = [];
         $r = rh_ai_model_refresh_run($pdo);
-        check($r['ran'] && ($r['results']['anthropic']['ok'] ?? false) && count($GLOBALS['ai_calls']) === 1 && strpos(json_encode($r), $FAKE_KEY) === false, 'refresh runs when on, one list call, no key in the result');
+        // Plus one read of the public price list (owner 2026-11-21: prices automatic), which never carries the key.
+        $listCalls = array_values(array_filter($GLOBALS['ai_calls'], static fn($c) => strpos((string)$c['url'], 'model_prices_and_context_window.json') === false));
+        $priceCalls = array_values(array_filter($GLOBALS['ai_calls'], static fn($c) => strpos((string)$c['url'], 'model_prices_and_context_window.json') !== false));
+        check($r['ran'] && ($r['results']['anthropic']['ok'] ?? false) && count($listCalls) === 1 && count($priceCalls) === 1 && strpos(json_encode($priceCalls), $FAKE_KEY) === false && strpos(json_encode($r), $FAKE_KEY) === false,
+            'refresh runs when on, one list call and one price-list read (no key sent), no key in the result');
         rh_ai_set_master(false, $pdo);
         check(!rh_ai_enabled($pdo) && (int)$pdo->query("SELECT is_enabled FROM enabled_modules WHERE module_key = 'ai_assistant'")->fetchColumn() === 0, 'master switch off turns both off');
         check((int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE is_selected = 1")->fetchColumn() === 3 && rh_ai_get_key('anthropic', $pdo) === $FAKE_KEY, 'switching off keeps keys and choices');
@@ -653,7 +659,7 @@ if (!$schemaReady) {
     check($body !== '' && strpos($body, 'id="ai-usage"') !== false, 'admin page renders all six sections');
     check(strpos($html, $FAKE_KEY) === false && strpos($html, $encRow) === false && strpos($html, substr($FAKE_KEY, 0, 12)) === false, 'page output never contains the key or its encrypted form');
     check(strpos($body, "\u{2022}\u{2022}\u{2022}\u{2022}WXYZ") !== false, 'page shows the key as ••••last4');
-    check(strpos($body, 'New - set price') !== false && strpos($body, 'Newest') !== false, 'models table flags new models and the newest');
+    check(strpos($body, 'No price yet') !== false && strpos($body, 'Newest') !== false && strpos($body, 'name="price_in[') === false, 'models table flags models with no price yet and the newest; no price boxes');
     check(strpos($body, 'Off - nobody sees the Assistant') !== false, 'status line says it is off');
     check(strpos($body, 'DeepSeek is hosted in China') !== false, 'DeepSeek card notes China hosting');
     check(!preg_match('/fa-(magic|wand|robot|hat-wizard)|sparkle|\bsmart\b|AI magic/i', $body), 'no sparkle/wand/robot icons or "smart" wording');

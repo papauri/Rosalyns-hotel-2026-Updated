@@ -97,6 +97,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $key = '';
             rh_ai_record_test($prov, $t['ok'], $t['ms'], $t['message'], $pdo);
             if ($t['ranked']) {
+                if ($t['ok'] && rh_ai_price_page_url($prov) !== '') {
+                    rh_ai_price_page_refresh($pdo, $prov); // prices are automatic (owner 2026-11-21); never throws
+                }
                 rh_ai_sync_models($pdo, $prov, $t['ranked']);
             }
             $aiFlash($t['ok'] ? 'success' : 'warning', 'Key saved for ' . $provLabel . '. ' . $t['message'], 'ai-prov-' . $prov);
@@ -111,6 +114,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $key = '';
             rh_ai_record_test($prov, $t['ok'], $t['ms'], $t['message'], $pdo);
             if ($t['ranked']) {
+                if ($t['ok'] && rh_ai_price_page_url($prov) !== '') {
+                    rh_ai_price_page_refresh($pdo, $prov); // prices are automatic (owner 2026-11-21); never throws
+                }
                 rh_ai_sync_models($pdo, $prov, $t['ranked']);
             }
             logActivity($uid, 'ai_settings', 'Assistant connection test for ' . $provLabel . ': ' . ($t['ok'] ? 'ok' : 'failed'));
@@ -155,6 +161,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
                 }
+                // Owner 2026-11-21 ("no need for us to set AI prices, you do it automatically"): prices are never typed.
+                // A model with no known price yet cannot be newly chosen (its cost would not count); one already in use stays.
+                if (isset($offeredNow[$mid]) && ($offeredNow[$mid]['price_in_per_mtok'] === null || $offeredNow[$mid]['price_out_per_mtok'] === null)
+                    && (int)($offeredNow[$mid]['is_selected'] ?? 0) !== 1) {
+                    $saveNotes[] = $nameOf($mid) . ' has no price yet, so it was not chosen. Its price is filled in automatically once the provider publishes it.';
+                    continue;
+                }
                 $picks[] = $mid;
                 $postRoles[$mid] = (string)($_POST['role'][$mid] ?? '');
             }
@@ -168,11 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $norm = rh_ai_normalise_picks($picks, $postRoles, array_map(static fn($m) => (float)$m['capability_rank'], $offeredNow), array_map(static fn($m) => (string)$m['label'], $offeredNow));
             $roles = $norm['roles'];
             $saveNotes = array_merge($saveNotes, $norm['notes']);
-            $prices = [];
-            foreach ((array)($_POST['price_in'] ?? []) as $mid => $pin) {
-                $prices[(string)$mid] = [(string)$pin, (string)($_POST['price_out'][$mid] ?? '')];
-            }
-            rh_ai_save_selection($pdo, $prov, $roles, $prices);
+            rh_ai_save_selection($pdo, $prov, $roles); // prices are automatic (built-in list + provider price page)
             logActivity($uid, 'ai_settings', 'Assistant models saved for ' . $provLabel . ': ' . implode(', ', array_map(static fn($k, $v) => $k . ' (' . $v . ')', array_keys($roles), $roles)));
             $setText = implode(', ', array_map(static fn($k, $v) => $nameOf((string)$k) . ' (' . ucfirst($v) . ')', array_keys($roles), $roles));
             $aiFlash('success', $roles
@@ -189,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Daily limit per person: a whole number of tokens from 1,000 to 50,000,000.');
             }
             if (!is_numeric($budget) || (float)$budget < 1 || (float)$budget > 100000) {
-                throw new RuntimeException('Monthly aim: a number of US dollars from 1 to 100,000.');
+                throw new RuntimeException('Monthly cap: a number of US dollars from 1 to 100,000.');
             }
             if (!ctype_digit($rate) || (int)$rate < 1 || (int)$rate > 500) {
                 throw new RuntimeException('Messages per person in 10 minutes: a whole number from 1 to 500.');
@@ -799,7 +808,7 @@ $fmtPrice = static function ($v): string {
                     $suggest = $choices['suggest'];
                     $mBadges = $choices['badges'];
                     $mSpeed = $choices['speed_ms'];
-                    // Prices read from the provider's own price page (Google only): shown with the day they were read.
+                    // Prices read automatically (Google's price page; the public price list for the others): shown with the day read.
                     $pagePrices = rh_ai_price_page_prices($pdo, $p);
                     $pageAt = rh_ai_price_page_saved($pdo, $p)['at'];
                     $hasKeyP = !empty($states[$p]['has_key']);
@@ -828,29 +837,34 @@ $fmtPrice = static function ($v): string {
                                 <th>Model</th>
                                 <th>Role <i class="help" data-tip="Primary answers questions and plans. Fast does short replies and routing. Fallback is used when Primary fails. Extra is kept ready.">?</i></th>
                                 <th>Context <i class="help" data-tip="How much text the model can read at once, in tokens (1 token is about 3/4 of a word). 1M = one million.">?</i></th>
-                                <th>Price in <i class="help" data-tip="US dollars per million tokens sent to the model. Used only to estimate cost on this page and against the monthly aim. Leave blank if unknown.">?</i></th>
-                                <th>Price out <i class="help" data-tip="US dollars per million tokens the model writes back. Used only for cost estimates and the monthly aim.">?</i></th>
-                                <th>Notes <i class="help" data-tip="Newest = the latest version in this list. Cheapest = the lowest price in plus out. Fastest = the quickest replies measured here (at least 5 in 30 days), otherwise the quickest kind of model (Flash-Lite, then Flash, then the rest). Price from Google's page = read from Google's price page on that day; a price you type is kept instead. New - set price = not in the built-in list; type its price from the provider's price page. Suggested = a current top model you have not chosen yet. No longer offered = the provider dropped a model you use; choose a replacement.">?</i></th>
+                                <th>Price in <i class="help" data-tip="US dollars per million tokens sent to the model, filled in automatically each day: from Google's own price page for Google, from the public model price list (LiteLLM) for the other providers, or the built-in list. Used to estimate cost against the monthly cap.">?</i></th>
+                                <th>Price out <i class="help" data-tip="US dollars per million tokens the model writes back, filled in automatically the same way. Used to estimate cost against the monthly cap.">?</i></th>
+                                <th>Notes <i class="help" data-tip="Newest = the latest version in this list. Cheapest = the lowest price in plus out. Fastest = the quickest replies measured here (at least 5 in 30 days), otherwise the quickest kind of model (Flash-Lite, then Flash, then the rest). Price read = the day the price was read automatically. No price yet = no price could be read for it yet; it cannot be chosen until one is found (checked daily). Suggested = a current top model you have not chosen yet. No longer offered = the provider dropped a model you use; choose a replacement.">?</i></th>
                             </tr></thead>
                             <tbody>
                             <?php foreach ($rows as $m):
                                 $mid = (string)$m['model_id'];
                                 $ticked = $hasSel ? (int)$m['is_selected'] === 1 : isset($suggest[$mid]);
                                 $role = $hasSel ? (string)($m['role'] ?? '') : (string)($suggest[$mid] ?? '');
+                                $role = ($m['price_in_per_mtok'] === null || $m['price_out_per_mtok'] === null) && (int)$m['is_selected'] !== 1 ? '' : $role; // no price yet: never shown as suggested
                                 $mSt = (string)($mStatus[$mid] ?? '');
                                 $retired = $mSt === 'retired';
+                                $noPrice = $m['price_in_per_mtok'] === null || $m['price_out_per_mtok'] === null;
+                                $locked = $noPrice && (int)$m['is_selected'] !== 1; // no price yet: cannot be chosen until one is read
                             ?>
                                 <tr<?php echo $retired ? ' data-ai-retired-row' : ''; ?>>
                                     <td>
                                         <?php if ($retired): /* never submitted: saving needs a replacement, nothing is switched for you */ ?>
                                             <input type="checkbox" checked disabled aria-label="<?php echo $h($m['label']); ?> is no longer offered">
+                                        <?php elseif ($locked): /* not data-ai-pick: the 5-limit script would re-enable it */ ?>
+                                            <input type="checkbox" disabled aria-label="<?php echo $h($m['label']); ?> has no price yet">
                                         <?php else: ?>
                                             <input type="checkbox" name="pick[]" value="<?php echo $h($mid); ?>" data-ai-pick<?php echo $ticked ? ' checked' : ''; ?> aria-label="Use <?php echo $h($m['label']); ?>">
                                         <?php endif; ?>
                                     </td>
                                     <td><strong><?php echo $h($m['label']); ?></strong><?php if ($mSt === 'older'): ?> <span class="ai-muted">(older, still in use)</span><?php endif; ?><br><code class="ai-id"><?php echo $h($mid); ?></code></td>
                                     <td>
-                                        <select name="role[<?php echo $h($mid); ?>]" class="form-control ai-role" aria-label="Role for <?php echo $h($m['label']); ?>"<?php echo $retired ? ' disabled' : ''; ?>>
+                                        <select name="role[<?php echo $h($mid); ?>]" class="form-control ai-role" aria-label="Role for <?php echo $h($m['label']); ?>"<?php echo $retired || $locked ? ' disabled' : ''; ?>>
                                             <option value="">—</option>
                                             <?php foreach (rh_ai_model_roles() as $rk => $rl): ?>
                                                 <option value="<?php echo $h($rk); ?>"<?php echo $role === $rk ? ' selected' : ''; ?>><?php echo $h(ucfirst($rk)); ?></option>
@@ -858,18 +872,18 @@ $fmtPrice = static function ($v): string {
                                         </select>
                                     </td>
                                     <td><?php echo $h($fmtCtx($m['context_tokens'])); ?></td>
-                                    <td><input type="text" inputmode="decimal" name="price_in[<?php echo $h($mid); ?>]" value="<?php echo $h($fmtPrice($m['price_in_per_mtok'])); ?>" class="form-control ai-price" aria-label="Price in for <?php echo $h($m['label']); ?>" placeholder="$"></td>
-                                    <td><input type="text" inputmode="decimal" name="price_out[<?php echo $h($mid); ?>]" value="<?php echo $h($fmtPrice($m['price_out_per_mtok'])); ?>" class="form-control ai-price" aria-label="Price out for <?php echo $h($m['label']); ?>" placeholder="$"></td>
+                                    <td><?php echo $m['price_in_per_mtok'] !== null ? '$' . $h($fmtPrice($m['price_in_per_mtok'])) : '—'; ?></td>
+                                    <td><?php echo $m['price_out_per_mtok'] !== null ? '$' . $h($fmtPrice($m['price_out_per_mtok'])) : '—'; ?></td>
                                     <td>
                                         <?php foreach ((array)($mBadges[$mid] ?? []) as $bk): ?><span class="badge badge-info"><?php echo $h(['newest' => 'Newest', 'cheapest' => 'Cheapest', 'fastest' => 'Fastest'][$bk] ?? ''); ?></span> <?php endforeach; ?>
                                         <?php if (isset($mSpeed[$mid])): ?><span class="ai-muted">Replies here in about <?php echo $h(number_format($mSpeed[$mid] / 1000, 1)); ?> s.</span><?php endif; ?>
                                         <?php
                                         $pp = rh_ai_price_page_for($pagePrices, $mid);
-                                        if ($pp !== null && (int)($m['price_edited'] ?? 0) !== 1 && $m['price_in_per_mtok'] !== null && $m['price_out_per_mtok'] !== null
+                                        if ($pp !== null && $m['price_in_per_mtok'] !== null && $m['price_out_per_mtok'] !== null
                                             && abs((float)$m['price_in_per_mtok'] - $pp[0]) < 0.00005 && abs((float)$m['price_out_per_mtok'] - $pp[1]) < 0.00005): ?>
-                                            <span class="ai-muted">Price from Google's page, <?php echo $h(date('j M Y', (int)strtotime($pageAt))); ?>.</span>
+                                            <span class="ai-muted">Price read <?php echo $h(date('j M Y', (int)strtotime($pageAt))); ?> from <?php echo $h(rh_ai_price_source_label($p)); ?>.</span>
                                         <?php endif; ?>
-                                        <?php if ((int)$m['is_new'] === 1): ?><span class="badge badge-warning">New - set price</span><?php endif; ?>
+                                        <?php if ($noPrice): ?><span class="badge badge-warning">No price yet</span><?php endif; ?>
                                         <?php if ($retired): ?><span class="badge badge-danger">No longer offered - choose a replacement</span><?php endif; ?>
                                         <?php if ($hasSel && !$ticked && isset($suggest[$mid])): ?><span class="badge badge-info">Suggested: <?php echo $h(ucfirst($suggest[$mid])); ?></span><?php endif; ?>
                                     </td>
@@ -903,9 +917,9 @@ $fmtPrice = static function ($v): string {
                         <p class="help-text">Tokens read plus written per person per day. Only a guard against a runaway loop: 2,000,000 is many times a very busy day, so normal use never reaches it.</p>
                     </div>
                     <div class="form-group">
-                        <label for="ai_budget"><strong>Monthly aim (US$)</strong></label>
+                        <label for="ai_budget"><strong>Monthly cap (US$)</strong></label>
                         <input type="number" min="1" max="100000" step="0.01" id="ai_budget" name="ai_monthly_budget_usd" class="form-control" value="<?php echo $h($settings['ai_monthly_budget_usd']); ?>">
-                        <p class="help-text">What the Assistant aims to cost a month. It is shown next to this month's cost as information only: chat never pauses and nobody is warned when it is passed.</p>
+                        <p class="help-text">The most the Assistant should cost a month. The only cost figure you set: model prices are filled in automatically. It is shown next to this month's estimated cost as information only: chat never pauses when it is passed.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_rate"><strong>Messages per person in 10 minutes</strong></label>
@@ -1279,7 +1293,7 @@ $fmtPrice = static function ($v): string {
                 <div class="ai-stat">
                     <span class="ai-stat__label">Estimated cost this month <i class="help" data-tip="Sum of the estimated cost of every Assistant reply since the 1st of this month, from the prices in Models. Your provider's bill is the real figure.">?</i></span>
                     <span class="ai-stat__value">$<?php echo $h(number_format($monthCost, 2)); ?></span>
-                    <span class="ai-stat__sub">monthly aim $<?php echo $h(number_format((float)$settings['ai_monthly_budget_usd'], 2)); ?></span>
+                    <span class="ai-stat__sub">monthly cap $<?php echo $h(number_format((float)$settings['ai_monthly_budget_usd'], 2)); ?></span>
                 </div>
                 <p class="help-text"><a href="ai-usage.php"><i class="fas fa-chart-bar" aria-hidden="true"></i> Open the usage dashboard</a> - cost per answer, answers given without a model call, and totals by person, day and model.</p>
                 <?php if (!$usage): ?>
