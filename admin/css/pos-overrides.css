@@ -7898,3 +7898,101 @@ html.page-zoomed body.pos-screen.rh-pwa-bar-on .till-wrap {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* Till header spacing on desktops (owner 2026-11-21: "very zoomed and too squeezed, not enough spacing or padding").
+   A 1920px screen at 125% Windows scaling is ~1536 CSS px, which fell into three stacked compact blocks above:
+   the stats row was a fixed 6-column grid holding 7 stats (Card wrapped under Orders), stat labels were 7px and the
+   brand/buttons had little padding. Placed last so it wins over those blocks. */
+@media (min-width: 1181px) and (max-width: 1700px) {
+    .till-bar .tb-row1 {
+        height: 78px;
+        min-height: 78px;
+        padding: 0 20px;
+        gap: 20px;
+    }
+
+    .till-bar .brand {
+        gap: 4px;
+        min-height: 0;
+    }
+
+    .till-bar .brand-name {
+        font-size: 22px;
+        letter-spacing: .02em;
+    }
+
+    .till-bar .brand-label {
+        font-size: 9px;
+        letter-spacing: .18em;
+    }
+
+    .till-bar .brand-cashier {
+        font-size: 11.5px;
+        gap: 6px;
+        margin-top: 2px;
+    }
+
+    .till-bar .brand-cashier i {
+        font-size: 11px;
+    }
+
+    .till-bar .tb-actions {
+        gap: 8px;
+    }
+
+    .till-bar .tb-actions > button.recent-toggle,
+    .till-bar .tb-actions > .tb-more > button.recent-toggle,
+    .till-bar .tb-actions > a.logout {
+        height: 58px;
+        min-height: 58px;
+        min-width: 76px;
+        padding: 0 14px;
+        gap: 6px;
+        font-size: 12.5px;
+        letter-spacing: .01em;
+    }
+
+    .till-bar .tb-actions > button.recent-toggle i,
+    .till-bar .tb-actions > .tb-more > button.recent-toggle i,
+    .till-bar .tb-actions > a.logout i {
+        font-size: 17px;
+    }
+
+    .till-bar .tb-sep {
+        height: 38px;
+        margin: 0 4px;
+    }
+}
+
+@media (min-width: 1281px) and (max-width: 1700px) {
+    /* One row, one equal column per stat, however many stats this till shows (6 or 7). */
+    .till-bar .tb-row2 {
+        display: grid;
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
+        height: 48px;
+        min-height: 48px;
+    }
+
+    .till-bar .stat {
+        padding: 0 10px;
+        gap: 4px;
+    }
+
+    .till-bar .stat strong {
+        font-size: 15px;
+        line-height: 1.15;
+    }
+
+    .till-bar .stat .stat-label {
+        font-size: 9.5px;
+        letter-spacing: .1em;
+        color: rgba(255, 255, 255, .45);
+    }
+
+    /* "(before refunds and voids)" does not fit a seventh of this bar; it stays in the cell's tooltip. */
+    .till-bar .stat .stat-label .stat-label-long {
+        display: none;
+    }
+}
