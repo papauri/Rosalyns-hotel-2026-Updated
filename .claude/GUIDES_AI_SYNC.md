@@ -71,6 +71,15 @@ when prompted."
 - **Assistant:** no table, column, setting or permission change. New POST action grid_apply on admin/blocked-dates.php
   (op block/unblock, items JSON). Page URLs: blocked-dates.php?month=YYYY-MM, blocked-dates.php?view=list.
 - **Manager Guides:** the Rooms / Front desk guide line on blocking dates (now a calendar).
+- **Follow-up (2026-11-22, owner PATCH "fully blocked types show greyed out"):** the public booking calendar now also greys
+  out a night when EVERY room of a type is off (each blocked one by one, Maintenance / Out of Order, or a maintenance
+  window; a joined type when every pair has a room off). Check-out ON a blocked date is allowed (the night before is what
+  counts); once a check-in is picked, check-out dates that would cross a blocked night are greyed. Guides: one line in the
+  guest booking / blocking section. Assistant: no table/setting change (helper includes/blocked-nights.php).
+- **Follow-up (2026-11-22, owner PATCH "specify the room names and the date"):** the Blocked Dates calendar's summary,
+  Block/Unblock confirm and result message now name each room and its nights ("Blocked 6 night(s): Villa 2 on 3 to 5 Jan
+  2028; ..."), never "rows"; the List-view forms say e.g. "Room 101 blocked on 12 Dec 2026". Guides: update any screenshot
+  text that shows the old "N nights on N rows" wording. Assistant: no change.
 
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 

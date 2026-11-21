@@ -74,6 +74,21 @@ $r = grid($items, 'block', [], [$cInd, $cType, $cAll, "SELECT COUNT(*) AS c FROM
 check(($r['json']['success'] ?? false) === true && c($r, 0) === 2 && c($r, 1) === 1 && c($r, 2) === 1 && c($r, 3) === 2 && strpos(msg($r), 'blocked 4 night') !== false,
     'one save blocks a room (2 nights), its type (1) and all rooms (1) with the chosen type', json_encode([$r['json'] ?? null, $r['verify'] ?? null]));
 check(!empty($r['rolled_back']) && empty($r['marker_lost']), 'block test rolled back');
+// The message names each room and its nights (not "rows"): "Room 101 on 12 to 13 Dec 2026; All Deluxe rooms on 12 Dec 2026; All rooms on 13 Dec 2026".
+$roomNo = (string)$pdo->query("SELECT room_number FROM individual_rooms WHERE id = $rid")->fetchColumn();
+$typeName = (string)$pdo->query("SELECT name FROM rooms WHERE id = $tid")->fetchColumn();
+$roomText = (ctype_digit(substr(trim($roomNo), 0, 1)) ? 'room ' : '') . strtolower(trim($roomNo)); // "Room 101" / "Villa 2"
+$t1 = strtotime($d1); $t2 = strtotime($d2);
+$rangeText = date('Y-m', $t1) === date('Y-m', $t2) ? date('j', $t1) . ' to ' . date('j M Y', $t2)
+    : (date('Y', $t1) === date('Y', $t2) ? date('j M', $t1) . ' to ' . date('j M Y', $t2) : date('j M Y', $t1) . ' to ' . date('j M Y', $t2));
+$want = [$roomText . ' on ' . strtolower($rangeText), 'all ' . strtolower($typeName) . ' rooms on ' . strtolower(date('j M Y', $t1)), 'all rooms on ' . strtolower(date('j M Y', $t2))];
+$miss = array_values(array_filter($want, static fn($w) => strpos(msg($r), $w) === false));
+check(!$miss && strpos(msg($r), 'row') === false, 'the block message names each room and its nights, and never says "rows"', json_encode([$miss, $r['json']['message'] ?? null]));
+// The older single-date form names the room and the date too.
+$r = run(['post' => ['action' => 'block_date', 'block_scope' => 'individual', 'individual_room_id' => (string)$rid, 'block_date' => $d1, 'block_type' => 'maintenance', 'reason' => $tag], 'ajax' => true, 'verify' => [$cInd]]);
+check(($r['json']['success'] ?? false) === true && c($r) === 1 && strpos(msg($r), $roomText . ' blocked on ' . strtolower(date('j M Y', $t1))) !== false, 'the single-date form says which room was blocked and on which date', json_encode($r['json'] ?? null));
+$r = run(['post' => ['action' => 'block_multiple', 'block_scope' => 'type', 'room_id' => (string)$tid, 'dates' => json_encode([$d1, $d2]), 'block_type' => 'event', 'reason' => $tag], 'ajax' => true, 'verify' => [$cType]]);
+check(($r['json']['success'] ?? false) === true && c($r) === 2 && strpos(msg($r), 'all ' . strtolower($typeName) . ' rooms on ' . strtolower($rangeText)) !== false, 'the several-dates form names the room type and the nights', json_encode($r['json'] ?? null));
 
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1, $d2, $d1]]], 'block', [$seedInd], [$cInd, "SELECT block_type AS c FROM individual_room_blocked_dates WHERE individual_room_id = $rid AND block_date = '$d1'"], ['block_type' => 'event']);
 check(($r['json']['success'] ?? false) === true && c($r) === 2 && ($r['verify'][1][0]['c'] ?? '') === 'event' && strpos(msg($r), 'blocked 1 night') !== false && strpos(msg($r), '1 night(s) were already blocked') !== false,
@@ -160,7 +175,7 @@ check(($r['json']['success'] ?? false) === true && c($r, 0) === 0 && c($r, 1) ==
 $r = grid([['t' => 'type', 'id' => $tid, 'd' => [$d1]]], 'unblock', [$seedType], [$cType]);
 check(($r['json']['success'] ?? false) === true && c($r) === 0 && strpos(msg($r), 'still blocked') === false && strpos(msg($r), 'unblocked 1 night') !== false, 'unblocking the type row removes the type block (and does not call its own block a wider one)', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$d1]]], 'unblock', [], [$cInd]);
-check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the selected nights were blocked') !== false, 'unblocking open nights changes nothing and says so', json_encode($r['json'] ?? null));
+check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the selected nights were blocked') !== false && strpos(msg($r), $roomText . ' on ') !== false, 'unblocking open nights changes nothing and says which room and night', json_encode($r['json'] ?? null));
 $r = grid([['t' => 'room', 'id' => $rid, 'd' => [$past, $d1]]], 'unblock', [], [$cInd]);
 check(($r['json']['success'] ?? true) === false && strpos(msg($r), 'none of the selected nights were blocked') !== false && strpos(msg($r), '1 past night(s) in the selection were skipped') !== false, 'unblocking open nights with a past night also says the past night was skipped', json_encode($r['json'] ?? null));
 

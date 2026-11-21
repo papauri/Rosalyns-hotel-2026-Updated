@@ -46,28 +46,77 @@
         });
     }
 
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    /** "12 Dec 2026", "12 to 14 Dec 2026", "30 Dec 2026 to 2 Jan 2027"; back-to-back nights joined (same as the server). */
+    function nightsText(dates) {
+        var ds = dates.slice().sort();
+        var runs = [];
+        ds.forEach(function (d) {
+            var last = runs[runs.length - 1];
+            if (last) {
+                var p = last[1].split('-').map(Number);
+                var next = new Date(p[0], p[1] - 1, p[2] + 1);
+                var nextStr = next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0') + '-' + String(next.getDate()).padStart(2, '0');
+                if (nextStr === d) { last[1] = d; return; }
+            }
+            if (!last || last[1] !== d) runs.push([d, d]);
+        });
+        return runs.map(function (r) {
+            var a = r[0].split('-').map(Number), b = r[1].split('-').map(Number);
+            var full = function (x) { return x[2] + ' ' + MONTHS[x[1] - 1] + ' ' + x[0]; };
+            if (r[0] === r[1]) return full(a);
+            if (a[0] === b[0] && a[1] === b[1]) return a[2] + ' to ' + full(b);
+            if (a[0] === b[0]) return a[2] + ' ' + MONTHS[a[1] - 1] + ' to ' + full(b);
+            return full(a) + ' to ' + full(b);
+        }).join(', ');
+    }
+
+    /** Selected cells grouped by their room line: [{label, t, id, d: [nights]}], in the order shown on the grid. */
+    function groupCells(cells) {
+        var groups = {}, order = [];
+        cells.forEach(function (td) {
+            var g = td.dataset.t + '|' + (td.dataset.id || '');
+            if (!groups[g]) {
+                var tr = td.parentElement;
+                groups[g] = { label: (tr && tr.getAttribute('data-row-label')) || 'Room', t: td.dataset.t, id: td.dataset.id ? parseInt(td.dataset.id, 10) : null, d: [] };
+                order.push(g);
+            }
+            groups[g].d.push(td.dataset.d);
+        });
+        return order.map(function (k) { return groups[k]; });
+    }
+
+    /** "Room 101 on 12 to 14 Dec 2026; All rooms on 15 Dec 2026", at most max rooms named. */
+    function whereText(groups, max) {
+        var parts = groups.map(function (g) { return g.label + ' on ' + nightsText(g.d); });
+        var more = parts.length - max;
+        return parts.slice(0, max).join('; ') + (more > 0 ? '; and ' + more + ' more' : '');
+    }
+
     function summary() {
         var el = document.getElementById('bdgSummary');
         if (!el) return;
         var cells = selectedCells();
-        var rows = {}, direct = 0, inherited = 0, open = 0, booked = 0;
+        var direct = 0, inherited = 0, open = 0, booked = 0;
         cells.forEach(function (td) {
-            rows[td.dataset.t + '|' + (td.dataset.id || '')] = true;
             if (td.dataset.state === 'direct') direct++;
             else if (td.dataset.state === 'inherited') inherited++;
             else open++;
             if (td.dataset.booked === '1') booked++;
         });
         var n = cells.length;
-        var nRows = Object.keys(rows).length;
         var text;
         if (n === 0) {
             text = 'No nights selected';
         } else if (n === 1) {
             text = cells[0].dataset.info || '1 night selected';
         } else {
-            text = n + ' nights selected on ' + nRows + (nRows === 1 ? ' row' : ' rows')
-                + ' (' + direct + ' blocked here, ' + (inherited ? inherited + ' blocked by a wider row, ' : '') + open + ' open)';
+            var parts = [];
+            if (direct) parts.push(direct + ' already blocked');
+            if (inherited) parts.push(inherited + ' blocked by the room type or All rooms');
+            if (open) parts.push(open + ' open');
+            text = n + ' nights selected: ' + whereText(groupCells(cells), 4) + ' (' + parts.join(', ') + ')';
         }
         if (n > 0 && booked > 0) {
             text += '. ' + booked + ' selected night(s) already have a booking: blocking does not move the guest.';
@@ -252,18 +301,14 @@
     function save(op) {
         var cells = selectedCells();
         if (!cells.length || busy) return;
-        var groups = {};
-        cells.forEach(function (td) {
-            var g = td.dataset.t + '|' + (td.dataset.id || '');
-            if (!groups[g]) groups[g] = { t: td.dataset.t, id: td.dataset.id ? parseInt(td.dataset.id, 10) : null, d: [] };
-            groups[g].d.push(td.dataset.d);
-        });
-        var items = Object.keys(groups).map(function (k) { return groups[k]; });
-        var wide = items.filter(function (it) { return it.t !== 'room'; }).length;
+        var grouped = groupCells(cells);
+        var items = grouped.map(function (g) { return { t: g.t, id: g.id, d: g.d }; });
+        var wide = grouped.filter(function (g) { return g.t !== 'room'; }).map(function (g) { return g.label; });
+        var where = whereText(grouped, 8);
         var msg = op === 'block'
-            ? 'Block ' + cells.length + ' night(s) on ' + items.length + ' row(s)? Guests will not be able to book them.'
-              + (wide ? ' Your selection includes a room type or All rooms row, which blocks every room under it.' : '')
-            : 'Unblock the selected nights that are blocked on their own row? Nights blocked by a room type or All rooms row stay blocked.';
+            ? 'Block ' + where + '? Guests will not be able to book them.'
+              + (wide.length ? ' ' + wide.join(' and ') + (wide.length === 1 ? ' blocks every room under it.' : ' block every room under them.') : '')
+            : 'Unblock ' + where + '? Nights blocked by a room type or All rooms stay blocked; unblock those on that line.';
         confirmAsk({
             title: op === 'block' ? 'Block nights' : 'Unblock nights',
             message: msg,
