@@ -1486,43 +1486,43 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
                 <span class="ck-kpi__icon"><i class="fas fa-calendar-day"></i></span>
                 <span class="ck-kpi__label">Today's Tasks</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['today_total']; ?></span>
-                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
+                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Click to see these</span>
             </button>
             <button type="button" class="ck-kpi ck-kpi--info" data-stat-key="pending" data-stat-title="Pending Tasks" data-stat-description="Maintenance tasks waiting for a technician.">
                 <span class="ck-kpi__icon"><i class="fas fa-clock"></i></span>
                 <span class="ck-kpi__label">Pending Tasks</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['pending']; ?></span>
-                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
+                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Click to see these</span>
             </button>
             <button type="button" class="ck-kpi ck-kpi--warn" data-stat-key="in_progress" data-stat-title="In Progress" data-stat-description="Repairs currently in active work.">
                 <span class="ck-kpi__icon"><i class="fas fa-spinner"></i></span>
                 <span class="ck-kpi__label">In Progress</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['in_progress']; ?></span>
-                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
+                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Click to see these</span>
             </button>
             <button type="button" class="ck-kpi ck-kpi--good" data-stat-key="completed_today" data-stat-title="Completed Today" data-stat-description="Maintenance jobs completed today.">
                 <span class="ck-kpi__icon"><i class="fas fa-check"></i></span>
                 <span class="ck-kpi__label">Completed Today</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['completed_today']; ?></span>
-                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
+                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Click to see these</span>
             </button>
             <button type="button" class="ck-kpi ck-kpi--good" data-stat-key="verified_today" data-stat-title="Verified Today" data-stat-description="Maintenance jobs verified today.">
                 <span class="ck-kpi__icon"><i class="fas fa-check-double"></i></span>
                 <span class="ck-kpi__label">Verified Today</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['verified_today']; ?></span>
-                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
+                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Click to see these</span>
             </button>
             <button type="button" class="ck-kpi ck-kpi--alert" data-stat-key="high_priority" data-stat-title="High/Urgent Priority" data-stat-description="Critical tasks that should be handled first.">
                 <span class="ck-kpi__icon"><i class="fas fa-exclamation-triangle"></i></span>
                 <span class="ck-kpi__label">High/Urgent Priority</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['high_priority']; ?></span>
-                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
+                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Click to see these</span>
             </button>
             <button type="button" class="ck-kpi ck-kpi--alert" data-stat-key="emergency_type" data-stat-title="Emergency" data-stat-description="Open emergency maintenance jobs across rooms.">
                 <span class="ck-kpi__icon"><i class="fas fa-bolt"></i></span>
                 <span class="ck-kpi__label">Emergency</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['emergency_type']; ?></span>
-                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
+                <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Click to see these</span>
             </button>
         </div>
         <?php endif; ?>
@@ -2093,7 +2093,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
             const listEl = document.getElementById('rmStatsModalList');
             if (!titleEl || !metaEl || !listEl) return;
 
-            titleEl.textContent = config.title + ' - Quick Insights';
+            titleEl.textContent = config.title + ' - Details';
             metaEl.innerHTML = '';
             listEl.innerHTML = '';
 

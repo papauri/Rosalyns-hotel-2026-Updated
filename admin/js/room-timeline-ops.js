@@ -256,7 +256,7 @@
 
             var scroller = q(st, '[data-tl-scroller]');
             var vp = U.viewport();
-            var roomW = vp === 'phone' ? 64 : (vp === 'tablet' ? 168 : 208);
+            var roomW = vp === 'phone' ? 92 : (vp === 'tablet' ? 168 : 208);
             var avail = (scroller.clientWidth || st.root.clientWidth || 1000) - roomW - 2;
             var dayW = Math.max(A.minColW || 44, Math.floor(avail / n));
             st.dayW = dayW;

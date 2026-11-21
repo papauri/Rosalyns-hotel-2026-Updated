@@ -664,7 +664,7 @@ body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
     .tl-range .ck-tab, .tl-view .ck-tab { min-height: 40px; }
 }
 @media (max-width: 599px) {
-    .tl { --tl-room-w: 64px; }
+    .tl { --tl-room-w: 92px; }
     .tl-range__opt--3 { display: inline-flex; }
     .tl-range__opt--14 { display: none; }
     .tl-toolbar__from > span { display: none; }
@@ -679,7 +679,8 @@ body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
     .tl-corner__label { display: none; }
     .tl-room__link { padding: 0 4px; gap: 4px; justify-content: space-between; }
     .tl-room__name { display: none; }
-    .tl-hk-link { width: 24px; }
+    .tl-hk-link { width: 44px; min-height: 44px; } /* 44px touch target (room column widened to 92px for it) */
+    .tl-room__num { min-width: 0; white-space: normal; overflow-wrap: break-word; line-height: 1.1; font-size: 12px; }
     .tl-room__num--un { font-size: 11px; white-space: normal; line-height: 1.1; }
     .tl-row--unassigned .tl-room__link > i { display: none; }
     .tl-group__cell { white-space: normal; }

@@ -2200,7 +2200,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
             const listEl = document.getElementById('hkStatsModalList');
             if (!titleEl || !metaEl || !listEl) return;
 
-            titleEl.textContent = config.title + ' - Quick Insights';
+            titleEl.textContent = config.title + ' - Details';
             metaEl.innerHTML = '';
             listEl.innerHTML = '';
 
