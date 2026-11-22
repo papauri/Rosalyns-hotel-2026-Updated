@@ -13,6 +13,17 @@
         init();
     }
 
+    // Tick cells in the compact list rows (tablet/phone only): the whole 44px cell is the touch
+    // target for its checkbox. A click on the cell outside the box and its label presses the box
+    // itself (same change/click events as a real tap), so page handlers see nothing new.
+    document.addEventListener('click', function (e) {
+        if ((window.innerWidth || 0) > 1024 || !e.target || !e.target.closest) { return; }
+        var cell = e.target.closest('table.mobile-enhanced > tbody > tr > td.rh-ph-tick, table.mobile-enhanced > thead > tr > th');
+        if (!cell || e.target.closest('input, label, a, button')) { return; }
+        var box = cell.querySelector('input[type="checkbox"]:not([disabled])');
+        if (box) { box.click(); }
+    });
+
     function init() {
         // Run layout-reading operations inside rAF so they don't block the first
         // paint and avoid the "Forced reflow" console violation.
@@ -451,10 +462,162 @@
             });
         });
 
+        // Compact list-row roles (tick / primary / status / actions ...) for the phone + tablet row CSS
+        markCompactRows(table);
+
         // Mark table as mobile-enhanced
         table.classList.add('mobile-enhanced');
         setCardModeWrappers(table, true);
         addColumnHelpNote(table);
+    }
+
+    /**
+     * Compact list rows (owner 2026-11-22). In card mode every row becomes a dense list row:
+     * tick at the left, primary cell + status pill on line 1, the other cells on one muted
+     * "Label value" line, actions on the right. This only tags cells with classes (and a short
+     * label in data-short); nothing is moved, cloned or renamed, so every handler keeps working.
+     * Page opt-ins (classes on the td): rh-ph-primary, rh-ph-meta, rh-ph-money, rh-ph-skip,
+     * rh-ph-status. Bookings keeps its own rules. Only runs at tablet/phone widths.
+     */
+    var CTL_SEL = 'button, a[href], input[type="submit"], input[type="button"], .quick-action, .btn';
+    var FIELD_SEL = 'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea';
+
+    function shortLabel(text) {
+        var t = String(text || '').replace(/\([^)]*\)/g, '').replace(/\s*[\/–—-]\s+.*$/, '').replace(/\s+/g, ' ').trim();
+        if (t.length > 14) { t = t.split(' ').slice(0, 2).join(' '); }
+        if (t.length > 16) { t = t.slice(0, 15).trim() + '…'; }
+        return t;
+    }
+
+    // Visible text of a cell: the More menu's items (folded actions) are not part of the row's own text.
+    function cellText(cell) {
+        var menus = cell.querySelectorAll('.actions-more-menu');
+        var t;
+        if (!menus.length) { t = cell.textContent || ''; }
+        else {
+            var copy = cell.cloneNode(true);
+            copy.querySelectorAll('.actions-more-menu').forEach(function (m) { m.remove(); });
+            t = copy.textContent || '';
+        }
+        return t.replace(/\s+/g, ' ').trim();
+    }
+
+    function rowControls(cell) {
+        return Array.prototype.filter.call(cell.querySelectorAll(CTL_SEL), function (c) {
+            return !c.closest('.actions-more-menu') && !c.hidden && c.type !== 'hidden'
+                && !(c.style && c.style.display === 'none');
+        });
+    }
+
+    function markCompactRows(table) {
+        if ((window.innerWidth || document.documentElement.clientWidth || 0) > 1024) { return; }
+        if (table.matches('.bookings-table, .receipts-table, .rh-own-rows') || table.closest('.pos-acct-close-form, .pos-acct-sales-wrap')) { return; }
+        var tbody = table.querySelector('tbody');
+        if (!tbody) { return; }
+        Array.prototype.forEach.call(tbody.children, function (row) {
+            if (row.tagName !== 'TR' || row.classList.contains('mobile-enhanced-empty-row')) { return; }
+            var cells = Array.prototype.filter.call(row.children, function (c) { return c.tagName === 'TD' || c.tagName === 'TH'; });
+            if (!cells.length) { return; }
+            // Forget our earlier automatic marks (rows are re-measured on every resize / mutation).
+            row.classList.remove('rh-act-side', 'rh-act-line', 'rh-act-n1', 'rh-act-n2', 'rh-act-n3', 'rh-act-n4', 'rh-has-tick', 'rh-has-status');
+            cells.forEach(function (c) {
+                c.classList.remove('rh-ph-tick', 'rh-ph-actions', 'rh-ph-field', 'rh-ph-empty');
+                if (c.getAttribute('data-rh-auto')) {
+                    c.classList.remove('rh-ph-primary', 'rh-ph-status', 'rh-ph-money');
+                    c.removeAttribute('data-rh-auto');
+                }
+            });
+            var primary = null, status = null, actionCell = null;
+            cells.forEach(function (c) {
+                if (c.classList.contains('rh-ph-primary')) { primary = c; }
+                if (c.classList.contains('rh-ph-status')) { status = c; }
+            });
+            cells.forEach(function (c, i) {
+                var label = c.getAttribute('data-label') || '';
+                if (label && !c.getAttribute('data-short')) { c.setAttribute('data-short', shortLabel(label)); }
+                var text = cellText(c);
+                var ctls = rowControls(c);
+                var ctlText = ctls.map(function (b) { return (b.textContent || '').replace(/\s+/g, ' ').trim(); }).join(' ').trim();
+                var hasCheck = !!c.querySelector('input[type="checkbox"], input[type="radio"]');
+                // Tick cell: a checkbox and nothing else readable.
+                if (hasCheck && !c.querySelector(FIELD_SEL) && (text === '' || (!ctls.length && text.length <= 2))) {
+                    c.classList.add('rh-ph-tick');
+                    row.classList.add('rh-has-tick');
+                    return;
+                }
+                // Cell with a form field keeps its label above the field, full width.
+                if (c.querySelector(FIELD_SEL)) { c.classList.add('rh-ph-field'); return; }
+                // Actions cell: named Actions, or the last cell whose only text is its own buttons.
+                var isActLabel = /^(actions?|manage|options)$/i.test(label);
+                var restText = ctlText ? text.split(ctlText).join('').trim() : text;
+                var onlyControls = ctls.length > 0 && restText === '';
+                if (!actionCell && ctls.length && (isActLabel || (i === cells.length - 1 && onlyControls))) {
+                    actionCell = c;
+                    c.classList.add('rh-ph-actions');
+                    var iconOnly = ctls.every(function (b) { return b.classList.contains('actions-more-toggle') || b.querySelector('i, svg, img'); });
+                    ctls.forEach(function (b) {
+                        var nm = (b.textContent || '').replace(/\s+/g, ' ').trim();
+                        if (nm && !b.getAttribute('aria-label') && !b.getAttribute('title')) { b.setAttribute('title', nm); }
+                    });
+                    if (iconOnly && restText === '' && ctls.length <= 3) {
+                        row.classList.add('rh-act-side', 'rh-act-n' + ctls.length);
+                    } else {
+                        row.classList.add('rh-act-line', 'rh-act-n' + Math.min(ctls.length, 4));
+                    }
+                    return;
+                }
+                // Empty value: nothing worth a line.
+                if (!ctls.length && (text === '' || /^[—–-]+$/.test(text)) && !c.querySelector('img, svg, .badge')) {
+                    c.classList.add('rh-ph-empty');
+                }
+            });
+            // Primary cell: the one a page marked; else the first cell that says WHAT or WHO (not a
+            // time or a bare reference); else the first readable cell.
+            var usable = cells.filter(function (c) {
+                return c !== actionCell && !/(?:^|\s)rh-ph-(?:tick|field|empty|skip)(?:\s|$)/.test(c.className);
+            });
+            if (!primary && usable.length) {
+                var lab = function (c) { return (c.getAttribute('data-label') || '').trim(); };
+                var tiers = [
+                    /^(what they did|what happened|description|message|event|title|subject|action|item|menu item|details?)\b/i,
+                    /^(name|full name|guest|customer|client|user|person|staff|who|ingredient|product|supplier|member|company|room|page|package|class|instructor)\b/i,
+                    /^(reference|ref|invoice|receipt|quot|credit|order|booking|payment|batch|number|no\b|#)/i
+                ];
+                for (var t = 0; t < tiers.length && !primary; t++) {
+                    primary = usable.filter(function (c) { return tiers[t].test(lab(c)); })[0] || null;
+                }
+                if (!primary) {
+                    primary = usable.filter(function (c) { return lab(c) !== '' && !/^(when|time|date|day|created|latest time|closed at|shift date|logged|sent|#|id)\b/i.test(lab(c)) && !/^[\d.,\s]+$/.test((c.textContent || '').trim()); })[0] || usable[0];
+                }
+                primary.classList.add('rh-ph-primary');
+                primary.setAttribute('data-rh-auto', '1');
+            }
+            if (!status) {
+                usable.some(function (c) {
+                    if (c !== primary && /status|state|result/i.test(c.getAttribute('data-label') || '')
+                        && (c.textContent || '').replace(/\s+/g, ' ').trim().length <= 28) {
+                        status = c;
+                        c.classList.add('rh-ph-status');
+                        c.setAttribute('data-rh-auto', '1');
+                        return true;
+                    }
+                    return false;
+                });
+            }
+            if (status) { row.classList.add('rh-has-status'); }
+            // Money: one amount per row is pushed to the right end of the muted line and set bold.
+            if (!usable.some(function (c) { return c.classList.contains('rh-ph-money'); })) {
+                usable.some(function (c) {
+                    if (c !== primary && c !== status && /^(amount|total|balance|price|cost|value|outstanding|due)\b/i.test(c.getAttribute('data-label') || '')
+                        && (c.textContent || '').replace(/\s+/g, ' ').trim().length <= 24) {
+                        c.classList.add('rh-ph-money');
+                        c.setAttribute('data-rh-auto', '1');
+                        return true;
+                    }
+                    return false;
+                });
+            }
+        });
     }
 
     /**

@@ -683,3 +683,59 @@ ul.occupied-rooms-list.ck-rows {
 
 /* 12a: .btn is inline-flex, so honour [hidden] on the filter Clear button */
 .hk-filter-clear[hidden]{display:none !important;}
+
+/* Phone + tablet (owner 2026-11-22): occupied-room cards as compact list rows, the two actions side by side at 40px */
+@media (max-width: 1024px) {
+    ul.occupied-rooms-list.ck-rows {
+        gap: 8px;
+    }
+
+    .occupied-room-card {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        column-gap: 8px;
+        padding: 10px 12px;
+        border-width: 1px;
+    }
+
+    .occupied-room-card > * {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
+    .occupied-room-card .date-info {
+        margin-bottom: 0;
+    }
+
+    .occupied-room-card .card-select-indicator {
+        margin-top: 2px;
+    }
+
+    .occupied-room-card > .btn-quick-assign {
+        flex: 1 1 calc(50% - 4px);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: auto;
+        min-height: 40px;
+        margin-top: 8px;
+    }
+}
+
+/* Phone + tablet (owner 2026-11-22): the assign bar is a tidy 2-column grid of 40px controls, not a stack of full-width ones */
+@media (max-width: 1024px) {
+    .bulk-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .bulk-actions > * {
+        width: 100%;
+        min-width: 0;
+        min-height: 40px;
+        margin: 0;
+        justify-content: center;
+    }
+}

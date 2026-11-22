@@ -1029,7 +1029,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             <td class="col-optional-md"><?php echo htmlspecialchars($i['unit']); ?></td>
                             <td class="qty-num <?php echo $qtyClass; ?>" style="text-align:right;"<?php echo rh_stock_qty_sort_attr($cur); ?>><?php echo rh_stock_qty_html($cur, $i, (string)$i['unit']); ?></td>
                             <td class="qty-num col-optional-lg" style="text-align:right;"<?php echo rh_stock_qty_sort_attr($min); ?>><?php echo rh_stock_qty_html($min, $i, (string)$i['unit']); ?></td>
-                            <td class="qty-num col-optional-lg" style="text-align:right;"><?php echo number_format((float)$i['yield_percent'], 1); ?></td>
+                            <td class="qty-num col-optional-lg rh-ph-skip" style="text-align:right;"><?php echo number_format((float)$i['yield_percent'], 1); ?></td>
                             <td class="qty-num" style="text-align:right;"><?php echo $currency_symbol . ' ' . number_format((float)$i['cost_per_unit'], 2); ?>
                                 <?php if (isset($caseCostFlags[(int)$i['id']])): ?>
                                     <div class="cost-case-note"><span class="badge badge-warning">May be a case price</span> <i class="help" data-tip="<?php echo htmlspecialchars($caseCostFlags[(int)$i['id']]['reason'] . ' Nothing has been changed. If it is a case price, correct it on Stock › Fix crate prices: type how many units are in one crate or case and the cost is divided by that number.'); ?>">?</i> <a class="cost-case-fix" style="display:inline-flex;align-items:center;min-height:44px;" href="stock-cost-fix.php?item=<?php echo (int)$i['id']; ?>">Fix crate prices</a></div>

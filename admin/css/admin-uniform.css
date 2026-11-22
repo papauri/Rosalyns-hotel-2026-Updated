@@ -807,3 +807,399 @@ body .content .sdash-section table tbody td {
         min-width: 0;
     }
 }
+
+/* ==========================================================================
+   Phone + tablet list rows for every table that admin-mobile.js turns into cards
+   (owner 2026-11-22, UI_DECISION: "compact like table rows, the way Bookings does it").
+   Up to 1024px a table that cannot fit becomes a dense list: tick box at the left, the
+   primary cell (first readable cell, or a td marked rh-ph-primary) bold on line 1 with the
+   status pill at the right, every other cell on one muted "Label value" line, actions on the
+   right as 40px icon buttons (more than three, or text-only buttons, sit in one row under the
+   text). admin-mobile.js only adds the classes below; markup, ids and handlers are unchanged.
+   Page opt-ins on a td: rh-ph-primary, rh-ph-status, rh-ph-meta, rh-ph-money (bold, pushed to
+   the right of the muted line), rh-ph-skip (hidden here). Bookings keeps its own rules.
+   Nothing here applies above 1024px.
+   ========================================================================== */
+@media (max-width: 1024px) {
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) {
+        display: block;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody {
+        display: block;
+        gap: 0;
+        border-top: 1px solid var(--admin-surface-border, #e3e8ef);
+        border-bottom: 1px solid var(--admin-surface-border, #e3e8ef);
+    }
+
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        column-gap: 12px;
+        row-gap: 1px;
+        min-height: 52px;
+        margin: 0;
+        padding: 9px 2px;
+        border: 0;
+        border-bottom: 1px solid var(--admin-surface-border, #e3e8ef);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:last-child { border-bottom: 0; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:hover { background: transparent; box-shadow: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr[hidden] { display: none !important; }
+    /* "No rows" message rows keep the shared empty-state tile */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:is(.mobile-enhanced-empty-row, :has(> td[colspan])) {
+        display: block;
+        min-height: 0;
+        padding: 0;
+    }
+
+    /* Every other cell: one muted "Label value" item that flows along the line */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th) {
+        display: block;
+        order: 5;
+        flex: 0 1 auto;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        margin: 0;
+        padding: 0 !important;
+        border: 0;
+        font-size: 12.5px;
+        font-weight: 500;
+        line-height: 1.4;
+        text-align: left !important;
+        color: var(--color-text, #231f1c);
+        white-space: normal;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th)[data-label]::before {
+        content: attr(data-label) " ";
+        display: inline;
+        margin: 0 4px 0 0;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: inherit;
+        color: var(--uni-muted, #5E554D);
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th)[data-short]::before {
+        content: attr(data-short) " ";
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th):not(.rh-ph-actions, .rh-ph-field, .rh-ph-primary) :is(div, p, small, span.d-block) {
+        display: inline;
+        margin: 0;
+        font-size: inherit;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th):not(.rh-ph-actions, .rh-ph-field, .rh-ph-primary) :is(div, p, small) + :is(div, p, small) { margin-left: 6px; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th) br { display: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(.rh-ph-empty, .rh-ph-skip) { display: none !important; }
+
+    /* Line 1: primary cell (bold) and the status pill */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-primary {
+        order: 1;
+        flex: 1 1 0;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-primary[data-label]::before, #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-primary[data-short]::before { content: none; display: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-primary :is(div, p, small, span.text-muted):not(:first-child) {
+        display: block;
+        margin-top: 1px;
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--uni-muted, #5E554D);
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status {
+        order: 2;
+        flex: 0 0 auto;
+        font-size: 12px;
+        text-align: right !important;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status[data-label]::before, #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status[data-short]::before { content: none; display: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row)::after {
+        content: "";
+        order: 3;
+        flex: 0 0 100%;
+        height: 0;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-meta { order: 4; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-money {
+        order: 6;
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    /* A cell that holds a form field keeps its label above it, full width */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-field {
+        order: 7;
+        flex: 1 1 100%;
+        margin-top: 4px;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-field[data-label]::before {
+        display: block;
+        margin: 0 0 2px;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-field :is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+        width: 100%;
+        max-width: 100%;
+        min-height: 40px;
+    }
+
+    /* Tick box: left of every line, 18px box inside a 44px touch cell */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-has-tick { padding-left: 44px; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-tick {
+        position: absolute;
+        left: 0;
+        order: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin: 0;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-tick[data-label]::before, #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-tick[data-short]::before { content: none; display: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-tick label {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 0;
+        margin: 0;
+    }
+
+    /* Actions: icon buttons on the right when there are up to three of them... */
+    /* (the buttons share line 1 with the primary cell, so no space is reserved beside the text lines) */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-status { order: 4; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-tick { top: 7px; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.rh-act-side) > .rh-ph-tick { top: -3px; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-actions {
+        order: 2;
+        flex: 0 0 auto;
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 8px;
+        width: auto;
+        margin: 0;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-actions :is(.row-actions, .actions-row, .quick-actions, .action-buttons, .btn-group, .actions-cell, .actions, .table-actions, form) {
+        display: contents !important;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *) {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto !important;
+        width: 40px !important;
+        min-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        font-size: 0 !important;
+        line-height: 0;
+        gap: 0;
+        border-radius: 8px;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *) :is(i, svg, img) {
+        margin: 0 !important;
+        font-size: 16px;
+    }
+    /* ...or one wrapping row under the text (more than three, or text-only buttons) */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-line > .rh-ph-actions {
+        order: 9;
+        flex: 1 0 100%;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+    }
+    /* one or two text buttons share the last muted line, right-aligned, when they fit */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-line:is(.rh-act-n1, .rh-act-n2) > .rh-ph-actions {
+        flex: 0 0 auto;
+        margin-left: auto;
+        margin-top: 0;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-actions[data-label]::before, #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-actions[data-short]::before { content: none; display: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-line > .rh-ph-actions :is(.row-actions, .actions-row, .quick-actions, .action-buttons, .btn-group, .actions-cell, .actions, .table-actions, form) {
+        display: contents !important;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-line > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *) {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        flex: 0 0 auto !important;
+        width: auto !important;
+        max-width: 100%;
+        min-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        margin: 0 !important;
+        padding: 0 12px !important;
+        font-size: 13px !important;
+        border-radius: 8px;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-actions .actions-more {
+        display: inline-flex;
+        width: auto;
+        margin: 0;
+    }
+
+    /* "Tick all": a table whose header holds a tick-all box keeps that one header cell as a slim row */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) {
+        display: block;
+        border-top: 1px solid var(--admin-surface-border, #e3e8ef);
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) > tr {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) > tr > th { display: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) > tr > th:has(input[type="checkbox"]) {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: auto;
+        min-height: 44px;
+        padding: 0 !important;
+        border: 0;
+        background: transparent;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--uni-muted, #5E554D);
+        cursor: pointer;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) > tr > th:has(input[type="checkbox"])::before {
+        content: "";
+        order: 1;
+        width: 13px;
+        flex: 0 0 13px;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) > tr > th:has(input[type="checkbox"])::after {
+        content: "Tick all";
+        order: 3;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) > tr > th:has(input[type="checkbox"]) > input { order: 2; margin: 0 !important; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > thead:has(th input[type="checkbox"]) > tr > th:has(input[type="checkbox"]) > :not(input) { display: none; }
+}
+
+/* ==========================================================================
+   Phone + tablet: one tick box, one button height, one gap, tab/filter chips in one row
+   (owner 2026-11-22, UI_DECISION). Everything here is inside max-width:1024px (tabs row: 640px).
+   - Tick box: 18px drawn box everywhere (rows, table heads, bulk bars, filter chips, forms).
+     The shared bulk-bar tick keeps its 44px touch area around the 18px box; labels that wrap a
+     tick in a table, bulk bar or filter row are at least 40px tall so the text is part of the target.
+   - Buttons in page headers, toolbars, filter bars and bulk bars: 40px high, 8px apart, wrapping on
+     one row (icon + short label); no full-width stacked buttons except a lone primary submit.
+   - Chip / tab rows scroll sideways in their own row instead of wrapping to many lines.
+   ========================================================================== */
+@media (max-width: 1024px) {
+    :root { --rh-ctl-h: 40px; }
+
+    /* ---- ticks ---- */
+    #rh-admin-page input[type="checkbox"]:not(.admin-bulk-check, [role="switch"], .visually-hidden, .sr-only, .rh-visually-hidden, [class*="switch"], [class*="toggle"], [class*="slider"]):not(:is(.switch, .toggle, .slider, [class*="switch"], [class*="toggle"]) input) {
+        width: 18px;
+        height: 18px;
+        min-width: 18px;
+        min-height: 18px;
+        margin: 0;
+        flex: 0 0 18px;
+        vertical-align: middle;
+        accent-color: var(--au-accent-deep, #7a5b34);
+        cursor: pointer;
+    }
+    /* shared bulk-bar tick (admin-bulk.js): 18px box inside the 44px touch area */
+    #rh-admin-page input.admin-bulk-check,
+    input.admin-bulk-check {
+        border-width: 13px;
+        background-size: 14px 14px;
+        outline-offset: -15px;
+    }
+    #rh-admin-page :is(table, .admin-bulk-bar, .filter-bar, .filters-row, .filter-form, .rh-toolbar, .toolbar, .table-toolbar, .rh-select-all) label:has(> input[type="checkbox"]:not([role="switch"])) {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 40px;
+        margin: 0;
+        cursor: pointer;
+    }
+
+    /* ---- buttons: one height, one gap ---- */
+    #rh-admin-page :is(.rh-admin-page-header, .rh-page-head, .rh-toolbar, .filter-bar, .toolbar, .table-toolbar, .search-bar, .admin-bulk-bar, .section-actions, .page-actions, .header-actions, .ck-hero__actions, .bookings-toolbar__actions) {
+        gap: 8px;
+    }
+    #rh-admin-page :is(.rh-admin-page-header, .rh-page-head, .rh-toolbar, .filter-bar, .toolbar, .table-toolbar, .search-bar, .admin-bulk-bar, .section-actions, .page-actions, .header-actions, .ck-hero__actions, .bookings-toolbar__actions) :is(button, a.btn, a[class*="btn"], .btn, input[type="submit"]):not(.modal-close, .close, [role="switch"], .actions-more-menu *) {
+        min-height: 40px !important;
+        box-sizing: border-box;
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+    /* Page header: title first, its buttons on one wrapping row under it (icon + short label) */
+    #rh-admin-page .rh-admin-page-header > div:not(.rh-admin-page-intro) {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+    }
+}
+
+/* Chip / tab rows: one row, scrolls sideways inside its own box (as the bookings tabs do) */
+@media (max-width: 640px) {
+    #rh-admin-page :is(.tabs-header, .filter-tabs, .report-tabs, .tab-nav, .ck-tabs, .ck-filter__presets, .gym-tabs, .user-filters, .tb-tabs, .tl-tabs, .sdash-quicknav, .tabs:not(:has(> :not(button, a)))) {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        gap: 6px !important;
+        scrollbar-width: thin;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    #rh-admin-page :is(.tabs-header, .filter-tabs, .report-tabs, .tab-nav, .ck-tabs, .ck-filter__presets, .gym-tabs, .user-filters, .tb-tabs, .tl-tabs, .sdash-quicknav, .tabs:not(:has(> :not(button, a)))) > :is(button, a, label) {
+        flex: 0 0 auto !important;
+        white-space: nowrap;
+    }
+}
+
+/* Stock-page filter toolbar (search + selects + count + action): phone = search on its own row,
+   selects two per row, the count and the action buttons on full rows; same 40px / 8px as every toolbar. */
+@media (max-width: 1024px) {
+    #rh-admin-page .stock-toolbar {
+        gap: 8px;
+        align-items: center;
+    }
+    #rh-admin-page .stock-toolbar :is(button, a.btn, .btn, .btn-secondary, .btn-add, .btn-primary):not(.actions-more-menu *) {
+        min-height: 40px !important;
+        box-sizing: border-box;
+    }
+}
+@media (max-width: 640px) {
+    #rh-admin-page .stock-toolbar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    #rh-admin-page .stock-toolbar > :is(input[type="text"], input[type="search"], span, button, a, .help, label) {
+        grid-column: 1 / -1;
+    }
+    #rh-admin-page .stock-toolbar > :is(input, select) {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        margin: 0;
+    }
+}
