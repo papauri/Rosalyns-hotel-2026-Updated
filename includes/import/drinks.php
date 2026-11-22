@@ -489,6 +489,16 @@ if (!function_exists('import_drinks_build')) {
                 return is_numeric($v) && (float)$v > 0 ? (float)$v : null;
             };
             $aiPortion = $num($aiA['portion_ml']['v'] ?? null);
+            // v11 (owner 2026-11-23): the file's own "Bottle size" / "Shot size" for this item (checked by the resolver: only values nothing certain
+            // disagrees with), shown as "from your file" with its cell; a size typed on the row still wins
+            $fs = is_array($it['file_sizes'] ?? null) ? $it['file_sizes'] : [];
+            $fileUnitMl = $num($fs['unit_ml'] ?? null);
+            $fileMeasMl = $num($fs['measure_ml'] ?? null);
+            $fileMeasFirst = !empty($fs['measure_first']);
+            // QA 2026-11-23: the person answered "use the file's size" over a size typed in step 3 (import_file_typed_check): the menu side
+            // follows that answer too, so the count and the item's saved size never differ ("use the typed size" drops the file value instead).
+            $fileUnitOverTyped = $fileUnitMl !== null && !empty($fs['unit_first']);
+            $fileMeasOverTyped = $fileMeasMl !== null && !empty($fs['measure_over_typed']);
             // an item whose own count measure already gives one sale ("25 shots in one bottle", "4 glasses in one carton") needs no size
             $worksNow = $own === null && import_drinks_sale_cost($ing, $sv, $served, $list) !== null;
             $sizeable = $db['drink_ready'] && !$worksNow && (!$isCont || $pour !== null);
@@ -668,8 +678,13 @@ if (!function_exists('import_drinks_build')) {
                     $size['shot_need'] = true;
                     $size['shot_row_ml'] = $num($rowA['shot'] ?? null);
                     $cellRaw = trim((string)($it['served_by'] ?? ''));
-                    if ($size['shot_row_ml'] !== null) {
+                    if ($fileMeasOverTyped) {
+                        [$size['shot_ml'], $size['shot_from'], $size['shot_src']] = [$fileMeasMl, 'file', (string)($fs['measure_ml_src'] ?? '')];
+                    } elseif ($size['shot_row_ml'] !== null) {
                         [$size['shot_ml'], $size['shot_from']] = [$size['shot_row_ml'], 'row'];
+                    } elseif ($fileMeasMl !== null && ($fileMeasFirst || $sv['kind'] !== 'ml') && $servedFrom !== 'answer') {
+                        // v11: the file's "Shot size" (a served-by size that disagrees was asked about: measure_first = the person chose the column)
+                        [$size['shot_ml'], $size['shot_from'], $size['shot_src']] = [$fileMeasMl, 'file', (string)($fs['measure_ml_src'] ?? '')];
                     } elseif ($sv['kind'] === 'ml') {
                         [$size['shot_ml'], $size['shot_from'], $size['shot_src']] = [(float)$sv['ml'], $servedFrom === 'ai' ? 'ai' : 'cell', $servedSrc];
                     } elseif ($servedFrom !== 'answer' && $aiPortion !== null && $cellRaw !== '' && import_cell_shows_size($cellRaw, $aiPortion)) {
@@ -689,8 +704,12 @@ if (!function_exists('import_drinks_build')) {
                     $size['glass_need'] = true;
                     $size['glass_row_ml'] = $num($rowA['glass'] ?? null);
                     $size['glass_file_ml'] = $gr['ml'] !== null && $servedFrom === 'cell' ? (float)$gr['ml'] : null;
-                    if ($size['glass_row_ml'] !== null) {
+                    if ($fileMeasOverTyped) {
+                        [$size['glass_ml'], $size['glass_from'], $size['glass_src']] = [$fileMeasMl, 'file', (string)($fs['measure_ml_src'] ?? '')];
+                    } elseif ($size['glass_row_ml'] !== null) {
                         [$size['glass_ml'], $size['glass_from']] = [$size['glass_row_ml'], 'row'];
+                    } elseif ($fileMeasMl !== null && ($fileMeasFirst || $gr['ml'] === null) && $servedFrom !== 'answer') {
+                        [$size['glass_ml'], $size['glass_from'], $size['glass_src']] = [$fileMeasMl, 'file', (string)($fs['measure_ml_src'] ?? '')];      // v11: "Glass size"
                     } elseif ($gr['ml'] !== null) {
                         [$size['glass_ml'], $size['glass_from'], $size['glass_src']] = [(float)$gr['ml'], $servedFrom === 'ai' ? 'ai' : 'cell', $servedSrc];
                     } elseif ($servedFrom !== 'answer' && $num($aiA['portion_ml']['v'] ?? null) !== null) {
@@ -723,8 +742,13 @@ if (!function_exists('import_drinks_build')) {
                     $contOptional = $isShot && $size['shot_from'] === 'count';
                     $size['row_ml'] = $num($rowA['ml'] ?? null);
                     $size['name_ml'] = $own !== null ? (float)$own['container'] : ($isCont ? import_measure_name_ml((string)$ing['name']) : null);
-                    if ($size['row_ml'] !== null) {
+                    if ($fileUnitOverTyped) {
+                        [$size['ml'], $size['from'], $size['src']] = [$fileUnitMl, 'file', (string)($fs['unit_ml_src'] ?? '')];
+                    } elseif ($size['row_ml'] !== null) {
                         [$size['ml'], $size['from']] = [$size['row_ml'], 'row'];
+                    } elseif ($fileUnitMl !== null) {
+                        // v11: the file's "Bottle size" (a size in the name that disagrees was asked about first)
+                        [$size['ml'], $size['from'], $size['src']] = [$fileUnitMl, 'file', (string)($fs['unit_ml_src'] ?? '')];
                     } elseif ($size['name_ml'] !== null) {
                         [$size['ml'], $size['from'], $size['src']] = [$size['name_ml'], 'name', (string)($it['name_source'] ?? '')];
                     } elseif ($pour !== null && $pour['ml'] !== null) {
@@ -1588,7 +1612,7 @@ if (!function_exists('import_drinks_build')) {
             $filled += $r['size_done'] ? 1 : 0;
             // the sizes the import will save on stock items (same rule as import_drinks_sizes_commit)
             $typed += (!empty($r['size_need']) && !empty($r['cont_need']) && $r['size_ml'] !== null && (in_array($r['size_from'], ['row', 'group'], true)
-                || (in_array($r['size_from'], ['cell', 'ai'], true) && !empty($r['ticked'])))) ? 1 : 0;
+                || (in_array($r['size_from'], ['cell', 'ai', 'file'], true) && !empty($r['ticked'])))) ? 1 : 0;
         }
         $aliases = import_load_aliases($pdo);
         $opts = array_map(function ($o) {
@@ -2088,8 +2112,8 @@ if (!function_exists('import_drinks_build')) {
             // typed in step 3 (row / group), read from the unit cell ("Carton 1 L") or a checked reading the person kept: saved on the item so
             // the menu line keeps working after the import; a size from the name is known from the name and not written
             // (a size only read, never typed, is written only for a drink ticked for the menu: the one that needs it)
-            if (empty($r['size_need']) || empty($r['cont_need']) || $r['size_ml'] === null || !in_array($r['size_from'], ['row', 'group', 'cell', 'ai'], true)
-                || (in_array($r['size_from'], ['cell', 'ai'], true) && empty($answers['_drinks'][$r['key']]['tick']))) {
+            if (empty($r['size_need']) || empty($r['cont_need']) || $r['size_ml'] === null || !in_array($r['size_from'], ['row', 'group', 'cell', 'ai', 'file'], true)
+                || (in_array($r['size_from'], ['cell', 'ai', 'file'], true) && empty($answers['_drinks'][$r['key']]['tick']))) {
                 continue;
             }
             $ingId = (int)$r['ing_id'];

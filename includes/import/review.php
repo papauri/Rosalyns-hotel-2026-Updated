@@ -254,6 +254,16 @@ if (!function_exists('import_job_analyse')) {
         $ov = (array)($answers['_overrides'] ?? []);
         if (!empty($ov['aliases'])) {
             $aliases = import_merge_aliases($aliases, ['fields' => (array)$ov['aliases']]);
+            // v11: a heading a person confirmed for this import ("No of shots" = how many in one) is read from then on, not asked again
+            $okd = [];
+            foreach ((array)$ov['aliases'] as $heads) {
+                foreach ((array)$heads as $hd) {
+                    $okd[import_norm_text((string)$hd)] = true;
+                }
+            }
+            $aliases['ask_phrases'] = array_values(array_filter((array)($aliases['ask_phrases'] ?? []), function ($p) use ($okd) {
+                return !isset($okd[import_norm_text((string)$p)]);
+            }));
         }
         return [
             'aliases' => $aliases,
@@ -782,7 +792,7 @@ if (!function_exists('import_job_analyse')) {
                 'columns' => array_map(function ($c) {
                     return ['letter' => $c['letter'], 'header' => $c['header'], 'ref' => $c['header_ref'], 'field' => $c['field'], 'derived' => !empty($c['derived']),
                         'state' => $c['state'] ?? '', 'filled' => $c['shape']['filled'] ?? null, 'fallback_from' => $c['fallback_from'] ?? null,
-                        'how_values' => $c['how_values'] ?? null];
+                        'how_values' => $c['how_values'] ?? null, 'per' => $c['per'] ?? null];      // v11: "Shots per bottle" -> shot / bottle
                 }, $sh['columns'] ?? []),
                 'non_item_rows' => array_slice(array_map(function ($r) {
                     return ['row' => $r['row'], 'kind' => $r['kind'], 'label' => $r['label'], 'source' => $r['source'], 'reason' => $r['reason']];

@@ -240,11 +240,11 @@ if (!function_exists('import_commit_stock')) {
                         $measureNot[] = ['name' => (string)$it['name'], 'why' => 'its count measure was changed in Stock Items after the review (' . rh_stock_measure_describe($curM) . '); it is kept'];
                         continue;
                     }
-                    // "Change to ..." was chosen. Lines on open counts typed in the old measure would be re-read in the new one: then it is kept.
+                    // "Change to ..." was chosen. Lines on open counts typed in the old measure would be re-worked by rh_stock_measure_save (a new N, or
+                    // "7 shots" read as "7 doubles"): then it is kept, whatever changes (a line typed since the review included), with the reason.
                     $ol = (int)(import_measure_open_lines($pdo, $ingId)[$ingId] ?? 0);
                     if ($ol > 0) {
-                        $measureNot[] = ['name' => (string)$it['name'], 'why' => 'it keeps its own count measure: ' . $ol . ' line' . ($ol === 1 ? '' : 's') . ' on open stock counts '
-                            . ($ol === 1 ? 'was' : 'were') . ' counted in it; finish those counts, then change it in Stock Items'];
+                        $measureNot[] = ['name' => (string)$it['name'], 'why' => import_measure_open_why($curM, $ol)];
                         continue;
                     }
                     $was = $curM;

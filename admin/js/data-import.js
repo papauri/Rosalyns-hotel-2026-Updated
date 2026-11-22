@@ -12,7 +12,7 @@
         item_name: 'Item name', batch: 'Batch', qty_primary: 'Balance (bar / kitchen)', qty_secondary: 'Balance (stores)', qty_single: 'Balance',
         unit: 'Unit', expiry: 'Expiry date', max_level: 'Par / maximum level', min_level: 'Reorder level', unit_price: 'Unit price',
         remarks: 'Remarks', category: 'Category', pack_name: 'Bought as (pack)', pack_size: 'Pack size', served_by: 'Sold / served by', pack_price: 'Price per pack',
-        sell_price: 'Selling price (VAT included)',
+        sell_price: 'Selling price (VAT included)', measures_per_unit: 'Measures in one unit', unit_ml: 'Bottle / container size (ml)', measure_ml: 'Shot / glass size (ml)',
         // columns that are recognised but never imported (shown greyed)
         min_qty: 'Minimum quantity', lead_time: 'Lead time (days)', qty_total: 'Total balance', days_to_expiry: 'Days to expiry',
         status: 'Status', action: 'Action', purchase_qty: 'Quantity to order', total_cost: 'Total value', row_no: 'Row number'
@@ -46,6 +46,8 @@
     function plural(w, q) {
         w = String(w || '').trim();
         if (Math.abs(Number(q) - 1) < 1e-9 || w.length <= 2) { return w; }
+        var of = /^(.+?)(\s+of\s+.+)$/i.exec(w);
+        if (of) { return plural(of[1], q) + of[2]; }       // "glass of wine" -> "glasses of wine"
         if (/(ss|sh|ch|x)$/i.test(w)) { return w + 'es'; }
         if (/s$/i.test(w)) { return w; }
         if (/[^aeiou]y$/i.test(w)) { return w.slice(0, -1) + 'ies'; }
@@ -1122,6 +1124,21 @@
                 }
                 else if (!c.field) { as = '—'; what = c.header ? 'Not imported: not recognised as stock data.' : 'Empty column.'; }
                 else if (c.state === 'question') { as = FIELD_LABEL[c.field] || c.field; what = 'Not sure: you are asked in the next step.'; }
+                else if (c.field === 'measures_per_unit' || c.field === 'unit_ml' || c.field === 'measure_ml') {
+                    // read, not a stock column of its own (owner 2026-11-23): turns a count in shots / glasses into bottles and fills the step 3 sizes
+                    as = FIELD_LABEL[c.field];
+                    var filled = c.filled !== null && c.filled !== undefined ? ' (' + c.filled + ' filled)' : '';
+                    if (c.field === 'measures_per_unit') {
+                        var pm = c.per && c.per.measure ? plural(c.per.measure, 2) : 'measures (the drink\'s served-by measure)';
+                        var pu = c.per && c.per.unit ? c.per.unit : 'stock unit';
+                        what = (c.header || as) + ': how many ' + pm + ' one ' + pu + ' holds. Read' + filled + '; used to turn a count in ' + (c.per && c.per.measure ? plural(c.per.measure, 2) : 'that measure')
+                            + ' into ' + plural(pu, 2) + ' and saved as the item\'s count measure. A value that disagrees with another column, the served-by cell or the item is asked about.';
+                    } else if (c.field === 'unit_ml') {
+                        what = (c.header || as) + ': how many ml one bottle or container holds. Read' + filled + '; shown in step 3 as from your file (a size you type there wins).';
+                    } else {
+                        what = (c.header || as) + ': how many ml one shot or glass holds. Read' + filled + '; shown in step 3 as from your file (a size you type there wins).';
+                    }
+                }
                 else {
                     as = FIELD_LABEL[c.field] || c.field;
                     what = 'Imported' + (c.filled !== null && c.filled !== undefined ? ' (' + c.filled + ' filled)' : '') + '.';
@@ -1153,7 +1170,7 @@
         var TYPE_LABEL = {
             'possible-typo': 'Did you mean (possible typo)', 'duplicate-no-batch': 'Same name twice, no batch', 'duplicate-batch-clash': 'Same name twice, same batch',
             'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit', 'pack-price-check': 'Price per unit and per pack disagree', 'count-unit': 'Counted in packs or single units',
-            'measure-n': 'How many in one bottle', 'measure-change': 'Count measure differs from stock', 'price-per-measure': 'Price per shot or glass', 'count-in': 'Count in bottles or in shots',
+            'measure-n': 'How many in one bottle', 'measure-file': 'File columns disagree', 'measure-change': 'Count measure differs from stock', 'price-per-measure': 'Price per shot or glass', 'count-in': 'Count in bottles or in shots',
             'price-check': 'Price looks unusual', 'same-item-two-sheets': 'Same item on two sheets', 'unit-clash': 'Unit differs from stock',
             'archived-match': 'Matches an archived item', 'ambiguous-match': 'Several possible matches', 'cost-too-large': 'Price too large to store',
             'value-too-long': 'Text too long to store', 'bad-value': 'Value is not a number', 'formula-name': 'Name looks like a formula', 'section-or-item': 'Heading or item?'
@@ -2544,15 +2561,15 @@
             };
             var dash = function (what) { var s = h('span', 'di-na', '—'); s.title = what; s.setAttribute('aria-label', what); return s; };
             var srcLine = function (text, long) { var d = h('div', 'di-small di-size-from', text); d.title = long || text; return d; };
-            var FROM_SHORT = { row: '', group: 'group', cell: 'file', ai: 'file', list: 'list', count: 'count', name: 'name' };
+            var FROM_SHORT = { row: '', group: 'group', cell: 'file', ai: 'file', file: 'file', list: 'list', count: 'count', name: 'name' };
             /** one labelled size box inside the Sizes cell ("Shot 25 ml", "Bottle 750 ml"); under it where the size in use comes from */
-            var sizeCell = function (label, rowVal, inUse, from, onSave, editable, fk, ph) {
+            var sizeCell = function (label, rowVal, inUse, from, onSave, editable, fk, ph, srcRef) {
                 var d = h('div', 'di-mt-size');
                 var lab = h('span', 'di-mt-size-l', label);
                 var w = sizeInput(rowVal, label + ' size in ml', editable, onSave, has(inUse) ? String(inUse) : ph, fk);
                 add(d, lab, w);
                 var f = FROM_SHORT[from];
-                if (has(inUse) && !has(rowVal) && f) { d.appendChild(h('span', 'di-mt-size-f', f)); d.title = mlText(inUse) + ' from the ' + ({ group: 'group size', file: 'file', list: 'Drink measures list', count: 'item\'s count measure', name: 'item name' }[f] || f) + '. Type to change it for this item.'; }
+                if (has(inUse) && !has(rowVal) && f) { d.appendChild(h('span', 'di-mt-size-f', f)); d.title = mlText(inUse) + (from === 'file' && srcRef ? ' from your file, ' + srcRef : ' from the ' + ({ group: 'group size', file: 'file', list: 'Drink measures list', count: 'item\'s count measure', name: 'item name' }[f] || f)) + '. Type to change it for this item.'; }
                 return d;
             };
             var rowEl = function (y, cols, edit, sizeEdit, r) {
@@ -2619,13 +2636,13 @@
                 if (cols.sold) {
                     var t3 = t2;
                     if (y.glass_need) {
-                        t3.appendChild(sizeCell('Glass', y.glass_row_ml, y.glass_ml, y.glass_from, function (v, i) { saveSize({ mode: 'row', key: y.key, field: 'glass', value: v }, i); }, sizeEdit, y.key + '|glass', ''));
+                        t3.appendChild(sizeCell('Glass', y.glass_row_ml, y.glass_ml, y.glass_from, function (v, i) { saveSize({ mode: 'row', key: y.key, field: 'glass', value: v }, i); }, sizeEdit, y.key + '|glass', '', y.glass_src));
                     } else if (y.shot_need) {
-                        t3.appendChild(sizeCell('Shot', y.shot_row_ml, y.shot_ml, y.shot_from, function (v, i) { saveSize({ mode: 'row', key: y.key, field: 'shot', value: v }, i); }, sizeEdit, y.key + '|shot', ''));
+                        t3.appendChild(sizeCell('Shot', y.shot_row_ml, y.shot_ml, y.shot_from, function (v, i) { saveSize({ mode: 'row', key: y.key, field: 'shot', value: v }, i); }, sizeEdit, y.key + '|shot', '', y.shot_src));
                     }
                     if (y.cont_need) {
                         var word = y.size_word && y.size_word !== 'bottle' ? y.size_word.charAt(0).toUpperCase() + y.size_word.slice(1) : 'Bottle';
-                        var cc = sizeCell(word, y.size_row_ml, y.size_ml, y.size_from, function (v, i) { saveSize({ mode: 'row', key: y.key, field: 'ml', value: v }, i); }, sizeEdit, y.key + '|ml', '');
+                        var cc = sizeCell(word, y.size_row_ml, y.size_ml, y.size_from, function (v, i) { saveSize({ mode: 'row', key: y.key, field: 'ml', value: v }, i); }, sizeEdit, y.key + '|ml', '', y.size_src);
                         if (y.cont_optional && !has(y.size_ml)) { cc.appendChild(h('span', 'di-mt-size-f', 'optional')); cc.title = 'Not needed: its count measure gives one shot. Add it only to use a different shot size.'; }
                         t3.appendChild(cc);
                     } else if ((y.glass_need || y.shot_need) && y.size_from === 'own') {

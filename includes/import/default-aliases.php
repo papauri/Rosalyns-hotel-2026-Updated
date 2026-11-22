@@ -18,6 +18,29 @@
 
 if (!function_exists('import_default_aliases')) {
 
+    /**
+     * v11 seed headings of a "how many measures in one stock unit" column: every measure word with every unit word ("Shots per bottle", "Glasses
+     * per casket", "Tots per btl", "Measures per unit"), "Shots in a bottle", and the asked "No of shots" (see ask_phrases).
+     */
+    function import_default_per_unit_phrases(): array
+    {
+        $out = [];
+        $meas = ['shots', 'tots', 'glasses', 'doubles', 'measures', 'pours', 'servings'];
+        foreach ($meas as $m) {
+            foreach (['bottle', 'btl', 'casket', 'cask', 'carton', 'box', 'jug', 'unit'] as $u) {
+                $out[] = $m . ' per ' . $u;
+            }
+            $out[] = $m . ' in a bottle';
+            $out[] = $m . ' in one bottle';
+            $out[] = $m . ' in a casket';
+        }
+        foreach (['shots', 'tots', 'glasses', 'measures'] as $m) {
+            $out[] = 'no of ' . $m;
+            $out[] = 'number of ' . $m;
+        }
+        return $out;
+    }
+
     function import_default_aliases(): array
     {
         return [
@@ -35,7 +58,13 @@ if (!function_exists('import_default_aliases')) {
             // (ml) can be set in advance for the menu link and the cost of one shot (never the opening count, never the Drink measures list).
             // v10 (2026-11-22, any item on the menu): menu_drink_words / menu_food_words: a category heading, a stock category or a served-by cell
             // with one of these words says for certain which menu an item belongs to (Drinks or Food). Both or neither = the person chooses.
-            'version' => 10,
+            // v11 (2026-11-23, owner: "a column that mentions how many shots in a bottle or glasses in a casket"): measures_per_unit ("Shots per bottle",
+            // "Glasses per casket": how many measures one stock unit holds; the measure word and the unit word are read from the heading), unit_ml
+            // ("Bottle size (ml)") and measure_ml ("Shot size"). CERTAIN file values for the count-in conversion and the saved count measure (resolve.php),
+            // pre-filled in the step 3 size boxes; never a stock column of their own. ask_phrases: headings read as a field only after a person says so
+            // ("No of shots" may be the shots IN STOCK as well as the shots in one bottle).
+            // v12 (2026-11-23, QA): size headings with no container word ("Volume (ml)", "Size ml") become ask_phrases (total volume in stock?).
+            'version' => 12,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -149,7 +178,29 @@ if (!function_exists('import_default_aliases')) {
                     'no', 'sn', 's n', 'sr', 'sr no', 'serial', 'serial no', 'serial number', 'number', 'ref', 'ref no', 'id', 'code', 'sku',
                     'commodity code',
                 ],
+                // v11: how many measures (shots, tots, glasses ...) one stock unit (bottle, casket, carton ...) holds. Never "per unit" alone, never
+                // a pack word ("Total Per Unit", "Units per case" stay the pack size).
+                'measures_per_unit' => import_default_per_unit_phrases(),
+                // v11: the size of ONE stock unit in ml (a bare number is ml; "0.75 L" = 750). Not "Carton size" / "Case size": those are the pack size.
+                'unit_ml' => [
+                    'bottle size', 'bottle size ml', 'bottle size l', 'bottle size litres', 'bottle ml', 'bottle volume', 'bottle volume ml', 'bottle capacity',
+                    'btl size', 'btl size ml', 'btl ml', 'casket size', 'casket size ml', 'casket size l', 'casket ml', 'container size', 'container size ml',
+                    'container size l', 'container ml', 'volume ml', 'volume l', 'volume in ml', 'size ml', 'size in ml', 'size l', 'unit size ml', 'unit volume ml',
+                    'ml per bottle', 'ml per casket', 'ml in bottle', 'ml in one bottle', 'capacity ml',
+                ],
+                // v11: the size of ONE measure (a shot, a tot, a glass) in ml
+                'measure_ml' => [
+                    'shot size', 'shot size ml', 'shot ml', 'ml per shot', 'shot volume', 'tot size', 'tot size ml', 'tot ml', 'ml per tot',
+                    'glass size', 'glass size ml', 'glass ml', 'ml per glass', 'glass volume', 'pour size ml', 'pour ml', 'ml per pour',
+                    'measure size', 'measure size ml', 'measure ml', 'ml per measure', 'serving size ml', 'double size', 'double ml', 'ml per double',
+                ],
             ],
+            // v11: a heading matched word for word to one of these is still ASKED (the person confirms the field once): "No of shots" can be the shots
+            // in one bottle or the shots in stock
+            // QA 2026-11-23 (owner rule): a size heading with no container word ("Volume (ml)", "Size ml", "Volume l", "Capacity ml") can be the size of one
+            // bottle or the volume in stock: asked; "Bottle volume", "Casket size ml" (a container word) are read as unit_ml
+            'ask_phrases' => ['no of shots', 'number of shots', 'no of tots', 'number of tots', 'no of glasses', 'number of glasses', 'no of measures', 'number of measures',
+                'volume ml', 'volume l', 'volume in ml', 'size ml', 'size in ml', 'size l', 'capacity ml', 'unit size ml', 'unit volume ml'],
             'derived' => ['qty_total', 'days_to_expiry', 'status', 'action', 'purchase_qty', 'total_cost', 'row_no', 'lead_time', 'min_qty', 'sell_price'],
             // derived field => the field it stands in for when the sheet has NO column of that field (stored as kind field_fallback).
             // v4: a "Total Balance" is the quantity when the sheet has no other quantity column at all (never from the bare word "total").

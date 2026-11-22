@@ -60,6 +60,9 @@ if (!function_exists('import_measure_words')) {
     function import_measure_singular(string $w): string
     {
         $w = mb_strtolower(trim($w, " .\t"));
+        if (preg_match('/^(.+?)(\s+of\s+.+)$/u', $w, $of)) {
+            return import_measure_singular($of[1]) . $of[2];      // "glasses of wine" -> "glass of wine" (the plural of import_measure_plural)
+        }
         if (preg_match('/^(.+(?:ss|sh|ch|x))es$/u', $w, $m)) {
             return $m[1];
         }
@@ -79,6 +82,9 @@ if (!function_exists('import_measure_words')) {
         }
         if (abs($qty - 1.0) < 1e-9 || mb_strlen($w) <= 2) {
             return $w;
+        }
+        if (preg_match('/^(.+?)(\s+of\s+.+)$/iu', $w, $of)) {
+            return import_measure_plural($of[1], $qty) . $of[2];        // "glass of wine" -> "glasses of wine" (never "glass of wines")
         }
         if (preg_match('/(ss|sh|ch|x)$/iu', $w)) {
             return $w . 'es';
@@ -200,6 +206,16 @@ if (!function_exists('import_measure_words')) {
             return $out;
         }
         $m = is_array($ex) ? ($ex['_measure'] ?? null) : null;
+        // v11: the file's own values ("Shots per bottle" = N, "Bottle size", "Shot size"), already checked by the resolver (import_file_meas_check):
+        // only values nothing certain disagrees with arrive here. skip_own = the person chose the file's N over the item's own measure (Change).
+        $fl = (isset($in['file']) && is_array($in['file'])) ? $in['file'] : [];
+        $flPos = function ($v): ?float {
+            return is_numeric($v) && (float)$v > 0 && is_finite((float)$v) ? (float)$v : null;
+        };
+        $skipOwn = !empty($fl['skip_own']);
+        if (is_array($m) && import_measure_singular((string)$m['small']) === $w && $skipOwn && ($m['side'] ?? '') === 'big') {
+            $m = null;
+        }
         if (is_array($m) && import_measure_singular((string)$m['small']) === $w) {
             if (($m['side'] ?? '') === 'small') {
                 $out['mode'] = 'none';
@@ -212,6 +228,15 @@ if (!function_exists('import_measure_words')) {
         }
         if (is_array($m)) {
             $out['kept'] = $m;
+        }
+        $fileN = $flPos($fl['n'] ?? null);
+        if ($fileN !== null && import_measure_n_valid($fileN) !== null) {
+            // v11: N written in the file ("Shots per bottle" 30): certain, used as written
+            $out['mode'] = 'n';
+            $out['n'] = round($fileN, 4);
+            $out['how'] = 'file';
+            $out['n_src'] = (string)($fl['n_src'] ?? '');
+            return $out;
         }
         // a container stock unit (crate, case, pack ...): "Beer 330ml" is the size of ONE bottle in it, not of the crate, so the name never gives N;
         // only the item's own measure (above), a volume typed on the item for its stock unit, or the person's answer
@@ -245,6 +270,11 @@ if (!function_exists('import_measure_words')) {
         $sizeFrom = $size !== null ? (is_array($ex) ? ((($ex['_ml_source'] ?? '') === 'name') ? 'name' : 'item') : (import_measure_unit_ml($unit) !== null ? 'unit' : 'name')) : '';
         $s3 = (isset($in['step3']) && is_array($in['step3'])) ? $in['step3'] : null;
         $mFrom = $mml !== null ? 'list' : '';
+        // v11: the file's own sizes come right after what a person typed for this row: bottle = own saved size / volume unit > row typed > the file's
+        // "Bottle size" > a size in the name > group; measure = row typed > served-by cell > the file's "Shot size" > group > list (import_count_in_step3)
+        $fileMl = $flPos($fl['unit_ml'] ?? null);
+        $sizeSrc = '';
+        $mSrc = '';
         if ($s3 !== null) {
             $pos = function ($v): ?float {
                 return is_numeric($v) && (float)$v > 0 && is_finite((float)$v) ? (float)$v : null;
@@ -252,18 +282,36 @@ if (!function_exists('import_measure_words')) {
             $typedOk = !$isCont || !empty($s3['pour']);       // a crate holds bottles: a bottle size is never the crate's (a carton of juice is poured from)
             $rowMl = $typedOk ? $pos($s3['row_ml'] ?? null) : null;
             $grpMl = $typedOk ? $pos($s3['group_ml'] ?? null) : null;
-            if ($rowMl !== null && ($size === null || $sizeFrom === 'name')) {
+            if ($fileMl !== null && $typedOk && !empty($fl['unit_first']) && ($size === null || $sizeFrom === 'name')) {
+                // the person chose the file's bottle size over the one typed in step 3 (import_file_typed_check)
+                [$size, $sizeFrom, $sizeSrc] = [$fileMl, 'file', (string)($fl['unit_ml_src'] ?? '')];
+            } elseif ($rowMl !== null && ($size === null || $sizeFrom === 'name')) {
                 [$size, $sizeFrom] = [$rowMl, 'row'];
+            } elseif ($fileMl !== null && $typedOk && ($size === null || $sizeFrom === 'name')) {
+                [$size, $sizeFrom, $sizeSrc] = [$fileMl, 'file', (string)($fl['unit_ml_src'] ?? '')];
             } elseif ($size === null && $grpMl !== null) {
                 [$size, $sizeFrom] = [$grpMl, 'group'];
             }
             $sm = $pos($s3['measure_ml'] ?? null);
             if ($sm !== null) {
                 [$mml, $mFrom] = [$sm, (string)($s3['measure_from'] ?? 'step3')];
+                $mSrc = $mFrom === 'file' ? (string)($s3['measure_src'] ?? '') : '';
+            } elseif (!empty($s3['unknown'])) {
+                [$mml, $mFrom] = [null, ''];        // "Shot 30" with a 25 ml shot on the list: the size of this shot is not known (never the list's)
+            }
+        } else {
+            if ($fileMl !== null && !$isCont && ($size === null || $sizeFrom === 'name')) {
+                [$size, $sizeFrom, $sizeSrc] = [$fileMl, 'file', (string)($fl['unit_ml_src'] ?? '')];
+            }
+            $fm = $flPos($fl['measure_ml'] ?? null);
+            if ($fm !== null) {
+                [$mml, $mFrom, $mSrc] = [$fm, 'file', (string)($fl['measure_ml_src'] ?? '')];
             }
         }
         $out['size_from'] = $sizeFrom;
         $out['measure_from'] = $mFrom;
+        $out['size_src'] = $sizeSrc;
+        $out['measure_src'] = $mSrc;
         $out['size_ml'] = $size;
         $out['measure_ml'] = $mml;
         if ($size !== null && $mml !== null) {
@@ -278,6 +326,10 @@ if (!function_exists('import_measure_words')) {
         $out['mode'] = 'ask';
         // the same unknown for every item of the same size and stock unit ("how many tots in one 750 ml bottle?"); no size = this item only
         $out['key'] = $size !== null ? 'size|' . $w . '|' . round($size, 2) . '|' . $unitS : 'item|' . $w . '|' . (string)($in['nk'] ?? '');
+        if ($s3 !== null && !empty($s3['unknown'])) {
+            // "Shot 30" / "Tot 35": shared only with the items whose served-by cell writes that same number (never with a plain "Shot")
+            $out['key'] .= '|cell:' . ($s3['cell_num'] !== null ? import_measure_fmt((float)$s3['cell_num']) : 'x' . (string)($in['nk'] ?? ''));
+        }
         return $out;
     }
 
@@ -327,6 +379,18 @@ if (!function_exists('import_measure_words')) {
         return mb_strtolower(trim((string)($a['big'] ?? ''))) === mb_strtolower(trim((string)($b['big'] ?? '')))
             && import_measure_singular(mb_strtolower(trim((string)($a['small'] ?? '')))) === import_measure_singular(mb_strtolower(trim((string)($b['small'] ?? ''))))
             && abs((float)($a['n'] ?? 0) - (float)($b['n'] ?? 0)) < 0.00005 && (string)($a['side'] ?? '') === (string)($b['side'] ?? '');
+    }
+
+    /**
+     * Why an item keeps its own count measure ['big','small','n'] while lines on open (draft / submitted) stock counts use it ($lines > 0):
+     * rh_stock_measure_save would re-work those lines with a new N or read them in a new measure, so an import never offers a change then
+     * (the same rule as the bulk setter). "it keeps 30 shots in one bottle: 2 open stock count lines use it; change it in Stock Items after the count is approved"
+     */
+    function import_measure_open_why(array $m, int $lines): string
+    {
+        $n = (float)($m['n'] ?? 0);
+        return 'it keeps ' . import_measure_fmt($n) . ' ' . import_measure_plural((string)($m['small'] ?? ''), $n) . ' in one ' . (string)($m['big'] ?? '') . ': '
+            . $lines . ' open stock count line' . ($lines === 1 ? ' uses' : 's use') . ' it; change it in Stock Items after the count is approved';
     }
 
     /**
@@ -390,6 +454,51 @@ if (!function_exists('import_measure_words')) {
             $rest = str_replace($x[0], ' ', $rest);
         }
         return [$ml, trim((string)preg_replace('/\s+/u', ' ', $rest))];
+    }
+
+    /**
+     * v11: a size cell of a "Bottle size" / "Shot size" column in ml. "750ml", "750 ml", "75cl", "0.75 L" carry their own unit; a bare number
+     * ("750", "25") is in the unit the heading names ($mul: "Bottle size (L)" = 1000), and with no unit in the heading it is ml only when it is 10 or
+     * more ("0.75" or "1" with no unit could be litres: never guessed). Returns ['status' => ok|empty|invalid, 'ml' => float|null, 'why' => text].
+     */
+    function import_parse_volume($v, ?float $mul): array
+    {
+        $bad = function (string $why): array {
+            return ['status' => 'invalid', 'ml' => null, 'why' => $why];
+        };
+        if ($v === null || is_bool($v)) {
+            return $v === null ? ['status' => 'empty', 'ml' => null, 'why' => ''] : $bad('it is not a size');
+        }
+        $s = is_string($v) ? trim(str_replace(["\xC2\xA0", "\xE2\x80\xAF"], ' ', $v)) : '';
+        if (is_string($v) && import_is_empty_marker($s)) {
+            return ['status' => 'empty', 'ml' => null, 'why' => ''];
+        }
+        $ml = null;
+        $pn = (is_int($v) || is_float($v) || !preg_match('/\p{L}/u', $s)) ? import_parse_number($v) : null;
+        if ($pn !== null) {
+            if ($pn['status'] !== 'ok' || $pn['neg']) {
+                return $bad('it is not a size');
+            }
+            $n = (float)$pn['value'];
+            if ($mul !== null) {
+                $ml = $n * $mul;
+            } elseif ($n >= 10) {
+                $ml = $n;
+            } else {
+                return $bad('a size under 10 with no unit could be litres or ml (write "750ml" or "0.75 L", or put the unit in the heading)');
+            }
+        } else {
+            $vol = import_served_volume_in($s);
+            if ($vol === null || trim((string)$vol[1]) !== '') {
+                return $bad('it is not one size in ml, cl or litres');
+            }
+            $ml = (float)$vol[0];
+        }
+        $ml = round($ml, 2);
+        if (!is_finite($ml) || $ml < 1 || $ml > 100000) {
+            return $bad('a size must be from 1 to 100,000 ml');
+        }
+        return ['status' => 'ok', 'ml' => $ml, 'why' => ''];
     }
 
     /**
@@ -757,11 +866,31 @@ if (!function_exists('import_measure_words')) {
         $cellMl = $vol ? (float)$vol[0] : null;
         $rest = $vol ? $vol[1] : $t;
         $rest = (string)preg_replace('/(?<=\d)(?=\p{L})|(?<=\p{L})(?=\d)/u', ' ', $rest);
+        // QA LATER 2026-11-22 (fixed 2026-11-23): a bare number next to the measure ("Shot 30", "Tot 35", "½ tot") is no size, but it is not nothing
+        // either: unless it is exactly the size the list gives that measure, the size of this row's measure is UNKNOWN (typed in step 3, a size
+        // column of the file, or asked), never the list's or the group's size. A plain 1 ("1 shot") says nothing.
+        $bare = [];
+        if (preg_match_all('/(?<![\p{L}\p{N}])(\d+(?:[.,]\d+)?)(?![\p{L}\p{N}])|(\p{No})/u', $rest, $bm, PREG_SET_ORDER)) {
+            foreach ($bm as $b) {
+                $num = isset($b[2]) && $b[2] !== '' ? null : (float)str_replace(',', '.', $b[1]);
+                if ($num === null || abs($num - 1.0) >= 1e-9) {
+                    $bare[] = $num;
+                }
+            }
+        }
         $rest = (string)preg_replace('/(?<![\p{L}\p{N}])\d+(?:[.,]\d+)?(?![\p{L}\p{N}])|\p{No}/u', ' ', $rest);
         $rest = trim((string)preg_replace('/\s+/u', ' ', $rest));
-        $withMl = function (array $x) use ($cellMl): array {
+        $withMl = function (array $x) use ($cellMl, $bare): array {
             if ($cellMl !== null && $x['cell_ml'] === null) {
                 $x['cell_ml'] = $cellMl;
+            }
+            if ($bare && $x['cell_ml'] === null) {
+                $one = count(array_unique(array_map('strval', $bare))) === 1 && $bare[0] !== null ? (float)$bare[0] : null;
+                $x['cell_num'] = $one;
+                if (!($one !== null && $x['list_ml'] !== null && abs($one - (float)$x['list_ml']) < 0.005)) {
+                    $x['list_ml'] = null;
+                    $x['size_unknown'] = true;      // "Shot 30" with a 25 ml shot on the list: the 25 is never used for this row
+                }
             }
             return $x;
         };
@@ -884,7 +1013,7 @@ if (!function_exists('import_measure_words')) {
      * bottle / container size of the row and of its group, and the measure size (row > the cell > group > the Drink measures list). Only what a
      * person typed or the file / list says; never an optional reading. Fed to import_measure_decide() as 'step3'.
      */
-    function import_count_in_step3(array $rd, string $nk, array $sizes): array
+    function import_count_in_step3(array $rd, string $nk, array $sizes, array $file = []): array
     {
         $pos = function ($v): ?float {
             return is_numeric($v) && (float)$v > 0 && is_finite((float)$v) ? (float)$v : null;
@@ -892,18 +1021,34 @@ if (!function_exists('import_measure_words')) {
         $rowA = is_array($sizes['r'][$nk] ?? null) ? $sizes['r'][$nk] : [];
         $grpA = ($rd['gkey'] ?? '') !== '' && is_array($sizes['g'][$rd['gkey']] ?? null) ? $sizes['g'][$rd['gkey']] : [];
         $f = $rd['kind'] === 'glass' ? 'glass' : ($rd['kind'] === 'shot' ? 'shot' : '');
+        // v11: the file's "Shot size" / "Glass size" (checked by the resolver against the served-by cell; measure_first = the person chose it over
+        // the cell's size). "Shot 30" with a different list size (size_unknown): never the list's size, and a group size only when it is that number.
+        $fm = $pos($file['measure_ml'] ?? null);
+        $unknown = !empty($rd['size_unknown']);
+        $cellNum = isset($rd['cell_num']) && $rd['cell_num'] !== null ? (float)$rd['cell_num'] : null;
         $mm = null;
         $mf = '';
-        if ($f !== '' && ($v = $pos($rowA[$f] ?? null)) !== null) {
-            [$mm, $mf] = [$v, 'row'];
+        $grpV = $f !== '' ? $pos($grpA[$f] ?? null) : null;
+        $rowV = $f !== '' ? $pos($rowA[$f] ?? null) : null;
+        $grpOk = $grpV !== null && (!$unknown || ($cellNum !== null && abs($grpV - $cellNum) < 0.005));
+        if ($fm !== null && !empty($file['measure_over_typed'])) {
+            [$mm, $mf] = [$fm, 'file'];             // the person chose the file's size over the one typed in step 3 (import_file_typed_check)
+        } elseif ($rowV !== null) {
+            [$mm, $mf] = [$rowV, 'row'];
+        } elseif ($fm !== null && !empty($file['measure_first'])) {
+            [$mm, $mf] = [$fm, 'file'];
         } elseif ($rd['cell_ml'] !== null) {
             [$mm, $mf] = [(float)$rd['cell_ml'], 'cell'];
-        } elseif ($f !== '' && ($v = $pos($grpA[$f] ?? null)) !== null) {
-            [$mm, $mf] = [$v, 'group'];
-        } elseif ($rd['list_ml'] !== null) {
+        } elseif ($fm !== null) {
+            [$mm, $mf] = [$fm, 'file'];
+        } elseif ($grpOk) {
+            [$mm, $mf] = [$grpV, 'group'];
+        } elseif ($rd['list_ml'] !== null && !$unknown) {
             [$mm, $mf] = [(float)$rd['list_ml'], 'list'];
         }
-        return ['row_ml' => $pos($rowA['ml'] ?? null), 'group_ml' => $pos($grpA['ml'] ?? null), 'measure_ml' => $mm, 'measure_from' => $mf, 'pour' => !empty($rd['pour'])];
+        return ['row_ml' => $pos($rowA['ml'] ?? null), 'group_ml' => $pos($grpA['ml'] ?? null), 'measure_ml' => $mm, 'measure_from' => $mf, 'pour' => !empty($rd['pour']),
+            'measure_src' => $mf === 'file' ? (string)($file['measure_ml_src'] ?? '') : '', 'unknown' => $unknown, 'cell_num' => $cellNum,
+            'row_meas' => $rowV, 'group_meas' => $grpOk ? $grpV : null];      // the measure sizes typed in step 3 (compared with the file's)
     }
 
     /**

@@ -25,7 +25,75 @@ if (!function_exists('import_validate_sheet')) {
             'max_level' => 'Max level', 'min_level' => 'Min level', 'unit_price' => 'Unit price', 'remarks' => 'Remarks',
             'category' => 'Category', 'pack_name' => 'Bought as', 'pack_size' => 'Pack size', 'served_by' => 'Sold / served by',
             'pack_price' => 'Price per pack', 'sell_price' => 'Selling price',
+            'measures_per_unit' => 'Measures in one unit', 'unit_ml' => 'Bottle / container size (ml)', 'measure_ml' => 'Shot / glass size (ml)',
         ];
+    }
+
+    /**
+     * v11 (owner 2026-11-23): the "Shots per bottle" / "Bottle size (ml)" / "Shot size" cells of one row, read as written. A cell that is not a
+     * plain number / one size (text, 0, negative, more than 4 decimals, out of range, a formula never calculated) is NOT read: a warning on the
+     * row says why, never a guess, never a question. Returns [fields to add, warnings].
+     */
+    function import_validate_measure_cols(array $cells, array $by, array $columns, string $sheetName): array
+    {
+        $fields = [];
+        $warn = [];
+        $labels = import_field_labels();
+        foreach (['measures_per_unit', 'unit_ml', 'measure_ml'] as $f) {
+            if (!isset($by[$f])) {
+                continue;
+            }
+            $col = (array)($columns[$by[$f]] ?? []);
+            $cell = $cells[$by[$f]] ?? null;
+            if ($cell === null) {
+                continue;
+            }
+            $head = (string)($col['header'] ?? ($labels[$f] ?? $f));
+            if (!$cell['cached']) {
+                $warn[] = ['code' => 'unknown-formula', 'text' => '"' . $head . '" in ' . $cell['ref'] . ' is a formula that was never calculated, so it is not used (not read as 0).'];
+                continue;
+            }
+            if (!import_cell_usable($cell)) {
+                continue;
+            }
+            $src = import_cell_source($sheetName, $cell);
+            $shown = import_norm_ws((string)$cell['v']);
+            if ($f === 'measures_per_unit') {
+                $p = import_parse_number($cell['v']);
+                if ($p['status'] === 'empty') {
+                    continue;
+                }
+                $n = $p['status'] === 'ok' && !$p['neg'] ? (float)$p['value'] : null;
+                $why = '';
+                if ($n === null) {
+                    $why = 'it is not a number';
+                } elseif ($n < 1 || $n > import_measure_max_n()) {
+                    $why = 'it must be from 1 to ' . import_measure_fmt(import_measure_max_n());
+                } elseif (abs(round($n, 4) - $n) > 1e-9) {
+                    $why = 'it has more than the 4 decimals a count measure keeps';
+                }
+                if ($why !== '') {
+                    $warn[] = ['code' => 'measure-col', 'text' => '"' . $head . '" in ' . $cell['ref'] . ' is "' . $shown . '": ' . $why . ', so it is not used.'];
+                    continue;
+                }
+                $per = (array)($col['per'] ?? ['measure' => '', 'unit' => '', 'generic' => true]);
+                $fields[$f] = ['value' => $p['value'], 'source' => $src, 'how' => 'as-written', 'measure' => (string)($per['measure'] ?? ''), 'unit' => (string)($per['unit'] ?? ''),
+                    'header' => $head, 'header_ref' => (string)($col['header_ref'] ?? '')];
+                continue;
+            }
+            $mul = isset($col['ml_mul']) && is_numeric($col['ml_mul']) ? (float)$col['ml_mul'] : null;
+            $p = import_parse_volume($cell['v'], $mul);
+            if ($p['status'] === 'empty') {
+                continue;
+            }
+            if ($p['status'] !== 'ok') {
+                $warn[] = ['code' => 'measure-col', 'text' => '"' . $head . '" in ' . $cell['ref'] . ' is "' . $shown . '": ' . $p['why'] . ', so it is not used.'];
+                continue;
+            }
+            $fields[$f] = ['value' => $p['ml'], 'source' => $src, 'how' => 'as-written', 'ml_mul' => $mul, 'header' => $head, 'header_ref' => (string)($col['header_ref'] ?? ''),
+                'measure' => $f === 'measure_ml' ? (string)($col['per']['measure'] ?? '') : ''];
+        }
+        return [$fields, $warn];
     }
 
     /**
@@ -501,6 +569,15 @@ if (!function_exists('import_validate_sheet')) {
                         'sheet' => $name, 'row' => $r, 'cells' => [import_cell_source($name, $cell)],
                         'options' => [['key' => 'date:' . $e['iso'], 'label' => $e['iso']], ['key' => 'date:' . $e['alt'], 'label' => $e['alt']]],
                     ]);
+                }
+            }
+
+            // ---- v11: how many measures in one unit / the unit's size / the measure's size (certain file values for the count in shots) ----
+            if (isset($by['measures_per_unit']) || isset($by['unit_ml']) || isset($by['measure_ml'])) {
+                [$mcF, $mcW] = import_validate_measure_cols($cells, $by, (array)$struct['columns'], $name);
+                $row['fields'] += $mcF;
+                foreach ($mcW as $w) {
+                    $row['warnings'][] = $w;
                 }
             }
 

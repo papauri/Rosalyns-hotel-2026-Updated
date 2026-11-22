@@ -1818,7 +1818,7 @@ $t($m4tg['items']['Gin']['status'] === 'ready' && ($m4gs['small'] ?? '') === 'to
 $exGinOpen = $exGin + ['_open_measure_lines' => 2];
 $m4to = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGinOpen]], $m4Base);
 $t(!$muOpen($m4to, 'measure-change') && $m4to['items']['Gin']['measure_save'] === null && $m4to['items']['Gin']['status'] === 'ready'
-    && strpos((string)$m4to['items']['Gin']['measure_not'], '2 lines on open stock counts were counted in shots') !== false,
+    && (string)$m4to['items']['Gin']['measure_not'] === 'it keeps 30 shots in one bottle: 2 open stock count lines use it; change it in Stock Items after the count is approved',
     'measure change: lines on open counts typed in shots = never changed (they would be read as tots), no question, the reason is shown ' . json_encode($m4to['items']['Gin']['measure_not']));
 $m4same = $muRun([['Item Name', 'Bar (shots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
 $t($m4same['items']['Gin']['measure_save'] === null && $m4same['items']['Gin']['measure_not'] === null && !$muOpen($m4same, 'measure-change') && abs($m4same['items']['Gin']['balance'] - 0.5) < 0.0000005,
@@ -2315,6 +2315,219 @@ $t(count($ci2n) === 1 && strpos((string)$ci2n[0]['text'], 'How many tots') === 0
 $t(strpos($djs, "x.small ? plural(String(x.small), 2)") !== false && strpos((string)file_get_contents($root . '/includes/import/commit-stock.php'), "'small' => (string)\$mNew['small']") !== false
     && import_measure_plural('glass', 2) === 'glasses' && import_measure_plural('half tot', 2) === 'half tots',
     'result page: the measure words come from each saved measure (plural("glass") = "glasses", "half tot" = "half tots"), the same rule as step 4');
+
+echo "-- a column with how many shots in one bottle / the bottle size / the shot size (owner 2026-11-23) --\n";
+// header mapping: every seed heading, the asked "No of shots", and no theft of the pack size headings
+$mpH = ['Shots per bottle' => 'measures_per_unit', 'Tots per bottle' => 'measures_per_unit', 'Glasses per casket' => 'measures_per_unit', 'Glasses per bottle' => 'measures_per_unit',
+    'Glasses per carton' => 'measures_per_unit', 'Measures per bottle' => 'measures_per_unit', 'Servings per bottle' => 'measures_per_unit', 'Pours per bottle' => 'measures_per_unit',
+    'Doubles per bottle' => 'measures_per_unit', 'Shots in a bottle' => 'measures_per_unit', 'Measures per unit' => 'measures_per_unit',
+    'Bottle size' => 'unit_ml', 'Bottle size (ml)' => 'unit_ml', 'Bottle ml' => 'unit_ml', 'Casket size' => 'unit_ml', 'Container size' => 'unit_ml', 'Bottle volume (ml)' => 'unit_ml', 'Bottle volume' => 'unit_ml', 'Casket size ml' => 'unit_ml',
+    'Shot size' => 'measure_ml', 'Shot ml' => 'measure_ml', 'ml per shot' => 'measure_ml', 'Tot size' => 'measure_ml', 'Glass size' => 'measure_ml', 'Glass ml' => 'measure_ml', 'Pour size (ml)' => 'measure_ml',
+    'Total Per Unit' => 'pack_size', 'Units per case' => 'pack_size', 'Carton size' => 'pack_size', 'Pour size' => 'served_by'];
+$mpBad = [];
+foreach ($mpH as $hh => $want) {
+    $mm = import_match_header($hh, $al);
+    if ($mm['field'] !== $want || $mm['conf'] < import_map_auto_threshold()) { $mpBad[] = $hh . ' -> ' . $mm['field'] . ' ' . $mm['conf']; }
+}
+$t($mpBad === [], 'v11 headings: "Shots per bottle", "Glasses per casket", "Bottle size (ml)", "Shot size" ... are read; "Total Per Unit", "Units per case", "Carton size" stay the pack size ' . json_encode($mpBad));
+$mpVol = [];
+foreach (['Volume (ml)', 'Volume ml', 'Size ml', 'Size (ml)', 'Volume l', 'Volume (L)', 'Size in ml', 'Capacity ml'] as $hh) {
+    $mm = import_match_header($hh, $al);
+    if ($mm['field'] !== 'unit_ml' || $mm['conf'] >= import_map_auto_threshold()) { $mpVol[] = $hh . ' -> ' . $mm['field'] . ' ' . $mm['conf']; }
+}
+$t($mpVol === [], 'QA 2026-11-23: a size heading with no container word ("Volume (ml)", "Size ml", "Volume l" ...) could be the total volume in stock: asked in step 2 (suggested as the bottle size), never read on its own ' . json_encode($mpVol));
+$mpAsk = [];
+foreach (['No of shots', 'Number of shots', 'No of tots'] as $hh) {
+    $mm = import_match_header($hh, $al);
+    if ($mm['field'] !== 'measures_per_unit' || $mm['conf'] >= import_map_auto_threshold()) { $mpAsk[] = $hh . ' -> ' . $mm['field'] . ' ' . $mm['conf']; }
+}
+$t($mpAsk === [] && import_match_header('No', $al)['field'] === 'row_no', '"No of shots" is never the row number: asked as "how many in one" (it could be the shots in stock); a bare "No" is still the row number ' . json_encode($mpAsk));
+$t(import_per_unit_words('Glasses per casket', $al) === ['measure' => 'glass', 'unit' => 'casket', 'generic' => false] && import_per_unit_words('Tots per btl', $al)['unit'] === 'bottle'
+    && import_per_unit_words('Measures per unit', $al) === ['measure' => '', 'unit' => '', 'generic' => true] && import_per_unit_words('No of shots', $al)['unit'] === ''
+    && import_header_ml_mul('Bottle size (ml)') === 1.0 && import_header_ml_mul('Bottle size (L)') === 1000.0 && import_header_ml_mul('Bottle size') === null,
+    'the measure word and the unit word come from the heading ("Glasses per casket" = glass / casket, "Tots per btl" = tot / bottle, "Measures per unit" = the served-by measure); the unit of a size heading too');
+$pv = function ($v, $mul = null) { $p = import_parse_volume($v, $mul); return $p['status'] === 'ok' ? $p['ml'] : $p['status']; };
+$t($pv('25') === 25.0 && $pv('750ml') === 750.0 && $pv('750 ml') === 750.0 && $pv('0.75 L') === 750.0 && $pv('75cl') === 750.0 && $pv(750) === 750.0 && $pv('1,000') === 1000.0
+    && $pv('0.75') === 'invalid' && $pv('0.75', 1000.0) === 750.0 && $pv('abc') === 'invalid' && $pv('-5') === 'invalid' && $pv('750ml glass') === 'invalid' && $pv('') === 'empty',
+    'size cells: "25", "750ml", "750 ml", "0.75 L", "75cl" read; "0.75" with no unit anywhere (litres or ml?), text, negative, extra words are not');
+$t(($al['version'] ?? 0) === 12 && in_array('volume ml', $al['ask_phrases'], true) && in_array('no of shots', $al['ask_phrases'], true) && in_array(['ask_phrase', 'no of shots', ''], import_alias_seed_rows(), true)
+    && in_array(['field', 'shots per bottle', 'measures_per_unit'], import_alias_seed_rows(), true),
+    'seed v11: the new headings and the asked phrases reach every hotel through the seed top-up (kind ask_phrase)');
+// the made-up bar sheet: Item, Category, Total Balance, Unit Price, Selling price, Served by, Shots per bottle, Bottle size (ml), Shot size
+$mpHead = ['Item', 'Category', 'Total Balance', 'Unit Price', 'Selling price', 'Served by', 'Shots per bottle', 'Bottle size (ml)', 'Shot size'];
+$mpRows = [$mpHead,
+    ['Gin A', 'GINS', '57', '30000', '4000', 'Shot', '30', '750', '25'],        // N from the column (agrees with 750 / 25)
+    ['Gin B', 'GINS', '40', '30000', '4000', 'Shot', '', '750', '25'],          // N from the two sizes
+    ['Gin C', 'GINS', '40', '30000', '4000', 'Shot', '30', '750', '35'],        // N disagrees with 750 / 35
+    ['Gin D', 'GINS', '20', '30000', '4000', 'Shot', 'many', '0.5', ''],        // bad cells: warnings, not used
+    ['Gin E', 'GINS', '30', '30000', '4000', 'Shot', '30', '750', '25'],
+];
+$mpUnits = ['unit_options' => ['bottle', 'casket']];
+$mpRun = function (array $answers, ?array $rows = null, array $ctx = []) use ($ciRun, $mpRows, $mpUnits) { return $ciRun($answers, $rows ?? $mpRows, $ctx + $mpUnits); };
+$mpAll = function (array $r) { return array_merge($r['res']['questions'], array_values($r['res']['extra_questions'])); };
+$mp0 = $mpRun([]);
+$mpCols = []; foreach ($mp0['an']['sheets'][0]['columns'] as $c0) { $mpCols[$c0['letter']] = [(string)$c0['field'], (string)$c0['state']]; }
+$mpBase = [];
+foreach ($mpAll($mp0) as $q0) { if ($q0['type'] === 'no-unit') { $mpBase[$q0['qkey']] = ['key' => 'unit:bottle']; } }
+foreach ($mp0['ci'] as $q0) { $mpBase[$q0['qkey']] = ['key' => 'measure']; }
+$mp1 = $mpRun($mpBase);
+$gA = $mp1['items']['Gin A'] ?? []; $gB = $mp1['items']['Gin B'] ?? []; $gC = $mp1['items']['Gin C'] ?? []; $gD = $mp1['items']['Gin D'] ?? [];
+$t($mpCols['G'] === ['measures_per_unit', 'mapped'] && $mpCols['H'] === ['unit_ml', 'mapped'] && $mpCols['I'] === ['measure_ml', 'mapped'] && $mp0['inv'] === [] && $mp1['inv'] === [],
+    'fixture: the three columns are read (G, H, I) and every value comes from its own cell (no invented values) ' . json_encode($mpCols));
+$t(abs((float)($gA['balance'] ?? 0) - 1.9) < 1e-9 && ($gA['measure_save']['n'] ?? null) === 30.0 && ($gA['measure_save']['small'] ?? '') === 'shot' && ($gA['measure_save']['from'] ?? '') === 'file'
+    && strpos((string)$gA['qty_how'], '57 shots = 1.9 bottles (30 shots in one bottle: written in your file, bar_nov!G2)') === 0 && ($gA['status'] ?? '') === 'ready',
+    'N from the column: 57 shots / 30 = 1.9 bottles, (bottle, shot, 30) saved on the item, the how line names the cell ' . json_encode([$gA['balance'] ?? null, $gA['qty_how'] ?? null, $gA['measure_save'] ?? null]));
+$t(abs((float)($gB['balance'] ?? 0) - round(40 / 30, 6)) < 1e-9 && ($gB['measure_save']['n'] ?? null) === 30.0 && strpos((string)$gB['qty_how'], '750 ml bottle in your file (bar_nov!H3) / 25 ml shot in your file (bar_nov!I3)') !== false,
+    'N from the size columns: 750 ml / 25 ml = 30, saved; the how line names both cells ' . json_encode([$gB['qty_how'] ?? null]));
+$mpQc = array_values(array_filter($mp1['open'], function ($q) { return $q['type'] === 'measure-file' && strpos($q['text'], 'Gin C') !== false; }));
+$t(count($mpQc) === 1 && ($gC['status'] ?? '') === 'needs-answer' && $gC['balance'] === null && $mp1['res']['can_confirm'] === false
+    && strpos($mpQc[0]['text'], '30 shots in one bottle (bar_nov!G4), but 750 ml (bar_nov!H4) / 35 ml (bar_nov!I4) = 21.4286') !== false
+    && array_column($mpQc[0]['options'], 'key') === ['use:n', 'use:size', 'skip'],
+    'conflict: "Shots per bottle" 30 vs 750 ml / 35 ml = 21.4286 blocks the item with both values and their cells; never a pick ' . json_encode($mpQc[0]['text'] ?? null));
+$mpCn = $mpRun($mpBase + [($mpQc[0]['qkey'] ?? 'x') => ['key' => 'use:n']]);
+$mpCs = $mpRun($mpBase + [($mpQc[0]['qkey'] ?? 'x') => ['key' => 'use:size']]);
+$t(abs((float)$mpCn['items']['Gin C']['balance'] - round(40 / 30, 6)) < 1e-9 && ($mpCn['items']['Gin C']['measure_save']['n'] ?? null) === 30.0
+    && abs((float)$mpCs['items']['Gin C']['balance'] - round(40 / 21.4286, 6)) < 1e-9 && $mpCs['items']['Gin C']['measure_save'] === null
+    && strpos((string)$mpCs['items']['Gin C']['measure_not'], 'not an exact number') !== false && $mpCs['items']['Gin C']['status'] === 'ready',
+    'conflict answered: "Use 30" = 40 / 30 and 30 saved; "Use the sizes" = 40 / 21.4286, not saved (not exact at 4 decimals, the reason listed)');
+$gDw = array_column(array_filter($mp1['an']['sheets'][0]['rows'][3]['warnings'], function ($w) { return $w['code'] === 'measure-col'; }), 'text');
+$t(count($gDw) === 2 && strpos($gDw[0], '"Shots per bottle" in G5 is "many": it is not a number, so it is not used.') === 0 && strpos($gDw[1], '"Bottle size (ml)" in H5 is "0.5": a size must be from 1 to 100,000 ml') === 0
+    && !isset($mp1['an']['sheets'][0]['rows'][3]['fields']['measures_per_unit']) && isset($mp1['an']['sheets'][0]['rows'][3]['fields']['unit_ml']) === false
+    && count(array_filter($mp1['open'], function ($q) { return $q['type'] === 'measure-n' && strpos($q['text'], 'Gin D') !== false; })) === 1 && ($gD['status'] ?? '') === 'needs-answer',
+    'bad cells ("many", "0.5" ml) are a warning on that row and are not used (never a guess, never a question of their own) ' . json_encode(array_column($mp1['an']['sheets'][0]['rows'][3]['warnings'], 'text')));
+// QA 2026-11-23: a size typed in step 3 that disagrees with the file is asked (both values and where each comes from), never settled silently
+$mpT = $mpRun($mpBase + ['_sizes' => ['r' => ['gin b' => ['shot' => 30]]]]);
+$mpTq = array_values(array_filter($mpT['open'], function ($q) { return $q['type'] === 'measure-file' && strpos($q['text'], 'Gin B') !== false; }));
+$t(count($mpTq) === 1 && $mpT['items']['Gin B']['balance'] === null && $mpT['items']['Gin B']['status'] === 'needs-answer' && $mpT['res']['can_confirm'] === false
+    && strpos($mpTq[0]['text'], '"Gin B": your file says one shot is 25 ml (bar_nov!I3), but 30 ml was typed for this drink in step 3. Which is right?') === 0
+    && array_column($mpTq[0]['options'], 'key') === ['use:file', 'use:typed', 'skip'] && abs((float)$mpT['items']['Gin A']['balance'] - 1.9) < 1e-9,
+    'typed vs file: a 30 ml shot typed for Gin B vs the file\'s 25 ml blocks the item with both values; Gin A keeps its column N ' . json_encode($mpTq[0]['text'] ?? null));
+$mpTt = $mpRun($mpBase + ['_sizes' => ['r' => ['gin b' => ['shot' => 30]]], ($mpTq[0]['qkey'] ?? 'x') => ['key' => 'use:typed']]);
+$mpTf = $mpRun($mpBase + ['_sizes' => ['r' => ['gin b' => ['shot' => 30]]], ($mpTq[0]['qkey'] ?? 'x') => ['key' => 'use:file']]);
+$mpTa = $mpRun($mpBase + ['_sizes' => ['r' => ['gin b' => ['shot' => 25, 'ml' => 750]]]]);
+$t(abs((float)$mpTt['items']['Gin B']['balance'] - round(40 / 25, 6)) < 1e-9 && ($mpTt['items']['Gin B']['measure_save']['n'] ?? null) === 25.0
+    && strpos((string)$mpTt['items']['Gin B']['qty_how'], '30 ml shot typed for this drink in step 3') !== false
+    && abs((float)$mpTf['items']['Gin B']['balance'] - round(40 / 30, 6)) < 1e-9 && ($mpTf['items']['Gin B']['measure_save']['n'] ?? null) === 30.0
+    && strpos((string)$mpTf['items']['Gin B']['qty_how'], '25 ml shot in your file (bar_nov!I3)') !== false
+    && !array_filter($mpTa['open'], function ($q) { return strpos($q['text'], 'Gin B') !== false; }) && abs((float)$mpTa['items']['Gin B']['balance'] - round(40 / 30, 6)) < 1e-9,
+    'typed vs file answered: "Use 30 ml (typed)" = 750 / 30 = 25; "Use 25 ml (file)" = 750 / 25 = 30; typed 750 / 25 agreeing with the file = no question');
+$mpTb = $mpRun($mpBase + ['_sizes' => ['r' => ['gin b' => ['ml' => 700]]]]);
+$mpTbq = array_values(array_filter($mpTb['open'], function ($q) { return $q['type'] === 'measure-file' && strpos($q['text'], 'Gin B') !== false; }));
+$mpTbt = $mpRun($mpBase + ['_sizes' => ['r' => ['gin b' => ['ml' => 700]]], ($mpTbq[0]['qkey'] ?? 'x') => ['key' => 'use:typed']]);
+$mpTbf = $mpRun($mpBase + ['_sizes' => ['r' => ['gin b' => ['ml' => 700]]], ($mpTbq[0]['qkey'] ?? 'x') => ['key' => 'use:file']]);
+$t(count($mpTbq) === 1 && strpos($mpTbq[0]['text'], 'your file says one bottle is 750 ml (bar_nov!H3), but 700 ml was typed for this drink in step 3') !== false
+    && abs((float)$mpTbt['items']['Gin B']['balance'] - round(40 / 28, 6)) < 1e-9 && abs((float)$mpTbf['items']['Gin B']['balance'] - round(40 / 30, 6)) < 1e-9,
+    'typed bottle size vs the file\'s: asked; "typed" = 700 / 25 = 28, "file" = 750 / 25 = 30 ' . json_encode($mpTbq[0]['text'] ?? null));
+// the file's N (30) vs typed sizes 750 / 30 = 25: asked; typed 750 / 25 = 30 agrees: no question
+$mpNr = [$mpHead, ['Gin T', 'GINS', '50', '30000', '4000', 'Shot', '30', '', '']];
+$mpNr0 = $mpRun([], $mpNr);
+$mpNrb = []; foreach ($mpAll($mpNr0) as $q0) { if ($q0['type'] === 'no-unit') { $mpNrb[$q0['qkey']] = ['key' => 'unit:bottle']; } } foreach ($mpNr0['ci'] as $q0) { $mpNrb[$q0['qkey']] = ['key' => 'measure']; }
+$mpNrT = ['_sizes' => ['r' => ['gin t' => ['ml' => 750, 'shot' => 30]]]];
+$mpNr1 = $mpRun($mpNrb + $mpNrT, $mpNr);
+$mpNrq = array_values(array_filter($mpNr1['open'], function ($q) { return $q['type'] === 'measure-file'; }));
+$mpNrn = $mpRun($mpNrb + $mpNrT + [($mpNrq[0]['qkey'] ?? 'x') => ['key' => 'use:n']], $mpNr);
+$mpNrs = $mpRun($mpNrb + $mpNrT + [($mpNrq[0]['qkey'] ?? 'x') => ['key' => 'use:size']], $mpNr);
+$mpNra = $mpRun($mpNrb + ['_sizes' => ['r' => ['gin t' => ['ml' => 750, 'shot' => 25]]]], $mpNr);
+$t(count($mpNrq) === 1 && $mpNr1['items']['Gin T']['balance'] === null && $mpNr1['items']['Gin T']['status'] === 'needs-answer'
+    && strpos($mpNrq[0]['text'], '"Gin T": your file says 30 shots in one bottle (bar_nov!G2), but the sizes give 750 ml (typed for this drink in step 3) / 30 ml (typed for this drink in step 3) = 25. Which is right?') === 0
+    && array_column($mpNrq[0]['options'], 'key') === ['use:n', 'use:size', 'skip'],
+    'typed 750 / 30 = 25 vs the column\'s 30: a blocking question naming both values and their sources (never the column silently) ' . json_encode($mpNrq[0]['text'] ?? null));
+$t(abs((float)$mpNrn['items']['Gin T']['balance'] - round(50 / 30, 6)) < 1e-9 && ($mpNrn['items']['Gin T']['measure_save']['n'] ?? null) === 30.0 && ($mpNrn['items']['Gin T']['measure_save']['from'] ?? '') === 'file'
+    && abs((float)$mpNrs['items']['Gin T']['balance'] - 2) < 1e-9 && ($mpNrs['items']['Gin T']['measure_save']['n'] ?? null) === 25.0 && ($mpNrs['items']['Gin T']['measure_save']['from'] ?? '') === 'size'
+    && !array_filter($mpNra['open'], function ($q) { return $q['type'] === 'measure-file'; }) && abs((float)$mpNra['items']['Gin T']['balance'] - round(50 / 30, 6)) < 1e-9
+    && ($mpNra['items']['Gin T']['measure_save']['n'] ?? null) === 30.0 && $mpNra['items']['Gin T']['status'] === 'ready',
+    'answered: "Use 30" = 50 / 30, 30 saved; "Use the sizes" = 50 / 25 = 2 bottles, 25 saved; typed 750 / 25 = 30 agrees with the column = no question');
+// the column's measure word vs the served-by word: asked, never used silently
+$mpG = [$mpHead, ['House Wine', 'WINES', '9', '60000', '10000', 'Glass', '30', '', '']];
+$mpG0 = $mpRun([], $mpG);
+$mpGb = []; foreach ($mpAll($mpG0) as $q0) { if ($q0['type'] === 'no-unit') { $mpGb[$q0['qkey']] = ['key' => 'unit:casket']; } } foreach ($mpG0['ci'] as $q0) { $mpGb[$q0['qkey']] = ['key' => 'measure']; }
+$mpG1 = $mpRun($mpGb, $mpG);
+$mpGq = array_values(array_filter($mpG1['open'], function ($q) { return $q['type'] === 'measure-file'; }));
+$mpG2 = $mpRun($mpGb + [($mpGq[0]['qkey'] ?? 'x') => ['key' => 'ignore']], $mpG);
+$t(count($mpGq) === 1 && strpos($mpGq[0]['text'], '"Shots per bottle" (bar_nov!G2) counts shots, but this count is in glasses') !== false && $mpG1['items']['House Wine']['status'] === 'needs-answer'
+    && $mpG2['items']['House Wine']['measure_save'] === null && count(array_filter($mpG2['open'], function ($q) { return $q['type'] === 'measure-n'; })) === 1,
+    'conflict: "Shots per bottle" on a wine served by the glass blocks; "do not use it" = the glasses in one casket are asked as before (its 30 is never used) ' . json_encode($mpGq[0]['text'] ?? null));
+// the item's own count measure (28 shots a bottle) vs the column's 30: Keep / Change
+$mpEx = ['id' => 901, 'name' => 'Gin A', 'category' => 'GINS', 'unit' => 'Bottle', 'current_quantity' => 0, 'cost_per_unit' => 30000, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '',
+    'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0, '_measure' => ['big' => 'bottle', 'small' => 'shot', 'n' => 28.0, 'side' => 'big'], '_ml' => null, '_open_measure_lines' => 0];
+$mpXr = [$mpHead, ['Gin A', 'GINS', '57', '30000', '4000', 'Shot', '30', '', '']];
+$mpXc = ['existing' => [$mpEx]];
+$mpX0 = $mpRun([], $mpXr, $mpXc);
+$mpXb = ['_updates' => [rh_ssi_key('Gin A') => ['quantity']]]; foreach ($mpX0['ci'] as $q0) { $mpXb[$q0['qkey']] = ['key' => 'measure']; }
+$mpX1 = $mpRun($mpXb, $mpXr, $mpXc);
+$mpXq = array_values(array_filter($mpX1['open'], function ($q) { return $q['type'] === 'measure-change'; }));
+$mpXk = $mpRun($mpXb + [($mpXq[0]['qkey'] ?? 'x') => ['key' => 'keep']], $mpXr, $mpXc);
+$mpXg = $mpRun($mpXb + [($mpXq[0]['qkey'] ?? 'x') => ['key' => 'change']], $mpXr, $mpXc);
+$t(count($mpXq) === 1 && $mpX1['items']['Gin A']['status'] === 'needs-answer' && $mpX1['items']['Gin A']['balance'] === null
+    && array_column($mpXq[0]['options'], 'label') === ['Keep 28 shots a bottle', 'Change to 30 shots a bottle']
+    && abs((float)$mpXk['items']['Gin A']['balance'] - round(57 / 28, 6)) < 1e-9 && $mpXk['items']['Gin A']['measure_save'] === null && $mpXk['items']['Gin A']['status'] === 'ready'
+    && abs((float)$mpXg['items']['Gin A']['balance'] - 1.9) < 1e-9 && ($mpXg['items']['Gin A']['measure_save']['n'] ?? null) === 30.0 && !empty($mpXg['items']['Gin A']['measure_save']['replace'])
+    && $mpXg['items']['Gin A']['status'] === 'ready',
+    'conflict with the item\'s own measure (28 shots a bottle) vs the column\'s 30: Keep (57 / 28, nothing saved) or Change (57 / 30, 30 saved) '
+    . json_encode([array_column($mpXq, 'text'), $mpXg['items']['Gin A']['measure_save'] ?? null, $mpXg['items']['Gin A']['measure_not'] ?? null]));
+// QA 2026-11-23: with lines on open stock counts in its measure the item keeps 28 (a corrected N would re-work them): never offered, the reason in step 4
+$mpXo = $mpRun($mpXb, $mpXr, ['existing' => [['_open_measure_lines' => 2] + $mpEx]]);
+$t(!array_filter($mpXo['open'], function ($q) { return in_array($q['type'], ['measure-change', 'measure-file'], true); })
+    && !array_filter(array_values($mpXo['res']['extra_questions']), function ($q) { return $q['type'] === 'measure-change'; })
+    && abs((float)$mpXo['items']['Gin A']['balance'] - round(57 / 28, 6)) < 1e-9 && $mpXo['items']['Gin A']['measure_save'] === null && $mpXo['items']['Gin A']['status'] === 'ready'
+    && (string)$mpXo['items']['Gin A']['measure_not'] === 'it keeps 28 shots in one bottle: 2 open stock count lines use it; change it in Stock Items after the count is approved',
+    'open count lines: the file\'s 30 vs Gin A\'s own 28 is not offered (57 / 28, nothing saved), step 4 lists why ' . json_encode([$mpXo['items']['Gin A']['measure_not'] ?? null, array_column($mpXo['open'], 'type')]));
+// a size in the name vs the bottle size column: asked
+$mpN = [$mpHead, ['Vodka 1L', 'VODKAS', '50', '30000', '4000', 'Shot', '', '750', '25']];
+$mpN0 = $mpRun([], $mpN);
+$mpNb = []; foreach ($mpAll($mpN0) as $q0) { if ($q0['type'] === 'no-unit') { $mpNb[$q0['qkey']] = ['key' => 'unit:bottle']; } } foreach ($mpN0['ci'] as $q0) { $mpNb[$q0['qkey']] = ['key' => 'measure']; }
+$mpN1 = $mpRun($mpNb, $mpN);
+$mpNq = array_values(array_filter($mpN1['open'], function ($q) { return $q['type'] === 'measure-file'; }));
+$mpN2 = $mpRun($mpNb + [($mpNq[0]['qkey'] ?? 'x') => ['key' => 'use:name']], $mpN);
+$t(count($mpNq) === 1 && strpos($mpNq[0]['text'], 'the size in its name (1,000 ml) and "Bottle size (ml)" (750 ml, bar_nov!H2) disagree') !== false
+    && abs((float)$mpN2['items']['Vodka 1L']['balance'] - 1.25) < 1e-9 && ($mpN2['items']['Vodka 1L']['measure_save']['n'] ?? null) === 40.0,
+    'conflict: "Vodka 1L" with a 750 ml bottle size column is asked; "the size in its name" = 1000 / 25 = 40 shots, 50 shots = 1.25 bottles ' . json_encode($mpNq[0]['text'] ?? null));
+// QA LATER fixed: "Shot 30" with a 25 ml shot on the list = the shot size is not known (asked), never the list's 25; "Shot 25" is fine
+$mpS = function (string $served, array $extra = []) use ($mpRun, $mpHead, $mpAll) {
+    $rows = [$mpHead, ['Rum R', 'RUMS', '60', '30000', '4000', $served, '', '', '']];
+    $r0 = $mpRun([], $rows);
+    $b = ['_sizes' => ['g' => ['m:shot|bottle' => ['ml' => 750, 'shot' => 25]]]];
+    foreach ($mpAll($r0) as $q0) { if ($q0['type'] === 'no-unit') { $b[$q0['qkey']] = ['key' => 'unit:bottle']; } }
+    foreach ($r0['ci'] as $q0) { $b[$q0['qkey']] = ['key' => 'measure']; }
+    return $mpRun($extra + $b, $rows);
+};
+$mpS30 = $mpS('Shot 30');
+$mpS25 = $mpS('Shot 25');
+$mpS30q = array_values(array_filter($mpS30['open'], function ($q) { return $q['type'] === 'measure-n'; }));
+$t(count($mpS30q) === 1 && $mpS30['items']['Rum R']['balance'] === null && $mpS30['items']['Rum R']['measure_save'] === null && $mpS30['items']['Rum R']['status'] === 'needs-answer'
+    && strpos($mpS30q[0]['text'], 'How many shots are in one 750 ml bottle?') === 0
+    && abs((float)$mpS25['items']['Rum R']['balance'] - 2) < 1e-9 && ($mpS25['items']['Rum R']['measure_save']['n'] ?? null) === 30.0,
+    '"Shot 30" with a 25 ml shot (list and group): the shot size is unknown, so "How many shots in one 750 ml bottle?" is asked and nothing is saved; "Shot 25" = 750 / 25 = 30, 60 shots = 2 bottles '
+    . json_encode([$mpS30['items']['Rum R']['qty_how'] ?? null, $mpS30q[0]['text'] ?? null]));
+$mpS30t = $mpS('Shot 30', ['_sizes' => ['g' => ['m:shot|bottle' => ['ml' => 750, 'shot' => 25]], 'r' => ['rum r' => ['shot' => 30]]]]);
+$mpS30g = $mpS('Shot 30', ['_sizes' => ['g' => ['m:shot|bottle' => ['ml' => 750, 'shot' => 30]]]]);
+$t(abs((float)$mpS30t['items']['Rum R']['balance'] - 2.4) < 1e-9 && abs((float)$mpS30g['items']['Rum R']['balance'] - 2.4) < 1e-9 && ($mpS30t['items']['Rum R']['measure_save']['n'] ?? null) === 25.0,
+    '"Shot 30": a 30 ml shot typed for the row, or a group shot size of exactly 30, gives 750 / 30 = 25 (60 shots = 2.4 bottles)');
+$rdS30 = import_count_in_read('Shot 30', 'Bottle', [['name' => 'shot', 'ml' => 25]], $al['unit_synonyms'], import_word_set($al['shot_words']), import_word_set($al['glass_words']));
+$rdS25 = import_count_in_read('Shot 25', 'Bottle', [['name' => 'shot', 'ml' => 25]], $al['unit_synonyms'], import_word_set($al['shot_words']), import_word_set($al['glass_words']));
+$rd1S = import_count_in_read('1 Shot', 'Bottle', [['name' => 'shot', 'ml' => 25]], $al['unit_synonyms'], import_word_set($al['shot_words']), import_word_set($al['glass_words']));
+$t(array_key_exists('list_ml', (array)$rdS30) && $rdS30['list_ml'] === null && !empty($rdS30['size_unknown']) && ($rdS30['cell_num'] ?? null) === 30.0 && ($rdS25['list_ml'] ?? null) === 25.0 && empty($rdS25['size_unknown'])
+    && ($rd1S['list_ml'] ?? null) === 25.0 && empty($rd1S['size_unknown']),
+    'count read: "Shot 30" drops the list size (unknown), "Shot 25" keeps it, "1 Shot" says nothing about the size');
+// "Shot 30" in the served-by cell vs a 25 ml "Shot size" column: asked
+$mpSc = [$mpHead, ['Rum S', 'RUMS', '60', '30000', '4000', 'Shot 30', '', '750', '25']];
+$mpSc0 = $mpRun([], $mpSc);
+$mpScb = []; foreach ($mpAll($mpSc0) as $q0) { if ($q0['type'] === 'no-unit') { $mpScb[$q0['qkey']] = ['key' => 'unit:bottle']; } } foreach ($mpSc0['ci'] as $q0) { $mpScb[$q0['qkey']] = ['key' => 'measure']; }
+$mpSc1 = $mpRun($mpScb, $mpSc);
+$mpScq = array_values(array_filter($mpSc1['open'], function ($q) { return $q['type'] === 'measure-file'; }));
+$mpSc2 = $mpRun($mpScb + [($mpScq[0]['qkey'] ?? 'x') => ['key' => 'use:file']], $mpSc);
+$t(count($mpScq) === 1 && strpos($mpScq[0]['text'], 'writes "30" next to the shot, and "Shot size" says one shot is 25 ml (bar_nov!I2)') !== false && $mpSc1['items']['Rum S']['balance'] === null
+    && abs((float)$mpSc2['items']['Rum S']['balance'] - 2) < 1e-9,
+    'conflict: "Shot 30" vs a 25 ml "Shot size" column is asked; "Yes, one shot is 25 ml" = 750 / 25 = 30 ' . json_encode($mpScq[0]['text'] ?? null));
+// plural of a measure of several words (QA LATER): "glasses of wine", never "glass of wines"
+$mpW = [['Item Name', 'Total Balance', 'Unit', 'Unit Price', 'Unit sold/Served by'], ['Red Wine', '9', 'Casket', '60000', 'Glass of wine'], ['White Wine', '4', 'Casket', '60000', 'Glass of wine']];
+$mpW0 = $ciRun([], $mpW, ['drink_measures' => [['name' => 'shot', 'ml' => 25], ['name' => 'glass of wine', 'ml' => 175]]]);
+$t(import_measure_plural('glass of wine', 2) === 'glasses of wine' && import_measure_singular('glasses of wine') === 'glass of wine' && import_measure_plural('glass of wine', 1) === 'glass of wine'
+    && strpos((string)($mpW0['ci'][0]['text'] ?? ''), 'in caskets or in glasses of wine?') !== false && strpos(json_encode($mpW0['ci']), 'glass of wines') === false,
+    'wording: "is it in caskets or in glasses of wine?" (the plural of the measure name), never "glass of wines" ' . json_encode(substr((string)($mpW0['ci'][0]['text'] ?? ''), 0, 120)));
+$t(strpos($djs, "measure-file': 'File columns disagree'") !== false && strpos($djs, "c.field === 'measures_per_unit'") !== false && strpos($djs, "' from your file, ' + srcRef") !== false
+    && strpos($djs, "if (of) { return plural(of[1], q) + of[2]; }") !== false,
+    'screen: step 2 says what each new column is ("Shots per bottle: how many shots one bottle holds"), step 3 size boxes say "from your file, Sheet1!J12", the same plural in the browser');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

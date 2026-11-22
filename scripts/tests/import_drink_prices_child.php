@@ -1309,6 +1309,35 @@ try {
         && abs((float)$col('SELECT volume_ml FROM stock_ingredients WHERE id = ?', [$ingC]) - 750) < 0.005,
         json_encode([$cC['ok'] ?? null, $cC['error'] ?? null, $lnC]));
 
+    // ---- file P (owner 2026-11-23): "Shots per bottle" / "Bottle size (ml)" / "Shot size" columns: step 3 shows the file's sizes "from your file"
+    // with their cells; a size typed on the row wins. (The count here is answered "in bottles" by $start, so nothing is converted.)
+    if (function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo)) {
+        $jP = $start($file(['Item Name', 'Unit', 'Unit Price', 'Balance', 'Selling Price', 'Served By', 'Shots per bottle', 'Bottle size (ml)', 'Shot size'], [
+            [$n('Rum P'), 'bottle', '18000', '2', '2000', 'Shot', '25', '750', '30'],
+            [$n('Gin P'), 'bottle', '18000', '2', '2000', 'Shot', '', '700', '35'],
+        ], 'p.csv'), 'zzd-p-' . $run . '.csv');
+        $sizesP = function () use ($pdo, &$jP, $admin) {
+            $v = import_job_sizes_view($pdo, $jP, $admin, ['size' => 100, 'ai' => false]);
+            $by = [];
+            foreach ((array)($v['rows'] ?? []) as $r) { $by[$r['name']] = $r; }
+            return $by;
+        };
+        $SP0 = $sizesP();
+        $rp = $SP0[$n('Rum P')] ?? [];
+        $gp = $SP0[$n('Gin P')] ?? [];
+        $ck('file sizes: the shot and bottle sizes of the file fill the step 3 boxes as "from your file" with their cells (Rum P 30 ml shot I2, 750 ml bottle H2; Gin P 35 ml, 700 ml)',
+            ($rp['shot_from'] ?? '') === 'file' && (float)($rp['shot_ml'] ?? 0) === 30.0 && preg_match('/I2$/', (string)($rp['shot_src'] ?? '')) === 1
+            && ($rp['from'] ?? '') === 'file' && (float)($rp['ml'] ?? 0) === 750.0 && preg_match('/H2$/', (string)($rp['src'] ?? '')) === 1
+            && ($gp['shot_from'] ?? '') === 'file' && (float)($gp['shot_ml'] ?? 0) === 35.0 && (float)($gp['ml'] ?? 0) === 700.0, json_encode([$rp, $gp]));
+        $rPset = import_job_sizes_set($pdo, $jP, $admin, ['mode' => 'row', 'key' => $rp['key'] ?? '', 'field' => 'shot', 'value' => '25']);
+        $SP1 = $sizesP();
+        [, $GP1] = $view($jP, $admin);
+        $ck('file sizes: a shot size typed on the row (25 ml) wins over the file\'s 30 ml; the cost of one shot follows it (18000 x 25 / 750)',
+            !empty($rPset['ok']) && ($SP1[$n('Rum P')]['shot_from'] ?? '') === 'row' && (float)($SP1[$n('Rum P')]['shot_ml'] ?? 0) === 25.0
+            && abs((float)($GP1[$n('Rum P')]['cost'] ?? 0) - 18000 * 25 / 750) <= BALANCE_TOLERANCE, json_encode([$rPset, $SP1[$n('Rum P')] ?? null, $GP1[$n('Rum P')] ?? null]));
+        import_job_cancel($pdo, $jP, $admin);
+    }
+
     // the import's own wording when a drink's stock item is gone (49ddf7d had made it "Nothing was saved.", the Put on the menu wording)
     $linkErr = '';
     try {

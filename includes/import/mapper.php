@@ -10,6 +10,7 @@
 
 require_once __DIR__ . '/text-util.php';
 require_once __DIR__ . '/pack-rule.php';
+require_once __DIR__ . '/measure.php';           // import_parse_volume(): a size column ("750ml", "0.75 L")
 
 if (!function_exists('import_match_header')) {
 
@@ -26,7 +27,7 @@ if (!function_exists('import_match_header')) {
         static $lastOut = null;
         // The same alias array is passed on every call of a run (once per cell): recognising it is a pointer / value comparison,
         // not a json_encode + md5 of the whole vocabulary per cell (that was most of the time of reading a big sheet).
-        $sub = [$aliases['fields'] ?? [], $aliases['noise_tokens'] ?? [], $aliases['guard_words'] ?? [], $aliases['derived'] ?? []];
+        $sub = [$aliases['fields'] ?? [], $aliases['noise_tokens'] ?? [], $aliases['guard_words'] ?? [], $aliases['derived'] ?? [], $aliases['ask_phrases'] ?? []];
         if ($lastIn !== null && $sub === $lastIn) {
             return $lastOut;
         }
@@ -62,9 +63,13 @@ if (!function_exists('import_match_header')) {
         foreach (($aliases['guard_words'] ?? []) as $g) {
             $guard[import_norm_text($g)] = true;
         }
+        $ask = [];
+        foreach (($aliases['ask_phrases'] ?? []) as $p) {
+            $ask[import_norm_text($p)] = true;
+        }
         $lastIn = $sub;
         return $lastOut = $cache[$key] = ['noise' => $noise, 'exact' => $exact, 'list' => $list, 'guard' => $guard,
-            'derived' => array_flip(array_map('strval', $aliases['derived'] ?? []))];
+            'derived' => array_flip(array_map('strval', $aliases['derived'] ?? [])), 'ask' => $ask];
     }
 
     function import_header_tokens(string $text, array $idx): array
@@ -159,6 +164,10 @@ if (!function_exists('import_match_header')) {
         if ($conf < 1.0 && $idx['guard'] && !isset($idx['derived'][$best['field']]) && import_field_kind((string)$best['field']) !== 'text' && array_intersect_key($idx['guard'], array_flip($tokens))) {
             $conf = min($conf, 0.6);
         }
+        // v11: a heading that can mean two things ("No of shots": in one bottle, or in stock) is always asked, never read on its own
+        if (!empty($idx['ask']) && isset($idx['ask'][(string)$best['alias']])) {
+            $conf = min($conf, 0.6);
+        }
         return ['field' => $best['field'], 'conf' => $conf, 'alias' => $best['alias'], 'candidates' => array_map(function ($c) {
             return ['field' => $c['field'], 'conf' => $c['conf'], 'alias' => $c['alias']];
         }, $cands)];
@@ -177,8 +186,11 @@ if (!function_exists('import_match_header')) {
 
     function import_field_kind(string $field): string
     {
-        if (in_array($field, ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price', 'pack_size', 'pack_price', 'sell_price'], true)) {
+        if (in_array($field, ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price', 'pack_size', 'pack_price', 'sell_price', 'measures_per_unit'], true)) {
             return 'number';
+        }
+        if ($field === 'unit_ml' || $field === 'measure_ml') {
+            return 'volume';            // v11: a size in ml ("750", "750ml", "0.75 L")
         }
         if ($field === 'expiry') {
             return 'date';
@@ -388,6 +400,10 @@ if (!function_exists('import_match_header')) {
                     } elseif ($info['field'] !== 'unit_price' && is_string($v) && import_heal_number_unit($v, $unitWordsShape ?? ($unitWordsShape = import_unit_words($aliases))) !== null) {
                         $good++;            // "12 pcs": the validator reads it as 12 and pcs (a repair the person can undo), so the column does hold quantities
                     }
+                } elseif ($kind === 'volume') {
+                    if (import_parse_volume($v, import_header_ml_mul((string)$info['header']))['status'] === 'ok') {
+                        $good++;
+                    }
                 } elseif ($kind === 'date') {
                     if (!empty($cell['date'])) {
                         $good++;
@@ -434,7 +450,69 @@ if (!function_exists('import_match_header')) {
                 $map['by_field'][$info['field']] = $map['by_field'][$info['field']] ?? $c;
             }
         }
+        // v11: what a measures-per-unit heading names ("Shots per bottle": shot, bottle) and the unit a size heading is in ("Bottle size (ml)")
+        foreach ($map['columns'] as $c => $info) {
+            if ($info['state'] === 'mapped' && $info['field'] === 'measures_per_unit') {
+                $map['columns'][$c]['per'] = import_per_unit_words((string)$info['header'], $aliases);
+            } elseif ($info['state'] === 'mapped' && in_array($info['field'], ['unit_ml', 'measure_ml'], true)) {
+                $map['columns'][$c]['ml_mul'] = import_header_ml_mul((string)$info['header']);
+                $map['columns'][$c]['per'] = import_per_unit_words((string)$info['header'], $aliases);      // "Glass size": a glass
+            }
+        }
         return $issues;
+    }
+
+    /**
+     * v11: the measure word and the unit word a "how many in one" heading names, both from the heading itself: "Shots per bottle" -> shot / bottle,
+     * "Glasses per casket" -> glass / casket, "No of tots" -> tot / '' (the stock unit), "Measures per unit" -> '' / '' (a generic heading: the
+     * measure is the row's served-by measure). Singular, lower case. 'generic' = the heading's measure word names no fixed measure.
+     */
+    function import_per_unit_words(string $header, array $aliases): array
+    {
+        $measSet = import_word_set(array_merge((array)($aliases['shot_words'] ?? []), (array)($aliases['glass_words'] ?? []), (array)($aliases['portion_words'] ?? []),
+            ['double', 'doubles']));
+        $generic = ['measure' => true, 'serving' => true, 'portion' => true, 'unit' => true, 'single' => true];
+        $syn = (array)($aliases['unit_synonyms'] ?? []);
+        $unitSet = import_word_set(array_merge((array)($aliases['units'] ?? []), (array)($aliases['pour_containers'] ?? []), array_keys($syn)));
+        $m = '';
+        $u = '';
+        $isGeneric = false;
+        foreach (explode(' ', import_norm_text($header)) as $tok) {
+            if ($tok === '' || in_array($tok, ['per', 'of', 'in', 'a', 'an', 'one', 'no', 'number'], true)) {
+                continue;
+            }
+            $s = import_measure_singular($tok);
+            if ($m === '' && !$isGeneric && (isset($measSet[$tok]) || isset($measSet[$s]) || isset($generic[$s]))) {
+                if (isset($generic[$s])) {
+                    $isGeneric = true;
+                } else {
+                    $m = $s;
+                }
+                continue;
+            }
+            if ($u === '' && !isset($generic[$s]) && (isset($unitSet[$tok]) || isset($unitSet[$s]))) {
+                $c = (string)($syn[$tok] ?? $syn[$s] ?? $s);
+                $u = import_measure_singular(mb_strtolower($c));
+            }
+        }
+        return ['measure' => $m, 'unit' => $u, 'generic' => $m === ''];
+    }
+
+    /** v11: the unit a size heading names ("Bottle size (ml)" = 1, "(cl)" = 10, "(L)" / "litres" = 1000), or null when it names none. */
+    function import_header_ml_mul(string $header): ?float
+    {
+        foreach (explode(' ', import_norm_text($header)) as $tok) {
+            if (in_array($tok, ['ml', 'mls', 'millilitre', 'millilitres', 'milliliter', 'milliliters'], true)) {
+                return 1.0;
+            }
+            if (in_array($tok, ['cl', 'centilitre', 'centilitres'], true)) {
+                return 10.0;
+            }
+            if (in_array($tok, ['l', 'lt', 'ltr', 'ltrs', 'litre', 'litres', 'liter', 'liters'], true)) {
+                return 1000.0;
+            }
+        }
+        return null;
     }
 
     /** Plain-English question for a column that could not be mapped with confidence. */

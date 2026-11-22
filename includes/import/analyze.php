@@ -254,8 +254,8 @@ if (!function_exists('import_analyze_file')) {
     {
         $bySheet = import_cells_by_sheet($readerCells);
         $allowed = ['item_name', 'batch', 'qty_primary', 'qty_secondary', 'qty_single', 'unit', 'expiry', 'max_level', 'min_level', 'unit_price', 'remarks',
-            'pack_name', 'pack_size', 'served_by', 'pack_price'];
-        $numeric = ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price', 'pack_size', 'pack_price'];
+            'pack_name', 'pack_size', 'served_by', 'pack_price', 'measures_per_unit', 'unit_ml', 'measure_ml'];
+        $numeric = ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price', 'pack_size', 'pack_price', 'measures_per_unit'];
         $bad = [];
         foreach ($analysis['sheets'] as $sh) {
             if (($sh['triage']['action'] ?? '') !== 'import' && $sh['rows']) {
@@ -324,6 +324,12 @@ if (!function_exists('import_analyze_file')) {
                         $cv = is_string($cell['v']) ? import_norm_ws($cell['v']) : '';
                         if (!is_string($fd['value']) || $fd['value'] === '' || !preg_match('/(?<![\p{L}])' . preg_quote($fd['value'], '/') . '(?![\p{L}])/u', $cv)) {
                             $bad[] = $where . ': unit "' . $fd['value'] . '" is not a word written in ' . $fd['source'];
+                        }
+                    } elseif ($f === 'unit_ml' || $f === 'measure_ml') {
+                        // v11: a size cell ("750", "0.75 L"): read again from that very cell with the unit its heading names, it must give the same ml
+                        $p = import_parse_volume($cell['v'], isset($fd['ml_mul']) && is_numeric($fd['ml_mul']) ? (float)$fd['ml_mul'] : null);
+                        if ($p['status'] !== 'ok' || abs((float)$p['ml'] - (float)$fd['value']) > 1e-9) {
+                            $bad[] = $where . ': ' . $f . ' ' . json_encode($fd['value']) . ' is not the size written in ' . $fd['source'];
                         }
                     } elseif (in_array($f, $numeric, true)) {
                         $p = import_parse_number($cell['v']);

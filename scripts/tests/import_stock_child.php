@@ -1241,11 +1241,69 @@ try {
         $ruNot = array_values(array_filter((array)($rX['measures_not'] ?? []), function ($x) use ($n) { return ($x['name'] ?? '') === $n('MS Rum'); }));
         $ck('measure change (database): Rum has a draft count line typed in tots, so "Change" is NOT applied at import (it would read 4 tots as 4 shots): 30 tots kept, the line untouched, the reason in the result',
             ($ruX['measure_small_name'] ?? '') === 'tot' && abs((float)($ruX['measure_per_big'] ?? 0) - 30) < 0.0001 && abs((float)($lnX['actual_quantity'] ?? 0) - round(1 + 4 / 30, 6)) < 0.000001
-            && abs((float)($lnX['entry_per_big'] ?? 0) - 30) < 0.0001 && $ruNot && strpos((string)$ruNot[0]['why'], 'open stock counts') !== false, json_encode([$ruX, $lnX, $rX['measures_not'] ?? null]));
+            && abs((float)($lnX['entry_per_big'] ?? 0) - 30) < 0.0001 && $ruNot && strpos((string)$ruNot[0]['why'], 'it keeps 30 tots in one bottle: 1 open stock count line uses it') === 0, json_encode([$ruX, $lnX, $rX['measures_not'] ?? null]));
         $lineX2 = $pdo->prepare('SELECT actual_quantity FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
         $lineX2->execute([(int)($resM['opening_count_id'] ?? 0), $idMG]);     // Gin is already on the first import's open opening count (this one leaves it out)
         $ck('measure change (database): the open opening count line of Gin (40 tots / 20 = 2 bottles, no typed measure) is not re-worked when its measure changes to 25 shots; cost 9,000 never divided',
             abs((float)$lineX2->fetchColumn() - 2) < 0.000001 && abs((float)$pdo->query('SELECT cost_per_unit FROM stock_ingredients WHERE id = ' . $idMG)->fetchColumn() - 9000) < 0.0001);
+
+        // ---- QA 2026-11-23: the SAME measure with a corrected N ("Shots per bottle" 20 vs Gin's own 25 shots): "Change" chosen at review, then a line
+        // typed in shots on a draft count before Confirm: kept at commit (rh_stock_measure_save would re-work that line), the reason in the result
+        $fhY = fopen('php://memory', 'w+');
+        foreach ([['Item Name', 'Balance (shots)', 'Unit', 'Unit Price', 'Shots per bottle'], [$n('MS Gin'), '50', 'bottle', '9000', '20']] as $rY) { fputcsv($fhY, $rY); }
+        rewind($fhY);
+        $uY = $upload($put((string)stream_get_contents($fhY), 'shots3.csv'), 'zzt-shots3-' . $run . '.csv', $admin);
+        $jY = (int)($uY['job_id'] ?? 0);
+        if ($jY) { import_job_analyse($pdo, $jY); }
+        $cgY = null;
+        foreach ((array)($jY ? (import_job_review_summary($pdo, $jY)['questions'] ?? []) : []) as $q0) {
+            if ($q0['type'] === 'measure-change' && strpos($q0['text'], $n('MS Gin')) !== false) { $cgY = $q0; }
+        }
+        $ck('corrected N (database): Gin counts 25 shots a bottle, the file says 20: "Keep 25 / Change to 20" is offered while no open count line uses it',
+            $cgY && array_column((array)$cgY['options'], 'label') === ['Keep 25 shots a bottle', 'Change to 20 shots a bottle'], json_encode($cgY['options'] ?? null));
+        if ($cgY) { import_job_answer($pdo, $jY, $cgY['id'], 'change', $admin); }
+        $tkY = $jY ? !empty(import_job_set_update_fields($pdo, $jY, rh_ssi_key($n('MS Gin')), ['quantity'], $admin)['ok']) : false;   // ticked once the count can be worked out
+        $pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, is_opening, created_at, snapshot_at) VALUES (?, CURDATE(), 'full', 'draft', ?, 0, NOW(), NOW())")
+            ->execute(['ZZT-' . $run . '-MY', $admin]);
+        $cidY = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost, reason_code, counted_at, entry_mode, entry_big, entry_small, entry_per_big)
+            VALUES (?, ?, 0, ?, ?, 9000, 0, '', NOW(), 'both', 1, 5, 25)")->execute([$cidY, $idMG, round(1 + 5 / 25, 6), round(1 + 5 / 25, 6)]);
+        $lineY = (int)$pdo->lastInsertId();
+        $answerAll($jY, $admin);
+        $cY = $jY ? import_commit_stock($pdo, $jY, $admin) : ['ok' => false];
+        $rY2 = $cY['result'] ?? [];
+        $gY = $mx($idMG);
+        $lnY = $pdo->query('SELECT actual_quantity, entry_per_big FROM stock_count_lines WHERE id = ' . $lineY)->fetch(PDO::FETCH_ASSOC) ?: [];
+        $gyNot = array_values(array_filter((array)($rY2['measures_not'] ?? []), function ($x) use ($n) { return ($x['name'] ?? '') === $n('MS Gin'); }));
+        $ck('corrected N (database): a line typed in shots since the review = Gin keeps 25 shots at commit, the line untouched (1 bottle + 5 shots / 25), the reason in the result',
+            $tkY && !empty($cY['ok']) && ($gY['measure_small_name'] ?? '') === 'shot' && abs((float)($gY['measure_per_big'] ?? 0) - 25) < 0.0001 && ($rY2['measures_saved'] ?? -1) === 0
+            && abs((float)($lnY['actual_quantity'] ?? 0) - 1.2) < 0.000001 && abs((float)($lnY['entry_per_big'] ?? 0) - 25) < 0.0001
+            && $gyNot && (string)$gyNot[0]['why'] === 'it keeps 25 shots in one bottle: 1 open stock count line uses it; change it in Stock Items after the count is approved',
+            json_encode([$cY['error'] ?? null, $gY, $lnY, $rY2['measures_not'] ?? null]));
+    }
+
+    // ---- v11 (owner 2026-11-23): "No of shots" is asked once (shots in stock or in one bottle?), then read; never the row number ----------
+    $fhN = fopen('php://memory', 'w+');
+    fputcsv($fhN, ['Item Name', 'Balance', 'Unit', 'Unit Price', 'Served By', 'No of shots', 'Bottle size (ml)']);
+    foreach ([[$n('NS Gin'), '2', 'bottle', '9000', 'Bottle', '30', '750'], [$n('NS Rum'), '3', 'bottle', '9000', 'Bottle', '25', '750'], [$n('NS Tequila'), '1', 'bottle', '9000', 'Bottle', '30', '750']] as $rwN) { fputcsv($fhN, $rwN); }
+    rewind($fhN);
+    $uN = $upload($put((string)stream_get_contents($fhN), 'noshots.csv'), 'zzt-noshots-' . $run . '.csv', $admin);
+    $jN = (int)($uN['job_id'] ?? 0);
+    if ($jN > 0) {
+        import_job_analyse($pdo, $jN);
+        $sN0 = import_job_review_summary($pdo, $jN);
+        $qN = null;
+        foreach ($sN0['questions'] as $q) { if ($q['type'] === 'mapping-unsure' && strpos($q['text'], 'No of shots') !== false) { $qN = $q; } }
+        $aN = $qN ? import_job_answer($pdo, $jN, $qN['id'], 'use:measures_per_unit', $admin) : ['ok' => false];
+        $sN1 = import_job_review_summary($pdo, $jN);
+        $colN = null;
+        foreach ($sN1['sheets'][0]['columns'] ?? [] as $c) { if ($c['header'] === 'No of shots') { $colN = $c; } }
+        $stillAsked = false;
+        foreach ($sN1['questions'] as $q) { if ($q['type'] === 'mapping-unsure' && strpos($q['text'], 'No of shots') !== false && $q['answer'] === null) { $stillAsked = true; } }
+        $ck('"No of shots" (database): asked once as "how many in one"; answered, the column is read (shot) and not asked again; the size column is read without a question',
+            $qN !== null && ($qN['options'][0]['key'] ?? '') === 'use:measures_per_unit' && !empty($aN['ok']) && !$stillAsked && ($colN['field'] ?? '') === 'measures_per_unit'
+            && ($colN['per']['measure'] ?? '') === 'shot', json_encode([$qN['text'] ?? null, $aN, $colN]));
+        import_job_cancel($pdo, $jN, $admin);
     }
 
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
