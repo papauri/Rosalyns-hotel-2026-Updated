@@ -201,6 +201,8 @@ if (!function_exists('import_commit_stock')) {
             // "how many tots in one bottle?" answered on the review screen: saved on the item as its count measure (Step U2 d), through the stock
             // lead's own path (rh_stock_measure_save: checked, logged as stock_measure_changed), in this same transaction. Never a raw UPDATE.
             $measureSaved = 0;
+            $measureList = [];     // the items now counted in a measure (step 4 / result: "Premier Brandy: 25 shots in one bottle")
+            $measureNot = [];      // converted counts whose measure is not saved, with the reason
             foreach ($v['res']['items'] as $it) {
                 if ($it['status'] !== 'ready' || empty($it['measure_save']) || !isset($plan['items'][rh_ssi_key($it['name'])])) {
                     continue;
@@ -224,14 +226,40 @@ if (!function_exists('import_commit_stock')) {
                 if ($ingId <= 0) {
                     throw new RuntimeException('"' . $it['name'] . '" was not found after the import, so its count measure could not be saved. Nothing was imported.');
                 }
-                $cur = $pdo->prepare('SELECT measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id = ?');
+                $cur = $pdo->prepare('SELECT measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id = ? FOR UPDATE');
                 $cur->execute([$ingId]);
                 $curRow = $cur->fetch(PDO::FETCH_ASSOC) ?: [];
-                if (rh_stock_measure_get($curRow) !== null) {
-                    continue;                           // an item's own measure (set since the review) is never replaced by an import
+                $curM = rh_stock_measure_get($curRow);
+                $was = null;
+                if ($curM !== null) {
+                    if (import_measure_same($curM, $mNew)) {
+                        continue;                       // already this measure: nothing to do
+                    }
+                    if (empty($ms['replace']) || !import_measure_same($curM, (array)$ms['replace'])) {
+                        // an item's own measure set since the review is never replaced by an import
+                        $measureNot[] = ['name' => (string)$it['name'], 'why' => 'its count measure was changed in Stock Items after the review (' . rh_stock_measure_describe($curM) . '); it is kept'];
+                        continue;
+                    }
+                    // "Change to ..." was chosen. Lines on open counts typed in the old measure would be re-read in the new one: then it is kept.
+                    $ol = (int)(import_measure_open_lines($pdo, $ingId)[$ingId] ?? 0);
+                    if ($ol > 0) {
+                        $measureNot[] = ['name' => (string)$it['name'], 'why' => 'it keeps its own count measure: ' . $ol . ' line' . ($ol === 1 ? '' : 's') . ' on open stock counts '
+                            . ($ol === 1 ? 'was' : 'were') . ' counted in it; finish those counts, then change it in Stock Items'];
+                        continue;
+                    }
+                    $was = $curM;
                 }
                 rh_stock_measure_save($pdo, $ingId, $mNew, $userId, 'Import #' . $jobId);
                 $measureSaved++;
+                if (count($measureList) < 500) {
+                    $measureList[] = ['name' => (string)$it['name'], 'small' => (string)$mNew['small'], 'text' =>import_measure_fmt((float)$mNew['n']) . ' ' . import_measure_plural((string)$mNew['small'], (float)$mNew['n']) . ' in one ' . $mNew['big'],
+                        'was' => $was !== null ? import_measure_fmt((float)$was['n']) . ' ' . import_measure_plural((string)$was['small'], (float)$was['n']) . ' in one ' . $was['big'] : null];
+                }
+            }
+            foreach ($v['res']['items'] as $it) {
+                if ($it['status'] === 'ready' && !empty($it['measure_not']) && isset($plan['items'][rh_ssi_key($it['name'])]) && count($measureNot) < 500) {
+                    $measureNot[] = ['name' => (string)$it['name'], 'why' => (string)$it['measure_not']];
+                }
             }
             // bottle sizes a person gave in step 3 (optional), saved before the drinks so a shot / ml stock link can be worked out
             $sizes = import_drinks_sizes_commit($pdo, (array)$v['res']['items'], $answersNow, $jobId, $userId);
@@ -261,7 +289,7 @@ if (!function_exists('import_commit_stock')) {
                 'count_lines' => (int)$ap['count_lines'], 'expiry_batches' => (int)$ap['batches'], 'left_out_overlap' => (int)($ap['left_out_overlap'] ?? 0),
                 'stock_not_counted_no_cost' => $nc['no_cost']['names'], 'stock_not_counted_not_ticked' => $nc['not_ticked']['names'],
                 'stock_not_counted_cost_not_ticked' => $nc['cost_not_ticked']['names'], 'stock_not_counted_same' => $nc['same']['names'], 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
-                'measures_saved' => $measureSaved, 'sizes_saved' => $sizes['saved'], 'sizes_names' => $sizes['names'],
+                'measures_saved' => $measureSaved, 'measures_list' => $measureList, 'measures_not' => $measureNot, 'sizes_saved' => $sizes['saved'], 'sizes_names' => $sizes['names'],
                 'drinks_added' => $drinks['added'] - $drinks['food_added'], 'drinks_updated' => $drinks['updated'] - $drinks['food_updated'], 'drinks_linked' => $drinks['linked'], 'drinks_names' => $drinks['names'],
                 'food_added' => $drinks['food_added'], 'food_updated' => $drinks['food_updated'],      // 2026-11-22: food / snack items put on the food menu
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),

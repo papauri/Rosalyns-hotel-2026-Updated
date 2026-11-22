@@ -1741,7 +1741,7 @@ $t($b2i['ticked'] === ['quantity'] && $b2i['in_count'] === false && count($b2w) 
 echo "-- counts in shots / tots / glasses --\n";
 $muRun = function (array $rows, array $ctx = [], array $answers = []) use ($csvRows, $al) {
     $p = $csvRows($rows, 'mu.csv');
-    $an = import_analyze_file($p, 'mu.csv', $al);
+    $an = import_analyze_file($p, 'mu.csv', $al, ['drink_measures' => (array)($ctx['drink_measures'] ?? [])]);     // as review.php does: the hotel's own measure names are count words
     $res = import_resolve($an, $answers, $ctx + ['existing' => [], 'unit_options' => ['bottle', 'each', 'tot'], 'corrections' => []]);
     $items = [];
     foreach ($res['items'] as $it) { $items[$it['name']] = $it; }
@@ -1767,9 +1767,10 @@ $t(abs($m1i['balance'] - 2.2) < 0.0000005 && $m1i['diff']['quantity'] === [1.0, 
     && strpos((string)$m1i['qty_how'], '66 shots = 2.2 bottles (30 shots in one bottle') !== false && abs((float)$m1i['cost'] - 9000) < 0.00005,
     'U2d: "Balance (shots)" 66 with the item\'s own measure (30 shots in one bottle) = 2.2 bottles, shown as "66 shots = 2.2 bottles", cost unchanged ' . json_encode([$m1i['balance'], $m1i['qty_how']]));
 $t($m1['inv'] === [] && ($m1['an']['sheets'][0]['rows'][0]['fields']['qty_single']['value'] ?? null) === 66, 'U2d: the row keeps the count as written (66, its own cell); the conversion is the resolver\'s, never stored as a source value');
-// size / the hotel's measures list: 750 ml / 25 ml tot = 30, nothing asked, nothing saved
+// size / the hotel's measures list: 750 ml / 25 ml tot = 30, nothing asked; both sizes certain, so "30 tots in one bottle" is saved (owner 2026-11-22)
 $m2 = $muRun([['Item Name', 'Balance (tots)', 'Unit', 'Unit Price'], ['Vodka 750ml', '60', 'bottle', '9000']], ['drink_measures' => [['name' => 'Tot', 'ml' => 25]]]);
-$t(abs($m2['items']['Vodka 750ml']['balance'] - 2) < 0.0000005 && !$m2['open'] && $m2['items']['Vodka 750ml']['measure_save'] === null
+$t(abs($m2['items']['Vodka 750ml']['balance'] - 2) < 0.0000005 && !$m2['open'] && ($m2['items']['Vodka 750ml']['measure_save']['n'] ?? null) === 30.0
+    && ($m2['items']['Vodka 750ml']['measure_save']['small'] ?? '') === 'tot' && ($m2['items']['Vodka 750ml']['measure_save']['big'] ?? '') === 'bottle'
     && strpos((string)$m2['items']['Vodka 750ml']['qty_how'], '750 ml / 25 ml tot') !== false,
     'U2d: no item measure: the size in the name (750 ml) / the tot on the hotel\'s measures list (25 ml) = 30 tots in one bottle: 60 tots = 2 bottles');
 // unknown: ONE question for like items (same measure + size), stock waits; an answer converts both and is saved on each new item
@@ -1800,9 +1801,40 @@ $t(abs($m4['items']['Gin']['balance'] - 2.5) < 0.0000005 && !$m4['open'] && strp
 $m4t = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
 $m4tq = $muOpen($m4t, 'measure-n');
 $m4ta = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick + [($m4tq[0]['qkey'] ?? 'x') => ['key' => 'n', 'pack_size' => 30]]);
-$t(count($m4tq) === 1 && abs($m4ta['items']['Gin']['balance'] - 0.5) < 0.0000005 && $m4ta['items']['Gin']['measure_save'] === null
-    && (bool)array_filter($m4ta['items']['Gin']['warnings'], function ($w) { return strpos($w, 'already has its own count measure (30 shots in one bottle)') !== false; }),
-    'U2d: counted in tots but the item\'s own measure is in shots: asked (never assumed equal), converted, and the item\'s own measure is kept');
+$m4tc = $muOpen($m4ta, 'measure-change');
+$t(count($m4tq) === 1 && abs($m4ta['items']['Gin']['balance'] - 0.5) < 0.0000005 && count($m4tc) === 1 && $m4ta['items']['Gin']['status'] === 'needs-answer' && $m4ta['res']['can_confirm'] === false
+    && ($m4tc[0]['options'][0]['label'] ?? '') === 'Keep 30 shots a bottle' && ($m4tc[0]['options'][1]['label'] ?? '') === 'Change to 30 tots a bottle',
+    'U2d: counted in tots but the item\'s own measure is in shots: asked (never assumed equal), converted; the different measure is never replaced silently: "Keep" / "Change" blocks confirm ' . json_encode(array_column($m4tc, 'options')));
+$m4Base = $ginTick + [($m4tq[0]['qkey'] ?? 'x') => ['key' => 'n', 'pack_size' => 30]];
+$m4tk = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $m4Base + [($m4tc[0]['qkey'] ?? 'y') => ['key' => 'keep']]);
+$m4tg = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $m4Base + [($m4tc[0]['qkey'] ?? 'y') => ['key' => 'change']]);
+$t($m4tk['items']['Gin']['measure_save'] === null && $m4tk['items']['Gin']['status'] === 'ready' && strpos((string)$m4tk['items']['Gin']['measure_not'], 'you chose to keep its own count measure (30 shots a bottle)') === 0
+    && abs($m4tk['items']['Gin']['balance'] - 0.5) < 0.0000005 && abs((float)$m4tk['items']['Gin']['cost'] - 9000) < 0.00005,
+    'measure change: "Keep 30 shots a bottle" = nothing saved, the count still 0.5 bottle, cost unchanged, step 4 says why ' . json_encode($m4tk['items']['Gin']['measure_not']));
+$m4gs = $m4tg['items']['Gin']['measure_save'];
+$t($m4tg['items']['Gin']['status'] === 'ready' && ($m4gs['small'] ?? '') === 'tot' && ($m4gs['n'] ?? null) === 30.0 && ($m4gs['big'] ?? '') === 'bottle' && ($m4gs['replace']['small'] ?? '') === 'shot'
+    && abs($m4tg['items']['Gin']['balance'] - 0.5) < 0.0000005 && $m4tg['items']['Gin']['measure_not'] === null,
+    'measure change: "Change to 30 tots a bottle" = saved at import (replacing 30 shots), the count the same 0.5 bottle');
+$exGinOpen = $exGin + ['_open_measure_lines' => 2];
+$m4to = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGinOpen]], $m4Base);
+$t(!$muOpen($m4to, 'measure-change') && $m4to['items']['Gin']['measure_save'] === null && $m4to['items']['Gin']['status'] === 'ready'
+    && strpos((string)$m4to['items']['Gin']['measure_not'], '2 lines on open stock counts were counted in shots') !== false,
+    'measure change: lines on open counts typed in shots = never changed (they would be read as tots), no question, the reason is shown ' . json_encode($m4to['items']['Gin']['measure_not']));
+$m4same = $muRun([['Item Name', 'Bar (shots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
+$t($m4same['items']['Gin']['measure_save'] === null && $m4same['items']['Gin']['measure_not'] === null && !$muOpen($m4same, 'measure-change') && abs($m4same['items']['Gin']['balance'] - 0.5) < 0.0000005,
+    'measure change: counted in shots, the item\'s own measure is 30 shots a bottle = the same measure, nothing to do, nothing asked');
+// "doubles" when the hotel's Drink measures list has a Double (60 ml): 750 / 60 = 12.5 exactly (4 decimals) = saved; an existing shot item is asked
+$m4d = $muRun([['Item Name', 'Bar (doubles)', 'Unit', 'Unit Price'], ['Rum 750ml', '25', 'bottle', '9000']], ['drink_measures' => [['name' => 'Double', 'ml' => 60]]]);
+$t(abs($m4d['items']['Rum 750ml']['balance'] - 2) < 1e-9 && ($m4d['items']['Rum 750ml']['measure_save']['small'] ?? '') === 'double' && ($m4d['items']['Rum 750ml']['measure_save']['n'] ?? null) === 12.5 && !$m4d['open'],
+    'doubles: 25 doubles of 60 ml (Drink measures list) from a 750 ml bottle (its name) = 2 bottles; "12.5 doubles in one bottle" saved ' . json_encode($m4d['items']['Rum 750ml']['measure_save']));
+$m4n = $muRun([['Item Name', 'Balance (tots)', 'Unit', 'Unit Price'], ['Vodka 750ml', '60', 'bottle', '9000']], ['drink_measures' => [['name' => 'Tot', 'ml' => 35]]]);
+$t($m4n['items']['Vodka 750ml']['measure_save'] === null && $m4n['items']['Vodka 750ml']['status'] === 'ready' && abs($m4n['items']['Vodka 750ml']['balance'] - round(60 / 21.4286, 6)) < 1e-9
+    && strpos((string)$m4n['items']['Vodka 750ml']['measure_not'], '750 ml / 35 ml = 21.43 tots in one bottle, not an exact number') === 0,
+    'non-whole N: 750 ml / 35 ml = 21.428571 tots: the count is converted as before, but no measure is saved (an item keeps N to 4 decimals exactly) ' . json_encode($m4n['items']['Vodka 750ml']['measure_not']));
+$t(import_measure_save_problem(['big' => 'bottle', 'small' => 'shot', 'n' => 25, 'side' => 'big']) === '' && import_measure_save_problem(['big' => 'bottle', 'small' => 'bottles', 'n' => 25, 'side' => 'big']) !== ''
+    && import_measure_save_problem(['big' => 'bottle', 'small' => str_repeat('x', 31), 'n' => 25, 'side' => 'big']) !== '' && import_measure_save_problem(['big' => 'bottle', 'small' => 'shot', 'n' => 0.5, 'side' => 'big']) !== ''
+    && import_measure_save_problem(['big' => 'bottle', 'small' => 'shot', 'n' => 21.428571, 'side' => 'big']) !== '' && import_measure_same(['big' => 'Bottle', 'small' => 'shots', 'n' => 25, 'side' => 'big'], ['big' => 'bottle', 'small' => 'shot', 'n' => 25.00001, 'side' => 'big']),
+    'measure checks: the Stock Items limits (names, 30 characters, N 1..1000 to 4 decimals); "Bottle / shots / 25" is the same measure as "bottle / shot / 25"');
 // "66 shots" typed in the quantity cell itself
 $m5 = $muRun([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['Gin', '66 shots', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
 $m5f = $m5['an']['sheets'][0]['rows'][0]['fields'];
@@ -2088,7 +2120,7 @@ $ciSizes = ['_sizes' => ['g' => ['m:shot|bottle' => ['shot' => 30, 'ml' => 750]]
 $ciM = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock']] + $ciSizes);
 $pb = $ciM['items']['Premier Brandy'];
 $t(abs($pb['balance'] - 2.28) < 1e-9 && abs($ciM['items']['Klip Brandy']['balance'] - 2) < 1e-9 && abs($ciM['items']['Malibu Cream']['balance'] - 0.28) < 1e-9
-    && abs((float)$pb['cost'] - 30000) < 1e-9 && abs($pb['balance'] * $pb['cost'] - 68400) < 0.005 && $pb['in_count'] === true && $pb['measure_save'] === null && $pb['status'] === 'ready',
+    && abs((float)$pb['cost'] - 30000) < 1e-9 && abs($pb['balance'] * $pb['cost'] - 68400) < 0.005 && $pb['in_count'] === true && ($pb['measure_save']['big'] ?? '') === 'bottle' && ($pb['measure_save']['small'] ?? '') === 'shot' && ($pb['measure_save']['n'] ?? null) === 25.0 && ($pb['measure_save']['side'] ?? '') === 'big' && $pb['status'] === 'ready',
     'count unit "in shots": 57 shots with a 30 ml shot and a 750 ml bottle (step 3 sizes) = 2.28 bottles exactly in the opening count, cost 30,000 per bottle (never divided), value 2.28 x 30,000 = 68,400 '
     . json_encode([$pb['balance'], $pb['cost'], $pb['qty_how']]));
 $t(strpos((string)$pb['qty_how'], '57 shots = 2.28 bottles (25 shots in one bottle: 750 ml bottle set for the group in step 3 / 30 ml shot set for the group in step 3)') === 0
@@ -2143,6 +2175,47 @@ $t(abs($ciX['items']['Premier Brandy']['balance'] - round(57 / 28, 6)) < 1e-9 &&
 $ciG = $ciRun([$ciShot['qkey'] => ['key' => 'stock'], $ciGl['qkey'] => ['key' => 'measure'], '_sizes' => ['g' => ['gl:casket' => ['glass' => 250, 'ml' => 5000]]]]);
 $t(abs($ciG['items']['Red Box Wine']['balance'] - 0.45) < 1e-9 && ($ciG['items']['Red Box Wine']['qty_words']['text'] ?? '') === '9 glasses',
     'count unit: "in glasses" for a wine kept in caskets: 9 glasses of 250 ml from a 5,000 ml casket = 0.45 casket ("9 glasses")');
+
+echo "-- count measure saved on the item (owner 2026-11-22: \"No guess work\") --\n";
+$rbw = $ciG['items']['Red Box Wine'];
+$t(($rbw['measure_save']['big'] ?? '') === 'casket' && ($rbw['measure_save']['small'] ?? '') === 'glass' && ($rbw['measure_save']['n'] ?? null) === 20.0 && abs((float)$rbw['cost'] - 60000) < 1e-9,
+    'saved: "in glasses" with a 250 ml glass and a 5,000 ml casket typed in step 3 = 20 glasses in one casket saved on the item; cost per casket never divided ' . json_encode($rbw['measure_save']));
+$ciG2 = $ciRun([$ciShot['qkey'] => ['key' => 'stock'], $ciGl['qkey'] => ['key' => 'measure'], '_sizes' => ['g' => ['gl:casket' => ['glass' => 150, 'ml' => 5000]]]]);
+$rbw2 = $ciG2['items']['Red Box Wine'];
+$t($rbw2['measure_save'] === null && abs($rbw2['balance'] - round(9 / 33.3333, 6)) < 1e-9 && $rbw2['status'] === 'ready'
+    && strpos((string)$rbw2['measure_not'], '5,000 ml / 150 ml = 33.33 glasses in one casket, not an exact number') === 0,
+    'not saved: a 150 ml glass from a 5,000 ml casket = 33.33 (not exact at 4 decimals): converted as before, measure not saved, the reason shown ' . json_encode($rbw2['measure_not']));
+$t($ciS['items']['Premier Brandy']['measure_save'] === null && $ciS['items']['Premier Brandy']['measure_not'] === null && $ciG['items']['Premier Brandy']['measure_save'] === null,
+    'answered "in bottles": nothing converted, nothing saved, nothing listed');
+$t($ciN['items']['Premier Brandy']['measure_save'] === null && $ciN['items']['Premier Brandy']['status'] === 'needs-answer' && $ciN['res']['can_confirm'] === false,
+    'no bottle size anywhere: nothing saved (the item waits for "How many shots are in one bottle?" or a size in step 3)');
+$t($ciB['items']['Premier Brandy']['measure_save'] === null && strpos((string)$ciB['items']['Premier Brandy']['measure_not'], '1,000 ml / 30 ml = 33.33 shots in one bottle') === 0
+    && ($ciB2['items']['Premier Brandy']['measure_save']['n'] ?? null) === 20.0 && ($ciB2['items']['Klip Brandy']['measure_save']['n'] ?? null) === 25.0,
+    'a 1,000 ml bottle / 30 ml shot (33.33) is not saved; a 700 ml bottle + 35 ml shot typed for one drink = 20 saved on it, the rest of the group 25');
+$t($ciX['items']['Premier Brandy']['measure_save'] === null && $ciX['items']['Premier Brandy']['measure_not'] === null && !array_filter($ciX['open'], function ($q) { return $q['type'] === 'measure-change'; }),
+    'the item\'s own count measure (28 shots a bottle) used for the count = the same measure, nothing saved, nothing asked');
+// the shot size written in the file ("Shot 30ml") + the bottle size typed in step 3 = 25 shots a bottle
+$ciFileRows = [$ciHead, ['Premier Brandy', 'BRANDYS', '57', '30000', '4000', '228000', 'Bottle', '1', 'Shot 30ml']];
+$ciF0 = $ciRun([], $ciFileRows);
+$ciFq = $ciF0['ci'][0]['qkey'] ?? 'x';
+$ciF = $ciRun([$ciFq => ['key' => 'measure'], '_sizes' => ['r' => ['premier brandy' => ['ml' => 750]]]], $ciFileRows);
+$pbF = $ciF['items']['Premier Brandy'];
+$t(($pbF['measure_save']['n'] ?? null) === 25.0 && ($pbF['measure_save']['small'] ?? '') === 'shot' && ($pbF['measure_save']['big'] ?? '') === 'bottle' && abs($pbF['balance'] - 2.28) < 1e-9
+    && ($pbF['qty_words']['text'] ?? '') === '57 shots = 2 bottles + 7 shots' && strpos((string)$pbF['measure_save']['how'], '30 ml shot written in your file') !== false,
+    'saved: "Shot 30ml" in the file + a 750 ml bottle typed in step 3 = (bottle, shot, 25); 57 shots = 2 bottles + 7 shots ' . json_encode([$pbF['measure_save'] ?? null, $pbF['qty_how']]));
+// an existing item counted in shots whose own measure is in glasses: Keep / Change, both work
+$ciExG = ['id' => 802, 'name' => 'Premier Brandy', 'category' => 'BRANDYS', 'unit' => 'Bottle', 'current_quantity' => 0, 'cost_per_unit' => 30000, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '',
+    'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0, '_measure' => ['big' => 'bottle', 'small' => 'tot', 'n' => 30.0, 'side' => 'big'], '_ml' => null];
+$ciUpd = ['_updates' => [rh_ssi_key('Premier Brandy') => ['quantity']]];
+$ciC0 = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock']] + $ciUpd + $ciSizes, null, ['existing' => [$ciExG]]);
+$ciCq = array_values(array_filter($ciC0['open'], function ($q) { return $q['type'] === 'measure-change'; }));
+$ciCk = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], ($ciCq[0]['qkey'] ?? 'x') => ['key' => 'keep']] + $ciUpd + $ciSizes, null, ['existing' => [$ciExG]]);
+$ciCc = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], ($ciCq[0]['qkey'] ?? 'x') => ['key' => 'change']] + $ciUpd + $ciSizes, null, ['existing' => [$ciExG]]);
+$t(count($ciCq) === 1 && $ciC0['items']['Premier Brandy']['status'] === 'needs-answer' && ($ciCq[0]['options'][1]['label'] ?? '') === 'Change to 25 shots a bottle'
+    && $ciCk['items']['Premier Brandy']['status'] === 'ready' && $ciCk['items']['Premier Brandy']['measure_save'] === null && abs($ciCk['items']['Premier Brandy']['balance'] - 2.28) < 1e-9
+    && $ciCc['items']['Premier Brandy']['status'] === 'ready' && ($ciCc['items']['Premier Brandy']['measure_save']['n'] ?? null) === 25.0 && abs($ciCc['items']['Premier Brandy']['balance'] - 2.28) < 1e-9,
+    'existing item with another measure (30 tots a bottle), counted in shots: blocks until "Keep 30 tots a bottle" / "Change to 25 shots a bottle"; keep = nothing saved, change = 25 shots saved; 2.28 bottles either way '
+    . json_encode(array_column($ciCq, 'options')));
 // the value check compares a count answered in shots in the stock unit the cost is for (made-up rows valued at cost: 2.28 x 30,000)
 $ciVcRows = [['Item Name', 'Total Balance', 'Unit Price', 'Stock Value', 'Unit Bought As', 'Unit sold/Served by'],
     ['Premier Brandy', '57', '30000', '68400', 'Bottle', 'Shot'], ['Klip Brandy', '50', '32000', '64000', 'Bottle', 'Shot']];
@@ -2171,9 +2244,77 @@ $t(import_qty_words(2.28, $cn, 'bottle') === ['text' => '57 shots = 2 bottles + 
 $djs = (string)file_get_contents($root . '/admin/js/data-import.js');
 $t(strpos($djs, 'function qtyWords(qty, cn, unit)') !== false && strpos($djs, "var smalls = Math.round(x * n * 10) / 10;") !== false && strpos($djs, "post('count_row'") !== false,
     'screen: the same words in the browser (qtyWords) and a drink\'s own answer is saved through count_row');
-$t(import_count_in_read('Bottle', 'Bottle', [], [], ['shot' => true], ['glass' => true]) === null && import_count_in_read('Double', 'Bottle', [['name' => 'double', 'ml' => 50]], [], ['shot' => true], ['glass' => true]) === null
+$t(import_count_in_read('Bottle', 'Bottle', [], [], ['shot' => true], ['glass' => true]) === null
     && import_count_in_read('25ml', 'Bottle', [], [], ['shot' => true], ['glass' => true]) === null && (import_count_in_read('Tot 35ml', 'Bottle', [['name' => 'shot', 'ml' => 25]], [], ['shot' => true, 'tot' => true], [])['cell_ml'] ?? null) === 35.0,
-    'count unit: served by the bottle itself, a "Double" or a bare "25ml" is never asked; "Tot 35ml" is a shot of 35 ml (the size from the cell)');
+    'count unit: served by the bottle itself or a bare "25ml" is never asked; "Tot 35ml" is a shot of 35 ml (the size from the cell)');
+// QA 2026-11-22: nothing served by a measure is read as bottles silently ("Shot 30", "Tot 35", "Double", "Wine glass" ...)
+$ciSh = import_word_set($al['shot_words']);
+$ciGs = import_word_set($al['glass_words']);
+$ciPs = import_word_set($al['pour_containers']);
+$ciRead = function (string $s, array $list = [['name' => 'shot', 'ml' => 25], ['name' => 'double', 'ml' => 50]]) use ($ciSh, $ciGs, $ciPs, $al) {
+    return import_count_in_read($s, 'Bottle', $list, $al['unit_synonyms'], $ciSh, $ciGs, $ciPs);
+};
+$rS30 = $ciRead('Shot 30');
+$rT35 = $ciRead('Tot 35');
+$rDb = $ciRead('Double');
+$rDbN = $ciRead('Double', [['name' => 'shot', 'ml' => 25]]);
+$rHt = $ciRead('Half tot', [['name' => 'shot', 'ml' => 25], ['name' => 'half tot', 'ml' => 12.5]]);
+$t(($rS30['kind'] ?? '') === 'shot' && $rS30['word'] === 'shot' && $rS30['cell_ml'] === null && ($rT35['kind'] ?? '') === 'shot' && $rT35['word'] === 'tot' && $rT35['cell_ml'] === null
+    && ($rDb['kind'] ?? '') === 'measure' && $rDb['word'] === 'double' && $rDb['list_ml'] === 50.0 && ($rDbN['word'] ?? '') === 'double' && $rDbN['list_ml'] === null
+    && ($rHt['word'] ?? '') === 'half tot' && $rHt['list_ml'] === 12.5
+    && ($ciRead('Glass of wine')['kind'] ?? '') === 'glass' && ($ciRead('Wine glass')['kind'] ?? '') === 'glass' && array_key_exists('cell_ml', (array)$ciRead('Wine glass')) && $ciRead('Wine glass')['cell_ml'] === null
+    && $ciRead('Bottle') === null && $ciRead('Can') === null && $ciRead('Each') === null && $ciRead('Btl 750ml') === null,
+    'count unit read: "Shot 30" / "Tot 35" (a bare number is no size: cell_ml null), "Double" (on the list: 50 ml; not on it: still a measure, no size), a list name of two words ("Half tot"), "Glass of wine", "Wine glass" are measures; "Bottle", "Can", "Each", "Btl 750ml" are not '
+    . json_encode([$rS30, $rT35, $rDb, $rDbN, $rHt]));
+$ciOne = function (string $served, bool $existing, string $unitCell = 'Bottle') use ($ciRun, $ciHead) {
+    $rows = [$ciHead, ['Premier Brandy', 'BRANDYS', '4', '30000', '', '', $unitCell, '1', $served]];
+    $ex = ['id' => 811, 'name' => 'Premier Brandy', 'category' => 'BRANDYS', 'unit' => 'Bottle', 'current_quantity' => 0, 'cost_per_unit' => 30000, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '',
+        'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0, '_measure' => null, '_ml' => null];
+    $r = $ciRun($existing ? ['_updates' => [rh_ssi_key('Premier Brandy') => ['quantity']]] : [], $rows, $existing ? ['existing' => [$ex]] : []);
+    $it = $r['items']['Premier Brandy'] ?? [];
+    return ['ci' => count($r['ci']), 'can' => $r['res']['can_confirm'], 'status' => (string)($it['status'] ?? ''), 'text' => (string)($r['ci'][0]['text'] ?? ''), 'unit' => (string)($it['unit'] ?? '')];
+};
+$ciAsk = [];
+foreach (['Shot 30', 'Tot 35', 'Tot 35ml', 'Double', 'Glass of wine', 'Wine glass'] as $sv0) {
+    foreach ([false, true] as $exi) {
+        $o = $ciOne($sv0, $exi);
+        if (!($o['ci'] === 1 && $o['can'] === false && $o['status'] === 'needs-answer' && strpos($o['text'], 'is it in bottles or in') !== false && strtolower($o['unit']) === 'bottle')) {
+            $ciAsk[] = [$sv0, $exi ? 'existing' : 'new', $o];
+        }
+    }
+}
+$t($ciAsk === [], 'count unit: served by "Shot 30", "Tot 35", "Tot 35ml", "Double", "Glass of wine", "Wine glass", for a new item and for an existing one: the "in bottles or in ...?" question is asked, the item waits, confirm is blocked ' . json_encode($ciAsk));
+$oEx0 = $ciOne('Tot 35ml', true, '');
+$t($oEx0['ci'] === 1 && $oEx0['can'] === false && strpos($oEx0['text'], 'is it in bottles or in tots?') !== false,
+    'count unit: an existing item with no unit in the file is asked in its own stock unit ("in bottles or in tots?") ' . json_encode($oEx0));
+$ciNo = [];
+foreach (['Bottle', 'Can', 'Each'] as $sv0) {
+    foreach ([false, true] as $exi) {
+        $o = $ciOne($sv0, $exi, $sv0);
+        if ($o['ci'] !== 0) {
+            $ciNo[] = [$sv0, $exi ? 'existing' : 'new', $o];
+        }
+    }
+}
+$t($ciNo === [], 'count unit: served by "Bottle", "Can", "Each" (the stock unit itself) is never asked ' . json_encode($ciNo));
+// two measures on one item: an ANSWERED N (10 tots, "How many tots in one bottle?" = 30) + a count answered "in shots" worked out from the step 3
+// sizes (57 shots, 750 / 30 = 25): converted both ways, but an item keeps one count measure, so none is saved and the reason is listed
+$ci2Head = ['Item Name', 'Batch', 'Total Balance', 'Unit Price (MWK)', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'];
+$ci2Rows = [$ci2Head, ['Premier Brandy', 'B1', '10 tots', '30000', 'Bottle', '1', 'Shot'], ['Premier Brandy', 'B2', '57', '30000', 'Bottle', '1', 'Shot']];
+$ci20 = $ciRun([], $ci2Rows);
+$ci2q = $ci20['ci'][0]['qkey'] ?? 'x';
+$ci21 = $ciRun([$ci2q => ['key' => 'measure']] + $ciSizes, $ci2Rows);
+$ci2n = array_values(array_filter($ci21['open'], function ($q) { return $q['type'] === 'measure-n'; }));
+$ci22 = $ciRun([$ci2q => ['key' => 'measure'], ($ci2n[0]['qkey'] ?? 'y') => ['key' => 'n', 'pack_size' => 30]] + $ciSizes, $ci2Rows);
+$pb2 = $ci22['items']['Premier Brandy'] ?? [];
+$t(count($ci2n) === 1 && strpos((string)$ci2n[0]['text'], 'How many tots') === 0 && ($pb2['status'] ?? '') === 'ready' && abs((float)($pb2['balance'] ?? 0) - round(10 / 30 + 57 / 25, 6)) < 1e-5
+    && array_key_exists('measure_save', $pb2) && $pb2['measure_save'] === null && strpos((string)($pb2['measure_not'] ?? ''), 'counted in tots and shots at once') !== false && strpos((string)$pb2['measure_not'], 'none is saved') !== false,
+    'two measures on one item: 10 tots (answered: 30 in one bottle) + 57 shots (step 3 sizes: 25 in one) = 2.613333 bottles; no count measure saved, the reason listed (an answered N never wins) '
+    . json_encode([$pb2['status'] ?? null, $pb2['balance'] ?? null, $pb2['measure_save'] ?? null, $pb2['measure_not'] ?? null, array_column($ci21['open'], 'type'), array_column($ci22['open'], 'type')]));
+// the result page names each saved measure by the measure's own plural rule (as step 4), never by the first word of its line
+$t(strpos($djs, "x.small ? plural(String(x.small), 2)") !== false && strpos((string)file_get_contents($root . '/includes/import/commit-stock.php'), "'small' => (string)\$mNew['small']") !== false
+    && import_measure_plural('glass', 2) === 'glasses' && import_measure_plural('half tot', 2) === 'half tots',
+    'result page: the measure words come from each saved measure (plural("glass") = "glasses", "half tot" = "half tots"), the same rule as step 4');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

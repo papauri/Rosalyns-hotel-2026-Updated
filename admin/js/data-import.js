@@ -1153,7 +1153,7 @@
         var TYPE_LABEL = {
             'possible-typo': 'Did you mean (possible typo)', 'duplicate-no-batch': 'Same name twice, no batch', 'duplicate-batch-clash': 'Same name twice, same batch',
             'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit', 'pack-price-check': 'Price per unit and per pack disagree', 'count-unit': 'Counted in packs or single units',
-            'measure-n': 'How many in one bottle', 'price-per-measure': 'Price per shot or glass', 'count-in': 'Count in bottles or in shots',
+            'measure-n': 'How many in one bottle', 'measure-change': 'Count measure differs from stock', 'price-per-measure': 'Price per shot or glass', 'count-in': 'Count in bottles or in shots',
             'price-check': 'Price looks unusual', 'same-item-two-sheets': 'Same item on two sheets', 'unit-clash': 'Unit differs from stock',
             'archived-match': 'Matches an archived item', 'ambiguous-match': 'Several possible matches', 'cost-too-large': 'Price too large to store',
             'value-too-long': 'Text too long to store', 'bad-value': 'Value is not a number', 'formula-name': 'Name looks like a formula', 'section-or-item': 'Heading or item?'
@@ -2054,6 +2054,40 @@
             if ((vc.selling || []).length) { bits.push('a column valued at the selling price'); }
             return bits.length ? bits.join(' · ') + '. A warning only: it does not stop the import.' : 'Nothing to check.';
         }
+        /**
+         * Counts converted from a measure (owner 2026-11-22: "No guess work"): one line "N items will be counted in shots from now on (e.g. Premier
+         * Brandy: 25 shots in one bottle)" with the list in a fold, and the items that keep no count measure with the reason. m = {n, words, list},
+         * mn = {n, list}; done = the result page (past tense). Text only (h() sets textContent).
+         */
+        function measureBlock(m, mn, done) {
+            m = m || {}; mn = mn || {};
+            var n = m.n || 0, k = mn.n || 0;
+            if (!n && !k) { return null; }
+            var box = h('div', 'di-measures');
+            var list = m.list || [];
+            if (n) {
+                var words = (m.words && m.words.length ? m.words : ['shots']).join(' and ');
+                var eg = list[0] ? ' (e.g. ' + list[0].name + ': ' + list[0].text + ')' : '';
+                box.appendChild(h('p', 'di-small', itemsWord(n) + (done ? (n === 1 ? ' is' : ' are') + ' now counted in ' : ' will be counted in ') + words + ' from now on' + eg
+                    + '. Saved on the item as its count measure, so the Stock screens show whole units plus the rest in that measure (for example "2 bottles + 7 shots"). Costs and this opening count do not change.'));
+                var d = h('details', 'di-details');
+                d.appendChild(h('summary', null, 'Show the ' + itemsWord(n) + ' and their count measure'));
+                var ul = h('ul', 'di-nonitems');
+                list.forEach(function (x) { ul.appendChild(h('li', null, x.name + ': ' + x.text + (x.was ? ' (was ' + x.was + ')' : '') + (x.how ? ' (' + x.how + ')' : ''))); });
+                if (n > list.length) { ul.appendChild(h('li', null, 'and ' + num(n - list.length, 0) + ' more')); }
+                d.appendChild(ul); box.appendChild(d);
+            }
+            if (k) {
+                var nl = mn.list || [];
+                var d2 = h('details', 'di-details');
+                d2.appendChild(h('summary', null, itemsWord(k) + ' counted in a measure ' + (k === 1 ? 'keeps' : 'keep') + ' no new count measure (why)'));
+                var ul2 = h('ul', 'di-nonitems');
+                nl.forEach(function (x) { ul2.appendChild(h('li', null, x.name + ': ' + x.why + '.')); });
+                if (k > nl.length) { ul2.appendChild(h('li', null, 'and ' + num(k - nl.length, 0) + ' more')); }
+                d2.appendChild(ul2); box.appendChild(d2);
+            }
+            return box;
+        }
         function renderConfirm() {
             var p = clear(panels[4]);
             var s = S.sum;
@@ -2081,6 +2115,8 @@
             var fpN = foldPanel(p, 's4-numbers', 'The numbers for the whole file', { badge: toAnswer ? 'required' : 'done', open: true,
                 summary: num(cf.creates || 0, 0) + ' new · ' + num(cf.updates || 0, 0) + ' updated · ' + num(cf.in_count || 0, 0) + ' in the opening count · ' + num(toAnswer, 0) + ' still need an answer' });
             fpN.body.appendChild(cards);
+            var mBox = measureBlock(cf.measures, cf.measures_not, false);
+            if (mBox) { fpN.body.appendChild(mBox); }
             var what = h('div', 'di-what');
             var ul = h('ul', 'di-facts');
             var menuLi = h('li', null, 'Nothing is deleted and recipes are not touched. Stock quantities only change once the opening count is approved.');
@@ -2785,6 +2821,11 @@
                 (r.food_added || r.food_updated) ? card('Food prices changed', num(r.food_updated || 0, 0), 'Food items already on the menu whose price you ticked to change. Each change is in System Logs (old and new price).') : null);
             p.appendChild(cards);
             if (r.sizes_saved) { p.appendChild(h('p', 'di-small', num(r.sizes_saved, 0) + ' bottle or container size' + (r.sizes_saved === 1 ? ' was' : 's were') + ' saved on stock items (from step 3). Each change is in System Logs.')); }
+            if (r.measures_list || r.measures_not) {
+                var rmBox = measureBlock({ n: r.measures_saved || 0, list: r.measures_list || [], words: (r.measures_list || []).map(function (x) { return x.small ? plural(String(x.small), 2) : String(x.text || '').replace(/^[\d.,]+ (\S+) .*$/, '$1'); }).filter(function (w, i, a) { return w && a.indexOf(w) === i; }) },
+                    { n: (r.measures_not || []).length, list: r.measures_not || [] }, true);
+                if (rmBox) { p.appendChild(rmBox); }
+            } else if (r.measures_saved) { p.appendChild(h('p', 'di-small', num(r.measures_saved, 0) + ' count measure' + (r.measures_saved === 1 ? ' was' : 's were') + ' saved on stock items. Each change is in System Logs.')); }
             if (r.drinks_linked) { p.appendChild(h('p', 'di-small', num(r.drinks_linked, 0) + ' drink' + (r.drinks_linked === 1 ? '' : 's') + ' got a stock link: each sale takes one measure off stock.')); }
             if (r.next_step) { p.appendChild(h('p', 'di-note', r.next_step)); }
             if (r.learned) { p.appendChild(h('p', 'di-small', num(r.learned, 0) + ' unit or category choice' + (r.learned === 1 ? '' : 's') + ' you confirmed will be remembered and suggested next time (with "Remembered from your earlier import" as the reason).')); }

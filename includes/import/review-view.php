@@ -295,7 +295,9 @@ if (!function_exists('import_rv_build')) {
             }
         }
         $confirm = ['creates' => 0, 'updates' => 0, 'kept' => 0, 'in_count' => 0, 'no_price' => 0, 'skipped' => $counts['skipped'], 'to_answer' => $counts['needs-answer'] + $counts['blocked'],
-            'cost_with_stock' => 0, 'cost_with_stock_names' => []];
+            'cost_with_stock' => 0, 'cost_with_stock_names' => [],
+            // counts converted from a measure (owner 2026-11-22): the items that will be counted in shots / glasses from now on, and those that keep none (why)
+            'measures' => ['n' => 0, 'words' => [], 'list' => []], 'measures_not' => ['n' => 0, 'list' => []]];
         foreach ($entries as $e) {
             if ($e['k'] !== 'item' || $e['st'] !== 'ready') {
                 continue;
@@ -311,6 +313,21 @@ if (!function_exists('import_rv_build')) {
             if (!empty($it['in_count'])) {
                 $confirm['in_count']++;
             }
+            if (!empty($it['measure_save'])) {
+                $msv = $it['measure_save'];
+                $confirm['measures']['n']++;
+                $confirm['measures']['words'][import_measure_plural((string)$msv['small'], 2)] = true;
+                if (count($confirm['measures']['list']) < 500) {
+                    $confirm['measures']['list'][] = ['name' => (string)$it['name'], 'text' => import_measure_fmt((float)$msv['n']) . ' ' . import_measure_plural((string)$msv['small'], (float)$msv['n']) . ' in one ' . $msv['big'],
+                        'was' => !empty($msv['replace']) ? import_measure_fmt((float)$msv['replace']['n']) . ' ' . import_measure_plural((string)$msv['replace']['small'], (float)$msv['replace']['n']) . ' in one ' . $msv['replace']['big'] : null,
+                        'how' => ($msv['from'] ?? '') === 'answer' ? 'your answer' : (string)($msv['how'] ?? '')];
+                }
+            } elseif (!empty($it['measure_not'])) {
+                $confirm['measures_not']['n']++;
+                if (count($confirm['measures_not']['list']) < 500) {
+                    $confirm['measures_not']['list'][] = ['name' => (string)$it['name'], 'why' => (string)$it['measure_not']];
+                }
+            }
             if ($it['match'] && isset($it['diff']['cost']) && in_array('cost', (array)$it['ticked'], true) && $e['s']) {
                 $confirm['cost_with_stock']++;
                 if (count($confirm['cost_with_stock_names']) < 40) {
@@ -318,6 +335,7 @@ if (!function_exists('import_rv_build')) {
                 }
             }
         }
+        $confirm['measures']['words'] = array_map('strval', array_keys($confirm['measures']['words']));
         return ['entries' => $entries, 'qs' => $qs, 'item_of' => $itemOf, 'row_of' => $rowOf, 'sheet_qids' => $sheetQ, 'struct_qids' => $structQ, 'row_src' => $rowSrc,
             'entry_counts' => $counts, 'progress' => ['answered' => $done, 'total' => $tot, 'open' => $tot - $done], 'confirm' => $confirm];
     }

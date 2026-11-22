@@ -95,6 +95,26 @@ if (!function_exists('import_job_analyse')) {
         return import_store_upload($pdo, $tmpPath, $origName, $userId, $opts);
     }
 
+    /**
+     * Lines on open (draft / submitted) stock counts typed in an item's own count measure, per ingredient id ($ingId = that one item only).
+     * Before database update 088 (no measures) = none.
+     */
+    function import_measure_open_lines(PDO $pdo, ?int $ingId = null): array
+    {
+        if (!function_exists('rh_stock_measure_ready') || !rh_stock_measure_ready($pdo)) {
+            return [];
+        }
+        $sql = "SELECT scl.ingredient_id, COUNT(*) FROM stock_count_lines scl INNER JOIN stock_counts sc ON sc.id = scl.count_id
+                WHERE sc.status IN ('draft','submitted') AND scl.entry_mode IN ('big','small','both')" . ($ingId !== null ? ' AND scl.ingredient_id = ?' : '') . ' GROUP BY scl.ingredient_id';
+        $st = $pdo->prepare($sql);
+        $st->execute($ingId !== null ? [$ingId] : []);
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_NUM) as $r) {
+            $out[(int)$r[0]] = (int)$r[1];
+        }
+        return $out;
+    }
+
     /** Stock data the resolver needs: existing ingredients, unit choices, this hotel's learned corrections. */
     function import_job_ctx(PDO $pdo): array
     {
@@ -111,6 +131,13 @@ if (!function_exists('import_job_analyse')) {
                 $ml = function_exists('rh_drink_item_ml') ? rh_drink_item_ml($e) : null;
                 $e['_ml'] = is_array($ml) ? (float)$ml['per_unit'] : null;
                 $e['_ml_source'] = is_array($ml) ? (string)($ml['source'] ?? '') : '';      // 'item' = a volume typed on the item (the only size a crate item may use)
+            }
+            unset($e);
+            // lines on open (draft / submitted) stock counts typed in an item's own measure: an import never changes that measure while they
+            // exist (rh_stock_measure_save would re-read "7 shots" in the new measure)
+            $openLines = import_measure_open_lines($pdo);
+            foreach ($existing as &$e) {
+                $e['_open_measure_lines'] = (int)($openLines[(int)$e['id']] ?? 0);
             }
             unset($e);
         }

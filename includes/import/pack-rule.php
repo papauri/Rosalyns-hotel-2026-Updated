@@ -120,6 +120,26 @@ if (!function_exists('import_pack_vocab')) {
                 return $k;
             }
         }
+        // QA 2026-11-22: a measure word with other words next to it ("Wine glass", "Half tot", "Double tot 25"): still that portion, so the count
+        // question asks bottles or glasses instead of the cell becoming the stock unit. Never when a unit or container word is there too ("Wine bottle").
+        $toks = array_values(array_filter(explode(' ', import_norm_text($rest)), function ($x) {
+            return $x !== '' && !preg_match('/^\d/u', $x);
+        }));
+        if (count($toks) > 1) {
+            $portion = false;
+            foreach ($toks as $x) {
+                $xs = import_measure_singular($x);
+                if (isset($vocab['unit'][$x]) || isset($vocab['unit'][$xs]) || import_pack_word_kind($x, $vocab) === 'container' || import_pack_word_kind($xs, $vocab) === 'container') {
+                    return '';
+                }
+                if (import_pack_word_kind($x, $vocab) === 'portion' || import_pack_word_kind($xs, $vocab) === 'portion') {
+                    $portion = true;
+                }
+            }
+            if ($portion) {
+                return 'portion';
+            }
+        }
         return '';
     }
 

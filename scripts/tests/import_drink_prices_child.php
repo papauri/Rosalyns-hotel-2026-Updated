@@ -1223,7 +1223,32 @@ try {
         && abs((float)($C3[$n('Premier C')]['cost'] ?? 0) - 1200) <= BALANCE_TOLERANCE, json_encode([$I3[$n('Premier C')]['balance'] ?? null, $C3[$n('Premier C')]['cost'] ?? null]));
     // import it "in shots": the opening count gets 2.28 bottles at 30,000 (value 68,400), the step 3 bottle size is saved on the item
     import_job_answer($pdo, $jC, $qid, 'measure', $admin);
+    $cfC = (array)(import_job_review_view($pdo, $jC)['confirm'] ?? []);
+    $cfL = [];
+    foreach ((array)($cfC['measures']['list'] ?? []) as $x) { $cfL[$x['name']] = $x['text']; }
+    $ck('count measure, step 4: "2 items will be counted in shots from now on (e.g. Premier C: 25 shots in one bottle)", none without a measure',
+        (int)($cfC['measures']['n'] ?? 0) === 2 && ($cfL[$n('Premier C')] ?? '') === '25 shots in one bottle' && ($cfL[$n('Klip C')] ?? '') === '25 shots in one bottle'
+        && ($cfC['measures']['words'] ?? []) === ['shots'] && (int)($cfC['measures_not']['n'] ?? -1) === 0, json_encode([$cfC['measures'] ?? null, $cfC['measures_not'] ?? null]));
     $cC = import_commit_stock($pdo, $jC, $admin);
+    if (rh_stock_measure_ready($pdo)) {
+        $mC = $pdo->prepare('SELECT id, unit, current_quantity, cost_per_unit, measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE name = ?');
+        $mC->execute([$n('Premier C')]);
+        $pcI = $mC->fetch(PDO::FETCH_ASSOC) ?: [];
+        $mC->execute([$n('Klip C')]);
+        $kcI = $mC->fetch(PDO::FETCH_ASSOC) ?: [];
+        $mC->execute([$n('Lager C')]);
+        $lgI = $mC->fetch(PDO::FETCH_ASSOC) ?: [];
+        $ck('count measure at import (owner 2026-11-22): Premier C and Klip C carry "25 shots in one bottle" (bottle, shot, 25, stock in bottles); the Stock screens read 2.28 as "2 bottles + 7 shots", 2 as "2 bottles"; the beer (served by the bottle) gets none',
+            ($pcI['measure_big_name'] ?? '') === 'bottle' && ($pcI['measure_small_name'] ?? '') === 'shot' && abs((float)($pcI['measure_per_big'] ?? 0) - 25) < 0.0001 && ($pcI['measure_stock_side'] ?? '') === 'big'
+            && rh_stock_qty_words(2.28, $pcI, 'Bottle') === '2 bottles + 7 shots' && rh_stock_qty_words(2.0, $kcI, 'Bottle') === '2 bottles' && rh_stock_measure_get($lgI) === null
+            && (int)($cC['result']['measures_saved'] ?? -1) === 2 && in_array($n('Premier C'), array_column((array)($cC['result']['measures_list'] ?? []), 'name'), true),
+            json_encode([$pcI, $kcI, $cC['result']['measures_saved'] ?? null]));
+        $ck('count measure at import: stock cost never divided (30,000 a bottle), nothing added to stock before the count is approved',
+            abs((float)($pcI['cost_per_unit'] ?? 0) - 30000) < 0.005 && abs((float)($pcI['current_quantity'] ?? 1)) < 0.000001, json_encode($pcI));
+        $logC = $pdo->prepare("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_measure_changed' AND details LIKE ?");
+        $logC->execute(['%' . $n('Premier C') . '%Import #' . $jC . '%']);
+        $ck('count measure at import: logged as stock_measure_changed "in Import #…"', (int)$logC->fetchColumn() === 1);
+    }
     $ingC = (int)$col('SELECT id FROM stock_ingredients WHERE name = ?', [$n('Premier C')]);
     $lnC = $pdo->prepare('SELECT actual_quantity, cost_per_unit FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
     $lnC->execute([(int)($cC['result']['opening_count_id'] ?? 0), $ingC]);

@@ -873,6 +873,11 @@ if (!function_exists('import_resolve')) {
                 if (!$hasCountUnitQ && empty($fin['qty_meas']) && !$fin['qty_unknown'] && is_numeric($fin['qty']) && (float)$fin['qty'] > 0
                     && trim((string)($fin['served_by'] ?? '')) !== '') {
                     $ciUnit = trim((string)($fin['unit_raw'] ?? ''));
+                    if ($ciUnit === '') {
+                        // no unit in the file: an existing item's own stock unit (the count may be in it), so it is read and asked the same way
+                        $ciEx = import_match_existing((string)($fin['match_name'] ?? $fin['name']), $ctx)['row'] ?? null;
+                        $ciUnit = is_array($ciEx) ? trim((string)($ciEx['unit'] ?? '')) : '';
+                    }
                     $rd = import_count_in_read((string)$fin['served_by'], $ciUnit, $ciList, $synonyms, $ciShot, $ciGlass, $ciPour);
                     if ($rd !== null && !import_measure_in_name((string)$fin['name'], $rd['word'])) {
                         $ciUnitS = $ciUnit !== '' ? import_measure_singular(mb_strtolower((string)($synonyms[mb_strtolower($ciUnit)] ?? $ciUnit))) : '';
@@ -1358,7 +1363,10 @@ if (!function_exists('import_resolve')) {
             // its size / the hotel's measure size, or the person's answer. Costs are never divided by N. ----
             $qtyHow = null;
             $measureSave = null;
-            $countN = null;         // N of the measure the count was in (display: "57 shots = 2 bottles + 7 shots")
+            $measureNot = null;     // a count converted from a measure whose N is NOT saved on the item: the plain reason (step 4 lists it)
+            $measureKept = null;    // an existing item's own different count measure, with the word the count was in
+            $dBy = [];              // measure word => import_measure_decide() result (mode n), so a certain N can be saved
+            $countN = null;        // N of the measure the count was in (display: "57 shots = 2 bottles + 7 shots")
             $countRows = [];        // sheet \x1f row => the count in the stock unit, for rows answered "in shots" (the value check compares these)
             $measWords = [];
             $ciRd = null;           // a count answered "in shots": the step 3 sizes give N (import_count_in_step3)
@@ -1417,11 +1425,11 @@ if (!function_exists('import_resolve')) {
                         continue;
                     }
                     if ($d['kept'] !== null) {
-                        $warn[] = '"' . ($ex['name'] ?? $first['name']) . '" already has its own count measure (' . import_measure_fmt((float)$d['kept']['n']) . ' ' . import_measure_plural((string)$d['kept']['small'], (float)$d['kept']['n']) . ' in one '
-                            . $d['kept']['big'] . '), not in ' . $wWritten . ': it is kept as it is.';
+                        $measureKept = ['m' => $d['kept'], 'word' => $wWritten];       // the warning is written once it is known whether it may change
                     }
                     if ($d['mode'] === 'n') {
                         $nBy[$ws] = (float)$d['n'];
+                        $dBy[$ws] = $d;
                         if ($d['how'] === 'item') {
                             $howBy[$ws] = 'this item\'s own count measure';
                         } elseif (($d['size_from'] ?? '') !== '' && in_array($d['size_from'], ['row', 'group'], true) || !in_array($d['measure_from'] ?? 'list', ['list', ''], true)) {
@@ -1473,7 +1481,7 @@ if (!function_exists('import_resolve')) {
                     $nBy[$ws] = $nAns;
                     $howBy[$ws] = 'your answer';
                     if ($measureSave === null) {
-                        $measureSave = ['big' => $stockUnit, 'small' => $ws, 'n' => $nAns, 'side' => 'big', 'qkey' => $xq['qkey']];
+                        $measureSave = ['big' => mb_strtolower($stockUnit), 'small' => $ws, 'n' => $nAns, 'side' => 'big', 'qkey' => $xq['qkey'], 'from' => 'answer'];
                     }
                 }
                 $ciWait = $ciRd !== null && $askOpen && !$waitMeas;
@@ -1518,8 +1526,52 @@ if (!function_exists('import_resolve')) {
                             $batches[] = ['label' => $label !== null ? mb_substr($label, 0, 50) : '', 'qty' => $q, 'expiry' => $exp, 'source' => $mm['fin']['expiry_source'] ?? $mm['fin']['name_source']];
                         }
                     }
+                    // owner 2026-11-22 ("as long as the counts are set like shot, double, glass whatever update these accordingly. No guess work"):
+                    // the N this count was converted with is saved on the item as its count measure when it is CERTAIN: an answered N (above), or
+                    // ml in one stock unit / ml in one measure with both sizes from the file, the person (step 3) or the Drink measures list entry of
+                    // that very name (import_measure_decide never uses anything else), and only when N is exact at the 4 decimals an item keeps.
+                    $nWords = array_keys($dBy);
+                    // every measure this item's count was converted from (an answered N, a size, its own measure): two different ones = none saved,
+                    // whichever way each N was found (QA 2026-11-22: an answered N never wins over a second measure)
+                    $convWords = array_keys(array_filter($howBy, function ($h) {
+                        return $h !== '';
+                    }));
+                    if (count($convWords) > 1) {
+                        $measureSave = null;
+                        $measureNot = 'counted in ' . implode(' and ', array_map(function ($w) {
+                            return import_measure_plural($w, 2);
+                        }, $convWords)) . ' at once; an item keeps one count measure, so none is saved';
+                    } elseif ($measureSave === null && $nWords) {
+                        $ws0 = $nWords[0];
+                        $d0 = $dBy[$ws0];
+                        $wPl = import_measure_plural($ws0, 2);
+                        if ($d0['how'] === 'size') {
+                            $exactN = (float)$d0['size_ml'] / (float)$d0['measure_ml'];
+                            if (abs(round($exactN, 4) - $exactN) > 1e-9) {
+                                $measureNot = import_measure_fmt((float)$d0['size_ml']) . ' ml / ' . import_measure_fmt((float)$d0['measure_ml']) . ' ml = ' . number_format($exactN, 2)
+                                    . ' ' . $wPl . ' in one ' . mb_strtolower($stockUnit) . ', not an exact number, so it is not saved (set it on the item in Stock Items if you want it)';
+                            } else {
+                                $measureSave = ['big' => mb_strtolower($stockUnit), 'small' => $ws0, 'n' => round($exactN, 4), 'side' => 'big', 'from' => 'size', 'how' => (string)($howBy[$ws0] ?? '')];
+                            }
+                        }
+                    }
+                    if ($measureSave !== null) {
+                        $mErr = import_measure_save_problem($measureSave);
+                        if ($mErr !== '') {
+                            $measureNot = $mErr;
+                            $measureSave = null;
+                        }
+                    }
                     if ($ex && $measureSave !== null && !empty($ex['_measure'])) {
-                        $measureSave = null;                // an item's own measure is never replaced by an import
+                        $old = (array)$ex['_measure'];
+                        if (import_measure_same($old, $measureSave)) {
+                            $measureSave = null;            // the item already has exactly this measure: nothing to do
+                        } elseif (($old['side'] ?? '') !== 'big') {
+                            $measureNot = 'its stock is kept in ' . import_measure_plural((string)$old['small'], 2) . ' (its own count measure), which an import never changes';
+                            $measureSave = null;
+                        } else {
+                            $measureSave['replace'] = $old;  // a different measure: the person chooses keep or change (asked below, once the ticks are known)
+                        }
                     }
                 }
             }
@@ -1695,6 +1747,41 @@ if (!function_exists('import_resolve')) {
             }
             if ($ex && $measureSave !== null && !in_array('quantity', $ticked, true)) {
                 $measureSave = null;                        // the answer is saved on an existing item only together with the count it converted
+                $measureNot = 'its stock quantity is not ticked, so the count measure it was counted in is not saved either';
+            }
+            if ($measureSave !== null && !empty($measureSave['replace'])) {
+                // an existing item with a DIFFERENT count measure: never replaced silently (owner 2026-11-22). Lines on open stock counts typed in the
+                // old measure would be re-read in the new one by rh_stock_measure_save (7 shots read as 7 doubles), so then it is kept, with the reason.
+                $old = (array)$measureSave['replace'];
+                $oldTxt = import_measure_fmt((float)$old['n']) . ' ' . import_measure_plural((string)$old['small'], (float)$old['n']) . ' a ' . $old['big'];
+                $newTxt = import_measure_fmt((float)$measureSave['n']) . ' ' . import_measure_plural((string)$measureSave['small'], (float)$measureSave['n']) . ' a ' . $measureSave['big'];
+                $openLines = (int)($ex['_open_measure_lines'] ?? 0);
+                if ($openLines > 0) {
+                    $measureNot = 'it keeps its own count measure (' . $oldTxt . '): ' . $openLines . ' line' . ($openLines === 1 ? '' : 's') . ' on open stock counts '
+                        . ($openLines === 1 ? 'was' : 'were') . ' counted in ' . import_measure_plural((string)$old['small'], 2) . '; finish those counts, then change it in Stock Items';
+                    $measureSave = null;
+                } else {
+                    $xq = $ans(import_xq('measure-change', (string)$it['nk'] . '|' . json_encode([$old['big'], $old['small'], (float)$old['n'], $measureSave['big'], $measureSave['small'], (float)$measureSave['n']]),
+                        '"' . (string)$ex['name'] . '" is counted in ' . import_measure_plural((string)$old['small'], 2) . ' (' . $oldTxt . '). Your count is in '
+                        . import_measure_plural((string)$measureSave['small'], 2) . ' (' . $newTxt . ($measureSave['from'] === 'answer' ? ', your answer' : (($measureSave['how'] ?? '') !== '' ? ': ' . $measureSave['how'] : '')) . ').'
+                        . ' An item keeps one count measure. Keep it as it is, or change it so stock counts read in ' . import_measure_plural((string)$measureSave['small'], 2) . ' from now on?'
+                        . ' This count is turned into ' . import_measure_plural((string)$measureSave['big'], 2) . ' either way; costs do not change.',
+                        [['key' => 'keep', 'label' => 'Keep ' . $oldTxt], ['key' => 'change', 'label' => 'Change to ' . $newTxt]],
+                        ['sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList, 'item_name' => (string)$ex['name']]));
+                    $extra[$xq['qkey']] = $xq;
+                    if ($xq['answer'] === 'keep') {
+                        $measureNot = 'you chose to keep its own count measure (' . $oldTxt . ')';
+                        $measureSave = null;
+                    } elseif ($xq['answer'] !== 'change') {
+                        $itemOpen[] = $xq['id'];
+                    }
+                }
+                $measureKept = null;                        // the question (or the reason above) says it
+            }
+            if ($measureKept !== null) {
+                $warn[] = '"' . ($ex['name'] ?? $first['name']) . '" already has its own count measure (' . import_measure_fmt((float)$measureKept['m']['n']) . ' '
+                    . import_measure_plural((string)$measureKept['m']['small'], (float)$measureKept['m']['n']) . ' in one ' . $measureKept['m']['big'] . '), not in '
+                    . $measureKept['word'] . ': it is kept as it is.';
             }
             // costs and stock on hand (accounting rule A11): stock with no cost is left out of the opening count
             $effCost = $cost;
@@ -1753,7 +1840,7 @@ if (!function_exists('import_resolve')) {
                 'price' => $first['price'], 'price_source' => $first['price_source'], 'cost' => $cost, 'cost_how' => $costHow, 'pack' => $pack,
                 'pack_name' => $pack ? $packName : null, 'pack_info' => $packInfo, 'pack_reason' => $packReason, 'pack_auto' => $packAuto,
                 'balance' => $balance, 'max' => $max, 'min' => $min, 'remarks' => $remarks, 'batches' => $batches,
-                'qty_how' => $qtyHow, 'measure_save' => $measureSave,
+                'qty_how' => $qtyHow, 'measure_save' => $measureSave, 'measure_not' => $measureNot,
                 // counted in a measure with a known N (display only, owner 2026-11-22): "57 shots = 2 bottles + 7 shots", the exact figure on hover
                 'count_n' => $countN, 'count_rows' => $countRows, 'count_in_wait' => $ciWait,
                 'qty_words' => ($countN !== null && $balance !== null) ? import_qty_words((float)$balance, $countN, (string)$countN['big']) : null,

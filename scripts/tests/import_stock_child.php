@@ -1187,6 +1187,65 @@ try {
         $logM = $pdo->prepare("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_measure_changed' AND details LIKE ?");
         $logM->execute(['%' . $n('MS Rum') . '%Import #' . $jM . '%']);
         $ck('tots (database): the saved measure is in the activity log as stock_measure_changed "in Import #…"', (int)$logM->fetchColumn() === 1);
+
+        // ---- owner 2026-11-22: a count in shots on items that already count in tots: Keep / Change, never silent; open count lines block a change ----
+        $idMR = (int)($rumM['id'] ?? 0);        // MS Rum: 30 tots a bottle (saved above); MS Gin: 20 tots; MS Cane: 25 tots
+        $fhX = fopen('php://memory', 'w+');
+        foreach ([['Item Name', 'Balance (shots)', 'Unit', 'Unit Price'], [$n('MS Gin'), '50', 'bottle', '9000'], [$n('MS Cane'), '60', 'bottle', '7000'], [$n('MS Rum'), '40', 'bottle', '9000']] as $rX) { fputcsv($fhX, $rX); }
+        rewind($fhX);
+        $uX = $upload($put(stream_get_contents($fhX), 'shots2.csv'), 'zzt-shots2-' . $run . '.csv', $admin);
+        $jX = (int)($uX['job_id'] ?? 0);
+        if ($jX) { import_job_analyse($pdo, $jX); }
+        $qOf = function (string $type, string $nm) use ($pdo, &$jX) {
+            foreach ((array)(import_job_review_summary($pdo, $jX)['questions'] ?? []) as $q0) { if ($q0['type'] === $type && strpos($q0['text'], $nm) !== false) { return $q0; } }
+            return null;
+        };
+        foreach (['MS Gin' => '25', 'MS Cane' => '30', 'MS Rum' => '20'] as $nm => $nn) {
+            $q0 = $qOf('measure-n', $n($nm));
+            if ($q0) { import_job_answer($pdo, $jX, $q0['id'], ['key' => 'n', 'pack_size' => $nn], $admin); }
+        }
+        $tkX = [];   // Quantity is ticked once the count can be worked out (as a person does)
+        foreach ([$n('MS Gin'), $n('MS Cane'), $n('MS Rum')] as $nm) { $tkX[] = !empty(import_job_set_update_fields($pdo, $jX, rh_ssi_key($nm), ['quantity'], $admin)['ok']); }
+        $cgG = $qOf('measure-change', $n('MS Gin'));
+        $cgC = $qOf('measure-change', $n('MS Cane'));
+        $cgR = $qOf('measure-change', $n('MS Rum'));
+        $ck('measure change (database): each item that counts in tots and is counted in shots gets "Keep … / Change to …", which blocks confirm until answered',
+            $tkX === [true, true, true] && $cgG && $cgC && $cgR && ($cgG['options'][0]['label'] ?? '') === 'Keep 20 tots a bottle' && ($cgG['options'][1]['label'] ?? '') === 'Change to 25 shots a bottle' && !import_job_can_confirm($pdo, $jX),
+            json_encode([$cgG['options'] ?? null, $cgC['options'] ?? null]));
+        import_job_answer($pdo, $jX, $cgG['id'] ?? '', 'change', $admin);
+        import_job_answer($pdo, $jX, $cgC['id'] ?? '', 'keep', $admin);
+        import_job_answer($pdo, $jX, $cgR['id'] ?? '', 'change', $admin);
+        $sX = import_job_review_view($pdo, $jX);
+        $cfX = (array)($sX['confirm'] ?? []);
+        $mNames = array_column((array)($cfX['measures']['list'] ?? []), 'name');
+        $ck('measure change (database): step 4 lists Gin and Rum as counted in shots from now on (was tots) and Cane as keeping its own measure (you chose it)',
+            in_array($n('MS Gin'), $mNames, true) && in_array($n('MS Rum'), $mNames, true) && in_array('shots', (array)($cfX['measures']['words'] ?? []), true)
+            && in_array($n('MS Cane'), array_column((array)($cfX['measures_not']['list'] ?? []), 'name'), true), json_encode([array_keys($sX), $cfX['measures'] ?? null, $cfX['measures_not'] ?? null]));
+        // between the review and Confirm, someone counts MS Rum in tots on a draft count: the change must not re-read "4 tots" as "4 shots"
+        $pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, is_opening, created_at, snapshot_at) VALUES (?, CURDATE(), 'full', 'draft', ?, 0, NOW(), NOW())")
+            ->execute(['ZZT-' . $run . '-MC', $admin]);
+        $cidX = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost, reason_code, counted_at, entry_mode, entry_big, entry_small, entry_per_big)
+            VALUES (?, ?, 0, ?, ?, 9000, 0, '', NOW(), 'both', 1, 4, 30)")->execute([$cidX, $idMR, round(1 + 4 / 30, 6), round(1 + 4 / 30, 6)]);
+        $lineX = (int)$pdo->lastInsertId();
+        $answerAll($jX, $admin);
+        $cX = $jX ? import_commit_stock($pdo, $jX, $admin) : ['ok' => false];
+        $rX = $cX['result'] ?? [];
+        $mx = function (int $id) use ($pdo) { $q = $pdo->prepare('SELECT measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id = ?'); $q->execute([$id]); return $q->fetch(PDO::FETCH_ASSOC) ?: []; };
+        $gX = $mx($idMG); $caX = $mx($idMC); $ruX = $mx($idMR);
+        $ck('measure change (database): "Change" saves 25 shots a bottle on Gin (was 20 tots), "Keep" leaves Cane at 25 tots; commit ok, 1 saved; the result names its measure word (small "shot", for the result page plural)',
+            !empty($cX['ok']) && ($gX['measure_small_name'] ?? '') === 'shot' && abs((float)($gX['measure_per_big'] ?? 0) - 25) < 0.0001 && ($gX['measure_big_name'] ?? '') === 'bottle'
+            && ($caX['measure_small_name'] ?? '') === 'tot' && abs((float)($caX['measure_per_big'] ?? 0) - 25) < 0.0001 && ($rX['measures_saved'] ?? -1) === 1
+            && ($rX['measures_list'][0]['was'] ?? '') === '20 tots in one bottle' && ($rX['measures_list'][0]['small'] ?? '') === 'shot', json_encode([$cX['error'] ?? null, $rX['measures_saved'] ?? null, $rX['measures_list'] ?? null, $gX, $caX]));
+        $lnX = $pdo->query('SELECT actual_quantity, entry_small, entry_per_big FROM stock_count_lines WHERE id = ' . $lineX)->fetch(PDO::FETCH_ASSOC) ?: [];
+        $ruNot = array_values(array_filter((array)($rX['measures_not'] ?? []), function ($x) use ($n) { return ($x['name'] ?? '') === $n('MS Rum'); }));
+        $ck('measure change (database): Rum has a draft count line typed in tots, so "Change" is NOT applied at import (it would read 4 tots as 4 shots): 30 tots kept, the line untouched, the reason in the result',
+            ($ruX['measure_small_name'] ?? '') === 'tot' && abs((float)($ruX['measure_per_big'] ?? 0) - 30) < 0.0001 && abs((float)($lnX['actual_quantity'] ?? 0) - round(1 + 4 / 30, 6)) < 0.000001
+            && abs((float)($lnX['entry_per_big'] ?? 0) - 30) < 0.0001 && $ruNot && strpos((string)$ruNot[0]['why'], 'open stock counts') !== false, json_encode([$ruX, $lnX, $rX['measures_not'] ?? null]));
+        $lineX2 = $pdo->prepare('SELECT actual_quantity FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
+        $lineX2->execute([(int)($resM['opening_count_id'] ?? 0), $idMG]);     // Gin is already on the first import's open opening count (this one leaves it out)
+        $ck('measure change (database): the open opening count line of Gin (40 tots / 20 = 2 bottles, no typed measure) is not re-worked when its measure changes to 25 shots; cost 9,000 never divided',
+            abs((float)$lineX2->fetchColumn() - 2) < 0.000001 && abs((float)$pdo->query('SELECT cost_per_unit FROM stock_ingredients WHERE id = ' . $idMG)->fetchColumn() - 9000) < 0.0001);
     }
 
     // ---- cleanup of staged files, purge ---------------------------------------------------------------

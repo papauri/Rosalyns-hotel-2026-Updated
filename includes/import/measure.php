@@ -321,6 +321,41 @@ if (!function_exists('import_measure_words')) {
         return $xq;
     }
 
+    /** Two count measures ['big','small','n','side'] are the same (names compared without case, one shot = shots, N to 4 decimals). */
+    function import_measure_same(array $a, array $b): bool
+    {
+        return mb_strtolower(trim((string)($a['big'] ?? ''))) === mb_strtolower(trim((string)($b['big'] ?? '')))
+            && import_measure_singular(mb_strtolower(trim((string)($a['small'] ?? '')))) === import_measure_singular(mb_strtolower(trim((string)($b['small'] ?? ''))))
+            && abs((float)($a['n'] ?? 0) - (float)($b['n'] ?? 0)) < 0.00005 && (string)($a['side'] ?? '') === (string)($b['side'] ?? '');
+    }
+
+    /**
+     * Why a count measure the import would save cannot be kept on the item ('' = it can): the same limits as the Stock Items form
+     * (rh_stock_measure_from_input: both names, at most 30 characters, different names, N 1..max at 4 decimals, side big / small).
+     */
+    function import_measure_save_problem(array $m): string
+    {
+        $big = trim((string)($m['big'] ?? ''));
+        $small = trim((string)($m['small'] ?? ''));
+        $n = (float)($m['n'] ?? 0);
+        if ($big === '' || $small === '') {
+            return 'the stock unit or the measure has no name';
+        }
+        if (mb_strlen($big) > 30 || mb_strlen($small) > 30) {
+            return 'the name "' . (mb_strlen($big) > 30 ? $big : $small) . '" is longer than the 30 characters a count measure can have';
+        }
+        if (import_measure_singular(mb_strtolower($big)) === import_measure_singular(mb_strtolower($small))) {
+            return 'the measure has the same name as the stock unit';
+        }
+        if (!is_finite($n) || $n < 1 || $n > import_measure_max_n() || abs(round($n, 4) - $n) > 1e-9) {
+            return import_measure_fmt($n) . ' ' . import_measure_plural($small, 2) . ' in one ' . $big . ' cannot be kept as a count measure (1 to ' . import_measure_fmt(import_measure_max_n()) . ', 4 decimals)';
+        }
+        if (($m['side'] ?? '') !== 'big' && ($m['side'] ?? '') !== 'small') {
+            return 'the stock side is not known';
+        }
+        return '';
+    }
+
     /** 2.2 / 30 / 0.033333 (up to 6 decimals, no trailing zeros) */
     function import_measure_fmt(float $x): string
     {
@@ -698,8 +733,9 @@ if (!function_exists('import_measure_words')) {
 
     /**
      * The count-unit question (owner 2026-11-22: "57 = 57 shots, not bottles"): what a served-by cell says one sale is, when it is a measure a
-     * plain count could be written in (a shot / tot, a glass, a one-word measure on the hotel's Drink measures list). null = not such a measure
-     * (the stock unit itself, a bare volume, a generic word like "single" or "double", words the plain rules cannot read).
+     * plain count could be written in (a shot / tot, a glass, a pour / pint, a drink quantity word like "double", any name on the hotel's Drink
+     * measures list, also with a bare number or other words next to it: "Shot 30", "Wine glass"). null = not such a measure (the stock unit
+     * itself, a bare volume, "Can", "Each", words the plain rules cannot read).
      * Returns ['kind' => shot|glass|measure, 'word' (singular, lower case), 'cell_ml' (a size written in the cell), 'list_ml', 'gkey' (the step 3
      * size group of import_drinks_build: "m:shot|bottle", "gl:casket"), 'pour' (the stock unit is a carton / casket poured from)].
      */
@@ -709,11 +745,94 @@ if (!function_exists('import_measure_words')) {
         if ($served === '') {
             return null;
         }
+        $r = import_count_in_exact($served, $unit, $list, $synonyms, $shotSet, $glassSet, $pourSet);
+        if (is_array($r) || $r === 'unit') {
+            return is_array($r) ? $r : null;
+        }
+        // QA 2026-11-22 ("nothing may be read as bottles silently when served by a measure"): the cell names a measure next to other text the
+        // plain rules above do not read whole: a bare number ("Shot 30", "Tot 35": a number with no ml is never a size here, cell_ml stays
+        // null), another word ("Wine glass", "Double tot"), a drink quantity word ("Double" not on the list). Still asked, never guessed.
+        $t = mb_strtolower((string)preg_replace('/\s+/u', ' ', $served));
+        $vol = import_served_volume_in($t);
+        $cellMl = $vol ? (float)$vol[0] : null;
+        $rest = $vol ? $vol[1] : $t;
+        $rest = (string)preg_replace('/(?<=\d)(?=\p{L})|(?<=\p{L})(?=\d)/u', ' ', $rest);
+        $rest = (string)preg_replace('/(?<![\p{L}\p{N}])\d+(?:[.,]\d+)?(?![\p{L}\p{N}])|\p{No}/u', ' ', $rest);
+        $rest = trim((string)preg_replace('/\s+/u', ' ', $rest));
+        $withMl = function (array $x) use ($cellMl): array {
+            if ($cellMl !== null && $x['cell_ml'] === null) {
+                $x['cell_ml'] = $cellMl;
+            }
+            return $x;
+        };
+        if ($rest !== '' && $rest !== $t) {
+            $r = import_count_in_exact($rest, $unit, $list, $synonyms, $shotSet, $glassSet, $pourSet);
+            if (is_array($r) || $r === 'unit') {
+                return is_array($r) ? $withMl($r) : null;
+            }
+        }
+        $u = mb_strtolower(trim($unit));
+        $unitS = $u !== '' ? import_measure_singular(mb_strtolower((string)($synonyms[$u] ?? $u))) : '';
+        $qtySet = array_flip(['double', 'doubles', 'dbl', 'dbls', 'dble', 'triple', 'triples', 'treble', 'trebles', 'tpl', 'half', 'halves', 'halfs']);
+        $measSet = array_flip(['single', 'singles', 'pour', 'pours', 'pint', 'pints', 'measure', 'measures']);
+        $in = function (string $tok, array $set): bool {
+            return isset($set[$tok]) || isset($set[import_measure_singular($tok)]);
+        };
+        $hasQ = false;
+        $shotTok = $glassTok = $measTok = '';
+        $words = [];
+        foreach (explode(' ', import_norm_text($rest)) as $tok) {
+            if ($tok === '' || in_array($tok, ['per', 'a', 'an', 'one', 'of', 'x', 'the', 'by'], true)) {
+                continue;
+            }
+            $s = import_measure_singular($tok);
+            if ($in($tok, $qtySet)) {
+                $hasQ = true;
+                $words[] = $s;
+            } elseif ($in($tok, $shotSet)) {
+                $shotTok = $shotTok !== '' ? $shotTok : $s;
+                $words[] = $s;
+            } elseif ($in($tok, $glassSet)) {
+                $glassTok = $glassTok !== '' ? $glassTok : $s;
+                $words[] = $s;
+            } elseif ($in($tok, $measSet)) {
+                $measTok = $measTok !== '' ? $measTok : $s;
+                $words[] = $s;
+            }
+        }
+        $pour = $u !== '' ? import_pour_container($unit, $pourSet) : null;
+        $loose = function (string $w) use ($withMl, $pour): array {
+            // a measure the hotel's list does not have under this name: no step 3 group, N comes from the item's own measure or is asked
+            return $withMl(['kind' => 'measure', 'word' => $w, 'cell_ml' => null, 'list_ml' => null, 'gkey' => '', 'pour' => $pour !== null]);
+        };
+        if ($hasQ) {
+            $w = implode(' ', array_unique($words));       // "double", "double tot", "half glass"
+            return ($unitS !== '' && $unitS === $w) ? null : $loose($w);
+        }
+        foreach ([$shotTok, $glassTok, $measTok] as $one) {
+            if ($one === '' || ($unitS !== '' && $unitS === $one)) {
+                continue;
+            }
+            $r = import_count_in_exact($one, $unit, $list, $synonyms, $shotSet, $glassSet, $pourSet);
+            if ($r === 'unit') {
+                return null;
+            }
+            return is_array($r) ? $withMl($r) : $loose($one);
+        }
+        return null;
+    }
+
+    /**
+     * import_count_in_read() for a cell the plain rules read whole: the read, 'unit' (served by the stock unit itself: nothing to ask) or null
+     * (not read whole). A name on the hotel's Drink measures list is a measure even when it is generic ("double") or of more than one word.
+     */
+    function import_count_in_exact(string $served, string $unit, array $list, array $synonyms, array $shotSet, array $glassSet, array $pourSet = [])
+    {
         $u = mb_strtolower(trim($unit));
         $pour = $u !== '' ? import_pour_container($unit, $pourSet) : null;
         $sv = import_served_read($served, $unit, $list, $synonyms);
         if ($sv['kind'] === 'unit') {
-            return null;            // served by the stock unit itself ("Bottle"): the count is in it, nothing to ask
+            return 'unit';            // served by the stock unit itself ("Bottle"): the count is in it, nothing to ask
         }
         $generic = array_flip(import_measure_generic_words());
         $gr = in_array($sv['kind'], ['ml', 'as_is'], true) ? import_glass_read($served, $glassSet) : null;
@@ -722,7 +841,16 @@ if (!function_exists('import_measure_words')) {
                 'gkey' => 'gl:' . ($pour !== null ? (string)$pour['word'] : $u), 'pour' => $pour !== null];
         }
         $w = import_measure_singular(mb_strtolower(trim($sv['kind'] === 'list' ? (string)$sv['measure'] : (string)$sv['word'])));
-        if ($w === '' || strpos($w, ' ') !== false || isset($generic[$w]) || ($u !== '' && import_measure_singular($u) === $w)) {
+        $listMl = null;
+        $listed = false;
+        foreach ($list as $dm) {
+            if (is_array($dm) && $w !== '' && import_measure_singular(mb_strtolower(trim((string)($dm['name'] ?? '')))) === $w) {
+                $listed = true;
+                $listMl = is_numeric($dm['ml'] ?? null) && (float)$dm['ml'] > 0 ? (float)$dm['ml'] : null;
+                break;
+            }
+        }
+        if ($w === '' || (!$listed && (strpos($w, ' ') !== false || isset($generic[$w]))) || ($u !== '' && import_measure_singular($u) === $w)) {
             return null;
         }
         if (isset($shotSet[$w])) {
@@ -743,15 +871,10 @@ if (!function_exists('import_measure_words')) {
                 'list_ml' => import_measure_singular($shotName) === $w ? $listMl : null,
                 'gkey' => ($sv['kind'] === 'as_is' && $listMl === null) ? '' : 'm:' . $shotName . '|' . $u, 'pour' => $pour !== null];
         }
-        if ($sv['kind'] === 'list') {
-            $listMl = null;
-            foreach ($list as $dm) {
-                if (is_array($dm) && import_measure_singular(mb_strtolower(trim((string)($dm['name'] ?? '')))) === $w && is_numeric($dm['ml'] ?? null) && (float)$dm['ml'] > 0) {
-                    $listMl = (float)$dm['ml'];
-                    break;
-                }
-            }
-            return ['kind' => 'measure', 'word' => $w, 'cell_ml' => null, 'list_ml' => $listMl, 'gkey' => 'm:' . mb_strtolower((string)$sv['word']) . '|' . $u, 'pour' => $pour !== null];
+        if ($listed) {
+            // a measure on the hotel's list ("Double", "Half tot", "Double 50ml"): its own size from the list, a size written in the cell first
+            return ['kind' => 'measure', 'word' => $w, 'cell_ml' => $sv['kind'] === 'ml' ? (float)$sv['ml'] : null, 'list_ml' => $listMl,
+                'gkey' => 'm:' . ((string)$sv['word'] !== '' ? mb_strtolower((string)$sv['word']) : $w) . '|' . $u, 'pour' => $pour !== null];
         }
         return null;
     }

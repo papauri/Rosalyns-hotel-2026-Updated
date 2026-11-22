@@ -415,7 +415,7 @@ if (!function_exists('import_drinks_build')) {
             if ($ex) {
                 $ing = $ex;
                 $ing['cost_per_unit'] = $it['line_cost'] ?? null;         // the cost after this import (a ticked cost change counts)
-                if (function_exists('rh_stock_measure_get') && rh_stock_measure_get($ing) === null && !empty($it['measure_save'])) {
+                if (function_exists('rh_stock_measure_get') && !empty($it['measure_save']) && (rh_stock_measure_get($ing) === null || !empty($it['measure_save']['replace']))) {
                     $ms = $it['measure_save'];      // the count measure this import sets on it
                     $ing['measure_big_name'] = $ms['big'];
                     $ing['measure_small_name'] = $ms['small'];
