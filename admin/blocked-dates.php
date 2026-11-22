@@ -1495,7 +1495,7 @@ $site_name = getSetting('site_name');
                         <label class="form-label">Block Level</label>
                         <select name="block_scope" id="blockRangeScopeSelect" class="form-select" required onchange="toggleBlockRangeLevel()">
                             <option value="type">Room Type Level (All rooms of type)</option>
-                            <option value="individual">Individual Room Level (Specific room)</option>
+                            <option value="individual">Individual Rooms (tick one or more)</option>
                         </select>
                     </div>
 
@@ -1513,19 +1513,25 @@ $site_name = getSetting('site_name');
                     </div>
 
                     <div class="mb-3 d-none" id="blockRangeIndividualRoomGroup">
-                        <label class="form-label">Individual Room</label>
-                        <select name="individual_room_id" id="blockRangeIndividualRoom" class="form-select">
+                        <span class="form-label" id="blockRangeRoomsLabel">Rooms</span>
+                        <?php /* Tick one or more rooms; saved in one go through grid_apply (the calendar's save). A joined
+                                 pair posts its first room id, which the server widens to both rooms (rh_block_room_ids). */ ?>
+                        <div class="bd-roompick" id="blockRangeRooms" role="group" aria-labelledby="blockRangeRoomsLabel">
                             <?php foreach ($individual_rooms_by_type as $irTypeName => $irGroup): ?>
-                                <optgroup label="<?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?>">
+                                <fieldset class="bd-roompick__group">
+                                    <legend class="bd-roompick__type">
+                                        <label><input type="checkbox" data-pick-type> <?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?></label>
+                                    </legend>
                                     <?php foreach ($irGroup as $ir): ?>
-                                        <option value="<?php echo htmlspecialchars((string)$ir['option_value'], ENT_QUOTES); ?>">
+                                        <label class="bd-roompick__room">
+                                            <input type="checkbox" data-room-id="<?php echo (int)$ir['id']; ?>" data-label="<?php echo htmlspecialchars($individual_room_label($ir), ENT_QUOTES); ?>">
                                             <?php echo htmlspecialchars($individual_room_label($ir)); ?>
-                                        </option>
+                                        </label>
                                     <?php endforeach; ?>
-                                </optgroup>
+                                </fieldset>
                             <?php endforeach; ?>
-                        </select>
-                        <small class="text-muted">Select a specific physical room to block. A room that is part of a joined room also takes that pair off sale on the blocked nights.</small>
+                        </div>
+                        <small class="text-muted">Tick one or more rooms (tick a room type's name for all its rooms). A room that is part of a joined room also takes that pair off sale on the blocked nights.</small>
                     </div>
 
                     <div class="mb-3">
@@ -1573,19 +1579,32 @@ $site_name = getSetting('site_name');
 
     <script>
 
+        // The admin SPA (admin-spa.js _cleanup) removes every .flatpickr-calendar from <body> before it swaps a page,
+        // but these Block modals live outside the swapped content, so their inputs kept a picker with no calendar and
+        // nothing opened until a reload. ensureBlockedPicker() rebuilds a picker whose calendar is gone; it runs on
+        // load, after every SPA swap (rh:content-updated) and when the date field gets focus.
+        function ensureBlockedPicker(sel, opts) {
+            const el = document.querySelector(sel);
+            if (!el || typeof flatpickr !== 'function') return;
+            const fp = el._flatpickr;
+            if (fp && fp.calendarContainer && fp.calendarContainer.isConnected) return;
+            if (fp) { try { fp.destroy(); } catch (e) { /* already half gone */ } }
+            flatpickr(el, opts());
+        }
+
         function initBlockedDatePickers() {
             if (typeof flatpickr !== 'function') {
                 return;
             }
 
             // Initialize single date picker
-            flatpickr('#singleDateInput', {
+            ensureBlockedPicker('#singleDateInput', function () { return {
                 minDate: 'today',
                 dateFormat: 'Y-m-d'
-            });
+            }; });
 
             // Initialize date range picker
-            flatpickr('#dateRangeInput', {
+            ensureBlockedPicker('#dateRangeInput', function () { return {
                 mode: 'range',
                 minDate: 'today',
                 dateFormat: 'Y-m-d',
@@ -1617,10 +1636,21 @@ $site_name = getSetting('site_name');
                         display.innerHTML = '<span class="blocked-dates-muted">Select start and end dates</span>';
                     }
                 }
-            });
+            }; });
         }
 
         initBlockedDatePickers();
+        if (!window.__bdPickerHooks) {
+            window.__bdPickerHooks = true;
+            document.addEventListener('rh:content-updated', function () { initBlockedDatePickers(); });
+            document.addEventListener('focusin', function (e) {
+                if (e.target && (e.target.id === 'dateRangeInput' || e.target.id === 'singleDateInput')) {
+                    initBlockedDatePickers();
+                    const fp = e.target._flatpickr;
+                    if (fp && !fp.isOpen) fp.open();
+                }
+            }, true);
+        }
 
         // Toggle between room type and individual room blocking (single date)
         function toggleBlockSingleLevel() {
@@ -1652,7 +1682,6 @@ $site_name = getSetting('site_name');
             const roomTypeGroup = document.getElementById('blockRangeRoomTypeGroup');
             const individualRoomGroup = document.getElementById('blockRangeIndividualRoomGroup');
             const roomTypeSelect = document.getElementById('blockRangeRoomType');
-            const individualRoomSelect = document.getElementById('blockRangeIndividualRoom');
             const scopeInput = document.getElementById('blockRangeScope');
 
             scopeInput.value = scope;
@@ -1661,13 +1690,99 @@ $site_name = getSetting('site_name');
                 roomTypeGroup.classList.add('d-none');
                 individualRoomGroup.classList.remove('d-none');
                 roomTypeSelect.removeAttribute('required');
-                individualRoomSelect.setAttribute('required', 'required');
             } else {
                 roomTypeGroup.classList.remove('d-none');
                 individualRoomGroup.classList.add('d-none');
                 roomTypeSelect.setAttribute('required', 'required');
-                individualRoomSelect.removeAttribute('required');
             }
+        }
+
+        // Room picker: a room type's box ticks / clears all its rooms; it shows "some" when only part is ticked.
+        document.addEventListener('change', function (e) {
+            const box = e.target;
+            if (!box || !box.closest || !box.closest('#blockRangeRooms')) return;
+            const group = box.closest('.bd-roompick__group');
+            if (!group) return;
+            const rooms = Array.from(group.querySelectorAll('input[data-room-id]'));
+            const typeBox = group.querySelector('input[data-pick-type]');
+            if (box.hasAttribute('data-pick-type')) {
+                rooms.forEach(function (r) { r.checked = box.checked; });
+            }
+            const on = rooms.filter(function (r) { return r.checked; }).length;
+            if (typeBox) {
+                typeBox.checked = on > 0 && on === rooms.length;
+                typeBox.indeterminate = on > 0 && on < rooms.length;
+            }
+        });
+
+        // Individual rooms: one save for every ticked room through grid_apply (the calendar's save: one lock, one log
+        // entry, past nights dropped, joined rooms widened). Like the calendar, the bookings on those nights are listed
+        // before the rooms go off sale.
+        function blockRangeRooms() {
+            const form = document.getElementById('blockRangeForm');
+            const saveBtn = document.getElementById('blockRangeSaveBtn');
+            const fb = document.getElementById('blockRangeFeedback');
+            const show = function (ok, msg) {
+                fb.className = 'admin-modal-feedback ' + (ok ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
+                fb.textContent = '';
+                const i = document.createElement('i');
+                i.className = 'fas fa-' + (ok ? 'check-circle' : 'exclamation-circle');
+                fb.appendChild(i);
+                fb.appendChild(document.createTextNode(' ' + msg));
+            };
+            const picked = Array.from(document.querySelectorAll('#blockRangeRooms input[data-room-id]:checked'));
+            let dates = [];
+            try { dates = JSON.parse(document.getElementById('selectedDatesArray').value || '[]'); } catch (err) { dates = []; }
+            if (!picked.length) { show(false, 'Tick at least one room.'); return; }
+            if (!Array.isArray(dates) || !dates.length) { show(false, 'Select the start and end dates.'); return; }
+            const items = picked.map(function (cb) { return { t: 'room', id: parseInt(cb.getAttribute('data-room-id'), 10), d: dates }; });
+            const names = picked.map(function (cb) { return cb.getAttribute('data-label'); });
+            const where = (names.length > 8 ? names.slice(0, 8).join(', ') + ' and ' + (names.length - 8) + ' more' : names.join(', '))
+                + ' from ' + dates[0] + ' to ' + dates[dates.length - 1] + ' (' + dates.length + (dates.length === 1 ? ' night' : ' nights') + ')';
+            const token = form.querySelector('input[name="csrf_token"]').value;
+            const post = function (fields) {
+                const fd = new FormData();
+                Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+                fd.append('csrf_token', token);
+                return fetch(window.location.pathname, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd, credentials: 'same-origin' })
+                    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+            };
+            const origHtml = saveBtn.innerHTML;
+            saveBtn.disabled = true;
+            fb.className = 'admin-modal-feedback';
+            fb.textContent = '';
+            post({ action: 'preview_block', items: JSON.stringify(items) })
+                .catch(function () { return null; })
+                .then(function (p) {
+                    if (p && p.success === false) { show(false, p.message || 'The rooms could not be checked.'); return false; }
+                    const msg = 'Block ' + where + '? Guests will not be able to book them.'
+                        + (p ? (p.booking_count > 0
+                            ? ' Warning: ' + p.booking_count + ' booking(s) already sleep on these nights and will NOT be moved or cancelled: ' + p.bookings + '. Each booking\'s History will get a note.'
+                            : ' No bookings sleep on these nights.') : '');
+                    if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
+                        return window.AdminConfirm.request({ title: 'Block rooms', message: msg, confirmText: 'Block', icon: 'fa-ban' });
+                    }
+                    return true;
+                })
+                .then(function (ok) {
+                    if (!ok) { saveBtn.disabled = false; return; }
+                    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+                    return post({
+                        action: 'grid_apply', op: 'block', items: JSON.stringify(items),
+                        block_type: form.querySelector('select[name="block_type"]').value,
+                        reason: form.querySelector('textarea[name="reason"]').value
+                    }).then(function (res) {
+                        saveBtn.disabled = false;
+                        saveBtn.innerHTML = origHtml;
+                        show(!!res.success, res.message || (res.success ? 'Saved.' : 'Nothing was changed.'));
+                        if (res.success) refreshBlockedDatesTable();
+                    });
+                })
+                .catch(function () {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = origHtml;
+                    show(false, 'Network error: nothing may have been saved. Reload the page to check, then try again.');
+                });
         }
 
         // ── AJAX save — keep modals open ──────────────────────────────────────
@@ -1718,6 +1833,10 @@ $site_name = getSetting('site_name');
         });
         document.getElementById('blockRangeForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            if (document.getElementById('blockRangeScopeSelect').value === 'individual') {
+                blockRangeRooms();
+                return;
+            }
             handleBlockFormSubmit('blockRangeForm', 'blockRangeSaveBtn', 'blockRangeFeedback');
         });
 

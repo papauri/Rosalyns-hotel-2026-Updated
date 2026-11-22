@@ -12,7 +12,9 @@
 (function () {
     'use strict';
 
-    var selected = new Map(); // "t|id|d" -> true
+    // "t|id|d" -> {t, id, d, label, state, booked, info}. Nights picked in other months stay here (and in this tab's
+    // sessionStorage) while the month arrows reload the page, so one Block / Unblock can cover several months.
+    var selected = new Map();
     var anchor = null;        // last clicked cell, for shift-click
     var drag = null;          // {start, mode, base, moved}
     var busy = false;
@@ -22,6 +24,64 @@
     function table() { return document.getElementById('bdgTable'); }
     function keyOf(td) { return td.dataset.t + '|' + (td.dataset.id || '') + '|' + td.dataset.d; }
     function isSel(td) { return td && td.matches && td.matches('td[data-sel="1"]'); }
+    /** What a picked night needs once its month is no longer on screen. */
+    function rec(td) {
+        var tr = td.parentElement;
+        return {
+            t: td.dataset.t, id: td.dataset.id || '', d: td.dataset.d,
+            label: (tr && tr.getAttribute('data-row-label')) || 'Room',
+            state: td.dataset.state || '', booked: td.dataset.booked === '1', info: td.dataset.info || ''
+        };
+    }
+    /** Nights the grid on screen covers: {"2026-12-01": true, ...}. */
+    function shownDates() {
+        var out = {};
+        var t = table();
+        if (t) t.querySelectorAll('td[data-d]').forEach(function (td) { out[td.dataset.d] = true; });
+        return out;
+    }
+    /** Drop the picks of the month on screen (other months' picks stay). */
+    function dropShown() {
+        var shown = shownDates();
+        selected.forEach(function (v, k) { if (shown[v.d]) selected.delete(k); });
+    }
+    /** Keep picks that are still selectable on screen, plus every pick in another month. */
+    function prune() {
+        var shown = shownDates();
+        var live = {};
+        var t = table();
+        if (t) t.querySelectorAll('td[data-sel="1"]').forEach(function (td) { live[keyOf(td)] = td; });
+        selected.forEach(function (v, k) {
+            if (shown[v.d] && !live[k]) selected.delete(k);
+            else if (live[k]) selected.set(k, rec(live[k]));
+        });
+    }
+
+    var STORE_KEY = 'bdg-selection-v1';
+    function persist() {
+        try {
+            if (!selected.size) { sessionStorage.removeItem(STORE_KEY); return; }
+            sessionStorage.setItem(STORE_KEY, JSON.stringify(Array.from(selected.values())));
+        } catch (e) { /* storage blocked: the selection just stays on this month */ }
+    }
+    function restore() {
+        var list = null;
+        try { list = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch (e) { list = null; }
+        if (!Array.isArray(list)) return;
+        var now = new Date();
+        var today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+        list.slice(0, 5000).forEach(function (v) {
+            if (!v || ['all', 'type', 'room'].indexOf(v.t) < 0 || typeof v.d !== 'string'
+                || !/^\d{4}-\d{2}-\d{2}$/.test(v.d) || v.d < today) return;
+            var id = v.id === null || v.id === undefined ? '' : String(v.id);
+            if (id !== '' && !/^\d+$/.test(id)) return;
+            selected.set(v.t + '|' + id + '|' + v.d, {
+                t: v.t, id: id, d: v.d, label: typeof v.label === 'string' ? v.label : 'Room',
+                state: typeof v.state === 'string' ? v.state : '', booked: v.booked === true,
+                info: typeof v.info === 'string' ? v.info : ''
+            });
+        });
+    }
 
     function visibleRows() {
         var t = table();
@@ -42,12 +102,21 @@
         summary();
     }
 
+    /** Every picked night as a record: the month on screen first (read live), then nights picked in other months. */
     function selectedCells() {
         var t = table();
         if (!t) return [];
-        return Array.prototype.filter.call(t.querySelectorAll('td[data-sel="1"]'), function (td) {
-            return selected.has(keyOf(td));
+        var out = [], seen = {};
+        Array.prototype.forEach.call(t.querySelectorAll('td[data-sel="1"]'), function (td) {
+            var k = keyOf(td);
+            if (selected.has(k)) { out.push(rec(td)); seen[k] = true; }
         });
+        var shown = shownDates();
+        selected.forEach(function (v, k) {
+            if (!v || typeof v !== 'object' || !v.t || !v.d) return; // never send a pick without its room line + night
+            if (!seen[k] && !shown[v.d]) { var r = Object.assign({}, v); r.offMonth = true; out.push(r); }
+        });
+        return out;
     }
 
     var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -79,14 +148,13 @@
     /** Selected cells grouped by their room line: [{label, t, id, d: [nights]}], in the order shown on the grid. */
     function groupCells(cells) {
         var groups = {}, order = [];
-        cells.forEach(function (td) {
-            var g = td.dataset.t + '|' + (td.dataset.id || '');
+        cells.forEach(function (c) {
+            var g = c.t + '|' + (c.id || '');
             if (!groups[g]) {
-                var tr = td.parentElement;
-                groups[g] = { label: (tr && tr.getAttribute('data-row-label')) || 'Room', t: td.dataset.t, id: td.dataset.id ? parseInt(td.dataset.id, 10) : null, d: [] };
+                groups[g] = { label: c.label || 'Room', t: c.t, id: c.id ? parseInt(c.id, 10) : null, d: [] };
                 order.push(g);
             }
-            groups[g].d.push(td.dataset.d);
+            groups[g].d.push(c.d);
         });
         return order.map(function (k) { return groups[k]; });
     }
@@ -102,12 +170,13 @@
         var el = document.getElementById('bdgSummary');
         if (!el) return;
         var cells = selectedCells();
-        var direct = 0, inherited = 0, open = 0, booked = 0;
-        cells.forEach(function (td) {
-            if (td.dataset.state === 'direct') direct++;
-            else if (td.dataset.state === 'inherited') inherited++;
+        var direct = 0, inherited = 0, open = 0, booked = 0, offMonth = 0;
+        cells.forEach(function (c) {
+            if (c.state === 'direct') direct++;
+            else if (c.state === 'inherited') inherited++;
             else open++;
-            if (td.dataset.booked === '1') booked++;
+            if (c.booked) booked++;
+            if (c.offMonth) offMonth++;
         });
         var n = cells.length;
         var text;
@@ -119,7 +188,7 @@
         if (n === 0) {
             text = 'No nights selected';
         } else if (n === 1) {
-            text = cells[0].dataset.info || '1 night selected';
+            text = cells[0].info || '1 night selected';
         } else {
             var parts = [];
             if (direct) parts.push(direct + ' already blocked');
@@ -130,6 +199,11 @@
         if (n > 0 && booked > 0) {
             text += '. ' + booked + ' selected night(s) already have a booking: blocking does not move the guest.';
         }
+        if (offMonth > 0) {
+            text = text.replace(/\.?\s*$/, '.') + (n === 1 ? ' This night is in another month.'
+                : ' ' + offMonth + (offMonth === 1 ? ' of these nights is' : ' of these nights are') + ' in another month.');
+        }
+        persist();
         el.textContent = '';
         if (n > 0) {
             var strong = document.createElement('strong');
@@ -169,7 +243,7 @@
     function applyRect(a, b, mode, base) {
         selected = new Map(base);
         rect(a, b).forEach(function (td) {
-            if (mode === 'add') selected.set(keyOf(td), true);
+            if (mode === 'add') selected.set(keyOf(td), rec(td));
             else selected.delete(keyOf(td));
         });
         paint();
@@ -177,7 +251,7 @@
 
     function toggle(td) {
         var k = keyOf(td);
-        if (selected.has(k)) selected.delete(k); else selected.set(k, true);
+        if (selected.has(k)) selected.delete(k); else selected.set(k, rec(td));
         anchor = td;
         paint();
     }
@@ -239,7 +313,7 @@
         if (!cells.length) return;
         var all = cells.every(function (td) { return selected.has(keyOf(td)); });
         cells.forEach(function (td) {
-            if (all) selected.delete(keyOf(td)); else selected.set(keyOf(td), true);
+            if (all) selected.delete(keyOf(td)); else selected.set(keyOf(td), rec(td));
         });
         anchor = cells[0];
         paint();
@@ -251,7 +325,7 @@
         if (!cells.length) return;
         var all = cells.every(function (td) { return selected.has(keyOf(td)); });
         cells.forEach(function (td) {
-            if (all) selected.delete(keyOf(td)); else selected.set(keyOf(td), true);
+            if (all) selected.delete(keyOf(td)); else selected.set(keyOf(td), rec(td));
         });
         anchor = cells[0];
         paint();
@@ -263,7 +337,7 @@
         if (busy || asking) return null;
         var cells = selectedCells();
         if (!cells.length) return null;
-        var direct = cells.some(function (td) { return td.dataset.state === 'direct'; });
+        var direct = cells.some(function (c) { return c.state === 'direct'; });
         var n = cells.length;
         return {
             title: n + (n === 1 ? ' night selected' : ' nights selected'),
@@ -278,15 +352,15 @@
     function pickFor(target) {
         var td = target.closest('#bdgTable td[data-sel="1"]');
         if (td) {
-            if (!selected.has(keyOf(td))) { selected = new Map(); selected.set(keyOf(td), true); anchor = td; paint(); }
+            if (!selected.has(keyOf(td))) { dropShown(); selected.set(keyOf(td), rec(td)); anchor = td; paint(); }
             return td;
         }
         var th = target.closest('#bdgTable th[data-row-select]');
         if (th) {
             var rowCells = Array.prototype.filter.call(th.parentElement.cells, isSel);
             if (rowCells.length && !rowCells.every(function (c) { return selected.has(keyOf(c)); })) {
-                selected = new Map();
-                rowCells.forEach(function (c) { selected.set(keyOf(c), true); });
+                dropShown();
+                rowCells.forEach(function (c) { selected.set(keyOf(c), rec(c)); });
                 anchor = rowCells[0];
                 paint();
             }
@@ -296,8 +370,8 @@
         if (dh) {
             var colCells = visibleRows().map(function (tr) { return tr.cells[dh.cellIndex]; }).filter(isSel);
             if (colCells.length && !colCells.every(function (c) { return selected.has(keyOf(c)); })) {
-                selected = new Map();
-                colCells.forEach(function (c) { selected.set(keyOf(c), true); });
+                dropShown();
+                colCells.forEach(function (c) { selected.set(keyOf(c), rec(c)); });
                 anchor = colCells[0];
                 paint();
             }
@@ -482,15 +556,22 @@
     window.bdgAfterRefresh = function () {
         var f = document.getElementById('bdgTypeFilter');
         if (f && f.value !== '') f.dispatchEvent(new Event('change', { bubbles: true }));
-        var keep = new Map();
-        var t = table();
-        if (t) t.querySelectorAll('td[data-sel="1"]').forEach(function (td) { if (selected.has(keyOf(td))) keep.set(keyOf(td), true); });
-        selected = keep;
+        prune();
         anchor = null;
         initFocus();
         paint();
     };
 
-    initFocus();
-    paint();
+    // Picks from other months survive the month arrows / month picker in this tab. Those links are admin SPA swaps
+    // (admin-spa.js): this file is not run again, so the new month is painted on rh:content-updated.
+    function boot() {
+        if (!table()) return;
+        restore();
+        prune();
+        anchor = null;
+        initFocus();
+        paint();
+    }
+    document.addEventListener('rh:content-updated', boot);
+    boot();
 })();

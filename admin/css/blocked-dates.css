@@ -786,3 +786,24 @@
     .bdg-actionbar__fields { width: 100%; }
     .bdg-actionbar__fields input { flex: 1 1 100%; width: auto; }
 }
+
+/* Block Date Range: tick several rooms (individual level). */
+.bd-roompick {
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--admin-surface-border);
+    border-radius: var(--admin-radius);
+    background: var(--admin-surface);
+    padding: 8px 12px;
+}
+.bd-roompick__group { border: 0; margin: 0 0 8px; padding: 0; }
+.bd-roompick__group:last-child { margin-bottom: 0; }
+.bd-roompick__type { font-size: 0.8rem; font-weight: 700; color: var(--admin-text); margin: 4px 0; padding: 0; }
+.bd-roompick__type label,
+.bd-roompick__room { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.bd-roompick__room { padding: 4px 0 4px 22px; font-size: 0.875rem; color: var(--admin-text); }
+.bd-roompick__room:hover { background: var(--admin-hover-bg); }
+.bd-roompick input[type="checkbox"] { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; }
+@media (pointer: coarse) {
+    .bd-roompick__room, .bd-roompick__type label { min-height: 44px; }
+}
