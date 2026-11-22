@@ -337,6 +337,12 @@
         }
 
         function holdPagerPosition() {
+            // Phone + tablet (owner 2026-11-22): rows are tall list rows, so padding the pager down to the tallest page
+            // left a big empty gap under a shorter page. Up to 1024px the pager just follows the last row.
+            if ((window.innerWidth || document.documentElement.clientWidth || 0) <= 1024) {
+                nav.style.marginTop = '';
+                return;
+            }
             if (!hostIsVisible()) {
                 tallestPage = 0;
                 nav.style.marginTop = '';

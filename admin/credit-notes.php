@@ -645,7 +645,7 @@ $modalsHtml = ob_get_clean();
                                         <small class="text-muted"><?php echo htmlspecialchars((string)$cn['guest_email']); ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="rh-ph-nolabel">
                                     <span class="cn-type-badge cn-type-badge--<?php echo htmlspecialchars((string)$cn['booking_type']); ?>">
                                         <?php echo htmlspecialchars(ucfirst((string)$cn['booking_type'])); ?>
                                     </span>
@@ -658,7 +658,7 @@ $modalsHtml = ob_get_clean();
                                         <?php echo htmlspecialchars($reasonLabels[$cn['reason']] ?? ucfirst((string)$cn['reason'])); ?>
                                     </span>
                                 </td>
-                                <td class="text-right"><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format((float)$cn['original_amount'], 2); ?></td>
+                                <td class="text-right" data-short="Face"><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format((float)$cn['original_amount'], 2); ?></td>
                                 <td class="text-right"><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format((float)$cn['amount_used'], 2); ?></td>
                                 <td class="text-right<?php echo $balance > 0 && $isActive ? ' cn-balance--available' : ''; ?>">
                                     <strong><?php echo htmlspecialchars($currencySymbol); ?> <?php echo number_format($balance, 2); ?></strong>
@@ -675,7 +675,7 @@ $modalsHtml = ob_get_clean();
                                         <br><span class="cn-badge cn-badge--warn" title="Expires soon"><i class="fas fa-clock"></i></span>
                                     <?php endif; ?>
                                 </td>
-                                <td><?php echo date('d M Y', strtotime((string)$cn['issued_at'])); ?></td>
+                                <td class="rh-ph-skip"><?php echo date('d M Y', strtotime((string)$cn['issued_at'])); ?></td>
                                 <td>
                                     <?php if ($cn['expires_at']): ?>
                                         <span class="<?php echo $expiresSoon ? 'text-warning' : 'text-muted'; ?>">

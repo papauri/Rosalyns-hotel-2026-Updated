@@ -19,7 +19,7 @@
     window.rhHeaderLabel = function (th) {
         if (!th) return '';
         const copy = th.cloneNode(true);
-        copy.querySelectorAll('.help, .log-th-help, .em-th-help').forEach((dot) => dot.remove());
+        copy.querySelectorAll('.help, .log-th-help, .em-th-help, [class*="th-help"]').forEach((dot) => dot.remove());
         return (copy.textContent || '').replace(/\s+/g, ' ').trim();
     };
 

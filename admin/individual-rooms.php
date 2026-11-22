@@ -1691,7 +1691,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                             <div class="room-name"><?php echo htmlspecialchars($room['room_name']); ?></div>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td class="rh-ph-nolabel">
                                         <?php echo htmlspecialchars($room['room_type_name'] ?? 'Unknown'); ?>
                                         <?php if ($isPair): ?>
                                             <small class="ir-joined-badge" title="Two rooms sold only as one joined room (2 rooms)">
@@ -1706,7 +1706,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                         <?php endforeach; ?>
                                     </td>
                                     <td><?php echo $room['floor'] ? htmlspecialchars($room['floor']) : '-'; ?></td>
-                                    <td>
+                                    <td class="rh-ph-nolabel">
                                         <?php echo (int)($room['max_guests_override'] ?? $room['max_guests']); ?> guests
                                         <?php if ($isPair): ?>
                                             <small style="display:block;color:#766550;">Both rooms</small>
@@ -1778,7 +1778,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                             <?php endif; ?>
                                         </button>
                                     </td>
-                                    <td>
+                                    <td data-short="Now">
                                         <?php if ($hasActiveBooking): ?>
                                             <div class="current-booking">
                                                 <a href="booking-details.php?id=<?php echo $room['active_booking_id']; ?>">
@@ -1793,7 +1793,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                             <span style="color: #999;">-</span>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td data-short="Next">
                                         <?php if ($room['next_booking_ref']): ?>
                                             <div class="next-booking">
                                                 <a href="booking-details.php?id=<?php echo $room['next_booking_id']; ?>">

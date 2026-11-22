@@ -737,20 +737,20 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                         <tbody>
                             <?php foreach ($invoices as $invoice): ?>
                                 <tr>
-                                    <td>
+                                    <td data-short="Inv #">
                                         <strong><?php echo htmlspecialchars($invoice['invoice_number'] ?? 'N/A'); ?></strong>
                                         <?php $invQuoteRef = $invFromQuote[trim((string)($invoice['invoice_number'] ?? ''))] ?? ''; ?>
                                         <?php if ($invQuoteRef !== ''): ?>
                                             <br><small style="color: #666;" title="A quotation was converted to this invoice with Convert to invoice on the Quotations page.">Linked to quotation <?php echo htmlspecialchars($invQuoteRef); ?></small>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td data-short="Pay #">
                                         <code><?php echo htmlspecialchars($invoice['payment_reference']); ?></code>
                                     </td>
-                                    <td>
+                                    <td data-short="Ref">
                                         <strong><?php echo htmlspecialchars($invoice['booking_reference']); ?></strong>
                                     </td>
-                                    <td>
+                                    <td class="rh-ph-nolabel">
                                         <span class="badge badge-<?php echo htmlspecialchars((string)$invoice['booking_type']); ?>">
                                             <?php echo htmlspecialchars(ucfirst((string)$invoice['booking_type'])); ?>
                                         </span>

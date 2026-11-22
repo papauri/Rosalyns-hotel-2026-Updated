@@ -1203,3 +1203,178 @@ body .content .sdash-section table tbody td {
         margin: 0;
     }
 }
+
+/* ==========================================================================
+   Round 2 (owner 2026-11-22: "all of them"): row buttons say what they do, one 40px button height,
+   shorter rows. Everything below is inside max-width queries; nothing applies above 1024px.
+   ========================================================================== */
+@media (max-width: 1024px) {
+    /* ---- Row buttons: a short name under the icon (the full text is folded away, touch screens never show a title) ---- */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *)[data-rh-name] {
+        flex-direction: column;
+        gap: 1px;
+        width: auto !important;
+        min-width: 40px !important;
+        max-width: 68px;
+        padding: 0 3px !important;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *)[data-rh-name]::after {
+        content: attr(data-rh-name);
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.1;
+        letter-spacing: 0;
+        text-transform: none;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-side > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *)[data-rh-name] :is(i, svg, img) {
+        font-size: 15px;
+        line-height: 1;
+    }
+
+    /* four or more icon buttons under the text: the same icon-over-name button, so they stay on one 40px row */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-line.rh-act-n4 > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *)[data-rh-name]:has(> :is(i, svg, img)) {
+        flex-direction: column;
+        gap: 1px;
+        width: auto !important;
+        min-width: 48px !important;
+        max-width: 72px;
+        padding: 0 4px !important;
+        font-size: 0 !important;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-line.rh-act-n4 > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *)[data-rh-name]:has(> :is(i, svg, img))::after {
+        content: attr(data-rh-name);
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.1;
+        letter-spacing: 0;
+        text-transform: none;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr.rh-act-line.rh-act-n4 > .rh-ph-actions :is(button, a, .btn, .quick-action, .actions-more-toggle):not(.actions-more-menu *)[data-rh-name]:has(> :is(i, svg, img)) > :is(i, svg, img) { margin: 0 !important; font-size: 15px; line-height: 1; }
+
+    /* ---- Overflow menu that admin-mobile.js builds on phones when a row has more than three plain buttons
+       (.actions-dropdown): closed until its ⋮ is tapped, then a small list of named buttons under it ---- */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr > .rh-ph-actions .actions-dropdown { position: relative; display: inline-flex; flex: 0 0 auto; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr > .rh-ph-actions .actions-dropdown-menu {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 4px);
+        z-index: 60;
+        min-width: 150px;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px;
+        background: #fff;
+        border: 1px solid var(--admin-surface-border, #e3e8ef);
+        border-radius: 8px;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr > .rh-ph-actions .actions-dropdown.active > .actions-dropdown-menu { display: flex; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr > .rh-ph-actions .actions-dropdown-menu .dropdown-item { display: block; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr > .rh-ph-actions .actions-dropdown-menu :is(button, a, .btn, .quick-action):not(.actions-more-menu *) {
+        flex-direction: row !important;
+        justify-content: flex-start !important;
+        width: 100% !important;
+        max-width: none !important;
+        gap: 8px !important;
+        padding: 0 12px !important;
+    }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr > .rh-ph-actions .actions-dropdown-menu :is(button, a, .btn, .quick-action):not(.actions-more-menu *)[data-rh-name]::after { font-size: 13px; }
+
+    /* ---- Row text: long unbroken values (file names, references) wrap instead of jumping to their own line ---- */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th) { overflow-wrap: anywhere; }
+    /* status and type pills sit tighter inside a list row */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th):not(.rh-ph-actions) :is(.badge, .cn-type-badge, .sc-pill) { padding-top: 2px !important; padding-bottom: 2px !important; line-height: 1.35 !important; font-size: 11.5px; }
+    /* a value that explains itself carries no label (page opt-in on the td) */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th).rh-ph-nolabel[data-label]::before,
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th).rh-ph-nolabel[data-short]::before { content: none; display: none; }
+    /* value + sub-line cells (value, then a small date or note): a gap between the parts when they share a line */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th):not(.rh-ph-actions, .rh-ph-field, .rh-ph-primary) > :is(div, p, small, span.d-block) + :is(div, p, small, span.d-block) { margin-left: 8px; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > :is(td, th):not(.rh-ph-actions, .rh-ph-field, .rh-ph-primary) > :is(span, strong, em) + :is(span.mm-sub, span.mm-uses, span.mm-tag) { margin-left: 6px; }
+
+    /* ---- A cell that is a closed "Undo this" disclosure rides line 1 like a status; open, it takes a full line ---- */
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status:has(details) { text-align: right !important; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status:has(details[open]) { order: 9; flex: 1 1 100%; text-align: left !important; margin-top: 6px; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status details { display: block; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status details > summary { display: inline-flex !important; align-items: center; gap: 6px; min-height: 40px; box-sizing: border-box; list-style: none; cursor: pointer; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status details > summary::-webkit-details-marker { display: none; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status details label { display: block; margin: 8px 0 0; font-size: 12.5px; font-weight: 600; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status details :is(input[type="text"], input[type="password"]) { display: block; width: 100%; min-height: 40px; margin-top: 3px; box-sizing: border-box; }
+    #rh-admin-page table.mobile-enhanced:not(.bookings-table, .receipts-table, .rh-own-rows, :is(.pos-acct-close-form, .pos-acct-sales-wrap) *) > tbody > tr:not(.mobile-enhanced-empty-row) > .rh-ph-status details button[type="submit"] { margin-top: 8px; min-height: 40px; }
+
+    /* ---- One button height (40px) for every page, toolbar, row and bulk-bar button: the older 44px touch rules
+       (admin-styles.css, admin-components.css, bookings.css, backup-management.css, menu-management.css) stop at 40 here.
+       The top bar (search / help / menu) and pop-up dialogs keep their own 44px. ---- */
+    body:not(.pos-screen):not(.station-screen) #rh-admin-page :is(.btn, .btn-sm, .btn-action, .quick-action, .actions-more-toggle, .ck-btn, .mm-btn, .mm-btn-sm, .mm-pill, .mini-action, .tab-button, .btn-run, .btn-dl, .btn-restore, .btn-delete-backup, .cache-toggle-btn, .sc-btn, .btn-save-order, .btn-add, .btn-filter, .btn-reset, .btn-primary, .btn-secondary, .btn-danger, .rmc-icon-btn, .rmc-edit-btn, .cmc-icon-btn, .cmc-edit-btn, .scf-btn, .stm-btn, .sbud-btn, .sdash-health-banner__refresh, .log-bar__btn, .log-toolbar button, .bookings-toolbar__button, .bookings-alert-banner__action, a.pg-btn, button.pg-btn):not(.admin-header *, .modal *, [class*="modal"] *, [role="dialog"] *) {
+        min-height: 40px !important;
+    }
+    body:not(.pos-screen):not(.station-screen) #rh-admin-page :is(.actions-more-toggle, .quick-action, a.pg-btn, button.pg-btn):not(.admin-header *, .modal *, [class*="modal"] *) {
+        min-width: 40px !important;
+    }
+    /* buttons whose own padding made them 43-56px tall: the height comes from min-height alone */
+    body:not(.pos-screen):not(.station-screen) #rh-admin-page :is(.sc-btn, .sbud-btn, .btn-save-order, .scf-btn, .stm-btn, .btn-add, .btn-filter, .btn-reset, .btn-action, .rmc-edit-btn, .cmc-edit-btn, .log-bar__btn):not(.admin-header *, .modal *, [class*="modal"] *) {
+        box-sizing: border-box;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    #rh-admin-page .bookings-toolbar { --rh-bookings-toolbar-control-height: 2.5rem; }
+    /* Bookings phone row: keep its layout, only the heights drop from 44 to 40 */
+    #rh-admin-page table.booking-table.bookings-table td.actions-cell .actions-row > :is(.quick-action, .actions-more > .actions-more-toggle),
+    #rh-admin-page table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row > .quick-action.rh-next-step,
+    #rh-admin-page table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row > .actions-more > .actions-more-toggle {
+        height: 40px !important;
+        min-height: 40px !important;
+    }
+    #rh-admin-page table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row > .actions-more > .actions-more-toggle {
+        width: 40px !important;
+        min-width: 40px !important;
+    }
+    /* Menu Management filter / category chips use the same 40px */
+    #rh-admin-page .mm-restaurant :is(.mm-btn, .mm-btn-sm, .mm-pill, .btn-action, .mm-catbtn, .mm-rsf) { min-height: 40px !important; }
+}
+
+/* Shared pager under every list (admin-section-pagination.js and the server-paged lists): a normal 8-12px gap under the
+   rows, buttons 40px apart by 8px, prev / numbers / next on one row with the rows-per-page picker beside or under it */
+@media (max-width: 1024px) {
+    :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) {
+        gap: 8px;
+        padding: 10px 0 4px;
+    }
+    :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(a.pg-btn, button.pg-btn, span.pg-current) {
+        min-width: 40px !important;
+        min-height: 40px !important;
+        padding: 0 8px !important;
+        box-sizing: border-box;
+    }
+    :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) .pg-ellipsis { padding: 0 2px; }
+    :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(.pg-summary, .log-table-pagination__info) { padding: 0 4px; }
+    :is(.admin-content, #rh-admin-page) :is(.admin-auto-pagination, .bookings-pagination, .pagination, .pagination-bar) .pg-size select { min-height: 40px; }
+    :is(.admin-content, #rh-admin-page) :is(.admin-auto-pagination, .bookings-pagination, .pagination, .pagination-bar) .pg-size { margin-left: 0; }
+}
+
+/* ==========================================================================
+   Page rows (phone + tablet list rows), tagged with page classes or targeted here
+   ========================================================================== */
+@media (max-width: 1024px) {
+    /* Individual Rooms: booking cells are one line (reference + guest); the dates are in Details */
+    #roomsTableBody > tr > td:has(> :is(.current-booking, .next-booking)) {
+        flex: 1 1 100% !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap !important;
+    }
+    #roomsTableBody > tr > td > :is(.current-booking, .next-booking) small:last-of-type { display: none !important; }
+    #roomsTableBody > tr > td > :is(.current-booking, .next-booking) :is(br) { display: none !important; }
+}

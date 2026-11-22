@@ -731,7 +731,7 @@ ul.occupied-rooms-list.ck-rows {
         gap: 8px;
     }
 
-    .bulk-actions > * {
+    .bulk-actions > :is(select, button, a.btn, .btn, .btn-quick, input:not([type="hidden"], [type="checkbox"], [type="radio"])) {
         width: 100%;
         min-width: 0;
         min-height: 40px;

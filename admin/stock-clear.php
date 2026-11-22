@@ -859,13 +859,13 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
                             <tbody>
                                 <?php foreach ($pastClears as $pc): ?>
                                     <tr>
-                                        <td><?php echo $e($pc['created_at'] ?? ''); ?></td>
+                                        <td class="rh-ph-primary"><?php echo $e($pc['created_at'] ?? ''); ?></td>
                                         <td><?php echo $e(($pc['by_name'] ?? '') !== '' ? $pc['by_name'] : ($pc['by_username'] ?? '')); ?></td>
                                         <td>
                                             <?php echo rh_sc_manifest_is_count_wipe($pc) ? '<strong>Stock count wipe:</strong> ' : ''; ?><?php echo $e(rh_sc_sentence($area, (array)($pc['tables'] ?? []))); ?><br>
                                             <span class="sc-small"><?php echo $e($pc['snapshot_file'] ?? ''); ?></span>
                                         </td>
-                                        <td>
+                                        <td class="rh-ph-status">
                                             <?php if (rh_sc_manifest_is_count_wipe($pc)): ?>
                                                 <span class="sc-pill">No Undo</span><br>
                                                 <span class="sc-small"><?php echo $e(rh_sc_count_wipe_restore_text($pc)); ?></span>

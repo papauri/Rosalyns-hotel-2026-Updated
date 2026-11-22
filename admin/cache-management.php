@@ -1019,8 +1019,8 @@ $cache_types = [
                                             <?php echo htmlspecialchars($cache['source_label']); ?>
                                         </span>
                                     </td>
-                                    <td><code><?php echo htmlspecialchars($cache['file']); ?></code></td>
-                                    <td><?php echo htmlspecialchars($cache['key']); ?></td>
+                                    <td class="rh-ph-nolabel"><code><?php echo htmlspecialchars($cache['file']); ?></code></td>
+                                    <td data-short="Key"><?php echo htmlspecialchars($cache['key']); ?></td>
                                     <td><?php echo $cache['size_formatted']; ?></td>
                                     <td><?php echo $cache['created_formatted']; ?></td>
                                     <td><?php echo $cache['expires_formatted']; ?></td>

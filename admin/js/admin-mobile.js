@@ -315,6 +315,8 @@
 
     function enhanceMobileTables() {
         const apply = () => {
+            // Desktop width: every title / aria-label / short name this script added to buttons comes off again.
+            if ((window.innerWidth || document.documentElement.clientWidth || 0) > 1024) { clearAddedAttrs(document); }
             const tables = getCardableTables();
             tables.forEach(table => {
                 if (shouldUseCardLayout(table)) {
@@ -502,6 +504,76 @@
         return t.replace(/\s+/g, ' ').trim();
     }
 
+    // Name of a row button: its own text, else its aria-label / title.
+    function ctlName(b) {
+        var t = (b.textContent || '').replace(/\s+/g, ' ').trim();
+        return t || (b.getAttribute('aria-label') || '').trim() || (b.getAttribute('title') || '').trim();
+    }
+
+    // Short name shown under the icon of a row button on touch screens (about 9 characters at most).
+    function btnShort(name) {
+        var t = String(name || '').replace(/\s+/g, ' ').trim();
+        if (t.length <= 8) { return t; }
+        var s2 = t.replace(/^(?:send|view|open|go to|show|download|print|create|add|new|mark as|mark|assign to|assign|make|issue|record|take|see)\s+/i, '');
+        if (s2 && s2 !== t) { t = s2.charAt(0).toUpperCase() + s2.slice(1); }
+        if (t.length <= 9) { return t; }
+        var w = t.split(' ')[0];
+        return w.length >= 3 ? w : t;
+    }
+
+    // Does the cell show something besides text: an icon, image, field or button?
+    function hasVisual(c) {
+        return Array.prototype.some.call(c.querySelectorAll('img, svg, i, canvas, picture, video, .badge, input:not([type="hidden"]), select, textarea, button, a[href]'), function (e) {
+            return !e.hidden && !(e.style && e.style.display === 'none') && !e.closest('.actions-more-menu');
+        });
+    }
+
+    // Fields that are on show (a form inside a closed <details> is not).
+    function openFields(cell) {
+        return Array.prototype.filter.call(cell.querySelectorAll(FIELD_SEL), function (f) { return !f.closest('details'); });
+    }
+
+    // Attributes this script adds to buttons (title / aria-label / short name) are marked so they can be taken
+    // off again when the table goes back to its desktop layout; anything the page set itself is never touched.
+    function clearAddedAttrs(root) {
+        Array.prototype.forEach.call(root.querySelectorAll('[data-rh-title-added], [data-rh-aria-added], [data-rh-name]'), function (el) {
+            var tv = el.getAttribute('data-rh-title-added');
+            if (tv !== null) {
+                if (el.getAttribute('title') === tv) { el.removeAttribute('title'); }
+                el.removeAttribute('data-rh-title-added');
+            }
+            var av = el.getAttribute('data-rh-aria-added');
+            if (av !== null) {
+                if (el.getAttribute('aria-label') === av) { el.removeAttribute('aria-label'); }
+                el.removeAttribute('data-rh-aria-added');
+            }
+            el.removeAttribute('data-rh-name');
+        });
+    }
+
+    // Everything markCompactRows adds to rows and cells (classes and short labels), taken off again.
+    function clearCompactMarks(table) {
+        var tbody = table.querySelector('tbody');
+        if (tbody) {
+            Array.prototype.forEach.call(tbody.children, function (row) {
+                if (row.tagName !== 'TR') { return; }
+                row.classList.remove('rh-act-side', 'rh-act-line', 'rh-act-n1', 'rh-act-n2', 'rh-act-n3', 'rh-act-n4', 'rh-has-tick', 'rh-has-status');
+                Array.prototype.forEach.call(row.children, function (c) {
+                    c.classList.remove('rh-ph-tick', 'rh-ph-actions', 'rh-ph-field', 'rh-ph-empty');
+                    if (c.getAttribute('data-rh-auto')) {
+                        c.classList.remove('rh-ph-primary', 'rh-ph-status', 'rh-ph-money');
+                        c.removeAttribute('data-rh-auto');
+                    }
+                    if (c.getAttribute('data-rh-auto-short')) {
+                        c.removeAttribute('data-short');
+                        c.removeAttribute('data-rh-auto-short');
+                    }
+                });
+            });
+        }
+        clearAddedAttrs(table);
+    }
+
     function rowControls(cell) {
         return Array.prototype.filter.call(cell.querySelectorAll(CTL_SEL), function (c) {
             return !c.closest('.actions-more-menu') && !c.hidden && c.type !== 'hidden'
@@ -509,8 +581,34 @@
         });
     }
 
+    // Every row button says what it does without hovering: screen readers get the name (aria-label), a title is added
+    // when there is none, and the CSS shows a short name (data-rh-name) under the icon when the text is folded away.
+    // All three are marked (data-rh-*-added) so they are taken off again at desktop width.
+    function nameRowButton(b) {
+        var nm = (b.textContent || '').replace(/\s+/g, ' ').trim();
+        if (nm && !b.getAttribute('title') && !b.getAttribute('aria-label')) {
+            b.setAttribute('title', nm);
+            b.setAttribute('data-rh-title-added', nm);
+        }
+        var nmA = nm || (b.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+        if (nmA && !b.getAttribute('aria-label')) {
+            b.setAttribute('aria-label', nmA);
+            b.setAttribute('data-rh-aria-added', nmA);
+        }
+        var short = btnShort(ctlName(b));
+        if (short) { b.setAttribute('data-rh-name', short); }
+    }
+
+    // Tables with their own row layout (receipts, rh-own-rows) only get their action buttons named.
+    function nameOwnRowButtons(table) {
+        Array.prototype.forEach.call(table.querySelectorAll('tbody > tr > td.actions-cell, tbody > tr > td[class*="-actions"]'), function (c) {
+            rowControls(c).forEach(nameRowButton);
+        });
+    }
+
     function markCompactRows(table) {
         if ((window.innerWidth || document.documentElement.clientWidth || 0) > 1024) { return; }
+        if (table.matches('.receipts-table, .rh-own-rows')) { nameOwnRowButtons(table); return; }
         if (table.matches('.bookings-table, .receipts-table, .rh-own-rows') || table.closest('.pos-acct-close-form, .pos-acct-sales-wrap')) { return; }
         var tbody = table.querySelector('tbody');
         if (!tbody) { return; }
@@ -534,19 +632,19 @@
             });
             cells.forEach(function (c, i) {
                 var label = c.getAttribute('data-label') || '';
-                if (label && !c.getAttribute('data-short')) { c.setAttribute('data-short', shortLabel(label)); }
+                if (label && !c.getAttribute('data-short')) { c.setAttribute('data-short', shortLabel(label)); c.setAttribute('data-rh-auto-short', '1'); }
                 var text = cellText(c);
                 var ctls = rowControls(c);
                 var ctlText = ctls.map(function (b) { return (b.textContent || '').replace(/\s+/g, ' ').trim(); }).join(' ').trim();
                 var hasCheck = !!c.querySelector('input[type="checkbox"], input[type="radio"]');
                 // Tick cell: a checkbox and nothing else readable.
-                if (hasCheck && !c.querySelector(FIELD_SEL) && (text === '' || (!ctls.length && text.length <= 2))) {
+                if (hasCheck && !openFields(c).length && (text === '' || (!ctls.length && text.length <= 2))) {
                     c.classList.add('rh-ph-tick');
                     row.classList.add('rh-has-tick');
                     return;
                 }
                 // Cell with a form field keeps its label above the field, full width.
-                if (c.querySelector(FIELD_SEL)) { c.classList.add('rh-ph-field'); return; }
+                if (openFields(c).length) { c.classList.add('rh-ph-field'); return; }
                 // Actions cell: named Actions, or the last cell whose only text is its own buttons.
                 var isActLabel = /^(actions?|manage|options)$/i.test(label);
                 var restText = ctlText ? text.split(ctlText).join('').trim() : text;
@@ -555,10 +653,7 @@
                     actionCell = c;
                     c.classList.add('rh-ph-actions');
                     var iconOnly = ctls.every(function (b) { return b.classList.contains('actions-more-toggle') || b.querySelector('i, svg, img'); });
-                    ctls.forEach(function (b) {
-                        var nm = (b.textContent || '').replace(/\s+/g, ' ').trim();
-                        if (nm && !b.getAttribute('aria-label') && !b.getAttribute('title')) { b.setAttribute('title', nm); }
-                    });
+                    ctls.forEach(nameRowButton);
                     if (iconOnly && restText === '' && ctls.length <= 3) {
                         row.classList.add('rh-act-side', 'rh-act-n' + ctls.length);
                     } else {
@@ -567,7 +662,7 @@
                     return;
                 }
                 // Empty value: nothing worth a line.
-                if (!ctls.length && (text === '' || /^[—–-]+$/.test(text)) && !c.querySelector('img, svg, .badge')) {
+                if (!ctls.length && (text === '' || /^(?:[—–-]+|n\/a)$/i.test(text)) && !hasVisual(c)) {
                     c.classList.add('rh-ph-empty');
                 }
             });
@@ -625,6 +720,7 @@
      */
     function restoreTableFromCards(table) {
         table.classList.remove('mobile-enhanced');
+        clearCompactMarks(table);
         setCardModeWrappers(table, false);
         removeColumnHelpNote(table);
 
@@ -743,6 +839,7 @@
                     const buttonText = button.textContent.trim();
                     if (buttonText) {
                         button.setAttribute('title', buttonText);
+                        button.setAttribute('data-rh-title-added', buttonText); // taken off again at desktop width
                     }
                 }
             });
