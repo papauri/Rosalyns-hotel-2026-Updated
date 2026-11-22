@@ -77,16 +77,16 @@ if ($staff === '') {
     $grant = "INSERT INTO user_permissions (user_id, permission_key, is_granted) SELECT id, '%s', %d FROM admin_users WHERE username = " . $pdo->quote($staff) . " ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)";
     $menuOnlySetup = array_merge($seed, [sprintf($grant, 'menu', 1), sprintf($grant, 'stock_management', 0), sprintf($grant, 'view_only', 0)]);
     $mo = harness('admin/stock-to-menu.php', ['as_username' => $staff, 'setup' => $menuOnlySetup, 'vars' => $vars, 'post' => ['action' => 'open', 'ids' => '{gin}'],
-        'grep' => ['ZZM ' . $run . ' Page Gin', 'Costs show for people with the Stock permission', '"show_cost":false', '"cost":null', '"profit":null', '15000', '"cost_note":"From']]);
+        'grep' => ['ZZM ' . $run . ' Page Gin', 'Costs show for people with the Stock permission', '"show_cost":false', '"cost":null', '"profit":null', '15000', '"cost_note":"From', 'profit_ex_vat', 'stm-exvat']]);
     $f = (array)($mo['found'] ?? []);
-    ok('page: a Menu-only user sees the item with "—" and "Costs show for people with the Stock permission"; no cost in the page data', $clean($mo) && !empty($f['ZZM ' . $run . ' Page Gin'])
+    ok('page: a Menu-only user sees the item with "—" and "Costs show for people with the Stock permission"; no cost in the page data, no Show profit without VAT box or figure', $clean($mo) && !empty($f['ZZM ' . $run . ' Page Gin'])
         && !empty($f['Costs show for people with the Stock permission']) && !empty($f['"show_cost":false']) && !empty($f['"cost":null']) && !empty($f['"profit":null'])
-        && empty($f['15000']) && empty($f['"cost_note":"From']), json_encode($f ?: $mo));
+        && empty($f['15000']) && empty($f['"cost_note":"From']) && empty($f['profit_ex_vat']) && empty($f['stm-exvat']), json_encode($f ?: $mo));
     $mp = harness('admin/stock-to-menu.php', ['as_username' => $staff, 'setup' => $menuOnlySetup, 'vars' => $vars, 'ajax' => true,
         'post' => ['action' => 'preview', 'rows' => '[{"ing_id":{gin},"sold":"m:shot","price":"100","tick":1}]']]);
     $mr = $mp['json']['rows'][0] ?? null;
     ok('page: the Menu-only preview JSON has no cost, profit or cost warning (shot costs 500 > price 100) and the row is ready', $clean($mp) && !empty($mp['json']['ok']) && $mr
-        && $mr['cost'] === null && $mr['profit'] === null && $mr['below'] === false && $mr['warn'] === '' && $mp['json']['show_cost'] === false && $mr['ready'] === true, json_encode($mp['json'] ?? $mp));
+        && $mr['cost'] === null && $mr['profit'] === null && !array_key_exists('profit_ex_vat', $mr) && $mr['below'] === false && $mr['warn'] === '' && $mp['json']['show_cost'] === false && $mr['ready'] === true, json_encode($mp['json'] ?? $mp));
     $ms = harness('admin/stock-to-menu.php', ['as_username' => $staff, 'setup' => $menuOnlySetup, 'vars' => $vars, 'ajax' => true,
         'post' => ['action' => 'save', 'rows' => '[{"ing_id":{gin},"name":"ZZM ' . $run . ' Menu Only Gin","sold":"unit","price":"12,500.50","category":"Bar","tick":1}]'],
         'verify' => ["SELECT price FROM drink_menu WHERE item_name = 'ZZM $run Menu Only Gin'"]]);
@@ -100,8 +100,9 @@ $pcr = $pc['json']['rows'][0] ?? null;
 ok('page: preview of "1,50" is refused with the comma message, never 150', $clean($pc) && $pcr && $pcr['price'] === null && $pcr['ready'] === false
     && $pcr['why_not'] === 'Use a dot for decimals, e.g. 1.50, and commas only between thousands, e.g. 1,500.', json_encode($pcr));
 $pr = $p['json']['rows'][0] ?? null;
-ok('page: preview JSON for Menu + Stock (admin) works the row out (shot of a 750 ml bottle costs 500, profit 1000, New on the menu)', $clean($p) && !empty($p['json']['ok']) && $pr && abs((float)$pr['cost'] - 500) < 0.005
-    && abs((float)$pr['profit'] - 1000) < 0.001 && $pr['status'] === 'new' && $pr['ready'] === true, json_encode($p['json'] ?? $p));
+ok('page: preview JSON for Menu + Stock (admin) works the row out (shot of a 750 ml bottle costs 500, profit 1000, New on the menu; with VAT on, its profit without VAT too)', $clean($p) && !empty($p['json']['ok']) && $pr && abs((float)$pr['cost'] - 500) < 0.005
+    && abs((float)$pr['profit'] - 1000) < 0.001 && $pr['status'] === 'new' && $pr['ready'] === true
+    && (vat_mode() === 'off' ? !array_key_exists('profit_ex_vat', $pr) : abs((float)($pr['profit_ex_vat'] ?? -1) - (vat_mode() === 'inclusive' ? round(round(1500 / (1 + (float)getSetting('vat_rate', 0) / 100), 2) - 500, 2) : 1000.0)) < 0.001), json_encode($p['json'] ?? $p));
 $x = harness('admin/stock-to-menu.php', ['setup' => $seed, 'vars' => $vars, 'ajax' => true,
     'post' => ['action' => 'save', 'csrf_token' => 'wrong', 'rows' => '[{"ing_id":{gin},"price":"1500","tick":1}]'],
     'verify' => ["SELECT COUNT(*) AS n FROM drink_menu WHERE item_name LIKE 'ZZM $run %'"]]);

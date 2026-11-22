@@ -162,6 +162,7 @@ if (!function_exists('stm_build')) {
     /**
      * The rows as the screen shows them. $inputs: [{ing_id, name?, sold?, price?, category?, tick?}] (missing = the default).
      * $showCost: stm_can_see_cost() of the person. Without it cost, cost_note, profit, below and warn are left empty (never sent).
+     * profit_ex_vat (import_menu_profit_ex_vat, only when VAT is on and only with $showCost): the "Show profit without VAT" figure.
      * @return array{rows:array, cats:array}
      */
     function stm_build(PDO $pdo, array $inputs, bool $showCost = false): array
@@ -179,6 +180,7 @@ if (!function_exists('stm_build')) {
         }
         $db = import_drinks_db($pdo, array_keys($ings));
         $list = function_exists('rh_drink_measures_list') ? rh_drink_measures_list() : [];
+        $vat = import_menu_vat();
         $rows = [];
         foreach ($byId as $id => $in) {
             $ing = $ings[$id] ?? null;
@@ -274,6 +276,9 @@ if (!function_exists('stm_build')) {
                 'old_price' => $menu ? round((float)$menu['price'], 2) : null,
                 'why_not' => $why, 'tick' => !empty($in['tick']),
             ];
+            if ($vat['mode'] !== 'off') {       // "Show profit without VAT" (display only; below cost keeps using the VAT-included profit)
+                $rows[count($rows) - 1]['profit_ex_vat'] = import_menu_profit_ex_vat(is_float($price) ? $price : null, $cost !== null ? (float)$cost : null, $vat);
+            }
         }
         // two ticked rows that end up as the same menu drink: neither goes (never a silent pick)
         $seen = [];
@@ -312,6 +317,7 @@ if (!function_exists('stm_build')) {
                 $r['cost'] = null;
                 $r['cost_note'] = '';
                 $r['profit'] = null;
+                unset($r['profit_ex_vat']);
                 $r['below'] = false;
                 $r['warn'] = '';
             }

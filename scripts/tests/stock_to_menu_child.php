@@ -99,6 +99,39 @@ try {
     $H = $rowsOf(stm_build($pdo, [['ing_id' => $gin, 'sold' => 'm:shot', 'price' => '100', 'tick' => 1]], false));
     $ck('cost: without the Stock permission no cost, profit or cost warning is sent; the row is still ready', $H[$gin]['cost'] === null && $H[$gin]['profit'] === null
         && $H[$gin]['below'] === false && $H[$gin]['warn'] === '' && $H[$gin]['cost_note'] === '' && $H[$gin]['ready'] === true, json_encode($H[$gin]));
+    // ---- "Show profit without VAT" (owner 2026-11-22): follows the hotel's VAT setting (set in memory only here, never saved, then put back)
+    $vatItem = $mk('Vat Item', 'bottle', 2521);
+    $vatWas = [];
+    foreach (['vat_enabled', 'vat_rate', 'vat_pricing_mode'] as $vk) {
+        $vatWas[$vk] = array_key_exists($vk, $GLOBALS['_SITE_SETTINGS'] ?? []) ? $GLOBALS['_SITE_SETTINGS'][$vk] : null;
+    }
+    $vatSet = function (string $on, string $rate, string $mode) {
+        $GLOBALS['_SITE_SETTINGS']['vat_enabled'] = $on;
+        $GLOBALS['_SITE_SETTINGS']['vat_rate'] = $rate;
+        $GLOBALS['_SITE_SETTINGS']['vat_pricing_mode'] = $mode;
+    };
+    $vIn = [['ing_id' => $vatItem, 'price' => '6,000', 'tick' => 1]];
+    try {
+        $vatSet('1', '17.5', 'inclusive');
+        $Vi = $rowsOf(stm_build($pdo, $vIn, true))[$vatItem];
+        $ck('VAT inclusive 17.5%: price 6,000, cost 2,521: profit 3,479.00 (VAT included), without VAT 2,585.38 (6000 / 1.175 = 5106.38 - 2521); the page sends {mode, rate}',
+            abs((float)$Vi['profit'] - 3479.0) < 0.000001 && abs((float)($Vi['profit_ex_vat'] ?? 0) - 2585.38) < 0.000001 && $Vi['below'] === false
+            && (import_menu_vat_view()['mode'] ?? '') === 'inclusive' && abs((float)(import_menu_vat_view()['rate'] ?? 0) - 17.5) < 0.000001, json_encode($Vi));
+        $Vn = $rowsOf(stm_build($pdo, $vIn, false))[$vatItem];
+        $ck('VAT: without the Stock permission no profit without VAT is sent (as cost and profit)', !array_key_exists('profit_ex_vat', $Vn) && $Vn['profit'] === null, json_encode($Vn));
+        $vatSet('1', '17.5', 'exclusive');
+        $Ve = $rowsOf(stm_build($pdo, $vIn, true))[$vatItem];
+        $ck('VAT exclusive: the menu price holds no VAT, so profit without VAT = the profit (3,479.00)', array_key_exists('profit_ex_vat', $Ve) && $Ve['profit_ex_vat'] === $Ve['profit']
+            && abs((float)$Ve['profit'] - 3479.0) < 0.000001 && (import_menu_vat_view()['mode'] ?? '') === 'exclusive', json_encode($Ve));
+        $vatSet('0', '17.5', 'inclusive');
+        $Vo = $rowsOf(stm_build($pdo, $vIn, true))[$vatItem];
+        $ck('VAT off: no profit without VAT and no tick box (vat null); the profit is unchanged', !array_key_exists('profit_ex_vat', $Vo) && import_menu_vat_view() === null
+            && abs((float)$Vo['profit'] - 3479.0) < 0.000001, json_encode($Vo));
+    } finally {
+        foreach ($vatWas as $vk => $vv) {
+            if ($vv === null) { unset($GLOBALS['_SITE_SETTINGS'][$vk]); } else { $GLOBALS['_SITE_SETTINGS'][$vk] = $vv; }
+        }
+    }
     $D = $rowsOf(stm_build($pdo, [['ing_id' => $same1, 'name' => $n('Same'), 'price' => '10', 'tick' => 1], ['ing_id' => $same2, 'name' => $n('Same'), 'price' => '10', 'tick' => 1]]));
     $ck('build: two ticked rows that are the same drink: neither goes', !$D[$same1]['ready'] && !$D[$same2]['ready'] && strpos($D[$same1]['why_not'], 'Untick one') !== false, json_encode([$D[$same1]['why_not'], $D[$same2]['why_not']]));
 

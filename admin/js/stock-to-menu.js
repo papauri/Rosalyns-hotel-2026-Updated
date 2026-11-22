@@ -14,6 +14,37 @@
         var cur = data.currency ? data.currency + ' ' : '';
         var showCost = data.show_cost !== false;      // no Stock permission: the server sends no costs and the cells keep their "—" + ?
         var rowsEl = Array.prototype.slice.call(table.querySelectorAll('tr.stm-row'));
+        // 'Show profit without VAT' (owner 2026-11-22): display only, remembered per browser; the server sends profit_ex_vat (VAT on + Stock permission)
+        var vat = showCost && data.vat ? data.vat : null;
+        var exBox = document.getElementById('stm-exvat');
+        var VAT_KEY = 'rhProfitExVat';
+        if (exBox) { try { exBox.checked = window.localStorage.getItem(VAT_KEY) === '1'; } catch (e) { /* works without it */ } }
+        function exVat() { return !!(vat && exBox && exBox.checked); }
+        var profitHead = document.getElementById('stm-profit-head');
+        var PROFIT_TIP = profitHead && profitHead.querySelector('.help') ? profitHead.querySelector('.help').getAttribute('data-tip') : '';
+        function profitWords() {
+            if (!exVat()) return ['Profit', PROFIT_TIP];
+            return ['Profit without VAT', vat.mode === 'inclusive'
+                ? 'Price without the ' + Number(vat.rate) + '% VAT, minus cost of one, per sale. Shown once a price is typed.'
+                : 'Your menu prices do not include VAT (it is added on top at the till), so this is the same as the profit: price minus cost of one, per sale.'];
+        }
+        function paintHead() {
+            if (!profitHead) return;
+            var w = profitWords();
+            var lbl = profitHead.querySelector('.stm-profit-label');
+            var dot = profitHead.querySelector('.help');
+            if (lbl) lbl.textContent = w[0];
+            if (dot) { dot.setAttribute('data-tip', w[1]); dot.setAttribute('aria-label', w[1]); }
+            var full = w[0] + (data.currency ? ' (' + data.currency + ')' : '');
+            rowsEl.forEach(function (tr) { var td = tr.querySelector('.stm-profit'); if (td && td.hasAttribute('data-label')) td.setAttribute('data-label', full); });
+            var note = table.closest('.table-responsive');
+            note = note ? note.previousElementSibling : null;      // phone cards: the shared 'What the columns mean' list
+            if (note && note.classList.contains('rh-col-help')) {
+                Array.prototype.forEach.call(note.querySelectorAll('dt'), function (dt) {
+                    if (/^Profit/.test(dt.textContent) && dt.nextElementSibling) { dt.textContent = full; dt.nextElementSibling.textContent = w[1]; }
+                });
+            }
+        }
         var state = {};          // ing id -> last row the server sent
         (data.rows || []).forEach(function (r) { state[r.ing_id] = r; });
         var q = document.getElementById('stm-q');
@@ -56,7 +87,8 @@
             var sold = tr.querySelector('.stm-in-sold');
             if (showCost) {
                 cost.innerHTML = r.cost === null ? '<span class="stm-muted">Not known</span>' : esc(num(r.cost)) + (r.cost_note ? '<span class="stm-muted stm-small">' + esc(r.cost_note) + '</span>' : '');
-                profit.innerHTML = r.profit === null ? '<span class="stm-muted">-</span>' : '<span class="' + (r.profit < 0 ? 'stm-neg' : '') + '">' + esc(num(r.profit)) + '</span>';
+                var pv = exVat() ? (r.profit_ex_vat === undefined ? null : r.profit_ex_vat) : r.profit;
+                profit.innerHTML = pv === null ? '<span class="stm-muted">-</span>' : '<span class="' + (pv < 0 ? 'stm-neg' : '') + '">' + esc(num(pv)) + '</span>';
             }
             var cls = { 'new': 'stm-pill--new', 'update': 'stm-pill--update', 'same': 'stm-pill--same', 'blocked': 'stm-pill--blocked' }[r.status] || '';
             var html = '<span class="stm-pill ' + cls + '">' + esc(r.status_text) + '</span>';
@@ -183,6 +215,14 @@
             tr.querySelector('.stm-in-sold').addEventListener('change', function () { later(id); });
         });
         q.addEventListener('input', filter);
+        if (exBox) {
+            exBox.addEventListener('change', function () {
+                try { window.localStorage.setItem(VAT_KEY, exBox.checked ? '1' : '0'); } catch (e) { /* works without it */ }
+                paintHead();
+                rowsEl.forEach(function (tr) { var r = state[tr.dataset.ing]; if (r) paint(tr, r); });
+            });
+        }
+        paintHead();
         show.addEventListener('change', filter);
         document.getElementById('stm-tick-shown').addEventListener('click', function () {
             var ids = [];

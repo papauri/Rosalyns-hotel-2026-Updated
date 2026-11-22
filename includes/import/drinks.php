@@ -227,6 +227,39 @@ if (!function_exists('import_drinks_build')) {
         return ($price !== null && $cost !== null) ? round($price - round($cost, 2), 2) : null;
     }
 
+    /** The hotel's VAT setting as the profit screens use it (vat_mode()): mode off / inclusive / exclusive and the rate (0 when off). */
+    function import_menu_vat(): array
+    {
+        $mode = function_exists('vat_mode') ? vat_mode() : 'off';
+        return ['mode' => $mode, 'rate' => $mode === 'off' ? 0.0 : (float)getSetting('vat_rate', 0)];
+    }
+
+    /**
+     * Profit without VAT (owner 2026-11-22, the "Show profit without VAT" tick box; the profit shown stays VAT included).
+     * inclusive: the price without its VAT (vat_components' rounding: price / (1 + rate/100) to 2 dp) minus cost of one to 2 dp.
+     * exclusive: the menu price holds no VAT, so the same as import_menu_profit(). off: null (no figure, no tick box).
+     * $vat: import_menu_vat() (tests pass their own).
+     */
+    function import_menu_profit_ex_vat(?float $price, ?float $cost, ?array $vat = null): ?float
+    {
+        $vat = $vat ?? import_menu_vat();
+        if ($price === null || $cost === null || ($vat['mode'] ?? 'off') === 'off') {
+            return null;
+        }
+        $rate = (float)($vat['rate'] ?? 0);
+        if ($vat['mode'] === 'inclusive' && $rate > 0) {
+            return round(round($price / (1 + ($rate / 100)), 2) - round($cost, 2), 2);
+        }
+        return import_menu_profit($price, $cost);
+    }
+
+    /** What the screens send about VAT for the tick box: null when VAT is off (no tick box), else {mode, rate}. */
+    function import_menu_vat_view(): ?array
+    {
+        $vat = import_menu_vat();
+        return $vat['mode'] === 'off' ? null : $vat;
+    }
+
     /**
      * One sale of an item and its cost: rh_drink_measure_cost (the shared helper) for a unit / a list measure / the cell as written; for a
      * volume written in the cell, the same ml conversion a recipe line typed in ml uses (rh_drink_measure_to_stock). null = cannot be worked out.
@@ -322,6 +355,7 @@ if (!function_exists('import_drinks_build')) {
      */
     function import_drinks_build(PDO $pdo, array $items, array $answers): array
     {
+        $vat = import_menu_vat();
         $ingIds = [];
         foreach ($items as $it) {
             if ($it['match']) {
@@ -906,6 +940,9 @@ if (!function_exists('import_drinks_build')) {
                 'why_not' => $why, 'tickable' => $why === '' && $kind !== '' && $price !== null && in_array($action, ['add', 'update'], true),
                 'ticked' => !empty($a['tick']),
             ];
+            if ($vat['mode'] !== 'off') {       // "Show profit without VAT" (display only; below cost keeps using the VAT-included profit)
+                $rows[count($rows) - 1]['profit_ex_vat'] = import_menu_profit_ex_vat($price, $cost !== null ? (float)$cost : null, $vat);
+            }
         }
         // two rows of the file that end up as the same menu item: neither is offered (never a silent pick)
         $seen = [];
@@ -1165,7 +1202,7 @@ if (!function_exists('import_drinks_build')) {
             'default_category' => import_drinks_default_category(), 'can_menu' => import_drinks_can_menu($userId), 'editable' => $editable,
             'drink_ready' => function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo),
             'size_groups' => import_sizes_groups($all, (array)($answers['_sizes']['g'] ?? [])),
-            'currency' => function_exists('getSetting') ? (string)getSetting('currency_symbol', '') : '', 'shown' => count($shown),
+            'currency' => function_exists('getSetting') ? (string)getSetting('currency_symbol', '') : '', 'shown' => count($shown), 'vat' => import_menu_vat_view(),
             'tickable_shown' => count(array_filter($shown, function ($r) {
                 return $r['tickable'] && !$r['ticked'];
             })), 'ticked_shown' => count(array_filter($shown, function ($r) {

@@ -2256,7 +2256,8 @@ $csrf_token = generateCsrfToken();
                     const parts = [];
                     if (bigs > 0) parts.push(part(bigs, d.mBig));
                     if (rest > 0) parts.push(part(rest, d.mSmall));
-                    const text = parts.join(' + ');
+                    let text = parts.join(' + ');
+                    if (bigs > 0) text += ' (' + part(Math.round((bigs * n + rest) * 10) / 10, d.mSmall) + ')'; // total in smalls, as rh_stock_qty_words()
                     if (qty < 0) return 'short by ' + text;
                     return signed ? 'over by ' + text : text;
                 }

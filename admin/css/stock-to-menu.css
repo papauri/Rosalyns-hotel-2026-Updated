@@ -9,6 +9,9 @@
 .stm-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
 .stm-toolbar label { display: flex; flex-direction: column; gap: 4px; font-size: .78rem; color: var(--au-muted, #5f6b7a); flex: 1 1 180px; min-width: 0; }
 .stm-toolbar input, .stm-toolbar select { min-height: 44px; padding: 8px 10px; border: 1px solid var(--au-border, #d8dde5); border-radius: 8px; font-family: inherit; font-size: .9rem; background: #fff; width: 100%; box-sizing: border-box; }
+/* "Show profit without VAT" (owner 2026-11-22): a plain tick box in the toolbar */
+.stm-toolbar label.stm-vat { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 8px; min-height: 44px; font-size: .86rem; color: var(--au-text, #1e2938); cursor: pointer; }
+.stm-toolbar label.stm-vat input { width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; accent-color: var(--au-accent-deep, #7a5b34); cursor: pointer; }
 .stm-btn { min-height: 44px; padding: 9px 16px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: .88rem; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; box-sizing: border-box; }
 .stm-btn--primary { background: var(--au-accent-deep, #7a5b34); color: #fff; }
 .stm-btn--ghost { background: #fff; border-color: var(--au-border, #d8dde5); color: var(--au-text, #1e2938); }

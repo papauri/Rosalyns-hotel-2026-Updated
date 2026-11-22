@@ -14134,6 +14134,9 @@ function rh_stock_measure_label(string $mode, $big, $small, array $m): string
  * Below zero the whole figure is wrapped: "short by 1 bottle + 3 shots". $signed (count differences): above zero
  * "over by ...", below zero "short by ...". No measure: the number at most 2 dp, trailing zeros dropped, + $unit as
  * stored ("2.23 bottle", "-1.5 kg"; signed: "+1.5 kg").
+ * When at least one whole big is shown, the total in smalls follows in brackets (owner 2026-11-22, "the bottle number then
+ * what it converts to in the other unit"): "2 bottles + 7 shots (67 shots)", "2 bottles (60 shots)",
+ * "short by 1 bottle + 3 shots (33 shots)". Under one big there is nothing to convert ("7 shots").
  */
 function rh_stock_qty_words(float $qty, array $ing, string $unit = '', bool $signed = false): string
 {
@@ -14171,6 +14174,10 @@ function rh_stock_qty_words(float $qty, array $ing, string $unit = '', bool $sig
         $parts[] = $part($rest, $m['small']);
     }
     $text = implode(' + ', $parts);
+    if ($bigs > 0) {
+        $total = round($bigs * $n + $rest, 1);  // the shown parts added up, so the brackets always match the words
+        $text .= ' (' . $part($total, $m['small']) . ')';
+    }
     if ($qty < 0) {
         return 'short by ' . $text;
     }
@@ -14184,7 +14191,7 @@ function rh_stock_qty_words(float $qty, array $ing, string $unit = '', bool $sig
 function rh_stock_qty_html(float $qty, array $ing, string $unit = '', bool $signed = false): string
 {
     $exact = rh_stock_qty_fmt($qty, 0) . ($unit !== '' ? ' ' . $unit : '');
-    $words = str_replace('&nbsp;+&nbsp;', ' + ', str_replace(' ', '&nbsp;', htmlspecialchars(rh_stock_qty_words($qty, $ing, $unit, $signed), ENT_QUOTES, 'UTF-8')));
+    $words = str_replace(['&nbsp;+&nbsp;', '&nbsp;('], [' + ', ' ('], str_replace(' ', '&nbsp;', htmlspecialchars(rh_stock_qty_words($qty, $ing, $unit, $signed), ENT_QUOTES, 'UTF-8')));
     return '<span class="rh-qty" title="' . htmlspecialchars('Exact: ' . $exact, ENT_QUOTES, 'UTF-8') . '">' . $words . '</span>';
 }
 

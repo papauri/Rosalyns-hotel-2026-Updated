@@ -899,6 +899,56 @@ try {
     $stm = function ($ingCost, $price) { return round($price - round($ingCost, 2), 2); };     // admin/includes/stock-to-menu-lib.php stm_build, the same sum
     $ck('maths: the same profit as Stock Items > Put on the menu for the same cost and price', abs($stm(2066.115, 5000) - (float)import_menu_profit(5000.0, 2066.115)) < 0.000001
         && abs($stm(2521.0085, 6000) - (float)import_menu_profit(6000.0, 2521.0085)) < 0.000001 && import_menu_profit(null, 1.0) === null);
+    // "Show profit without VAT" (owner 2026-11-22): follows the hotel's VAT setting. Set in memory only for these checks (never saved), then put back.
+    $vIn = ['mode' => 'inclusive', 'rate' => 17.5];
+    $vEx = ['mode' => 'exclusive', 'rate' => 17.5];
+    $ck('VAT maths: inclusive 17.5%, price 6,000, cost 2,521: profit 3,479.00 (VAT included), without VAT 2,585.38 (6000 / 1.175 = 5106.38 - 2521); exclusive: the same as the profit; off: none',
+        abs((float)import_menu_profit(6000.0, 2521.0) - 3479.0) < 0.000001 && abs((float)import_menu_profit_ex_vat(6000.0, 2521.0, $vIn) - 2585.38) < 0.000001
+        && abs((float)import_menu_profit_ex_vat(6000.0, 2521.0, $vEx) - 3479.0) < 0.000001 && import_menu_profit_ex_vat(6000.0, 2521.0, ['mode' => 'off', 'rate' => 0.0]) === null
+        && import_menu_profit_ex_vat(null, 2521.0, $vIn) === null && import_menu_profit_ex_vat(6000.0, null, $vIn) === null,
+        json_encode([import_menu_profit_ex_vat(6000.0, 2521.0, $vIn), import_menu_profit_ex_vat(6000.0, 2521.0, $vEx)]));
+    $vatWas = [];
+    foreach (['vat_enabled', 'vat_rate', 'vat_pricing_mode'] as $vk) {
+        $vatWas[$vk] = array_key_exists($vk, $GLOBALS['_SITE_SETTINGS'] ?? []) ? $GLOBALS['_SITE_SETTINGS'][$vk] : null;
+    }
+    $vatSet = function (string $on, string $rate, string $mode) {
+        $GLOBALS['_SITE_SETTINGS']['vat_enabled'] = $on;
+        $GLOBALS['_SITE_SETTINGS']['vat_rate'] = $rate;
+        $GLOBALS['_SITE_SETTINGS']['vat_pricing_mode'] = $mode;
+    };
+    try {
+        $gSp = (string)($F7[$n('Special')]['group'] ?? '');
+        $vatSet('1', '17.5', 'inclusive');
+        $Fi = $rowsF();
+        [$vFi] = $mv(['mgroup' => $gSp]);
+        $vSp = null;
+        foreach ((array)($vFi['rows'] ?? []) as $r) { if ($r['name'] === $n('Special')) { $vSp = $r; } }
+        $ck('VAT inclusive 17.5%: the step 3 list sends {mode, rate} and each row\'s profit without VAT; Special 6000 - 2521.01: profit 3478.99, without VAT 2585.37 (5106.38 - 2521.01)',
+            ($vFi['vat']['mode'] ?? '') === 'inclusive' && abs((float)($vFi['vat']['rate'] ?? 0) - 17.5) < 0.000001 && $vSp
+            && abs((float)$vSp['profit'] - 3478.99) < 0.000001 && abs((float)($vSp['profit_ex_vat'] ?? 0) - 2585.37) < 0.000001
+            && abs((float)($Fi[$n('Kuche')]['profit_ex_vat'] ?? 0) - round(round(5000 / 1.175, 2) - 2066.12, 2)) < 0.000001,
+            json_encode([$vFi['vat'] ?? null, $vSp['profit'] ?? null, $vSp['profit_ex_vat'] ?? null, $Fi[$n('Kuche')]['profit_ex_vat'] ?? null]));
+        $vatSet('1', '17.5', 'exclusive');
+        $Fe = $rowsF();
+        [$vFe] = $mv();
+        $eqOk = true;
+        foreach ($Fe as $r) { if (!array_key_exists('profit_ex_vat', $r) || $r['profit_ex_vat'] !== $r['profit']) { $eqOk = false; } }
+        $ck('VAT exclusive: the menu price holds no VAT, so profit without VAT = the profit on every row; the list says exclusive', $eqOk && ($vFe['vat']['mode'] ?? '') === 'exclusive',
+            json_encode([$vFe['vat'] ?? null, $Fe[$n('Special')]['profit'] ?? null, $Fe[$n('Special')]['profit_ex_vat'] ?? null]));
+        $vatSet('0', '17.5', 'inclusive');
+        $Fo = $rowsF();
+        [$vFo] = $mv(['mgroup' => $gSp]);
+        $offOk = array_key_exists('vat', $vFo) && $vFo['vat'] === null;
+        foreach (array_merge(array_values($Fo), (array)($vFo['rows'] ?? [])) as $r) { if (array_key_exists('profit_ex_vat', $r)) { $offOk = false; } }
+        $belowSame = true;
+        foreach ($Fo as $k => $r) { if (($Fi[$k]['below'] ?? null) !== $r['below'] || ($Fe[$k]['below'] ?? null) !== $r['below'] || ($Fi[$k]['profit'] ?? null) !== $r['profit']) { $belowSame = false; } }
+        $ck('VAT off: no tick box (vat null) and no profit without VAT on any row', $offOk, json_encode([$vFo['vat'] ?? 'missing', $Fo[$n('Special')] ?? null]));
+        $ck('VAT: the profit and "Sells below cost" are the same in every VAT mode (they keep the VAT-included price)', $belowSame);
+    } finally {
+        foreach ($vatWas as $vk => $vv) {
+            if ($vv === null) { unset($GLOBALS['_SITE_SETTINGS'][$vk]); } else { $GLOBALS['_SITE_SETTINGS'][$vk] = $vv; }
+        }
+    }
     // tick all within a group, then the whole list; the step 4 counts (drinks and food apart)
     $gBeers = (string)($F0[$n('Kuche')]['group'] ?? '');
     $taG = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'tick_all', 'on' => true, 'mgroup' => $gBeers]);
@@ -1238,9 +1288,9 @@ try {
         $kcI = $mC->fetch(PDO::FETCH_ASSOC) ?: [];
         $mC->execute([$n('Lager C')]);
         $lgI = $mC->fetch(PDO::FETCH_ASSOC) ?: [];
-        $ck('count measure at import (owner 2026-11-22): Premier C and Klip C carry "25 shots in one bottle" (bottle, shot, 25, stock in bottles); the Stock screens read 2.28 as "2 bottles + 7 shots", 2 as "2 bottles"; the beer (served by the bottle) gets none',
+        $ck('count measure at import (owner 2026-11-22): Premier C and Klip C carry "25 shots in one bottle" (bottle, shot, 25, stock in bottles); the Stock screens read 2.28 as "2 bottles + 7 shots (57 shots)", 2 as "2 bottles (50 shots)"; the beer (served by the bottle) gets none',
             ($pcI['measure_big_name'] ?? '') === 'bottle' && ($pcI['measure_small_name'] ?? '') === 'shot' && abs((float)($pcI['measure_per_big'] ?? 0) - 25) < 0.0001 && ($pcI['measure_stock_side'] ?? '') === 'big'
-            && rh_stock_qty_words(2.28, $pcI, 'Bottle') === '2 bottles + 7 shots' && rh_stock_qty_words(2.0, $kcI, 'Bottle') === '2 bottles' && rh_stock_measure_get($lgI) === null
+            && rh_stock_qty_words(2.28, $pcI, 'Bottle') === '2 bottles + 7 shots (57 shots)' && rh_stock_qty_words(2.0, $kcI, 'Bottle') === '2 bottles (50 shots)' && rh_stock_measure_get($lgI) === null
             && (int)($cC['result']['measures_saved'] ?? -1) === 2 && in_array($n('Premier C'), array_column((array)($cC['result']['measures_list'] ?? []), 'name'), true),
             json_encode([$pcI, $kcI, $cC['result']['measures_saved'] ?? null]));
         $ck('count measure at import: stock cost never divided (30,000 a bottle), nothing added to stock before the count is approved',

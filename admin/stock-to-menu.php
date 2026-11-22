@@ -8,6 +8,7 @@
  * a message) and from Menu Management > Drinks > "Add from stock" (a plain GET: every stock item not archived and not kept by weight,
  * showing the ones not on the drinks menu yet).
  * Cost of one, profit and the cost warning only for people with the Stock permission (stock_management); others see "—".
+ * "Show profit without VAT" tick box (display only, remembered per browser): for them too, and only when VAT is on.
  * One row per item: drink name, Sold as, price (VAT included), category, cost of one, profit, status. "Add N to the menu" writes
  * the ticked rows that are ready. Logic, rules and writes: admin/includes/stock-to-menu-lib.php (the same writes as Import step 4).
  * Permission: menu (it writes the drinks menu); modules: pos + stock.
@@ -18,6 +19,9 @@ require_once __DIR__ . '/includes/stock-to-menu-lib.php';
 
 $uid = (int)($_SESSION['admin_user_id'] ?? 0);
 $showCost = stm_can_see_cost($uid);
+// "Show profit without VAT" (owner 2026-11-22): only with the Stock permission (it is a cost figure) and only when VAT is on
+$vatView = $showCost ? import_menu_vat_view() : null;
+$vatRateTxt = $vatView ? rtrim(rtrim(number_format((float)$vatView['rate'], 2, '.', ''), '0'), '.') : '';
 $currency_symbol = (string)getSetting('currency_symbol');
 $error = '';
 if (!ensureStockTablesExist()) {
@@ -146,6 +150,9 @@ $h = function ($s) {
                 </label>
                 <button type="button" class="stm-btn stm-btn--ghost" id="stm-tick-shown"><i class="fas fa-check-double"></i> Tick all shown</button>
                 <button type="button" class="stm-btn stm-btn--ghost" id="stm-untick"><i class="fas fa-xmark"></i> Untick all</button>
+                <?php if ($vatView): ?>
+                <label class="stm-vat"><input type="checkbox" id="stm-exvat"> Show profit without VAT <i class="help" data-tip="<?php echo $vatView['mode'] === 'inclusive' ? 'Shows the profit with the ' . $h($vatRateTxt) . '% VAT taken out of the price: price without VAT minus cost of one. Only changes what is shown; prices are saved as typed.' : 'Your menu prices do not include VAT (it is added on top at the till), so profit without VAT is the same as the profit shown.'; ?>">?</i></label>
+                <?php endif; ?>
             </div>
             <p class="stm-muted" id="stm-count"></p>
 
@@ -168,7 +175,7 @@ $h = function ($s) {
                             <th>Price<?php echo $currency_symbol !== '' ? ' (' . $h($currency_symbol) . ')' : ''; ?> <i class="help" data-tip="The selling price of one, VAT included, in <?php echo $h($currency_symbol); ?>. It is saved exactly as typed (2 decimals); VAT is never added on top.">?</i></th>
                             <th>Category <i class="help" data-tip="The drinks menu category. It starts as the stock category when the drinks menu has one with that name, else Bar. A drink already on the menu keeps its own category.">?</i></th>
                             <th class="num">Cost of one<?php echo $currency_symbol !== '' ? ' (' . $h($currency_symbol) . ')' : ''; ?> <i class="help" data-tip="Stock cost of one sale: the item's current average cost per unit (Stock Items) times what one sale takes. For a drink already on the menu with a stock link, the cost of that link.">?</i></th>
-                            <th class="num">Profit<?php echo $currency_symbol !== '' ? ' (' . $h($currency_symbol) . ')' : ''; ?> <i class="help" data-tip="Price minus cost of one, per sale, VAT included in the price. Shown once a price is typed.">?</i></th>
+                            <th class="num" id="stm-profit-head"><span class="stm-profit-label">Profit</span><?php echo $currency_symbol !== '' ? ' (' . $h($currency_symbol) . ')' : ''; ?> <i class="help" data-tip="Price minus cost of one, per sale, VAT included in the price. Shown once a price is typed.">?</i></th>
                             <th>Status <i class="help" data-tip="New on the menu, Price change (old -> new), Already on the menu at this price (nothing to save), or Cannot go on the menu with the reason.">?</i></th>
                         </tr>
                     </thead>
@@ -217,7 +224,7 @@ $h = function ($s) {
             <button type="button" class="stm-btn stm-btn--primary" id="stm-save" disabled><i class="fas fa-plus"></i> <span id="stm-save-text">Add to the menu</span></button>
         </div>
         <?php endif; ?>
-        <script type="application/json" id="stm-data"><?php echo json_encode(['rows' => $built['rows'], 'currency' => $currency_symbol, 'csrf' => $csrf_token, 'show_cost' => $showCost], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?></script>
+        <script type="application/json" id="stm-data"><?php echo json_encode(['rows' => $built['rows'], 'currency' => $currency_symbol, 'csrf' => $csrf_token, 'show_cost' => $showCost, 'vat' => $vatView], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?></script>
         <?php endif; ?>
     </div>
 

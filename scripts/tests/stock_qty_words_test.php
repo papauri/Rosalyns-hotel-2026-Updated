@@ -29,38 +29,38 @@ $glass = ['measure_big_name' => 'bottle', 'measure_small_name' => 'glass', 'meas
 $none = ['measure_big_name' => null, 'measure_small_name' => null, 'measure_per_big' => null, 'measure_stock_side' => null];
 
 // Stock kept in bottles (side big).
-eq(rh_stock_qty_words(2.233333, $big, 'bottle'), '2 bottles + 7 shots', 'side big 2.233333 n30 -> 2 bottles + 7 shots');
-eq(rh_stock_qty_words(2.0, $big, 'bottle'), '2 bottles', 'exact bottles');
-eq(rh_stock_qty_words(1.0, $big, 'bottle'), '1 bottle', 'one bottle is singular');
+eq(rh_stock_qty_words(2.233333, $big, 'bottle'), '2 bottles + 7 shots (67 shots)', 'side big 2.233333 n30 -> 2 bottles + 7 shots');
+eq(rh_stock_qty_words(2.0, $big, 'bottle'), '2 bottles (60 shots)', 'exact bottles');
+eq(rh_stock_qty_words(1.0, $big, 'bottle'), '1 bottle (30 shots)', 'one bottle is singular');
 eq(rh_stock_qty_words(0.233333, $big, 'bottle'), '7 shots', 'under one bottle -> shots only');
 eq(rh_stock_qty_words(0.033333, $big, 'bottle'), '1 shot', 'one shot is singular');
-eq(rh_stock_qty_words(1.033333, $big, 'bottle'), '1 bottle + 1 shot', 'one bottle + one shot, both singular');
-eq(rh_stock_qty_words(2.249999, $big, 'bottle'), '2 bottles + 7.5 shots', 'half shot kept to 1 dp');
+eq(rh_stock_qty_words(1.033333, $big, 'bottle'), '1 bottle + 1 shot (31 shots)', 'one bottle + one shot, both singular');
+eq(rh_stock_qty_words(2.249999, $big, 'bottle'), '2 bottles + 7.5 shots (67.5 shots)', 'half shot kept to 1 dp');
 eq(rh_stock_qty_words(6.9999 / 30, $big, 'bottle'), '7 shots', '6.9999 shots -> 7 shots');
-eq(rh_stock_qty_words(29.99 / 30, $big, 'bottle'), '1 bottle', '29.99 of 30 shots rolls into the next bottle');
-eq(rh_stock_qty_words(1 + 29.99 / 30, $big, 'bottle'), '2 bottles', '1 bottle + 29.99 shots -> 2 bottles');
+eq(rh_stock_qty_words(29.99 / 30, $big, 'bottle'), '1 bottle (30 shots)', '29.99 of 30 shots rolls into the next bottle');
+eq(rh_stock_qty_words(1 + 29.99 / 30, $big, 'bottle'), '2 bottles (60 shots)', '1 bottle + 29.99 shots -> 2 bottles');
 eq(rh_stock_qty_words(0.0, $big, 'bottle'), '0 bottles', 'zero shows in the stock measure');
 eq(rh_stock_qty_words(0.0001, $big, 'bottle'), '0 bottles', 'a dust figure shows as 0');
 
 // Stock kept in shots (side small): same words.
-eq(rh_stock_qty_words(67.0, $small, 'shot'), '2 bottles + 7 shots', 'side small 67 n30 -> 2 bottles + 7 shots');
-eq(rh_stock_qty_words(60.0, $small, 'shot'), '2 bottles', 'side small exact bottles');
+eq(rh_stock_qty_words(67.0, $small, 'shot'), '2 bottles + 7 shots (67 shots)', 'side small 67 n30 -> 2 bottles + 7 shots');
+eq(rh_stock_qty_words(60.0, $small, 'shot'), '2 bottles (60 shots)', 'side small exact bottles');
 eq(rh_stock_qty_words(7.0, $small, 'shot'), '7 shots', 'side small under one bottle');
-eq(rh_stock_qty_words(29.99, $small, 'shot'), '1 bottle', 'side small 29.99 rolls into a bottle');
+eq(rh_stock_qty_words(29.99, $small, 'shot'), '1 bottle (30 shots)', 'side small 29.99 rolls into a bottle');
 eq(rh_stock_qty_words(0.0, $small, 'shot'), '0 shots', 'side small zero in shots');
 
 // A measure with a fractional N (glasses of wine).
-eq(rh_stock_qty_words(1.5, $glass, 'bottle'), '1 bottle + 2.1 glasses', 'fractional N: 1.5 bottles = 1 bottle + 2.1 glasses');
-eq(rh_stock_qty_words(1.0, $glass, 'bottle'), '1 bottle', 'fractional N: exact bottle');
+eq(rh_stock_qty_words(1.5, $glass, 'bottle'), '1 bottle + 2.1 glasses (6.4 glasses)', 'fractional N: 1.5 bottles = 1 bottle + 2.1 glasses');
+eq(rh_stock_qty_words(1.0, $glass, 'bottle'), '1 bottle (4.3 glasses)', 'fractional N: exact bottle');
 
 // Negative stock: the whole figure is wrapped.
-eq(rh_stock_qty_words(-1.1, $big, 'bottle'), 'short by 1 bottle + 3 shots', 'negative -> short by 1 bottle + 3 shots');
+eq(rh_stock_qty_words(-1.1, $big, 'bottle'), 'short by 1 bottle + 3 shots (33 shots)', 'negative -> short by 1 bottle + 3 shots');
 eq(rh_stock_qty_words(-0.1, $big, 'bottle'), 'short by 3 shots', 'negative under one bottle');
 eq(rh_stock_qty_words(-0.00001, $big, 'bottle'), '0 bottles', 'negative dust shows as 0');
 
 // Count differences (signed).
 eq(rh_stock_qty_words(0.1, $big, 'bottle', true), 'over by 3 shots', 'signed positive -> over by');
-eq(rh_stock_qty_words(-1.1, $big, 'bottle', true), 'short by 1 bottle + 3 shots', 'signed negative -> short by');
+eq(rh_stock_qty_words(-1.1, $big, 'bottle', true), 'short by 1 bottle + 3 shots (33 shots)', 'signed negative -> short by');
 eq(rh_stock_qty_words(0.0, $big, 'bottle', true), '0 bottles', 'signed zero');
 
 // No count measure: number at most 2 dp + the unit as stored.
@@ -77,11 +77,11 @@ eq(rh_stock_qty_words(2.233333, ['measure_big_name' => 'bottle', 'measure_small_
 
 // Plurals of other names.
 $box = ['measure_big_name' => 'box', 'measure_small_name' => 'glass', 'measure_per_big' => '10', 'measure_stock_side' => 'big'];
-eq(rh_stock_qty_words(2.3, $box, 'box'), '2 boxes + 3 glasses', 'plural es for box / glass');
+eq(rh_stock_qty_words(2.3, $box, 'box'), '2 boxes + 3 glasses (23 glasses)', 'plural es for box / glass');
 
 // HTML: escaped words, exact figure on hover.
-eq(rh_stock_qty_html(-1.1, $big, 'bottle'), '<span class="rh-qty" title="Exact: -1.1 bottle">short&nbsp;by&nbsp;1&nbsp;bottle + 3&nbsp;shots</span>', 'html: negative keeps short by with its figure');
-eq(rh_stock_qty_html(2.233333, $big, 'bottle'), '<span class="rh-qty" title="Exact: 2.233333 bottle">2&nbsp;bottles + 7&nbsp;shots</span>', 'html: words with the exact figure as title, wraps only at +');
+eq(rh_stock_qty_html(-1.1, $big, 'bottle'), '<span class="rh-qty" title="Exact: -1.1 bottle">short&nbsp;by&nbsp;1&nbsp;bottle + 3&nbsp;shots (33&nbsp;shots)</span>', 'html: negative keeps short by with its figure');
+eq(rh_stock_qty_html(2.233333, $big, 'bottle'), '<span class="rh-qty" title="Exact: 2.233333 bottle">2&nbsp;bottles + 7&nbsp;shots (67&nbsp;shots)</span>', 'html: words with the exact figure as title, wraps only at +');
 eq(rh_stock_qty_html(1.5, $none, 'kg <b>'), '<span class="rh-qty" title="Exact: 1.5 kg &lt;b&gt;">1.5&nbsp;kg&nbsp;&lt;b&gt;</span>', 'html: unit is escaped');
 
 echo "\n$pass passed, $fail failed\n";

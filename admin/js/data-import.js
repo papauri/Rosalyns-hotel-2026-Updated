@@ -2259,6 +2259,13 @@
             var sh = h('select', 'di-select'); sh.setAttribute('aria-label', 'Show');
             MENU_SHOW.forEach(function (o) { var op = h('option', null, o[1]); op.value = o[0]; sh.appendChild(op); });
             add(ctrl, ctlWrap('Search', si, 'A name, a category or a cell such as E12.'), ctlWrap('Show', sh, 'Only some of the items, in every group.'));
+            // "Show profit without VAT" (owner 2026-11-22): display only, remembered per browser; shown only when the hotel's VAT is on.
+            // The server sends profit_ex_vat per row; the profit (and "Sells below cost") stays VAT included.
+            var vatBox = document.createElement('input'); vatBox.type = 'checkbox'; vatBox.className = 'di-vat-box';
+            var vatHelp = h('span', 'di-vat-help');
+            var vatWrap = add(h('div', 'di-vat-f'), add(h('label', 'di-vat'), vatBox, ' Show profit without VAT'), ' ', vatHelp); vatWrap.hidden = true;
+            try { vatBox.checked = window.localStorage.getItem('rhProfitExVat') === '1'; } catch (e) { /* works without it */ }
+            ctrl.appendChild(vatWrap);
             // sizes for many drinks at once (one shot / glass / bottle size per kind of drink)
             var sizeBox = h('details', 'di-details di-menu-sizes'); sizeBox.hidden = true;
             var sizeSum = h('summary', null, 'Sizes for many drinks at once');
@@ -2289,6 +2296,33 @@
             var cur = function () { return last && last.currency ? last.currency + ' ' : ''; };
             var canEdit = function () { return !!(last && last.can_menu && last.editable); };
             var itemsWordN = function (n) { return num(n, 0) + ' item' + (n === 1 ? '' : 's'); };
+            var exVat = function () { return !!(last && last.vat && vatBox.checked); };
+            var vatRateTxt = function () { return last && last.vat ? String(Number(last.vat.rate)) : ''; };
+            // the profit figure, heading and "?" follow the tick box (both figures are in every row: data-inc / data-ex)
+            var paintVat = function () {
+                vatWrap.hidden = !(last && last.vat);
+                clear(vatHelp);
+                if (last && last.vat) {
+                    vatHelp.appendChild(helpDot(last.vat.mode === 'inclusive'
+                        ? 'Shows the profit with the ' + vatRateTxt() + '% VAT taken out of the selling price: price without VAT minus cost of one. Only changes what is shown; prices are saved as typed.'
+                        : 'Your menu prices do not include VAT (it is added on top at the till), so profit without VAT is the same as the profit shown.'));
+                }
+                var ex = exVat(), curTxt = last && last.currency ? ' (' + last.currency + ')' : '';
+                var label = ex ? 'Profit without VAT' : 'Profit';
+                var tip = !ex ? MENU_HEADS.filter(function (c) { return c[0] === 'profit'; })[0][2] : (last.vat.mode === 'inclusive'
+                    ? 'Price without the ' + vatRateTxt() + '% VAT, minus cost of one (cost to 2 decimals), per sale.'
+                    : 'Your menu prices do not include VAT (it is added on top at the till), so this is the same as the profit: selling price minus cost of one, per sale.');
+                Array.prototype.forEach.call(sec.querySelectorAll('th.di-c-profit'), function (th) { add(clear(th), label + curTxt, ' ', helpDot(tip)); });
+                Array.prototype.forEach.call(sec.querySelectorAll('td.di-c-profit'), function (td) {
+                    td.setAttribute('data-label', ex ? 'Profit without VAT' : 'Profit of one');
+                    var pf = td.querySelector('.di-money');
+                    if (pf) { pf.textContent = pf.getAttribute(ex ? 'data-ex' : 'data-inc') || '—'; }
+                });
+            };
+            vatBox.addEventListener('change', function () {
+                try { window.localStorage.setItem('rhProfitExVat', vatBox.checked ? '1' : '0'); } catch (e) { /* works without it */ }
+                paintVat();
+            });
 
             // ---- server calls
             var base = function () { return { job: S.job, q: st.q, show: st.show }; };
@@ -2355,6 +2389,7 @@
                 drawBulk();
                 var shownN = last.shown || 0;
                 empty.hidden = shownN > 0; empty.textContent = 'Nothing matches the search and Show.';
+                paintVat();
             };
             var mlText = function (x) { return num(x, x % 1 ? 2 : 0) + ' ml'; };
             var has = function (v) { return v !== null && v !== undefined; };
@@ -2491,6 +2526,7 @@
                 if (!rows.length) { x.rowsBox.appendChild(h('p', 'di-muted', 'Nothing in this group matches the search and Show.')); }
                 if (r.total > 10) { x.rowsBox.appendChild(pager(r, function (n) { x.page = n; loadGroup(k); }, function (n) { x.size = n; x.page = 1; loadGroup(k); })); }
                 if (keep) { var back = x.rowsBox.querySelector('[data-fk="' + keep.replace(/"/g, '') + '"]'); if (back && !back.disabled) { back.focus(); } }
+                paintVat();
             };
             var pager = function (r, goTo, onSize) {
                 var bar = h('div', 'di-pager di-mt-pager');
@@ -2607,10 +2643,15 @@
                 pi.value = has(y.price) ? Number(y.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
                 pi.placeholder = 'Type price'; pi.disabled = !edit; pi.setAttribute('aria-label', 'Selling price of ' + y.name + ', VAT included'); pi.setAttribute('data-fk', y.key + '|price');
                 var t7 = cell('Profit of one', 'di-c-profit num'), pf = h('strong', 'di-money', money2('', y.profit));
+                pf.setAttribute('data-inc', money2('', y.profit)); pf.setAttribute('data-ex', money2('', y.profit_ex_vat));
                 t7.appendChild(pf);
-                pi.addEventListener('input', function () {      // the profit follows what is typed (saved when the box is left)
+                pi.addEventListener('input', function () {      // both profits follow what is typed (saved when the box is left; the server's figures come back then)
                     var v = Number(pi.value.replace(/,/g, '')), okv = pi.value.trim() !== '' && isFinite(v) && v > 0;
-                    pf.textContent = okv && has(y.cost) ? money2('', Math.round((v - Math.round(Number(y.cost) * 100) / 100) * 100) / 100) : '—';
+                    var c2 = Math.round(Number(y.cost) * 100) / 100, ok = okv && has(y.cost), vt = last && last.vat;
+                    var net = vt && vt.mode === 'inclusive' && Number(vt.rate) > 0 ? Math.round(v / (1 + Number(vt.rate) / 100) * 100) / 100 : v;   // as the server: price without VAT to 2 dp
+                    pf.setAttribute('data-inc', ok ? money2('', Math.round((v - c2) * 100) / 100) : '—');
+                    pf.setAttribute('data-ex', ok && vt ? money2('', Math.round((net - c2) * 100) / 100) : '—');
+                    pf.textContent = pf.getAttribute(exVat() ? 'data-ex' : 'data-inc');
                 });
                 pi.addEventListener('change', function () {
                     var v = pi.value.trim(), was = has(y.price) ? Number(y.price) : null;
