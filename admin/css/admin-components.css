@@ -4760,3 +4760,271 @@ select.rh-input-invalid.rh-input-invalid {
         display: none !important;
     }
 }
+
+/* ================================================================
+   GLOBAL ADMIN FORM-CONTROL BASE + TOOLBAR RHYTHM (owner 2026-11-22)
+   One look for every bare <select>, text-like <input> and <textarea>
+   inside the admin content area, and one reusable row layout
+   (.rh-toolbar) where buttons, fields and labels share a height.
+   The base is wrapped in :where() (specificity 0): any page or
+   component rule that styles its own control still wins. Not applied
+   to POS/KDS (they do not use .content) or the guest site.
+   ================================================================ */
+:root {
+    --rh-ctl-h: 40px;
+    --rh-ctl-radius: 10px;
+    --rh-ctl-font: 13.5px;
+    --rh-ctl-pad-x: 12px;
+    --rh-ctl-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%235f6b7a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+    :root { --rh-ctl-h: 44px; }
+}
+
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(
+    select:not([multiple]):not([size]),
+    input:is([type="text"], [type="search"], [type="number"], [type="date"], [type="month"], [type="time"], [type="datetime-local"], [type="email"], [type="tel"], [type="url"], [type="password"]),
+    input:not([type]),
+    textarea
+) {
+    box-sizing: border-box;
+    max-width: 100%;
+    background-color: #fff;
+    color: var(--au-text, #1e2938);
+    border: 1px solid var(--au-border, #d8dde5);
+    border-radius: var(--rh-ctl-radius);
+    font-family: inherit;
+    font-size: var(--rh-ctl-font);
+    line-height: 1.3;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(
+    select:not([multiple]):not([size]),
+    input:is([type="text"], [type="search"], [type="number"], [type="date"], [type="month"], [type="time"], [type="datetime-local"], [type="email"], [type="tel"], [type="url"], [type="password"]),
+    input:not([type])
+) {
+    height: var(--rh-ctl-h);
+    padding: 0 var(--rh-ctl-pad-x);
+}
+
+/* Inside a table the same look, one step shorter, so rows do not bloat. */
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(table) :where(
+    select:not([multiple]):not([size]),
+    input:is([type="text"], [type="search"], [type="number"], [type="date"], [type="month"], [type="time"], [type="datetime-local"], [type="email"], [type="tel"], [type="url"], [type="password"]),
+    input:not([type])
+) {
+    height: 34px;
+    padding: 0 10px;
+}
+
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(textarea) {
+    min-height: 72px;
+    padding: 10px var(--rh-ctl-pad-x);
+    resize: vertical;
+}
+
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(select:not([multiple]):not([size])) {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding-right: 34px;
+    cursor: pointer;
+    text-overflow: ellipsis;
+}
+
+/* The arrow is !important (still specificity 0 against other !important rules) because many
+   page sheets set a background shorthand on their selects, which would wipe it and leave a
+   select with no arrow at all. Colour, border and size stay up to the page. The native arrow is
+   switched off here too (some sheets set appearance:auto, e.g. .form-group select), else two arrows show. */
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(select:not([multiple]):not([size]):not(.status-select)) {
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    background-image: var(--rh-ctl-arrow) !important;
+    background-repeat: no-repeat !important;
+    background-position: right 11px center !important;
+    background-size: 12px 8px !important;
+    padding-right: 32px !important; /* room for the arrow, whatever shorthand padding a page sets */
+}
+
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(
+    select:not([multiple]):not([size]),
+    input:is([type="text"], [type="search"], [type="number"], [type="date"], [type="month"], [type="time"], [type="datetime-local"], [type="email"], [type="tel"], [type="url"], [type="password"]),
+    input:not([type]),
+    textarea
+):focus {
+    outline: none;
+    border-color: var(--au-accent, #8f6a35);
+    box-shadow: 0 0 0 3px rgba(143, 106, 53, 0.2);
+}
+
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(
+    select:not([multiple]):not([size]),
+    input:is([type="text"], [type="search"], [type="number"], [type="date"], [type="month"], [type="time"], [type="datetime-local"], [type="email"], [type="tel"], [type="url"], [type="password"]),
+    input:not([type]),
+    textarea
+):disabled {
+    background-color: #f3f4f6;
+    color: var(--au-muted, #5f6b7a);
+    cursor: not-allowed;
+}
+
+:where(.content, .admin-content, .modal, .modal-overlay, .admin-modal-overlay) :where(input, textarea)::placeholder {
+    color: #8a94a3;
+}
+
+/* ---------- .rh-toolbar: one row, one height ---------- */
+.rh-toolbar {
+    --rh-toolbar-gap: 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--rh-toolbar-gap) 0.75rem;
+}
+
+.rh-toolbar__group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--rh-toolbar-gap);
+    margin: 0;
+}
+
+/* Label + control pair: the label sits on the control's centre line. */
+.rh-toolbar__field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+}
+
+.rh-toolbar :is(label, .form-label) {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--rh-ctl-h);
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rh-toolbar :is(.btn, button, input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select) {
+    box-sizing: border-box;
+    height: var(--rh-ctl-h);
+    min-height: var(--rh-ctl-h);
+    margin: 0;
+    padding-block: 0;
+    border-radius: var(--rh-ctl-radius);
+    font-family: inherit;
+    font-size: var(--rh-ctl-font);
+    line-height: 1.2;
+    vertical-align: middle;
+}
+
+.rh-toolbar :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select) {
+    padding-inline: var(--rh-ctl-pad-x);
+    border: 1px solid var(--au-border, #d8dde5);
+    background-color: #fff;
+}
+
+.rh-toolbar select:not([multiple]) {
+    padding-right: 34px;
+}
+
+.rh-toolbar .btn {
+    padding-inline: 14px;
+    border-width: 1px;
+}
+
+/* Quiet bordered button for prev/next style controls, same box as a field. */
+.rh-toolbar .btn-ghost {
+    background: #fff;
+    border: 1px solid var(--au-border, #d8dde5);
+    color: var(--au-text, #1e2938);
+}
+
+.rh-toolbar .btn-ghost:hover {
+    background: color-mix(in srgb, #fff 92%, var(--au-border-soft, #e7ecf3) 8%);
+    border-color: var(--au-border, #d8dde5);
+}
+
+/* Square icon button: as wide as it is tall. */
+.rh-toolbar .rh-toolbar__icon {
+    width: var(--rh-ctl-h);
+    padding-inline: 0;
+}
+
+/* Heading-style text in a toolbar (e.g. the month) shares the row's centre line. */
+.rh-toolbar__title {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--rh-ctl-h);
+    margin: 0;
+    line-height: 1.2;
+}
+
+/* Spacing between stacked rows under a toolbar (legend, help line). */
+.rh-toolbar-notes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-block: 0.75rem 0.9rem;
+}
+
+.rh-toolbar-notes > * { margin: 0 !important; }
+
+@media (max-width: 640px) {
+    .rh-toolbar__field { flex: 1 1 100%; }
+    .rh-toolbar__field > :is(select, input) { flex: 1 1 auto; min-width: 0; }
+}
+
+/* The older filter bars set `background:` as a shorthand (which wipes the arrow) and
+   also on :focus, so restate the arrow there, on the same footing as their rules. */
+:is(.filter-bar, .toolbar, .search-bar, .table-toolbar) select:not([multiple]):not([size]),
+:is(.filter-bar, .toolbar, .search-bar, .table-toolbar) select:not([multiple]):not([size]):focus {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: var(--rh-ctl-arrow);
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 12px 8px;
+    padding-right: 34px;
+    text-overflow: ellipsis;
+}
+
+/* ---------- Older filter bars brought onto the same control spec ----------
+   .filter-bar / .toolbar / .search-bar / .table-toolbar (admin-styles.css) had their own
+   ~31px height, font and radius. They now read the global spec, so every control row in the
+   admin is one height (40px, 44px on touch/narrow), radius, border and font size. */
+:is(.filter-bar, .toolbar, .search-bar, .table-toolbar) {
+    --rh-toolbar-control-height: var(--rh-ctl-h);
+    --rh-toolbar-control-font-size: var(--rh-ctl-font);
+    --rh-toolbar-control-pad-x: var(--rh-ctl-pad-x);
+    align-items: center;
+}
+
+:is(.filter-bar, .toolbar, .search-bar, .table-toolbar) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="range"]):not([type="color"]):not([type="file"]), select) {
+    box-sizing: border-box;
+    border-radius: var(--rh-ctl-radius);
+    border-color: var(--au-border, #d8dde5);
+    background-color: #fff;
+    line-height: 1.3;
+}
+
+:is(.filter-bar, .toolbar, .search-bar, .table-toolbar) :is(button, .btn) {
+    box-sizing: border-box;
+    border-radius: var(--rh-ctl-radius);
+    gap: 6px;
+}
+
+:is(.filter-bar, .toolbar, .search-bar, .table-toolbar) :is(label, .form-label) {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    line-height: 1.2;
+}

@@ -47,12 +47,33 @@
 
 /* ---------------------------------------------------------------- toolbar */
 .tl-toolbar {
+    /* one control height for the whole row (global --rh-ctl-h: 40px, 44px on touch) */
+    --rh-toolbar-control-height: var(--rh-ctl-h, 40px);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px 12px;
     margin-bottom: 12px;
 }
+.tl-toolbar :is(.btn, .tl-btn, .tl-icon-btn, .ck-tab) {
+    box-sizing: border-box;
+    min-height: var(--rh-toolbar-control-height);
+    height: var(--rh-toolbar-control-height);
+    padding-block: 0;
+    border-radius: var(--rh-ctl-radius, 10px);
+    line-height: 1.2;
+}
+.tl-toolbar :is(.tl-toolbar__date, .tl-toolbar__search input, .tl-field select) {
+    box-sizing: border-box;
+    border-radius: var(--rh-ctl-radius, 10px);
+    font-size: var(--rh-ctl-font, 13.5px);
+    padding-inline: var(--rh-ctl-pad-x, 12px);
+}
+.tl-toolbar .tl-toolbar__search input { padding-left: 32px; }
+.tl-toolbar :is(.tl-toolbar__from, .tl-field) > span { font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+/* the drawer rule further down makes every .tl-field a stacked column; in the toolbar a
+   label and its control sit on one line */
+.tl-toolbar .tl-field { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; }
 .tl-toolbar__nav { display: flex; align-items: center; gap: 4px; }
 .tl-toolbar__from { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; font-size: 13px; color: var(--ck-muted, #786d62); }
 .tl-toolbar__date,

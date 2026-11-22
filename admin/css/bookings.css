@@ -158,9 +158,10 @@
 }
 
 .bookings-toolbar {
-    --rh-bookings-toolbar-control-height: clamp(1.9rem, 1.84rem + 0.14vw, 2.06rem);
-    --rh-bookings-toolbar-control-font-size: clamp(0.72rem, 0.69rem + 0.1vw, 0.8rem);
-    --rh-bookings-toolbar-control-pad-x: clamp(0.58rem, 0.54rem + 0.18vw, 0.8rem);
+    /* the global control spec (admin-components.css): 40px, 44px on touch/narrow */
+    --rh-bookings-toolbar-control-height: var(--rh-ctl-h, 40px);
+    --rh-bookings-toolbar-control-font-size: var(--rh-ctl-font, 13.5px);
+    --rh-bookings-toolbar-control-pad-x: var(--rh-ctl-pad-x, 12px);
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
@@ -171,13 +172,6 @@
     border-radius: var(--admin-radius-lg, 0.72rem);
     background: var(--color-white, var(--color-background));
     box-shadow: var(--au-shadow-sm, var(--shadow, 0 1px 3px rgba(15, 23, 42, 0.05)));
-}
-
-@media (max-width: 768px) {
-    .bookings-toolbar {
-        --rh-bookings-toolbar-control-height: 2.6rem;
-        --rh-bookings-toolbar-control-font-size: 0.78rem;
-    }
 }
 
 /* Tablets and touch screens: 44px controls (staff tap these standing up). */
@@ -197,8 +191,17 @@
 
 .bookings-toolbar__search {
     position: relative;
-    flex: 1 1 clamp(10.5rem, 22vw, 15rem);
-    min-width: min(100%, clamp(9.8rem, 20vw, 13.4rem));
+    /* Own full row, so the placeholder is readable; the rest of the controls share the next
+       row. On wide screens (below) it joins that row. */
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+@media (min-width: 1700px) {
+    .bookings-toolbar__search {
+        flex: 1 1 12rem;
+        min-width: 12rem;
+    }
 }
 
 .bookings-toolbar__search-icon {
@@ -215,8 +218,8 @@
     min-height: var(--rh-bookings-toolbar-control-height);
     height: var(--rh-bookings-toolbar-control-height);
     border: 1px solid var(--admin-surface-border, var(--color-lux-clay-50));
-    border-radius: var(--admin-radius-sm, 0.5rem);
-    background: var(--color-white, var(--color-background));
+    border-radius: var(--rh-ctl-radius, 10px);
+    background-color: var(--color-white, var(--color-background));
     color: var(--admin-text, var(--color-text-primary));
     font-family: var(--font-body, var(--font-sans));
     font-size: var(--rh-bookings-toolbar-control-font-size);
@@ -245,7 +248,8 @@
 }
 
 .bookings-toolbar__input--status {
-    flex: 0 1 clamp(7.8rem, 11vw, 9.2rem);
+    flex: 0 1 7.6rem;
+    min-width: 7.6rem;
 }
 
 /* From/To fit the full dd/mm/yyyy plus the picker icon at the toolbar font size (no clipped year):
@@ -265,7 +269,7 @@
     justify-content: center;
     gap: clamp(0.26rem, 0.24rem + 0.08vw, 0.36rem);
     min-height: var(--rh-bookings-toolbar-control-height);
-    border-radius: var(--admin-radius-sm, 0.5rem);
+    border-radius: var(--rh-ctl-radius, 10px);
     border: 1px solid transparent;
     padding: 0 var(--rh-bookings-toolbar-control-pad-x);
     font-family: var(--font-body, var(--font-sans));

@@ -1041,20 +1041,20 @@ $site_name = getSetting('site_name');
 
         <?php if ($bdView === 'calendar'): ?>
         <div class="card bdg-card">
-            <div class="card-header bdg-toolbar">
-                <div class="bdg-monthnav">
-                    <a class="btn btn-ghost btn-sm" href="blocked-dates.php?month=<?php echo $gridPrevMonth; ?>" aria-label="Previous month"><i class="fas fa-chevron-left"></i></a>
-                    <h3 class="bdg-month"><?php echo date('F Y', strtotime($gridStart)); ?></h3>
-                    <a class="btn btn-ghost btn-sm" href="blocked-dates.php?month=<?php echo $gridNextMonth; ?>" aria-label="Next month"><i class="fas fa-chevron-right"></i></a>
-                    <a class="btn btn-secondary btn-sm" href="blocked-dates.php">This month</a>
-                    <form method="GET" class="bdg-jump">
+            <div class="card-header bdg-toolbar rh-toolbar">
+                <div class="bdg-monthnav rh-toolbar__group">
+                    <a class="btn btn-ghost rh-toolbar__icon" href="blocked-dates.php?month=<?php echo $gridPrevMonth; ?>" aria-label="Previous month"><i class="fas fa-chevron-left"></i></a>
+                    <h3 class="bdg-month rh-toolbar__title"><?php echo date('F Y', strtotime($gridStart)); ?></h3>
+                    <a class="btn btn-ghost rh-toolbar__icon" href="blocked-dates.php?month=<?php echo $gridNextMonth; ?>" aria-label="Next month"><i class="fas fa-chevron-right"></i></a>
+                    <a class="btn btn-secondary" href="blocked-dates.php">This month</a>
+                    <form method="GET" class="bdg-jump rh-toolbar__group">
                         <label class="rh-visually-hidden" for="bdgJumpMonth">Go to month</label>
-                        <input type="month" id="bdgJumpMonth" name="month" class="form-control form-control-sm" value="<?php echo htmlspecialchars($gridMonth, ENT_QUOTES); ?>" onchange="this.form.submit()">
+                        <input type="month" id="bdgJumpMonth" name="month" class="form-control" value="<?php echo htmlspecialchars($gridMonth, ENT_QUOTES); ?>" onchange="this.form.submit()">
                     </form>
                 </div>
-                <div class="bdg-typefilter">
+                <div class="bdg-typefilter rh-toolbar__field">
                     <label class="form-label" for="bdgTypeFilter">Room type</label>
-                    <select id="bdgTypeFilter" class="form-select form-select-sm">
+                    <select id="bdgTypeFilter" class="form-select">
                         <option value="">All room types</option>
                         <?php foreach ($gridTypes as $gt): ?>
                             <option value="<?php echo (int)$gt['id']; ?>"><?php echo htmlspecialchars($room_type_label($gt)); ?></option>
