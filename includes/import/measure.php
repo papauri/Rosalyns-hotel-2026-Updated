@@ -390,7 +390,7 @@ if (!function_exists('import_measure_words')) {
     {
         $n = (float)($m['n'] ?? 0);
         return 'it keeps ' . import_measure_fmt($n) . ' ' . import_measure_plural((string)($m['small'] ?? ''), $n) . ' in one ' . (string)($m['big'] ?? '') . ': '
-            . $lines . ' open stock count line' . ($lines === 1 ? ' uses' : 's use') . ' it; change it in Stock Items after the count is approved';
+            . $lines . ' open stock count line' . ($lines === 1 ? ' uses' : 's use') . ' it; change it in ' . import_stock_page_name() . ' after the count is approved';
     }
 
     /**

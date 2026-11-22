@@ -104,6 +104,7 @@
         var page = root.getAttribute('data-page') || 'data-import.php';
         var canReimport = root.getAttribute('data-can-reimport') === '1';
         var canStockReports = root.getAttribute('data-can-stock-reports') === '1';     // the same check the menu uses to link Stock Reports
+        var stockPage = root.getAttribute('data-stock-page') || 'Stock Items';          // the hotel's name for the stock items page (Ingredients when the restaurant is on)
         var maxText = root.getAttribute('data-max-text') || '';
         var msgEl = root.querySelector('#diMsg');
         var steps = root.querySelector('#diSteps');
@@ -1986,6 +1987,57 @@
             return a;
         }
         function rowsN(n) { return num(n, 0) + ' row' + (n === 1 ? '' : 's'); }
+        /**
+         * Result screen: "Differences from the uploaded file" (frozen at the import, includes/import/diff-report.php). Summary only: one chip per
+         * kind (labels and helpers from the server), the value totals, a link to the opening count (where the rows are listed) and the download.
+         * An import made before this list existed has no r.diff: nothing is shown.
+         */
+        function diffBlock(df, jobId, countId) {
+            if (!df || !df.kinds || !df.labels) { return null; }
+            var box = h('div', 'di-what di-diff');
+            box.appendChild(h('h4', 'di-diff-h', 'Differences from the uploaded file'));
+            box.appendChild(helpLine('Where what was imported is not exactly what the file says, and why. The manager who approves the opening count sees the same list on the count. Kept as it was at the import: later changes to items do not change it.'));
+            var total = Number(df.total || 0);
+            if (!total) {
+                box.appendChild(h('p', 'di-small', 'None: every item was imported exactly as the file says.'));
+            } else {
+                var chips = h('div', 'di-diff-chips');
+                Object.keys(df.labels).forEach(function (k) {
+                    var n = Number((df.kinds || {})[k] || 0);
+                    if (!n) { return; }
+                    var lab = df.labels[k] || [k, ''];
+                    var c = h(countId ? 'a' : 'span', 'di-diff-chip');
+                    if (countId) { c.href = 'stock-count.php?id=' + encodeURIComponent(countId) + '&diff=' + encodeURIComponent(k) + '#scDiff'; }
+                    c.title = lab[1] || '';
+                    add(c, h('span', 'di-diff-chip-l', lab[0]), h('span', 'di-diff-chip-n', num(n, 0)));
+                    chips.appendChild(c);
+                });
+                box.appendChild(chips);
+            }
+            var v = df.value || null;
+            if (v && v.compared) {
+                box.appendChild(h('p', 'di-small', 'Value column (' + (v.headers || []).join(', ') + ') in your file: ' + num(v.file_total, 2) + '. Count × unit cost imported for the same ' + rowsN(v.compared) + ': ' + num(v.imported_total, 2)
+                    + (v.differ ? ' (' + rowsN(v.differ) + ' differ).' : '.')));
+            }
+            if (df.count_lines) { box.appendChild(h('p', 'di-small', 'The opening count holds ' + num(df.count_lines, 0) + ' line' + (df.count_lines === 1 ? '' : 's') + ' worth ' + num(df.count_value || 0, 2) + ' (count × unit cost).')); }
+            if (Number(df.stored || 0) < total) { box.appendChild(h('p', 'di-small', 'Only the first ' + num(df.stored, 0) + ' of ' + num(total, 0) + ' differences are listed; the counts above are exact.')); }
+            var nav = h('div', 'di-actions');
+            if (countId) {
+                var a = h('a', 'btn-secondary di-btn', 'See the list on the opening count');
+                a.href = 'stock-count.php?id=' + encodeURIComponent(countId) + '#scDiff';
+                nav.appendChild(a);
+            }
+            if (jobId && total) {
+                [['xlsx', 'Download (Excel)'], ['csv', 'Download (CSV)']].forEach(function (f) {
+                    var d = h('a', 'btn-secondary di-btn', ' ' + f[1]);
+                    d.href = page + '?action=diff&job=' + encodeURIComponent(jobId) + '&format=' + f[0];
+                    d.insertBefore(h('i', 'fas fa-download'), d.firstChild);
+                    nav.appendChild(d);
+                });
+            }
+            if (nav.firstChild) { box.appendChild(nav); }
+            return box;
+        }
         function valueCheckBlock() {
             var vc = (S.sum && S.sum.value_check) || null;
             if (!vc || (!vc.show && !(vc.selling || []).length)) { return null; }
@@ -2865,9 +2917,10 @@
             if (S.resultAlready) { p.appendChild(h('p', 'di-warn', 'This import had already been completed. Nothing was written a second time.')); }
             p.appendChild(helpLine(S.resultFile ? 'Result for "' + S.resultFile + '".' : 'Result of this import.'));
             var cards = h('div', 'di-cards');
+            var itemsLabel = stockPage === 'Stock Items' ? 'Stock items' : stockPage;
             add(cards,
-                card('Ingredients created', num(r.created, 0), 'New ingredients added to your stock list.', 'good'),
-                card('Ingredients updated', num(r.updated, 0), 'Existing ingredients where you ticked a change.'),
+                card(itemsLabel + ' created', num(r.created, 0), 'New items added to ' + stockPage + '.', 'good'),
+                card(itemsLabel + ' updated', num(r.updated, 0), 'Items already in ' + stockPage + ' where you ticked a change.'),
                 card('Rows skipped', num(r.skipped_rows, 0), 'Rows that were skipped or are not items.'),
                 card('Left out by you', num(r.skipped_by_you || 0, 0), 'Blocked or unanswered rows you chose to leave out. The uploaded file is deleted now, so only the copy you downloaded can be fixed and imported later.'),
                 card('Fixed for you', num(r.fixed_for_you || 0, 0), 'Small spelling or format fixes made while reading the file.'),
@@ -2878,6 +2931,8 @@
                 (r.food_added || r.food_updated) ? card('Food added to the menu', num(r.food_added || 0, 0), 'Ticked food and snack items now on the food menu and the till at the selling price from step 3 (VAT included).', 'good') : null,
                 (r.food_added || r.food_updated) ? card('Food prices changed', num(r.food_updated || 0, 0), 'Food items already on the menu whose price you ticked to change. Each change is in System Logs (old and new price).') : null);
             p.appendChild(cards);
+            var dfBox = diffBlock(r.diff || null, S.job, r.opening_count_id || 0);
+            if (dfBox) { p.appendChild(dfBox); }
             if (r.sizes_saved) { p.appendChild(h('p', 'di-small', num(r.sizes_saved, 0) + ' bottle or container size' + (r.sizes_saved === 1 ? ' was' : 's were') + ' saved on stock items (from step 3). Each change is in System Logs.')); }
             if (r.measures_list || r.measures_not) {
                 var rmBox = measureBlock({ n: r.measures_saved || 0, list: r.measures_list || [], words: (r.measures_list || []).map(function (x) { return x.small ? plural(String(x.small), 2) : String(x.text || '').replace(/^[\d.,]+ (\S+) .*$/, '$1'); }).filter(function (w, i, a) { return w && a.indexOf(w) === i; }) },
@@ -2934,7 +2989,7 @@
                 nav.appendChild(pp);
                 p.appendChild(h('p', 'di-small', 'See projected profit opens Stock Reports > Projected profit for every drink on the menu. It uses stock on hand, so stock from this import counts there once its opening count is approved.'));
             }
-            var b = h('a', 'btn-secondary di-btn', 'See the ingredients'); b.href = 'stock-ingredients.php';
+            var b = h('a', 'btn-secondary di-btn', 'Open ' + stockPage); b.href = 'stock-ingredients.php';
             var again = h('button', 'btn-secondary di-btn', 'Import another file'); again.type = 'button';
             again.addEventListener('click', function () { S.job = 0; S.sum = null; S.result = null; S.reach = 1; setUrl(0); showStep(1); });
             add(nav, b, again);

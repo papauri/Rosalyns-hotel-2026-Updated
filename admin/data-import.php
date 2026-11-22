@@ -19,6 +19,7 @@
  * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out;
  * GET ?action=stock_check&job=ID downloads the stock-check workbook (value column vs Quantity x Unit Cost, stock with no unit cost); POST value_rows pages its rows.
  * GET ?action=original&job=ID downloads the uploaded file as it was uploaded (while the stored copy still exists).
+ * GET ?action=diff&job=ID&format=xlsx|csv downloads "Differences from the uploaded file" of a committed import (includes/import/diff-report.php).
  * All page text built from the file (names, sheets, cells) is set with textContent in the browser - it is never parsed as HTML.
  */
 require_once 'admin-init.php';
@@ -98,6 +99,17 @@ function di_mb_text(int $bytes): string
 function di_job(PDO $pdo, int $jobId, int $uid, bool $isAdmin): ?array
 {
     return import_job_for_user($pdo, $jobId, $uid, $isAdmin);
+}
+
+/** A stored result for the screen: the "Differences from the uploaded file" report goes as its summary only (counts, totals; the rows are
+ *  on the opening count's page and in the download). */
+function di_result_lean(array $res): array
+{
+    if (isset($res['diff_report'])) {
+        $res['diff'] = import_diff_summary(is_array($res['diff_report']) ? $res['diff_report'] : null);
+        unset($res['diff_report']);
+    }
+    return $res;
 }
 
 /** The filter values a request carries (validated again in import_rv_params; nothing here is trusted). */
@@ -231,6 +243,32 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'stock_check') {
     header('Cache-Control: no-store');
     echo $f['body'];
     exit;
+}
+
+// ---- download: "Differences from the uploaded file" (frozen at commit, stored with the job) -------------------------------------
+// Same gates as above; only the uploader or an admin. The same file is offered on the opening count's page (Stock Count) to whoever can open it.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'diff') {
+    $jobId = (int)($_GET['job'] ?? 0);
+    $job = di_job($pdo, $jobId, $uid, $isAdmin);
+    $resD = ($job && $job['status'] === 'committed') ? json_decode((string)$job['result_json'], true) : null;
+    $rep = is_array($resD) && is_array($resD['diff_report'] ?? null) ? $resD['diff_report'] : null;
+    if (!$rep) {
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit('There is no list of differences for this import (it was imported before the list was made, or it is not finished).');
+    }
+    $f = import_diff_export($rep, (($_GET['format'] ?? 'xlsx') === 'csv') ? 'csv' : 'xlsx');
+    if (empty($f['ok'])) {
+        http_response_code(422);
+        exit((string)$f['error']);
+    }
+    if (function_exists('logActivity')) {
+        logActivity($uid, 'import_diff_export', 'Differences from the uploaded file downloaded: import #' . $jobId . ' (' . import_clean_name((string)$job['original_name']) . ').');
+    }
+    import_diff_send($f);
 }
 
 // ---- download: the original uploaded file, exactly as it was uploaded, with its own name ---------------------------------------
@@ -425,7 +463,7 @@ if ($isAjax) {
             if (is_array($resC) && (int)($job['analysis_bytes'] ?? 0) === 0) {
                 unset($resC['stock_check']);        // the stock check is built from the stored analysis: gone = no link
             }
-            di_json(['ok' => true, 'state' => 'committed', 'file' => $job['original_name'], 'result' => $resC]);
+            di_json(['ok' => true, 'state' => 'committed', 'file' => $job['original_name'], 'result' => is_array($resC) ? di_result_lean($resC) : $resC]);
         }
         if ($job['status'] === 'cancelled') {
             di_json(['ok' => false, 'error' => 'This import was cancelled.', 'state' => 'cancelled']);
@@ -620,6 +658,9 @@ if ($isAjax) {
             di_json(['ok' => false, 'error' => 'Please press Confirm to import.']);
         }
         $r = import_commit_stock($pdo, $jobId, $uid);     // re-checks the file, the answers and the permission; one transaction; safe to repeat
+        if (is_array($r['result'] ?? null)) {
+            $r['result'] = di_result_lean($r['result']);
+        }
         di_json($r);
     }
 
@@ -687,6 +728,7 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
              data-max-text="<?php echo htmlspecialchars(di_mb_text($maxBytes), ENT_QUOTES); ?>"
              data-can-reimport="<?php echo $canReimport ? '1' : '0'; ?>"
              data-can-stock-reports="<?php echo (function_exists('rhCanLinkTo') && rhCanLinkTo($uid, 'stock-reports.php')) ? '1' : '0'; ?>"
+             data-stock-page="<?php echo htmlspecialchars(import_stock_page_name(), ENT_QUOTES); ?>"
              data-page="data-import.php">
 
             <p class="di-intro">Bring a stock list in from Excel or CSV in four steps. Nothing is saved to your stock until you press Confirm and import on the last step.</p>

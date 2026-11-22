@@ -21,9 +21,44 @@
 
 require_once __DIR__ . '/review.php';
 require_once __DIR__ . '/drinks.php';
+require_once __DIR__ . '/diff-report.php';
 require_once dirname(__DIR__, 2) . '/admin/includes/procurement-schema.php';
 
 if (!function_exists('import_commit_stock')) {
+
+    /**
+     * The "Differences from the uploaded file" report (diff-report.php) for this commit, from what was really written: the opening count's
+     * own lines (count and cost per item, read back inside this transaction), the reviewed items, the menu rows and the count measures.
+     */
+    function import_commit_diff_report(PDO $pdo, array $job, int $jobId, array $v, array $plan, array $ap, ?array $vcFin, array $menuRows, array $measureList, array $measureNot): array
+    {
+        $byKey = [];
+        if (!empty($ap['count_id'])) {
+            $st = $pdo->prepare('SELECT l.actual_quantity, l.cost_per_unit, i.name FROM stock_count_lines l JOIN stock_ingredients i ON i.id = l.ingredient_id WHERE l.count_id = ?');
+            $st->execute([(int)$ap['count_id']]);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $l) {
+                $byKey[rh_ssi_key((string)$l['name'])] = ['qty' => (float)$l['actual_quantity'], 'cost' => (float)$l['cost_per_unit']];
+            }
+        }
+        $planned = [];
+        $lines = [];
+        foreach ((array)$v['res']['items'] as $it) {
+            $k = rh_ssi_key((string)$it['name']);
+            if (($it['status'] ?? '') !== 'ready' || !isset($plan['items'][$k])) {
+                continue;
+            }
+            $planned[(string)$it['key']] = true;
+            if (isset($byKey[$k])) {
+                $lines[(string)$it['key']] = $byKey[$k];
+            }
+        }
+        return import_diff_build([
+            'file' => (string)$job['original_name'], 'job_id' => $jobId, 'count_id' => $ap['count_id'] ?? null, 'count_ref' => (string)($ap['count_ref'] ?? ''),
+            'res' => (array)$v['res'], 'planned' => $planned, 'lines' => $lines,
+            'vc_col' => (array)($v['vc_col'] ?? []), 'vc_fin' => (array)($vcFin ?? []),
+            'menu_rows' => $menuRows, 'measures_list' => $measureList, 'measures_not' => $measureNot,
+        ]);
+    }
 
     function import_commit_fail(string $msg, array $extra = []): array
     {
@@ -122,6 +157,9 @@ if (!function_exists('import_commit_stock')) {
         if (!$hasOpening) {
             $pdo->exec('ALTER TABLE stock_counts ADD COLUMN is_opening TINYINT(1) NOT NULL DEFAULT 0');
         }
+        // the opening count's link back to this job (the "Differences from the uploaded file" report on Stock Count): nullable, added the same
+        // way; where it cannot be added the import still runs (the count then shows no report)
+        $opts['_diff_link'] = import_diff_link_ready($pdo, true);
 
         // One import commit at a time (I1): taken BEFORE the transaction starts, so this transaction's read snapshot is made after
         // any earlier import has committed. A second import that shares a new item then sees it as existing instead of creating
@@ -196,7 +234,11 @@ if (!function_exists('import_commit_stock')) {
             if ($ap['count_id']) {
                 $note = 'Stock sheet import ' . date('Y-m-d') . ': opening balances from "' . mb_substr((string)$job['original_name'], 0, 120) . '" (Import #' . $jobId
                     . '). Counted by the import - a second manager must approve it. Ingredients not in the file are not in this count.';
-                $pdo->prepare('UPDATE stock_counts SET notes = ? WHERE id = ? AND is_opening = 1')->execute([$note, (int)$ap['count_id']]);
+                if (!empty($opts['_diff_link'])) {
+                    $pdo->prepare('UPDATE stock_counts SET notes = ?, import_job_id = ? WHERE id = ? AND is_opening = 1')->execute([$note, $jobId, (int)$ap['count_id']]);
+                } else {
+                    $pdo->prepare('UPDATE stock_counts SET notes = ? WHERE id = ? AND is_opening = 1')->execute([$note, (int)$ap['count_id']]);
+                }
             }
             // "how many tots in one bottle?" answered on the review screen: saved on the item as its count measure (Step U2 d), through the stock
             // lead's own path (rh_stock_measure_save: checked, logged as stock_measure_changed), in this same transaction. Never a raw UPDATE.
@@ -237,7 +279,7 @@ if (!function_exists('import_commit_stock')) {
                     }
                     if (empty($ms['replace']) || !import_measure_same($curM, (array)$ms['replace'])) {
                         // an item's own measure set since the review is never replaced by an import
-                        $measureNot[] = ['name' => (string)$it['name'], 'why' => 'its count measure was changed in Stock Items after the review (' . rh_stock_measure_describe($curM) . '); it is kept'];
+                        $measureNot[] = ['name' => (string)$it['name'], 'why' => 'its count measure was changed in ' . import_stock_page_name() . ' after the review (' . rh_stock_measure_describe($curM) . '); it is kept'];
                         continue;
                     }
                     // "Change to ..." was chosen. Lines on open counts typed in the old measure would be re-worked by rh_stock_measure_save (a new N, or
@@ -302,6 +344,13 @@ if (!function_exists('import_commit_stock')) {
                 $result['stock_check'] = ['differ' => (int)$vcFin['differ'], 'missing' => (int)$vcFin['missing_n']];
             } catch (Throwable $e) {
                 // a fault in the report never stops the import (no stock_check key = no stock-check link in Import history)
+            }
+            // "Differences from the uploaded file" (owner 2026-11-23): built now, from what was really written, and stored frozen with the job.
+            // The opening count's own lines give the imported count and cost of each item. A fault here never stops the import (no report key).
+            try {
+                $result['diff_report'] = import_commit_diff_report($pdo, $job, $jobId, $v, $plan, $ap, $vcFin ?? null, (array)($drinks['rows'] ?? []), $measureList, $measureNot);
+            } catch (Throwable $e) {
+                error_log('import_commit_stock #' . $jobId . ' differences report: ' . $e->getMessage());
             }
             $pdo->prepare("UPDATE import_jobs SET status = 'committed', committed_by = ?, committed_at = NOW(), result_json = ?, error_text = NULL WHERE id = ?")
                 ->execute([$userId > 0 ? $userId : null, import_json($result), $jobId]);

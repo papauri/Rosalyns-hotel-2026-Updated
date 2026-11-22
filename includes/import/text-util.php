@@ -217,6 +217,21 @@ if (!function_exists('import_norm_text')) {
     }
 }
 
+if (!function_exists('import_stock_page_name')) {
+    /**
+     * The hotel's own name for the stock items page, as the admin menu shows it (admin/includes/admin-nav-items.php): "Ingredients" when the
+     * restaurant module is on, else "Stock Items". Import messages name the page with this (owner 2026-11-23). Pure engine tests (no settings) get "Stock Items".
+     */
+    function import_stock_page_name(): string
+    {
+        try {
+            return (function_exists('isRestaurantEnabled') && isRestaurantEnabled()) ? 'Ingredients' : 'Stock Items';
+        } catch (Throwable $e) {
+            return 'Stock Items';
+        }
+    }
+}
+
 if (!function_exists('import_q')) {
     /**
      * Question descriptor (ids are assigned when the analysis registers it).

@@ -1278,7 +1278,7 @@ try {
         $ck('corrected N (database): a line typed in shots since the review = Gin keeps 25 shots at commit, the line untouched (1 bottle + 5 shots / 25), the reason in the result',
             $tkY && !empty($cY['ok']) && ($gY['measure_small_name'] ?? '') === 'shot' && abs((float)($gY['measure_per_big'] ?? 0) - 25) < 0.0001 && ($rY2['measures_saved'] ?? -1) === 0
             && abs((float)($lnY['actual_quantity'] ?? 0) - 1.2) < 0.000001 && abs((float)($lnY['entry_per_big'] ?? 0) - 25) < 0.0001
-            && $gyNot && (string)$gyNot[0]['why'] === 'it keeps 25 shots in one bottle: 1 open stock count line uses it; change it in Stock Items after the count is approved',
+            && $gyNot && (string)$gyNot[0]['why'] === 'it keeps 25 shots in one bottle: 1 open stock count line uses it; change it in ' . import_stock_page_name() . ' after the count is approved',
             json_encode([$cY['error'] ?? null, $gY, $lnY, $rY2['measures_not'] ?? null]));
     }
 

@@ -312,8 +312,8 @@ if (!function_exists('import_resolve')) {
                 $use['unit_ml'] = null;
             } elseif ($in['own_ml'] !== null) {
                 if (abs((float)$in['own_ml'] - $u['v']) >= 0.005) {
-                    $out['warn'][] = $nm . ' already has its own size (' . $ml((float)$in['own_ml']) . ', Stock Items), which is kept: the ' . $ml($u['v']) . ' in "' . $u['head'] . '" ('
-                        . $u['src'] . ') is not used. Change the size in Stock Items if the file is right.';
+                    $out['warn'][] = $nm . ' already has its own size (' . $ml((float)$in['own_ml']) . ', ' . import_stock_page_name() . '), which is kept: the ' . $ml($u['v']) . ' in "' . $u['head'] . '" ('
+                        . $u['src'] . ') is not used. Change the size in ' . import_stock_page_name() . ' if the file is right.';
                 }
                 $use['unit_ml'] = null;
             } elseif ($in['name_ml'] !== null && abs((float)$in['name_ml'] - $u['v']) >= 0.005) {
@@ -429,7 +429,7 @@ if (!function_exists('import_resolve')) {
                     $out['not'] = import_measure_open_why($own, (int)$in['open_lines']);
                 } elseif (($own['side'] ?? '') !== 'big') {
                     $out['warn'][] = $nm . ' keeps its stock in ' . import_measure_plural((string)$own['small'], 2) . ' (' . $fmt((float)$own['n']) . ' in one ' . $own['big'] . '); your file says '
-                        . $fmt($fileN) . ' (' . $fileHow . '). An import never changes that: change it in Stock Items if the file is right.';
+                        . $fmt($fileN) . ' (' . $fileHow . '). An import never changes that: change it in ' . import_stock_page_name() . ' if the file is right.';
                 } else {
                     $old = $own;
                     $new = ['big' => mb_strtolower((string)$in['stock_unit']), 'small' => $ws, 'n' => $fileN];
@@ -1769,6 +1769,7 @@ if (!function_exists('import_resolve')) {
             $dBy = [];              // measure word => import_measure_decide() result (mode n), so a certain N can be saved
             $countN = null;        // N of the measure the count was in (display: "57 shots = 2 bottles + 7 shots")
             $countRows = [];        // sheet \x1f row => the count in the stock unit, for rows answered "in shots" (the value check compares these)
+            $qtyConv = [];          // each converted count: its cells, as the file wrote it, the stock-unit result (the "Differences from the uploaded file" report)
             $measWords = [];
             $ciRd = null;           // a count answered "in shots": the step 3 sizes give N (import_count_in_step3)
             $ciWait = false;        // ... and N is not known yet: its sizes can still be typed in step 3 (import_drinks_build lists it)
@@ -1975,6 +1976,8 @@ if (!function_exists('import_resolve')) {
                             if ($howBy[$ws] !== '') {
                                 $how[] = import_measure_text((float)$qm['plain'], (float)$qm['amount'], (string)$qm['word'], $nBy[$ws], $stockUnit, $q, $howBy[$ws]);
                             }
+                            $qtyConv[] = ['cells' => array_values(array_map('strval', (array)($qm['srcs'] ?? []))), 'amount' => (float)$qm['amount'], 'plain' => (float)$qm['plain'],
+                                'word' => (string)$qm['word'], 'n' => (float)$nBy[$ws], 'how' => (string)$howBy[$ws], 'q' => $q];
                         }
                         $conv[$k] = $q;
                         if ($q !== null) {
@@ -2020,7 +2023,7 @@ if (!function_exists('import_resolve')) {
                             $exactN = (float)$d0['size_ml'] / (float)$d0['measure_ml'];
                             if (abs(round($exactN, 4) - $exactN) > 1e-9) {
                                 $measureNot = import_measure_fmt((float)$d0['size_ml']) . ' ml / ' . import_measure_fmt((float)$d0['measure_ml']) . ' ml = ' . number_format($exactN, 2)
-                                    . ' ' . $wPl . ' in one ' . mb_strtolower($stockUnit) . ', not an exact number, so it is not saved (set it on the item in Stock Items if you want it)';
+                                    . ' ' . $wPl . ' in one ' . mb_strtolower($stockUnit) . ', not an exact number, so it is not saved (set it on the item in ' . import_stock_page_name() . ' if you want it)';
                             } else {
                                 $measureSave = ['big' => mb_strtolower($stockUnit), 'small' => $ws0, 'n' => round($exactN, 4), 'side' => 'big', 'from' => 'size', 'how' => (string)($howBy[$ws0] ?? '')];
                             }
@@ -2331,7 +2334,7 @@ if (!function_exists('import_resolve')) {
                 'balance' => $balance, 'max' => $max, 'min' => $min, 'remarks' => $remarks, 'batches' => $batches,
                 'qty_how' => $qtyHow, 'measure_save' => $measureSave, 'measure_not' => $measureNot,
                 // counted in a measure with a known N (display only, owner 2026-11-22): "57 shots = 2 bottles + 7 shots", the exact figure on hover
-                'count_n' => $countN, 'count_rows' => $countRows, 'count_in_wait' => $ciWait,
+                'count_n' => $countN, 'count_rows' => $countRows, 'count_in_wait' => $ciWait, 'qty_conv' => $qtyConv,
                 'qty_words' => ($countN !== null && $balance !== null) ? import_qty_words((float)$balance, $countN, (string)$countN['big']) : null,
                 'rows' => $rowRefs, 'uids' => $uidList, 'sheet' => $ms[0]['sheet'], 'clean_sheet' => $ms[0]['cleanSheet'],
                 'match' => $ex ? ['id' => (int)$ex['id'], 'name' => (string)$ex['name'], 'how' => $first['match_name'] !== null ? (!empty($first['match_auto']) ? 'learned' : 'chosen') : $matchHow, 'archived' => (int)$ex['is_archived'] === 1] : null,

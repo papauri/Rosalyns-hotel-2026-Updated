@@ -824,7 +824,7 @@ if (!function_exists('import_drinks_build')) {
                 } elseif ($kind === 'food' && $served !== '') {
                     $why = 'Sold by "' . $served . '", which cannot be worked out for "' . (string)$it['name'] . '". If one sale is one ' . $unit . ', choose "One whole unit" under Sold as.';
                 } elseif ($sv['kind'] === 'as_is' && $served !== '') {
-                    $why = 'Sold by "' . $served . '", which is not on your Drink measures list (Stock Items), so one sale of "' . (string)$it['name'] . '" cannot be worked out. Add "' . ($sv['word'] !== '' ? $sv['word'] : $served) . '" to that list with its ml, or set a count measure on the item in Stock, then open this list again.';
+                    $why = 'Sold by "' . $served . '", which is not on your Drink measures list (' . import_stock_page_name() . '), so one sale of "' . (string)$it['name'] . '" cannot be worked out. Add "' . ($sv['word'] !== '' ? $sv['word'] : $served) . '" to that list with its ml, or set a count measure on the item in Stock, then open this list again.';
                 } else {
                     $why = 'Sold by "' . $served . '", which "' . (string)$it['name'] . '" cannot be measured in yet (set its bottle size or count measure in Stock). Add it on the Menu page after the import.';
                 }
@@ -2242,7 +2242,7 @@ if (!function_exists('import_drinks_build')) {
      */
     function import_drinks_commit(PDO $pdo, array $items, array $answers, int $jobId, int $userId): array
     {
-        $out = ['added' => 0, 'updated' => 0, 'linked' => 0, 'names' => [], 'food_added' => 0, 'food_updated' => 0];
+        $out = ['added' => 0, 'updated' => 0, 'linked' => 0, 'names' => [], 'food_added' => 0, 'food_updated' => 0, 'rows' => []];
         if (!import_drinks_any_ticked($answers)) {
             return $out;
         }
@@ -2290,6 +2290,10 @@ if (!function_exists('import_drinks_build')) {
             }
             $what = $w['what'];
             $out['names'][] = $r['name'];
+            // what was written, for the "Differences from the uploaded file" report (commit-stock.php): the file's price vs the one used
+            $out['rows'][] = ['name' => (string)$r['name'], 'menu' => (string)($r['menu'] ?? ''), 'action' => (string)$w['action'], 'price' => $w['price'] ?? $r['price'],
+                'price_from' => (string)($r['price_from'] ?? ''), 'file_price' => $r['file_price'] ?? null, 'price_source' => (string)($r['price_source'] ?? ''),
+                'old_price' => $w['old_price'] ?? null, 'category' => (string)($r['category'] ?? '')];
             if (function_exists('logActivity')) {
                 logActivity($userId, 'drink_menu_import', 'Import #' . $jobId . ': ' . $what . '.');
             }

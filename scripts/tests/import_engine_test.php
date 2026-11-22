@@ -1818,7 +1818,7 @@ $t($m4tg['items']['Gin']['status'] === 'ready' && ($m4gs['small'] ?? '') === 'to
 $exGinOpen = $exGin + ['_open_measure_lines' => 2];
 $m4to = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGinOpen]], $m4Base);
 $t(!$muOpen($m4to, 'measure-change') && $m4to['items']['Gin']['measure_save'] === null && $m4to['items']['Gin']['status'] === 'ready'
-    && (string)$m4to['items']['Gin']['measure_not'] === 'it keeps 30 shots in one bottle: 2 open stock count lines use it; change it in Stock Items after the count is approved',
+    && (string)$m4to['items']['Gin']['measure_not'] === 'it keeps 30 shots in one bottle: 2 open stock count lines use it; change it in ' . import_stock_page_name() . ' after the count is approved',
     'measure change: lines on open counts typed in shots = never changed (they would be read as tots), no question, the reason is shown ' . json_encode($m4to['items']['Gin']['measure_not']));
 $m4same = $muRun([['Item Name', 'Bar (shots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
 $t($m4same['items']['Gin']['measure_save'] === null && $m4same['items']['Gin']['measure_not'] === null && !$muOpen($m4same, 'measure-change') && abs($m4same['items']['Gin']['balance'] - 0.5) < 0.0000005,
@@ -2470,7 +2470,7 @@ $mpXo = $mpRun($mpXb, $mpXr, ['existing' => [['_open_measure_lines' => 2] + $mpE
 $t(!array_filter($mpXo['open'], function ($q) { return in_array($q['type'], ['measure-change', 'measure-file'], true); })
     && !array_filter(array_values($mpXo['res']['extra_questions']), function ($q) { return $q['type'] === 'measure-change'; })
     && abs((float)$mpXo['items']['Gin A']['balance'] - round(57 / 28, 6)) < 1e-9 && $mpXo['items']['Gin A']['measure_save'] === null && $mpXo['items']['Gin A']['status'] === 'ready'
-    && (string)$mpXo['items']['Gin A']['measure_not'] === 'it keeps 28 shots in one bottle: 2 open stock count lines use it; change it in Stock Items after the count is approved',
+    && (string)$mpXo['items']['Gin A']['measure_not'] === 'it keeps 28 shots in one bottle: 2 open stock count lines use it; change it in ' . import_stock_page_name() . ' after the count is approved',
     'open count lines: the file\'s 30 vs Gin A\'s own 28 is not offered (57 / 28, nothing saved), step 4 lists why ' . json_encode([$mpXo['items']['Gin A']['measure_not'] ?? null, array_column($mpXo['open'], 'type')]));
 // a size in the name vs the bottle size column: asked
 $mpN = [$mpHead, ['Vodka 1L', 'VODKAS', '50', '30000', '4000', 'Shot', '', '750', '25']];

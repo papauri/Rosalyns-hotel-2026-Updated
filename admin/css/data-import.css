@@ -735,3 +735,12 @@
     .di-mt-on { min-height: 44px; }
     .di-mt-back { min-height: 44px; }
 }
+
+/* Result: "Differences from the uploaded file" (owner 2026-11-23): summary chips per kind, linked to the list on the opening count */
+.di-diff { margin: 14px 0; }
+.di-diff-h { margin: 0 0 2px; font-size: 15px; color: var(--admin-text, #1f2a37); }
+.di-diff-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 8px; }
+.di-diff-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 12px; border: 1px solid var(--tbl-border, #E8E0D6); border-radius: 999px; background: #fff; color: var(--navy, #231F1C); font-size: 13px; text-decoration: none; }
+a.di-diff-chip:hover { background: var(--tbl-row-hover, #FAF6F0); border-color: var(--color-primary, #766550); }
+a.di-diff-chip:focus-visible { outline: 2px solid var(--color-primary, #766550); outline-offset: 2px; }
+.di-diff-chip-n { font-weight: 600; min-width: 1.5em; text-align: center; padding: 0 6px; border-radius: 999px; background: var(--gold-light, #F3ECE4); }

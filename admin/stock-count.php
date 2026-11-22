@@ -57,6 +57,29 @@ if (!ensureStockTablesExist()) {
     $error = 'Stock counts can’t be used yet because the stock tables have not been created. Ask your administrator to run the stock set-up (admin/migrations/015_stock_management.php), then reload this page.';
 }
 
+/* "Differences from the uploaded file" of an opening count filed by Import (owner 2026-11-23): the download. Whoever can open this page can
+ * open the count, so the same people can download its list (frozen at the import, stored with the import: includes/import/diff-report.php). */
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && isset($_GET['diff_export'], $_GET['id'])) {
+    require_once __DIR__ . '/../includes/import/diff-report.php';
+    $dxSt = $pdo->prepare('SELECT * FROM stock_counts WHERE id = ?');
+    $dxSt->execute([(int)$_GET['id']]);
+    $dxCount = $dxSt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $dx = $dxCount ? import_diff_for_count($pdo, $dxCount) : null;
+    if (!$dx) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit('This count has no list of differences from an uploaded file.');
+    }
+    $dxFile = import_diff_export($dx['report'], ((string)$_GET['diff_export'] === 'csv') ? 'csv' : 'xlsx');
+    if (empty($dxFile['ok'])) {
+        http_response_code(422);
+        exit((string)$dxFile['error']);
+    }
+    logActivity((int)$user['id'], 'import_diff_export', 'Differences from the uploaded file downloaded from count ' . displayCountReference((string)$dxCount['reference']) . ' (#' . (int)$dxCount['id'] . ', import #' . (int)$dx['job']['id'] . ').');
+    import_diff_send($dxFile);
+}
+
 /* Helper: generate a count reference */
 function generateCountReference(): string
 {
@@ -1864,6 +1887,108 @@ $csrf_token = generateCsrfToken();
                 </div>
             <?php endif; ?>
 
+            <?php
+            /* "Differences from the uploaded file" (owner 2026-11-23): an opening count filed by Import carries a link to its job
+             * (stock_counts.import_job_id); the job holds the list, frozen at the import. Older counts have no link: nothing is shown. */
+            $scDiff = null;
+            if ($isOpeningCount && !empty($activeCount['import_job_id'])) {
+                require_once __DIR__ . '/../includes/import/diff-report.php';
+                $scDiff = import_diff_for_count($pdo, $activeCount);
+            }
+            if ($scDiff):
+                $dRep = $scDiff['report'];
+                $dKinds = import_diff_kinds();
+                $dTotal = (int)($dRep['total'] ?? 0);
+                $dWant = isset($_GET['diff']) && isset($dKinds[(string)$_GET['diff']]) ? (string)$_GET['diff'] : '';
+                $dOpen = $isSubmitted || $dWant !== '' || isset($_GET['diff']);
+                $dUrl = 'stock-count.php?id=' . (int)$activeCount['id'] . '&diff_export=';
+                $dTip = static fn(string $label, string $tip): string => '<i class="help" tabindex="0" role="button" aria-label="About ' . htmlspecialchars($label, ENT_QUOTES) . '" data-tip="' . htmlspecialchars($tip, ENT_QUOTES) . '">?</i>';
+            ?>
+                <details class="sc-diff" id="scDiff" data-want="<?php echo htmlspecialchars($dWant, ENT_QUOTES); ?>"<?php echo $dOpen ? ' open' : ''; ?>>
+                    <summary class="sc-diff__sum">
+                        <i class="fas fa-chevron-right sc-diff__chev" aria-hidden="true"></i>
+                        <span class="sc-diff__title">Differences from the uploaded file (<?php echo htmlspecialchars((string)$scDiff['job']['file']); ?>)</span>
+                        <span class="sc-diff__count"><?php echo $dTotal === 0 ? 'none' : number_format($dTotal) . ' difference' . ($dTotal === 1 ? '' : 's'); ?></span>
+                    </summary>
+                    <div class="sc-diff__body">
+                        <p class="sc-diff__help">This count was filed by Import #<?php echo (int)$scDiff['job']['id']; ?>. Listed: every place where what was imported is not exactly what the file says, and why. Kept as it was at the import (<?php echo htmlspecialchars((string)($dRep['built_at'] ?? '')); ?>): later changes to items do not change it. An item imported exactly as the file says is not listed.</p>
+                        <?php if ($dTotal === 0): ?>
+                            <p class="sc-diff__none">None: every item in this count was imported exactly as the file says.</p>
+                        <?php else: ?>
+                            <div class="sc-diff__chips" role="group" aria-label="Show one kind of difference">
+                                <button type="button" class="sc-diff__chip is-on" data-k="" aria-pressed="true">All <span class="sc-diff__n"><?php echo number_format($dTotal); ?></span></button>
+                                <?php foreach ($dKinds as $dk => $dl): if (empty($dRep['kinds'][$dk])) continue; ?>
+                                    <button type="button" class="sc-diff__chip" data-k="<?php echo htmlspecialchars($dk, ENT_QUOTES); ?>" aria-pressed="false" title="<?php echo htmlspecialchars($dl[1], ENT_QUOTES); ?>"><?php echo htmlspecialchars($dl[0]); ?> <span class="sc-diff__n"><?php echo number_format((int)$dRep['kinds'][$dk]); ?></span></button>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                        <?php if (!empty($dRep['value'])): $dv = $dRep['value']; ?>
+                            <p class="sc-diff__note"><strong>Value check:</strong> the value column (<?php echo htmlspecialchars(implode(', ', (array)$dv['headers'])); ?>) in the file adds up to <?php echo htmlspecialchars($currency . ' ' . number_format((float)$dv['file_total'], 2)); ?>; count &times; unit cost as imported for the same <?php echo number_format((int)$dv['compared']); ?> row<?php echo (int)$dv['compared'] === 1 ? '' : 's'; ?> is <?php echo htmlspecialchars($currency . ' ' . number_format((float)$dv['imported_total'], 2)); ?><?php echo (int)$dv['differ'] > 0 ? ' (' . number_format((int)$dv['differ']) . ' row' . ((int)$dv['differ'] === 1 ? '' : 's') . ' differ)' : ''; ?>.
+                                <?php echo $dTip('the value check', 'The file\'s own value column (Stock Value / Total) added up over the rows that have a value and a count, next to the same rows valued at the count and unit cost this import put in the count. Skipped rows and stock left out of the count are valued at 0.'); ?></p>
+                        <?php endif; ?>
+                        <p class="sc-diff__note">This count as imported: <?php echo number_format((int)($dRep['count_lines'] ?? 0)); ?> line<?php echo (int)($dRep['count_lines'] ?? 0) === 1 ? '' : 's'; ?> worth <?php echo htmlspecialchars($currency . ' ' . number_format((float)($dRep['count_value'] ?? 0), 2)); ?> (count &times; unit cost).</p>
+                        <?php if ((int)($dRep['stored'] ?? 0) < $dTotal): ?>
+                            <p class="sc-diff__note">Only the first <?php echo number_format((int)$dRep['stored']); ?> of <?php echo number_format($dTotal); ?> differences are listed; the counts above are exact.</p>
+                        <?php endif; ?>
+                        <?php if ($dTotal > 0): ?>
+                            <div class="sc-diff__tools">
+                                <a class="btn-secondary" href="<?php echo htmlspecialchars($dUrl . 'xlsx', ENT_QUOTES); ?>"><i class="fas fa-download" aria-hidden="true"></i> Download (Excel)</a>
+                                <a class="btn-secondary" href="<?php echo htmlspecialchars($dUrl . 'csv', ENT_QUOTES); ?>"><i class="fas fa-download" aria-hidden="true"></i> Download (CSV)</a>
+                            </div>
+                            <div class="card sc-diff__card">
+                                <table class="lines-table sc-diff__table">
+                                    <thead>
+                                        <tr>
+                                            <th>What <?php echo $dTip('what', 'The kind of difference. Click a chip above to see one kind only.'); ?></th>
+                                            <th>Item <?php echo $dTip('item', 'The stock item as it is named in stock (or the row\'s name when the row was not imported).'); ?></th>
+                                            <th>Cell <?php echo $dTip('the cell', 'Where in the uploaded file this comes from: sheet name ! cell (for example Sheet1!C5 = column C, row 5).'); ?></th>
+                                            <th>In your file <?php echo $dTip('the file value', 'What the uploaded file says in that cell (for an answer: the question, in short).'); ?></th>
+                                            <th>Imported <?php echo $dTip('the imported value', 'What this import put in stock, the count or the menu instead (for an answer: the choice made).'); ?></th>
+                                            <th>Why <?php echo $dTip('why', 'Why the two differ, in plain words.'); ?></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ((array)($dRep['rows'] ?? []) as $dr): ?>
+                                            <tr data-k="<?php echo htmlspecialchars((string)$dr['k'], ENT_QUOTES); ?>">
+                                                <td data-label="What"><span class="sc-diff__kind"><?php echo htmlspecialchars($dKinds[$dr['k']][0] ?? (string)$dr['k']); ?></span></td>
+                                                <td data-label="Item"><?php echo htmlspecialchars((string)$dr['item']); ?></td>
+                                                <td data-label="Cell" class="sc-diff__cell"><?php echo htmlspecialchars((string)$dr['cell'] !== '' ? (string)$dr['cell'] : '—'); ?></td>
+                                                <td data-label="In your file"><?php echo htmlspecialchars((string)$dr['file'] !== '' ? (string)$dr['file'] : '—'); ?></td>
+                                                <td data-label="Imported"><?php echo htmlspecialchars((string)$dr['used'] !== '' ? (string)$dr['used'] : '—'); ?></td>
+                                                <td data-label="Why" class="sc-diff__why"><?php echo htmlspecialchars((string)$dr['why']); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </details>
+                <script>
+                (function () {
+                    var box = document.getElementById('scDiff');
+                    if (!box || box.getAttribute('data-ready') === '1') { return; }
+                    box.setAttribute('data-ready', '1');
+                    var table = box.querySelector('.sc-diff__table');
+                    var chips = Array.prototype.slice.call(box.querySelectorAll('.sc-diff__chip'));
+                    function refresh(reset) { if (table && typeof table.rhPagerRefresh === 'function') { table.rhPagerRefresh(reset); } }
+                    function show(k) {
+                        chips.forEach(function (c) { var on = c.getAttribute('data-k') === k; c.classList.toggle('is-on', on); c.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+                        if (!table) { return; }
+                        Array.prototype.forEach.call(table.tBodies[0].rows, function (tr) {
+                            var out = k !== '' && tr.getAttribute('data-k') !== k;
+                            if (out) { tr.setAttribute('data-filter-hidden', '1'); tr.hidden = true; } else { tr.removeAttribute('data-filter-hidden'); tr.hidden = false; }
+                        });
+                        refresh(true);
+                    }
+                    chips.forEach(function (c) { c.addEventListener('click', function () { show(c.getAttribute('data-k') || ''); }); });
+                    box.addEventListener('toggle', function () { if (box.open) { refresh(false); } });
+                    var want = box.getAttribute('data-want') || '';
+                    if (want !== '') { show(want); setTimeout(function () { show(want); }, 120); }
+                    if (location.hash === '#scDiff' || want !== '') { setTimeout(function () { box.scrollIntoView({ block: 'start' }); }, 150); }
+                })();
+                </script>
+            <?php endif; ?>
             <?php $mayDeleteActive = scMayDeleteCount($activeCount, $user, $canApprove); ?>
             <?php if (!empty($activeCount['is_opening']) && (string)($activeCount['scope'] ?? '') !== 'full'): ?>
                 <p class="sc-info-note"><strong>This opening count covers only <?php echo htmlspecialchars(scScopePhrase($activeCount)); ?>.</strong> Every other item keeps the stock it has now. Count the rest later in another opening count.</p>
