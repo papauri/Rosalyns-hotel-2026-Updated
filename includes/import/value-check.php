@@ -233,12 +233,24 @@ if (!function_exists('import_vc_collect')) {
         $selling = [];
         $all = [];
         $missing = import_vc_missing($items);
+        // a count the person said is in shots / glasses (the count-unit question, owner 2026-11-22): compared in the stock unit the cost is for
+        // (57 shots = 2.28 bottles x the bottle cost), never 57 bottles. Only those rows; the selling-price test keeps the sheet's own number.
+        $conv = [];
+        foreach ($items as $it) {
+            foreach ((array)($it['count_rows'] ?? []) as $k => $q) {
+                $conv[(string)$k] = ['q' => (float)$q, 'cn' => $it['count_n'] ?? null];
+            }
+        }
         $sheetsOut = [];
         foreach ((array)($col['sheets'] ?? []) as $si => $sh) {
             $sheetsOut[] = ['name' => $sh['name'], 'header_row' => $sh['header_row'], 'qty_cols' => $sh['qty_cols'], 'qty_heads' => $sh['qty_heads'],
                 'price_col' => $sh['price_col'], 'price_head' => $sh['price_head'], 'value_cols' => $sh['value_cols']];
             $valOf = function (array $r, string $letter) {
                 return is_array($r[8]) ? ($r[8][$letter] ?? null) : $r[8];
+            };
+            $qOf = function (array $r) use ($conv, $sh) {
+                $k = (string)$sh['name'] . "\x1f" . (int)$r[1];
+                return isset($conv[$k]) && $r[5] !== null ? $conv[$k]['q'] : $r[5];
             };
             $packed = function (array $r) use ($pack, $packAt, $perUnit, $perUnitAt, $sh) {
                 foreach ($r[10] as $qid) {
@@ -281,7 +293,7 @@ if (!function_exists('import_vc_collect')) {
                             $agreeP++;
                         }
                         if ($r[5] !== null) {
-                            $cq = $r[5] * $cost;
+                            $cq = $qOf($r) * $cost;
                             if (abs($v - $cq) <= import_vc_tolerance($cq)) {
                                 $agreeQ++;
                             }
@@ -308,7 +320,7 @@ if (!function_exists('import_vc_collect')) {
                     }
                     if ($r[6] !== null) {
                         $pk = $packed($r);
-                        $cc = $r[5] * ($pk ? $r[6] / $pk : $r[6]);
+                        $cc = $qOf($r) * ($pk ? $r[6] / $pk : $r[6]);
                         if (abs($v - $cc) <= import_vc_tolerance($cc)) {
                             $agreeC++;
                         }
@@ -356,7 +368,7 @@ if (!function_exists('import_vc_collect')) {
                     }
                     $pk = $packed($r);
                     $cost = $pk ? $r[6] / $pk : $r[6];
-                    $calc = $r[5] * $cost;
+                    $calc = $qOf($r) * $cost;
                     $diff = $v - $calc;
                     $g['compared']++;
                     $g['calc_total'] += $calc;
@@ -379,9 +391,12 @@ if (!function_exists('import_vc_collect')) {
                     if ($noQty) {
                         $g['no_qty_n']++;
                     }
-                    $why = import_vc_why($r[5] === null ? null : (float)$r[5], (float)$cost, (float)$v, (string)$r[4]);
+                    $why = import_vc_why($r[5] === null ? null : (float)$qOf($r), (float)$cost, (float)$v, (string)$r[4]);
+                    $ck = (string)$sh['name'] . "\x1f" . (int)$r[1];
+                    $qw = isset($conv[$ck]) && function_exists('import_qty_words') ? import_qty_words((float)$conv[$ck]['q'], $conv[$ck]['cn'], (string)$r[4]) : null;
                     $g['why_' . $why[0]] = ($g['why_' . $why[0]] ?? 0) + 1;
-                    $all[] = ['sheet' => $sh['name'], 'si' => $si, 'row' => $r[1], 'name' => $r[2], 'category' => $r[3], 'unit' => $r[4], 'qty' => $r[5],
+                    $all[] = ['sheet' => $sh['name'], 'si' => $si, 'row' => $r[1], 'name' => $r[2], 'category' => $r[3], 'unit' => $r[4], 'qty' => $qOf($r),
+                        'qty_words' => $qw !== null ? $qw['text'] : null, 'qty_exact' => $qw !== null ? $qw['exact'] : null,
                         'why_code' => $why[0], 'why' => $why[1],
                         'price' => $r[6], 'pack' => $pk, 'cost' => $cost, 'calc' => round($calc, 2), 'value' => $v, 'diff' => round($diff, 2), 'abs' => abs($diff),
                         'kind' => $noQty ? 'no-qty' : ($diff > 0 ? 'more' : 'less'), 'header' => $header,

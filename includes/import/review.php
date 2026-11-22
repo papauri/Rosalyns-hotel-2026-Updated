@@ -133,7 +133,9 @@ if (!function_exists('import_job_analyse')) {
             'price_evidence' => import_job_price_evidence($pdo, $existing), 'cost_limits' => import_cost_limits($pdo),
             'learned' => import_load_learned($pdo), 'unit_synonyms' => (array)$aliasSet['unit_synonyms'], 'container_words' => (array)($aliasSet['container_words'] ?? []),
             'case_evidence' => import_cs_load_evidence($pdo),        // recipe selling prices, real deliveries, barcode / order pack sizes (case-signals.php)
-            'drink_measures' => function_exists('rh_drink_measures_list') ? rh_drink_measures_list() : []];     // the hotel's measures list (shot 25 ml ...)
+            'drink_measures' => function_exists('rh_drink_measures_list') ? rh_drink_measures_list() : [],     // the hotel's measures list (shot 25 ml ...)
+            // the count-unit question (a count of a drink sold by the shot / glass: in bottles or in shots?) reads the served-by cell with these
+            'shot_words' => (array)($aliasSet['shot_words'] ?? []), 'glass_words' => (array)($aliasSet['glass_words'] ?? []), 'pour_containers' => (array)($aliasSet['pour_containers'] ?? [])];
     }
 
     /**
@@ -489,6 +491,44 @@ if (!function_exists('import_job_analyse')) {
         return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => $reanalyse];
     }
 
+    /**
+     * One drink's own answer to the count-unit question (owner 2026-11-22: "a row may differ"): $key 'stock' (the count is in its stock unit),
+     * 'measure' (in the measure it is sold by), '' = back to the group's answer. Stored as answers['_count_in'][uid]; the row must belong to that
+     * question. Returns the same shape as import_job_answer().
+     */
+    function import_job_count_row(PDO $pdo, int $jobId, string $questionId, string $uid, string $key, int $userId = 0): array
+    {
+        $fail = function (string $m) {
+            return ['ok' => false, 'error' => $m, 'can_confirm' => false, 'reanalysed' => false];
+        };
+        if (!in_array($key, ['stock', 'measure', ''], true)) {
+            return $fail('That is not one of the choices for this drink.');
+        }
+        $state = import_job_state($pdo, $jobId);
+        if (!$state) {
+            return $fail('That import cannot be reviewed.');
+        }
+        if (!in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
+            return $fail('This import is already ' . $state['job']['status'] . ' and cannot be changed.');
+        }
+        $q = import_job_find_question($state, $questionId);
+        if (!$q || ($q['type'] ?? '') !== 'count-in' || !in_array($uid, array_map('strval', (array)$q['row_uids']), true)) {
+            return $fail('That drink does not belong to this question.');
+        }
+        $answers = $state['answers'];
+        if ($key === '') {
+            unset($answers['_count_in'][$uid]);
+            if (empty($answers['_count_in'])) {
+                unset($answers['_count_in']);
+            }
+        } else {
+            $answers['_count_in'][$uid] = ['key' => $key, 'by' => $userId > 0 ? $userId : null, 'at' => date('Y-m-d H:i:s')];
+        }
+        $pdo->prepare("UPDATE import_jobs SET answers_json = ?, status = 'reviewing' WHERE id = ? AND status IN ('analysed','reviewing')")
+            ->execute([import_json($answers), $jobId]);
+        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => false];
+    }
+
     /** Tick which fields of a matched, existing ingredient the file may change ($key = rh_ssi_key of the stock name). Default: none. */
     function import_job_set_update_fields(PDO $pdo, int $jobId, string $key, array $fields, int $userId = 0): array
     {
@@ -668,6 +708,10 @@ if (!function_exists('import_job_analyse')) {
                 'suggestion' => $q['suggestion'] ?? null, 'synthetic' => !empty($q['synthetic']),
                 'evidence' => $q['evidence'] ?? null,     // the numbers a price question was judged on (nothing invented), for the screen / read-only helper
                 'conflict_field' => $conflictByQ[$q['id']]['field'] ?? ($q['conflict_field'] ?? null),
+                // the count-unit question: its drinks (name, count cell, number, the row's own answer), the evidence-based suggestion (one click still
+                // needed) and the two answer words for the per-drink choice
+                'count_rows' => $q['count_rows'] ?? null, 'count_rows_n' => $q['count_rows_n'] ?? null, 'suggest' => $q['suggest'] ?? null,
+                'count_words' => $q['count_words'] ?? null,
             ];
         }
         return $qs;

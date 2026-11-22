@@ -1100,7 +1100,11 @@ try {
     if ($jB) { import_job_analyse($pdo, $jB); }
     $sB = $jB ? import_job_review_summary($pdo, $jB) : ['questions' => []];
     $openB = array_filter((array)($sB['questions'] ?? []), function ($q) { return $q['blocking'] && $q['answer'] === null; });
-    $ck('bar layout (database aliases): no question at all', $jB > 0 && isset($sB['questions']) && !$openB, json_encode([$uB, array_keys($sB), $sB['error'] ?? null, array_column($openB, 'text')]));
+    // the only question: is the gin's count (sold by the shot) in bottles or in shots? (owner 2026-11-22: never a silent guess); answered "in bottles"
+    $openB = array_values($openB);
+    $ck('bar layout (database aliases): no question but "is the gin\'s count in bottles or in shots?"', $jB > 0 && isset($sB['questions']) && count($openB) === 1 && ($openB[0]['type'] ?? '') === 'count-in'
+        && array_column((array)($openB[0]['count_rows'] ?? []), 'name') === [$n('BR Gin')], json_encode([$uB, array_keys($sB), $sB['error'] ?? null, array_column($openB, 'text')]));
+    if ($openB) { import_job_answer($pdo, $jB, $openB[0]['id'], 'stock', $admin); }
     $cB = $jB ? import_commit_stock($pdo, $jB, $admin) : ['ok' => false];
     $ingB = [];
     foreach ($pdo->query("SELECT name, unit, cost_per_unit, pack_name, pack_size FROM stock_ingredients WHERE name LIKE 'ZZT $run BR %'")->fetchAll(PDO::FETCH_ASSOC) as $x) { $ingB[$x['name']] = $x; }

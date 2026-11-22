@@ -355,7 +355,10 @@ if (!function_exists('import_drinks_build')) {
             if (empty($it['sells']) && $typedPrice === null && trim((string)($it['served_by'] ?? '')) === '') {
                 continue;
             }
-            if (($it['status'] ?? '') !== 'ready') {
+            // a drink whose count is in shots and only waits for "how many in one bottle?" is listed so its sizes can be typed here (they give that
+            // number: the count-unit question, owner 2026-11-22); it cannot be ticked until it is ready
+            $sizeWait = ($it['status'] ?? '') === 'needs-answer' && !empty($it['size_wait']);
+            if (($it['status'] ?? '') !== 'ready' && !$sizeWait) {
                 if (($it['status'] ?? '') !== 'skipped') {
                     $waiting++;
                 }
@@ -839,6 +842,10 @@ if (!function_exists('import_drinks_build')) {
                 'cont_optional' => $size['cont_optional'], 'glass_need' => $size['glass_need'], 'glass_ml' => $size['glass_ml'], 'shot_need' => $size['shot_need'],
                 'shot_ml' => $size['shot_ml'], 'shot_from' => $size['shot_from']]);
             $sizeWhy = $needSize ? $why : '';
+            if ($sizeWait && $why === '') {
+                $why = 'Its count in your file is in ' . ($size['kind'] === 'glass' ? 'glasses' : 'shots') . ' and is not worked out yet: add its sizes here, or answer "How many in one '
+                    . $unit . '?" above. It can go on the menu once that is done.';
+            }
             if ($kind === '') {
                 $why = 'Choose Drinks or Food for it (or for its group "' . ($fileCat !== '' ? $fileCat : 'no category') . '"). Its name and category do not say for certain which menu it belongs to.';
             } elseif ($cat === '' && $action === 'add' && $why === '') {

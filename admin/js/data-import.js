@@ -42,6 +42,41 @@
         if (!isFinite(x)) { return String(n); }
         return x.toLocaleString('en-US', { maximumFractionDigits: max === undefined ? 4 : max });
     }
+    // one of / some of, as import_measure_plural() (includes/import/measure.php): "shot" / "shots", "glass" / "glasses"; short words stay
+    function plural(w, q) {
+        w = String(w || '').trim();
+        if (Math.abs(Number(q) - 1) < 1e-9 || w.length <= 2) { return w; }
+        if (/(ss|sh|ch|x)$/i.test(w)) { return w + 'es'; }
+        if (/s$/i.test(w)) { return w; }
+        if (/[^aeiou]y$/i.test(w)) { return w.slice(0, -1) + 'ies'; }
+        return w + 's';
+    }
+    /**
+     * A stock quantity of a drink counted in a measure, in words (owner 2026-11-22): "57 shots = 2 bottles + 7 shots", "50 shots = 2 bottles",
+     * "7 shots". The same rounding as import_qty_words() (measure.php) and the Stock screens. cn = {n, small, big}; none = the number + unit.
+     * Display only: returns {text, exact} (exact = the stored figure in the stock unit, shown on hover).
+     */
+    function qtyWords(qty, cn, unit) {
+        var x = Number(qty);
+        var exact = num(x, 6) + (unit ? ' ' + plural(unit, x) : '');
+        var n = cn ? Number(cn.n) : 0;
+        if (!cn || !(n >= 1) || !isFinite(n) || !cn.small || !isFinite(x) || x < 0) { return { text: exact, exact: exact }; }
+        var big = cn.big || unit || '', small = String(cn.small);
+        exact = num(x, 6) + ' ' + plural(big, x);
+        var smalls = Math.round(x * n * 10) / 10;
+        var bigs = Math.floor(smalls / n + 1e-9);
+        var rest = Math.round((smalls - bigs * n) * 10) / 10;
+        if (rest < 0.05) { rest = 0; } else if (rest >= Math.round(n * 10) / 10 - 1e-9) { bigs++; rest = 0; }
+        var head = num(smalls, 1) + ' ' + plural(small, smalls);
+        if (bigs === 0) { return { text: head, exact: exact }; }
+        return { text: head + ' = ' + bigs + ' ' + plural(big, bigs) + (rest > 0 ? ' + ' + num(rest, 1) + ' ' + plural(small, rest) : ''), exact: exact };
+    }
+    function qtyEl(qty, cn, unit) {
+        var w = qtyWords(qty, cn, unit);
+        var s = h('span', 'di-qty', w.text.replace(/(\d) /g, '$1\u00a0'));      // a narrow column wraps at "=" and "+", never inside "7 shots"
+        if (w.text !== w.exact) { s.title = 'Exact: ' + w.exact; }
+        return s;
+    }
     function src(ref, prefix) {
         if (!ref) { return null; }
         var s = h('span', 'di-src', (prefix || '') + ref);
@@ -76,7 +111,7 @@
         var dropEl = root.querySelector('#diDrop');
         var nameEl = root.querySelector('#diFileName');
         var mineList = root.querySelector('#diMineList');
-        var S = { job: 0, sum: null, result: null, step: 1, reach: 1, busy: false, file: null, chain: Promise.resolve(), f: null, R: null, page: null, facets: null, statusEff: [], seq: 0, openCats: {}, bulkSel: null, uiUnits: {} };
+        var S = { job: 0, sum: null, result: null, step: 1, reach: 1, busy: false, file: null, chain: Promise.resolve(), f: null, R: null, page: null, facets: null, statusEff: [], seq: 0, openCats: {}, bulkSel: null, uiUnits: {}, uiCount: {} };
         S.f = { q: '', sheet: '', cat: '', status: null, type: '', kind: '', warn: 0, cost: 0, stock: 0, answered: 0, sort: 'order', size: 50, page: 1, view: 'list' };
 
         // ---------- plumbing ----------
@@ -316,7 +351,7 @@
             S.job = id;
             S.result = null;
             S.f = fromUrl ? urlFilters() : copyDef();      // a reload keeps the filters in the address; opening a job starts clean
-            S.openCats = {}; S.page = null; S.facets = null; S.statusEff = []; S.bulkSel = null; S.uiUnits = {};
+            S.openCats = {}; S.page = null; S.facets = null; S.statusEff = []; S.bulkSel = null; S.uiUnits = {}; S.uiCount = {};
             return post('summary', { job: id }).then(function (r) {
                 if (r.state === 'committed') {
                     S.sum = null; S.result = r.result || {}; S.file = null; setUrl(id); S.resultFile = r.file; showStep(4); loadMine(); return;
@@ -510,6 +545,11 @@
                 c.appendChild(h('p', 'di-q-note', 'This cannot be imported as it is. Correct the cell in your file and upload the file again, or leave the row out and carry on.'));
             }
             if (q.type === 'no-unit' && q.unit_items) { c.appendChild(unitItemsBlock(q)); }
+            if (q.type === 'count-in') {
+                // "is the count in bottles or in shots?" (owner 2026-11-22): a suggestion from the file's own figures still needs a click
+                if (q.suggest && !answered && q.count_words) { c.appendChild(h('p', 'di-q-note', 'Suggested answer: ' + (q.count_words[q.suggest.key] || '') + '. ' + q.suggest.text + ' Choose it below to use it.')); }
+                if (q.answer === 'per-row') { c.appendChild(h('p', 'di-q-note', 'Every drink below has its own answer.')); }
+            }
             var cv = {};
             (q.conflict_values || []).forEach(function (v) { cv[v.key] = v; });
             var checked = answered ? q.answer : (q.default || null);
@@ -576,9 +616,10 @@
             }
             c.appendChild(opts);
             if (packBox) { c.appendChild(packBox); }
+            if (q.type === 'count-in' && q.count_rows && q.count_rows.length) { c.appendChild(countRowsBlock(q)); }      // the drinks, each can differ
             if (q.can_skip) {
                 // a row that cannot be fixed here can always be left out; the rest of the file carries on
-                var sk = h('button', 'btn-secondary di-btn di-btn--quiet di-q-skip', q.type === 'no-unit' ? 'Skip these items' : 'Skip this row');
+                var sk = h('button', 'btn-secondary di-btn di-btn--quiet di-q-skip', q.type === 'no-unit' ? 'Skip these items' : (q.type === 'count-in' ? 'Skip these rows' : 'Skip this row'));
                 sk.type = 'button';
                 sk.addEventListener('click', function () {
                     if (q.type !== 'no-unit') { save(q, '_skip', null, c); return; }
@@ -803,6 +844,64 @@
             b.type = 'button';
             b.addEventListener('click', function () { b.disabled = true; skipRows('uids', uids).then(function () { if (document.body.contains(b)) { b.disabled = false; } }); });
             return b;
+        }
+
+        // ---------- the drinks of a count-unit question ("in bottles or in shots?"): a drink may have its own answer ----------
+        function countRowsBlock(q) {
+            var ui = S.uiCount[q.id] || (S.uiCount[q.id] = { open: false, page: 1, size: 10, q: '' });
+            var rows = q.count_rows || [], words = q.count_words || {};
+            var total = q.count_rows_n || rows.length;
+            var own = rows.filter(function (x) { return !!x.answer; }).length;
+            var box = h('div', 'di-unitbox di-countbox');
+            var redraw = function () { var nb = countRowsBlock(q); if (box.parentNode) { box.parentNode.replaceChild(nb, box); } };
+            var tog = h('button', 'btn-secondary di-btn', ui.open ? 'Hide the drinks' : 'Show the ' + num(total, 0) + ' drink' + (total === 1 ? '' : 's') + (own ? ' (' + num(own, 0) + ' with their own answer)' : ''));
+            tog.type = 'button';
+            tog.setAttribute('aria-expanded', ui.open ? 'true' : 'false');
+            tog.addEventListener('click', function () { ui.open = !ui.open; redraw(); });
+            box.appendChild(tog);
+            if (!ui.open) { return box; }
+            box.appendChild(helpLine('Each drink follows the answer above unless you choose its own here. The number is the count cell of your file.'));
+            var search = document.createElement('input'); search.type = 'search'; search.className = 'di-select di-count-search'; search.placeholder = 'Find a drink'; search.value = ui.q;
+            search.setAttribute('aria-label', 'Find a drink in this group');
+            box.appendChild(search);
+            var list = h('div', 'di-unitlist');
+            box.appendChild(list);
+            var pgBox = h('div');
+            box.appendChild(pgBox);
+            var groupWord = (q.answer === 'stock' || q.answer === 'measure') ? (words[q.answer] || '') : '';
+            var draw = function () {
+                var t = ui.q.trim().toLowerCase();
+                var hit = rows.filter(function (x) { return !t || String(x.name).toLowerCase().indexOf(t) >= 0 || String(x.cell).toLowerCase().indexOf(t) >= 0; });
+                var pages = Math.max(1, Math.ceil(hit.length / ui.size));
+                ui.page = Math.min(Math.max(1, ui.page), pages);
+                clear(list); clear(pgBox);
+                hit.slice((ui.page - 1) * ui.size, ui.page * ui.size).forEach(function (x) {
+                    var r = h('div', 'di-unitrow di-opt di-unitrow--' + (x.answer ? 'chosen' : 'ask'));
+                    var top = h('div', 'di-unitname');
+                    add(top, itemNameEl(x.name), ' ', src(x.cell), h('span', 'di-small', ' · counted ' + num(x.qty)));
+                    r.appendChild(top);
+                    var sel = h('select', 'di-select');
+                    sel.setAttribute('aria-label', 'How ' + x.name + ' is counted');
+                    [['', 'Same as the group' + (groupWord ? ' (' + groupWord.toLowerCase() + ')' : '')], ['stock', words.stock || 'In stock units'], ['measure', words.measure || 'In measures']].forEach(function (o) {
+                        var op = h('option', null, o[1]); op.value = o[0]; if ((x.answer || '') === o[0]) { op.selected = true; } sel.appendChild(op);
+                    });
+                    sel.addEventListener('change', function () {
+                        sel.disabled = true;
+                        S.chain = S.chain.then(function () { return post('count_row', Object.assign({ job: S.job, question: q.id, uid: x.uid, answer: sel.value }, pagedExtra())); }).then(function (a) {
+                            if (!a.ok) { msg(a.error || 'That answer could not be saved.'); sel.disabled = false; return; }
+                            msg(''); refresh(a.summary);
+                        });
+                    });
+                    r.appendChild(sel);
+                    list.appendChild(r);
+                });
+                if (!hit.length) { list.appendChild(h('p', 'di-small', 'No drink matches.')); }
+                if (hit.length > 10) { pgBox.appendChild(pagerEl({ page: ui.page, pages: pages, size: ui.size, total: hit.length }, function (p) { ui.page = p; draw(); }, function (s) { ui.size = s; ui.page = 1; draw(); })); }
+                if (rows.length < total) { pgBox.appendChild(h('p', 'di-small', 'Showing the first ' + num(rows.length, 0) + ' of ' + num(total, 0) + '; the rest follow the answer above.')); }
+            };
+            search.addEventListener('input', function () { ui.q = search.value; ui.page = 1; draw(); });
+            draw();
+            return box;
         }
 
         // ---------- units for the items of a sheet, one by one ----------
@@ -1054,7 +1153,7 @@
         var TYPE_LABEL = {
             'possible-typo': 'Did you mean (possible typo)', 'duplicate-no-batch': 'Same name twice, no batch', 'duplicate-batch-clash': 'Same name twice, same batch',
             'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit', 'pack-price-check': 'Price per unit and per pack disagree', 'count-unit': 'Counted in packs or single units',
-            'measure-n': 'How many in one bottle', 'price-per-measure': 'Price per shot or glass',
+            'measure-n': 'How many in one bottle', 'price-per-measure': 'Price per shot or glass', 'count-in': 'Count in bottles or in shots',
             'price-check': 'Price looks unusual', 'same-item-two-sheets': 'Same item on two sheets', 'unit-clash': 'Unit differs from stock',
             'archived-match': 'Matches an archived item', 'ambiguous-match': 'Several possible matches', 'cost-too-large': 'Price too large to store',
             'value-too-long': 'Text too long to store', 'bad-value': 'Value is not a number', 'formula-name': 'Name looks like a formula', 'section-or-item': 'Heading or item?'
@@ -1798,12 +1897,12 @@
             var t3 = cell('Unit');
             add(t3, h('span', null, it.unit || '—'), h('div', 'di-capline'), it.unit_source ? src(it.unit_source) : (it.unit ? h('span', 'di-small', it.unit_how || '') : h('span', 'di-small', 'not in the file')));
             var t4 = cell('Opening stock');
-            add(t4, h('span', null, it.balance === null || it.balance === undefined ? '—' : num(it.balance)));
+            add(t4, it.balance === null || it.balance === undefined ? h('span', null, '—') : (it.count_n ? qtyEl(it.balance, it.count_n, it.unit) : h('span', null, num(it.balance))));
             if (it.balance_sources && it.balance_sources.length) { t4.appendChild(h('div', 'di-capline')); it.balance_sources.forEach(function (x) { t4.appendChild(src(x)); t4.appendChild(document.createTextNode(' ')); }); }
             if (it.qty_how) { t4.appendChild(h('div', 'di-small', it.qty_how)); }      // a count in shots / tots / glasses, turned into the stock unit
             if ((it.batches || []).some(function (b) { return b.expiry; })) {
                 var bt = h('div', 'di-small');
-                bt.textContent = it.batches.filter(function (b) { return b.expiry; }).map(function (b) { return (b.label ? b.label + ' ' : '') + num(b.qty) + ' exp ' + b.expiry; }).join('; ');
+                bt.textContent = it.batches.filter(function (b) { return b.expiry; }).map(function (b) { return (b.label ? b.label + ' ' : '') + (it.count_n ? qtyWords(b.qty, it.count_n, it.unit).text : num(b.qty)) + ' exp ' + b.expiry; }).join('; ');
                 t4.appendChild(bt);
             }
             var t5 = cell('Cost per unit');
@@ -1840,7 +1939,7 @@
                 var lab = h('label', 'di-opt');
                 var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = k; cb.checked = (it.ticked || []).indexOf(k) >= 0;
                 boxes.push(cb);
-                var fmt = function (v) { return typeof v === 'number' ? num(v) : (v === null || v === undefined || v === '' ? 'blank' : String(v)); };
+                var fmt = function (v) { return typeof v === 'number' ? (k === 'quantity' && it.count_n ? qtyWords(v, it.count_n, it.unit).text : num(v)) : (v === null || v === undefined || v === '' ? 'blank' : String(v)); };
                 add(lab, cb, h('span', 'di-opt-t', (DIFF_LABEL[k] || k) + ': keep ' + fmt(d[0]) + ' (now) → change to ' + fmt(d[1]) + ' (your file)'));
                 box.appendChild(lab);
                 if (k === 'cost' && it.cost_stock_warning) { box.appendChild(h('p', 'di-warn', it.cost_stock_warning)); }
@@ -1926,7 +2025,8 @@
                         var tr = h('tr', 'di-row');
                         var t1 = cell('Item'); add(t1, itemNameEl(x.name), h('div', 'di-capline'), src(x.cell));
                         if (x.kind === 'no-qty') { t1.appendChild(h('div', 'di-small', 'shows value with no quantity')); }
-                        var t2 = cell('Quantity'); t2.textContent = num(x.qty);
+                        var t2 = cell('Quantity'); t2.textContent = x.qty_words || num(x.qty);
+                        if (x.qty_words && x.qty_exact) { t2.title = 'Exact: ' + x.qty_exact; }
                         var t3 = cell('Unit cost'); t3.textContent = money(x.cost);
                         if (x.pack) { t3.appendChild(h('div', 'di-small', num(x.price, 2) + ' per case of ' + num(x.pack, 0))); }
                         var t4 = cell('Quantity × Unit cost'); t4.textContent = money(x.calc);

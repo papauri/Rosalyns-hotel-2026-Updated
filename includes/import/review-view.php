@@ -72,7 +72,8 @@ if (!function_exists('import_rv_build')) {
         if (!$hasUids && ($q['row'] === null || $q['row'] === '')) {
             return 'structural';
         }
-        return (!$hasUids || (string)$q['type'] === 'no-unit') ? 'sheet' : 'entry';
+        // the count-unit question ("in bottles or in shots?") is one answer for a whole served-by group: shown once, at the top, like the unit question
+        return (!$hasUids || in_array((string)$q['type'], ['no-unit', 'count-in'], true)) ? 'sheet' : 'entry';
     }
 
     /** Question types a person may answer in bulk (never the ones that re-read the file, never the per-sheet unit question). */

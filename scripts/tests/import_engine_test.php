@@ -1444,6 +1444,13 @@ $cpRun = function (string $key, array $ctx = [], array $answers = []) use ($put,
     $p = $put($f['bytes'], $f['name']);
     $an = import_analyze_file($p, $f['name'], $al);
     $res = import_resolve($an, $answers, $ctx + $cpCtx);
+    // the count-unit question (owner 2026-11-22: a plain count of a drink sold by the shot / glass may be in bottles or in shots) is answered
+    // "in bottles" here, unless the scenario answers it: these layouts were written with counts in bottles (today's result)
+    $countIn = array_values(array_filter($res['extra_questions'], function ($q) { return $q['type'] === 'count-in'; }));
+    if ($countIn) {
+        foreach ($countIn as $q) { if (!isset($answers[$q['qkey']])) { $answers[$q['qkey']] = ['key' => 'stock']; } }
+        $res = import_resolve($an, $answers, $ctx + $cpCtx);
+    }
     $all = array_merge($res['questions'], array_values($res['extra_questions']));
     $open = array_values(array_filter($all, function ($q) { return $q['answer'] === null; }));
     $auto = array_values(array_filter($all, function ($q) { return $q['answer'] !== null && !empty($q['auto']); }));
@@ -1452,7 +1459,8 @@ $cpRun = function (string $key, array $ctx = [], array $answers = []) use ($put,
     $cols = [];
     foreach ($an['sheets'] as $s) { foreach ($s['columns'] as $c) { $cols[$s['name']][$c['letter']] = $c['state'] === 'mapped' ? $c['field'] : $c['state']; } }
     $reader = substr($f['name'], -5) === '.xlsx' ? import_xlsx_read($p) : import_csv_read($p, $f['name']);
-    return ['an' => $an, 'res' => $res, 'open' => $open, 'auto' => $auto, 'items' => $items, 'cols' => $cols, 'inv' => import_assert_no_invented_values($an, $reader), 'path' => $p];
+    return ['an' => $an, 'res' => $res, 'open' => $open, 'auto' => $auto, 'items' => $items, 'cols' => $cols, 'inv' => import_assert_no_invented_values($an, $reader), 'path' => $p,
+        'count_in' => $countIn];
 };
 $cpItem = function (array $r, string $name, $unit, $pack, $cost, $qty) {
     $it = $r['items'][$name] ?? null;
@@ -1488,6 +1496,10 @@ $t(count($bt['open']) === 1 && $bt['open'][0]['type'] === 'case-price' && strpos
     && (int)($bt['open'][0]['pack_hint'] ?? 0) === 24,
     'bar layout: only the row that does not add up is asked (5,000 per bottle after dividing, above its selling price 3,000), with the pack pre-filled');
 $t($bt['inv'] === [], 'bar layout: INVARIANT holds (unit from the served-by / bought-as cell, pack size from its cell)' . json_encode($bt['inv']));
+$t(count($bt['count_in']) === 2 && count(array_filter($bt['count_in'], function ($q) { return strpos($q['text'], 'in bottles or in shots') !== false; })) === 1
+    && count(array_filter($bt['count_in'], function ($q) { return strpos($q['text'], 'in caskets or in glasses') !== false; })) === 1,
+    'bar layout: the gin sold by the shot and the wine sold by the glass are each asked "in bottles or in shots?" / "in caskets or in glasses?" (count-unit question, answered "bottles" for the checks above) '
+    . json_encode(array_map(function ($q) { return substr($q['text'], 0, 90); }, $bt['count_in'])));
 $btU = $cpRun('bar_tracker', [], [$bt['open'][0]['qkey'] => ['key' => 'per-unit']]);
 $t($cpItem($btU, 'Over Lager', 'bottle', null, 120000, 5), 'bar layout: answering "one unit" takes the row\'s pack out again (cost = the price as written)');
 // value column at the SELLING price: one summary line, no row reported
@@ -2030,6 +2042,138 @@ $t(import_cell_numbers('Tot 3.5cl') === [35.0] && import_cell_numbers('Shot 35')
     && !import_cell_shows_size('Shot 30', 35) && !import_cell_shows_size('2 x 35ml', 35) && !import_cell_shows_size('½ tot 35', 35)
     && import_cell_strip_size('Shot 35', 35) === 'shot' && import_cell_strip_size('35', 35) === '',
     'shot size: a cell shows a shot size only when every number it writes (besides a plain 1) is that size; "Shot", "Shot 30" (read as 35), "2 x 35ml", "½ tot 35" do not');
+
+echo "-- count in bottles or in shots? (owner 2026-11-22) --\n";
+// a made-up bar sheet with the columns of the owner's bar workbook: the count of a drink sold by the shot is a plain number (57), the Stock
+// Value column is count x the price of ONE SHOT (57 x 4,000), the unit price is per bottle. Rule: never a silent guess, ask once per group.
+$ciHead = ['Item Name', 'Categories', 'Total Balance', 'Unit Price (MWK)', 'Selling price', 'Stock Value', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'];
+$ciRows = [$ciHead,
+    ['Premier Brandy', 'BRANDYS', '57', '30000', '4000', '228000', 'Bottle', '1', 'Shot'],
+    ['Klip Brandy', 'BRANDYS', '50', '32000', '4500', '225000', 'Bottle', '1', 'Shot'],
+    ['Malibu Cream', 'LIQUEURS', '7', '28000', '3500', '24500', 'Bottle', '1', 'Shot'],
+    ['Empty Gin', 'GINS', '0', '26000', '3500', '0', 'Bottle', '1', 'Shot'],
+    ['Sky Vodka', 'VODKAS', '66 shots', '30000', '4000', '264000', 'Bottle', '1', 'Shot'],
+    ['Green Lager', 'LOCAL BEERS', '94', '50420', '6000', '564000', 'Crate', '20', 'Bottle'],
+    ['Red Box Wine', 'WINES', '9', '60000', '10000', '90000', 'Casket', '1', 'Glass'],
+];
+$ciCtx = ['existing' => [], 'unit_options' => ['bottle', 'casket', 'crate', 'each'], 'corrections' => [], 'drink_measures' => [['name' => 'shot', 'ml' => 25], ['name' => 'double', 'ml' => 50]]];
+$ciRun = function (array $answers, array $rows = null, array $ctx = []) use ($csvRows, $al, $ciRows, $ciCtx) {
+    $p = $csvRows($rows ?? $ciRows, 'bar_nov.csv');
+    $an = import_analyze_file($p, 'bar_nov.csv', $al);
+    $res = import_resolve($an, $answers, $ctx + $ciCtx);
+    $items = [];
+    foreach ($res['items'] as $it) { $items[$it['name']] = $it; }
+    $all = array_merge($res['questions'], array_values($res['extra_questions']));
+    $ci = array_values(array_filter($all, function ($q) { return $q['type'] === 'count-in'; }));
+    $open = array_values(array_filter($all, function ($q) { return $q['answer'] === null; }));
+    return ['an' => $an, 'res' => $res, 'items' => $items, 'ci' => $ci, 'open' => $open, 'inv' => import_assert_no_invented_values($an, import_csv_read($p, 'bar_nov.csv'))];
+};
+$ci0 = $ciRun([]);
+$ciShot = array_values(array_filter($ci0['ci'], function ($q) { return strpos($q['text'], 'in bottles or in shots') !== false; }))[0] ?? null;
+$ciGl = array_values(array_filter($ci0['ci'], function ($q) { return strpos($q['text'], 'in caskets or in glasses') !== false; }))[0] ?? null;
+$ciNames = $ciShot ? array_column((array)$ciShot['count_rows'], 'name') : [];
+sort($ciNames);
+$t($ciShot && $ciGl && count($ci0['ci']) === 2 && $ciNames === ['Klip Brandy', 'Malibu Cream', 'Premier Brandy'] && $ciShot['answer'] === null && $ciShot['blocking']
+    && strpos($ciShot['text'], 'Your count for these 3 drinks (column C "Total Balance"): is it in bottles or in shots?') === 0,
+    'count unit: ONE question for the 3 drinks sold by the shot with a plain count (not the "66 shots" cell, not the 0, not the beer sold by the bottle); one more for the wine by the glass '
+    . json_encode(array_map(function ($q) { return substr($q['text'], 0, 110); }, $ci0['ci'])));
+$t($ci0['res']['can_confirm'] === false && $ci0['items']['Premier Brandy']['status'] === 'needs-answer' && $ci0['items']['Malibu Cream']['status'] === 'needs-answer'
+    && $ci0['items']['Green Lager']['status'] === 'ready' && $ci0['items']['Empty Gin']['status'] === 'ready',
+    'count unit: unanswered = those drinks wait and the import cannot be confirmed (the beer and the 0 count are not held up)');
+$t(($ciShot['suggest']['key'] ?? '') === 'measure' && strpos((string)($ciShot['suggest']['text'] ?? ''), '"Stock Value" column (F) is the count x the price of one shot on 3 of 3 rows') !== false
+    && strpos((string)$ciShot['suggest']['text'], '57 x 4,000 = 228,000') !== false && $ciShot['answer'] === null && $ciShot['default'] === null
+    && substr((string)$ciShot['options'][1]['label'], -12) === ' (suggested)',
+    'count unit: the file\'s own figures give a SUGGESTED answer (Stock Value = count x price of one shot: 57 x 4,000 = 228,000), never applied without a click ' . json_encode($ciShot['suggest']));
+$ciSizes = ['_sizes' => ['g' => ['m:shot|bottle' => ['shot' => 30, 'ml' => 750]]]];
+$ciM = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock']] + $ciSizes);
+$pb = $ciM['items']['Premier Brandy'];
+$t(abs($pb['balance'] - 2.28) < 1e-9 && abs($ciM['items']['Klip Brandy']['balance'] - 2) < 1e-9 && abs($ciM['items']['Malibu Cream']['balance'] - 0.28) < 1e-9
+    && abs((float)$pb['cost'] - 30000) < 1e-9 && abs($pb['balance'] * $pb['cost'] - 68400) < 0.005 && $pb['in_count'] === true && $pb['measure_save'] === null && $pb['status'] === 'ready',
+    'count unit "in shots": 57 shots with a 30 ml shot and a 750 ml bottle (step 3 sizes) = 2.28 bottles exactly in the opening count, cost 30,000 per bottle (never divided), value 2.28 x 30,000 = 68,400 '
+    . json_encode([$pb['balance'], $pb['cost'], $pb['qty_how']]));
+$t(strpos((string)$pb['qty_how'], '57 shots = 2.28 bottles (25 shots in one bottle: 750 ml bottle set for the group in step 3 / 30 ml shot set for the group in step 3)') === 0
+    && $pb['count_n'] === ['n' => 25.0, 'small' => 'shot', 'big' => 'bottle'] && ($pb['qty_words']['text'] ?? '') === '57 shots = 2 bottles + 7 shots' && ($pb['qty_words']['exact'] ?? '') === '2.28 bottles'
+    && ($ciM['items']['Klip Brandy']['qty_words']['text'] ?? '') === '50 shots = 2 bottles' && ($ciM['items']['Malibu Cream']['qty_words']['text'] ?? '') === '7 shots',
+    'count unit display: "57 shots = 2 bottles + 7 shots" (exact 2.28 bottles on hover), "50 shots = 2 bottles", "7 shots"; the how line says where 25 came from ' . json_encode([$pb['qty_how'], $pb['qty_words']]));
+$t($ciM['inv'] === [] && ($ciM['an']['sheets'][0]['rows'][0]['fields']['qty_single']['value'] ?? null) === 57, 'count unit: the row keeps its count as written (57, its own cell); the conversion is the resolver\'s');
+$ciS = $ciRun([$ciShot['qkey'] => ['key' => 'stock'], $ciGl['qkey'] => ['key' => 'stock']] + $ciSizes);
+$t(abs($ciS['items']['Premier Brandy']['balance'] - 57) < 1e-9 && abs((float)$ciS['items']['Premier Brandy']['cost'] - 30000) < 1e-9 && $ciS['items']['Premier Brandy']['qty_how'] === null
+    && $ciS['items']['Premier Brandy']['count_n'] === null && $ciS['items']['Premier Brandy']['qty_words'] === null && $ciS['items']['Premier Brandy']['status'] === 'ready',
+    'count unit "in bottles": 57 bottles at 30,000 = the result before this question (no conversion, no words)');
+$ciVk = $ciM['items']['Sky Vodka'];
+$ciVk0 = $ciRun([])['items']['Sky Vodka'];
+$t($ciVk['balance'] === null && $ciVk0['balance'] === null && $ciVk['open'] === $ciVk0['open'] && count($ciVk['open']) === 1 && strpos(json_encode($ciVk['open']), 'x') !== false
+    && count(array_filter($ciM['open'], function ($q) { return $q['type'] === 'measure-n' && strpos($q['text'], 'Sky Vodka') !== false; })) === 1,
+    'count unit: a cell that already says "66 shots" keeps today\'s path (its own "How many shots in one bottle?" question; the step 3 sizes and the new question do not touch it)');
+// a drink may differ from its group
+$malUid = '';
+foreach ((array)$ciShot['count_rows'] as $cr) { if ($cr['name'] === 'Malibu Cream') { $malUid = $cr['uid']; } }
+$ciR = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], '_count_in' => [$malUid => ['key' => 'stock']]] + $ciSizes);
+$t(abs($ciR['items']['Malibu Cream']['balance'] - 7) < 1e-9 && abs($ciR['items']['Premier Brandy']['balance'] - 2.28) < 1e-9 && $ciR['items']['Malibu Cream']['status'] === 'ready',
+    'count unit: a drink\'s own answer wins over the group ("Malibu Cream" in bottles: 7; the others in shots)');
+$ciEach = ['_count_in' => []];
+foreach ((array)$ciShot['count_rows'] as $cr) { $ciEach['_count_in'][$cr['uid']] = ['key' => $cr['name'] === 'Klip Brandy' ? 'stock' : 'measure']; }
+$ciE = $ciRun($ciEach + [$ciGl['qkey'] => ['key' => 'stock']] + $ciSizes);
+$ciEq = array_values(array_filter($ciE['ci'], function ($q) { return strpos($q['text'], 'in shots') !== false; }))[0] ?? [];
+$t(($ciEq['answer'] ?? null) === 'per-row' && $ciE['items']['Klip Brandy']['status'] === 'ready' && $ciE['items']['Malibu Cream']['status'] === 'ready' && abs($ciE['items']['Klip Brandy']['balance'] - 50) < 1e-9 && abs($ciE['items']['Premier Brandy']['balance'] - 2.28) < 1e-9,
+    'count unit: every drink answered on its own = the question is answered (nothing left to ask), each counted its own way');
+$ciRow1 = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], '_count_in' => [$malUid => ['key' => 'measure']]]);
+$t($ciRow1['items']['Klip Brandy']['status'] === 'needs-answer' && $ciRow1['items']['Malibu Cream']['status'] === 'needs-answer',
+    'count unit: a "Malibu" row answer alone does not release the other drinks of the group (they still wait for the group answer or their own)'
+    . json_encode([$ciRow1['items']['Klip Brandy']['status']]));
+// changing a size in step 3 re-works the count
+$ciB = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], '_sizes' => ['g' => ['m:shot|bottle' => ['shot' => 30, 'ml' => 1000]]]]);
+$ciB2 = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], '_sizes' => ['g' => ['m:shot|bottle' => ['shot' => 30, 'ml' => 750]], 'r' => ['premier brandy' => ['ml' => 700, 'shot' => 35]]]]);
+$t(abs($ciB['items']['Premier Brandy']['balance'] - round(57 / 33.3333, 6)) < 1e-9 && abs($ciB2['items']['Premier Brandy']['balance'] - round(57 / 20, 6)) < 1e-9 && abs($ciB2['items']['Klip Brandy']['balance'] - 2) < 1e-9
+    && strpos((string)$ciB2['items']['Premier Brandy']['qty_how'], '700 ml bottle typed for this drink in step 3 / 35 ml shot typed for this drink in step 3') !== false,
+    'count unit: a 1,000 ml bottle in step 3 makes 57 shots 1.710002 bottles (33.3333 in one); a 700 ml bottle + 35 ml shot typed for one drink = 20 in one: 2.85 (the rest keep the group sizes) ' . json_encode([$ciB['items']['Premier Brandy']['balance'], $ciB2['items']['Premier Brandy']['balance']]));
+$ciL = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], '_sizes' => ['g' => ['m:shot|bottle' => ['ml' => 750]]]]);
+$ciN = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock']]);
+$t(abs($ciL['items']['Premier Brandy']['balance'] - 1.9) < 1e-9 && strpos((string)$ciL['items']['Premier Brandy']['qty_how'], '25 ml shot on your Drink measures list') !== false
+    && $ciN['items']['Premier Brandy']['balance'] === null && count(array_filter($ciN['open'], function ($q) { return $q['type'] === 'measure-n' && strpos($q['text'], 'Premier Brandy') !== false; })) === 1,
+    'count unit: no shot typed = the shot on the Drink measures list (25 ml: 750 / 25 = 30, 57 shots = 1.9); no bottle size anywhere = the existing "How many shots are in one bottle?" question');
+// the item's own count measure comes first (an existing item: 28 shots in one bottle), whatever the step 3 sizes say
+$ciEx = ['id' => 801, 'name' => 'Premier Brandy', 'category' => 'BRANDYS', 'unit' => 'Bottle', 'current_quantity' => 0, 'cost_per_unit' => 30000, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '',
+    'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0, '_measure' => ['big' => 'bottle', 'small' => 'shot', 'n' => 28.0, 'side' => 'big'], '_ml' => null];
+$ciX = $ciRun([$ciShot['qkey'] => ['key' => 'measure'], $ciGl['qkey'] => ['key' => 'stock'], '_updates' => [rh_ssi_key('Premier Brandy') => ['quantity']]] + $ciSizes, null, ['existing' => [$ciEx]]);
+$t(abs($ciX['items']['Premier Brandy']['balance'] - round(57 / 28, 6)) < 1e-9 && strpos((string)$ciX['items']['Premier Brandy']['qty_how'], 'this item\'s own count measure') !== false
+    && ($ciX['items']['Premier Brandy']['qty_words']['text'] ?? '') === '57 shots = 2 bottles + 1 shot',
+    'count unit: the item\'s own count measure (28 shots in one bottle) comes before the step 3 sizes: 57 shots = 2.035714 bottles, "57 shots = 2 bottles + 1 shot"');
+// the glass group: a wine kept in caskets, counted in glasses, with the casket and glass sizes of step 3
+$ciG = $ciRun([$ciShot['qkey'] => ['key' => 'stock'], $ciGl['qkey'] => ['key' => 'measure'], '_sizes' => ['g' => ['gl:casket' => ['glass' => 250, 'ml' => 5000]]]]);
+$t(abs($ciG['items']['Red Box Wine']['balance'] - 0.45) < 1e-9 && ($ciG['items']['Red Box Wine']['qty_words']['text'] ?? '') === '9 glasses',
+    'count unit: "in glasses" for a wine kept in caskets: 9 glasses of 250 ml from a 5,000 ml casket = 0.45 casket ("9 glasses")');
+// the value check compares a count answered in shots in the stock unit the cost is for (made-up rows valued at cost: 2.28 x 30,000)
+$ciVcRows = [['Item Name', 'Total Balance', 'Unit Price', 'Stock Value', 'Unit Bought As', 'Unit sold/Served by'],
+    ['Premier Brandy', '57', '30000', '68400', 'Bottle', 'Shot'], ['Klip Brandy', '50', '32000', '64000', 'Bottle', 'Shot']];
+$ciV0 = $ciRun([], $ciVcRows);
+$ciVq = $ciV0['ci'][0]['qkey'] ?? 'x';
+$ciVm = $ciRun([$ciVq => ['key' => 'measure']] + $ciSizes, $ciVcRows);
+$ciVs = $ciRun([$ciVq => ['key' => 'stock']] + $ciSizes, $ciVcRows);
+$vcM = import_vc_finish(import_vc_collect($ciVm['an']), $ciVm['res']['questions'], $ciVm['res']['items']);
+$vcS = import_vc_finish(import_vc_collect($ciVs['an']), $ciVs['res']['questions'], $ciVs['res']['items']);
+$vcSr = $vcS['rows'][0] ?? [];
+$t(($ciV0['ci'][0]['suggest'] ?? null) === null && $vcM['differ'] === 0 && $vcS['differ'] === 2 && empty($vcSr['qty_words']),
+    'value check: answered "in shots", 57 shots (2.28 bottles) x 30,000 = 68,400 agrees with the sheet; answered "in bottles" both rows disagree (57 x 30,000). No suggestion here (the value fits neither count x the price of one shot nor count x the bottle price) '
+    . json_encode([$ciV0['ci'][0]['suggest'] ?? null, $vcM['differ'], $vcS['differ']]));
+$ciVm2 = $ciRun([$ciVq => ['key' => 'measure'], '_sizes' => ['g' => ['m:shot|bottle' => ['shot' => 30, 'ml' => 1000]]]], $ciVcRows);
+$vcM2 = import_vc_finish(import_vc_collect($ciVm2['an']), $ciVm2['res']['questions'], $ciVm2['res']['items']);
+$vcRow = array_values(array_filter($vcM2['rows'], function ($r) { return $r['name'] === 'Premier Brandy'; }))[0] ?? [];
+$t($vcM2['differ'] === 2 && abs((float)($vcRow['qty'] ?? 0) - round(57 / 33.3333, 6)) < 1e-9 && ($vcRow['qty_words'] ?? '') === '57 shots = 1 bottle + 23.7 shots' && ($vcRow['qty_exact'] ?? '') === '1.710002 bottles',
+    'value check rows: a count in shots shows as "57 shots = 1 bottle + 23.7 shots" (exact 1.710002 bottles) ' . json_encode([$vcRow['qty'] ?? null, $vcRow['qty_words'] ?? null]));
+// display helper (the same rounding in admin/js/data-import.js qtyWords)
+$cn = ['n' => 25, 'small' => 'shot', 'big' => 'bottle'];
+$t(import_qty_words(2.28, $cn, 'bottle') === ['text' => '57 shots = 2 bottles + 7 shots', 'exact' => '2.28 bottles'] && import_qty_words(2, $cn)['text'] === '50 shots = 2 bottles'
+    && import_qty_words(0.28, $cn)['text'] === '7 shots' && import_qty_words(0, $cn)['text'] === '0 shots' && import_qty_words(1, $cn)['text'] === '25 shots = 1 bottle'
+    && import_qty_words(0.04, $cn)['text'] === '1 shot' && import_qty_words(2.28, null, 'bottle') === ['text' => '2.28 bottles', 'exact' => '2.28 bottles']
+    && import_qty_words(1.9996, $cn)['text'] === '50 shots = 2 bottles' && import_qty_words(57 / 28, ['n' => 28, 'small' => 'shots', 'big' => 'bottle'])['text'] === '57 shots = 2 bottles + 1 shot',
+    'display: 57 -> "57 shots = 2 bottles + 7 shots", 50 -> "50 shots = 2 bottles", 7 -> "7 shots", 0 -> "0 shots", 1 shot, no N known -> "2.28 bottles", 49.99 shots rounds to 2 bottles');
+$djs = (string)file_get_contents($root . '/admin/js/data-import.js');
+$t(strpos($djs, 'function qtyWords(qty, cn, unit)') !== false && strpos($djs, "var smalls = Math.round(x * n * 10) / 10;") !== false && strpos($djs, "post('count_row'") !== false,
+    'screen: the same words in the browser (qtyWords) and a drink\'s own answer is saved through count_row');
+$t(import_count_in_read('Bottle', 'Bottle', [], [], ['shot' => true], ['glass' => true]) === null && import_count_in_read('Double', 'Bottle', [['name' => 'double', 'ml' => 50]], [], ['shot' => true], ['glass' => true]) === null
+    && import_count_in_read('25ml', 'Bottle', [], [], ['shot' => true], ['glass' => true]) === null && (import_count_in_read('Tot 35ml', 'Bottle', [['name' => 'shot', 'ml' => 25]], [], ['shot' => true, 'tot' => true], [])['cell_ml'] ?? null) === 35.0,
+    'count unit: served by the bottle itself, a "Double" or a bare "25ml" is never asked; "Tot 35ml" is a shot of 35 ml (the size from the cell)');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

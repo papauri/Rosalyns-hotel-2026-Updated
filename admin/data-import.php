@@ -10,7 +10,7 @@
  * Access: admin-init.php (session, data_import permission, stock module) + this file (kill switch data_import_enabled, fail-closed,
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
- * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | drinks_list | drinks_set | menu_list | sizes_list | sizes_set | sizes_bulk | cancel | confirm | list | delete.
+ * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | count_row | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | drinks_list | drinks_set | menu_list | sizes_list | sizes_set | sizes_bulk | cancel | confirm | list | delete.
  * menu_list / drinks_set = Step 3 "Put items on the menu" (includes/import/drinks.php): any item with a selling price (or one typed here), drinks
  * and food, grouped by the file's category heading; ticked one by one or all at once (unticked by default); ticking, typing a price, choosing the
  * menu and importing a ticked item also need the Menu permission.
@@ -412,7 +412,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'sizes_bulk', 'menu_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'count_row', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'sizes_bulk', 'menu_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -473,6 +473,16 @@ if ($isAjax) {
         }
         $r = import_job_answer($pdo, $jobId, $qid, $answer, $uid);
         if (!empty($r['ok'])) {          // the fresh picture comes back with the answer (one round trip, not two)
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
+    if ($action === 'count_row') {
+        // one drink's own answer to "is the count in bottles or in shots?" ('' = back to the group's answer)
+        $r = import_job_count_row($pdo, $jobId, (string)($_POST['question'] ?? ''), (string)($_POST['uid'] ?? ''), (string)($_POST['answer'] ?? ''), $uid);
+        if (!empty($r['ok'])) {
             $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
         }

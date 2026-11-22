@@ -1141,6 +1141,99 @@ try {
         ($P0[$n('Coke P')]['menu'] ?? '') === 'drink' && ($P0[$n('Coke P')]['menu_from'] ?? '') === 'menu_cat' && !empty($P0[$n('Beans P')]['need_menu'])
         && !empty($P0[$n('Hot chocolate P')]['need_menu']), json_encode([$P0[$n('Coke P')] ?? null, $P0[$n('Beans P')]['menu'] ?? null, $P0[$n('Hot chocolate P')]['menu'] ?? null]));
 
+    // ---- the count-unit question (owner 2026-11-22): a bar sheet laid out like the owner's bar workbook, where the count of a drink sold by the
+    // shot is the SHOTS left (57 = 57 shots) and the Stock Value column is count x the price of one shot. Never guessed: asked, blocks confirm.
+    $headC = ['Item Name', 'Categories', 'Total Balance', 'Unit Price (MWK)', 'Selling price', 'Stock Value', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'];
+    $rC = import_job_create($pdo, $file($headC, [
+        [$n('Premier C'), 'BRANDYS', '57', '30000', '4000', '228000', 'Bottle', '1', 'Shot'],
+        [$n('Klip C'), 'BRANDYS', '50', '32000', '4500', '225000', 'Bottle', '1', 'Shot'],
+        [$n('Lager C'), 'LOCAL BEERS', '94', '50420', '6000', '564000', 'Crate', '20', 'Bottle'],
+    ], 'c.csv'), 'zzd-c-' . $run . '.csv', $admin, ['from_upload' => false]);
+    $jC = (int)($rC['job_id'] ?? 0);
+    $made[] = import_job_get($pdo, $jC)['stored_path'] ?? null;
+    import_job_analyse($pdo, $jC);
+    for ($i = 0; $i < 40; $i++) {           // every other blocking question the safe way; the count-unit question is left open
+        $s = import_job_review_summary($pdo, $jC);
+        $open = null;
+        foreach ($s['questions'] as $q) { if ($q['blocking'] && $q['answer'] === null && $q['options'] && $q['type'] !== 'count-in') { $open = $q; break; } }
+        if (!$open) { break; }
+        $keys = array_column($open['options'], 'key');
+        import_job_answer($pdo, $jC, $open['id'], in_array('per-unit', $keys, true) ? 'per-unit' : $keys[0], $admin);
+    }
+    $cItems = function () use ($pdo, &$jC) {
+        $st = import_job_state($pdo, $jC);
+        $o = [];
+        foreach ((array)$st['res']['items'] as $it) { $o[$it['name']] = $it; }
+        return $o;
+    };
+    $sC = import_job_review_summary($pdo, $jC);
+    $qC = array_values(array_filter($sC['questions'], function ($q) { return $q['type'] === 'count-in'; }));
+    $vC = import_job_review_view($pdo, $jC, [], ['facets' => true]);
+    $sheetQ = array_column((array)($vC['page']['sheet_questions'] ?? []), 'type');
+    $ck('count unit: ONE question "is it in bottles or in shots?" for the 2 drinks sold by the shot, shown once at the top of step 3, with the evidence as a suggestion; unanswered = cannot confirm',
+        count($qC) === 1 && $qC[0]['answer'] === null && $qC[0]['blocking'] && count($qC[0]['count_rows'] ?? []) === 2 && ($qC[0]['suggest']['key'] ?? '') === 'measure'
+        && strpos((string)$qC[0]['text'], 'is it in bottles or in shots?') !== false && in_array('count-in', $sheetQ, true) && !import_job_can_confirm($pdo, $jC)
+        && ($cItems()[$n('Premier C')]['status'] ?? '') === 'needs-answer' && ($cItems()[$n('Lager C')]['status'] ?? '') === 'ready',
+        json_encode([$qC[0]['text'] ?? null, $qC[0]['suggest'] ?? null, $sheetQ]));
+    $qid = $qC[0]['id'] ?? '';
+    $uidOf = [];
+    foreach ((array)($qC[0]['count_rows'] ?? []) as $cr) { $uidOf[$cr['name']] = $cr['uid']; }
+    $aM = import_job_answer($pdo, $jC, $qid, 'measure', $admin);
+    // no bottle size yet: the drinks wait ("how many shots in one bottle?"), but are listed in the step 3 sizes so the sizes can be typed there
+    [$svC0] = [import_job_sizes_view($pdo, $jC, $admin, ['size' => 100, 'ai' => false])];
+    $grpC = array_column((array)($svC0['groups'] ?? []), 'key');
+    [, $C0] = $view($jC, $admin);
+    $ck('count unit "in shots" with no bottle size: the drinks wait for "How many shots in one bottle?", and are listed under the step 3 sizes (not tickable for the menu yet)',
+        !empty($aM['ok']) && ($cItems()[$n('Premier C')]['status'] ?? '') === 'needs-answer' && ($cItems()[$n('Premier C')] ?? ['balance' => 1])['balance'] === null
+        && in_array('m:shot|bottle', $grpC, true) && isset($C0[$n('Premier C')]) && empty($C0[$n('Premier C')]['tickable'])
+        && preg_match('/is in shots and is not worked out yet|Add bottle size in Step 3/', (string)($C0[$n('Premier C')]['why_not'] ?? '')) === 1,
+        json_encode([$aM, $grpC, $C0[$n('Premier C')]['why_not'] ?? null]));
+    $z1 = import_job_sizes_set($pdo, $jC, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'field' => 'ml', 'value' => '750']);
+    $z2 = import_job_sizes_set($pdo, $jC, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'field' => 'shot', 'value' => '30']);
+    $I1 = $cItems();
+    [, $C1] = $view($jC, $admin);
+    $pc = $I1[$n('Premier C')] ?? [];
+    $ck('count unit "in shots" + step 3 sizes 750 ml bottle / 30 ml shot: 57 shots = 2.28 bottles in the opening count (exact), "57 shots = 2 bottles + 7 shots"; cost 30,000 a bottle, not divided',
+        !empty($z1['ok']) && !empty($z2['ok']) && ($pc['status'] ?? '') === 'ready' && abs((float)($pc['balance'] ?? 0) - 2.28) < 1e-9 && abs((float)($pc['cost'] ?? 0) - 30000) < 1e-9
+        && ($pc['qty_words']['text'] ?? '') === '57 shots = 2 bottles + 7 shots' && abs((float)($I1[$n('Klip C')]['balance'] ?? 0) - 2) < 1e-9 && import_job_can_confirm($pdo, $jC),
+        json_encode([$z1, $z2, $pc['balance'] ?? null, $pc['qty_how'] ?? null, $pc['qty_words'] ?? null]));
+    $ck('count unit: "Put items on the menu" is unchanged by the answer: one shot costs the bottle cost x 30 / 750 = 1,200 (never the count)',
+        abs((float)($C1[$n('Premier C')]['cost'] ?? 0) - 1200) <= BALANCE_TOLERANCE && !empty($C1[$n('Premier C')]['tickable']) && ($C1[$n('Premier C')]['measure'] ?? '') === '30 ml (shot)',
+        json_encode($C1[$n('Premier C')] ?? null));
+    // the bottle size changed in step 3 re-works the count
+    import_job_sizes_set($pdo, $jC, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'field' => 'ml', 'value' => '1000']);
+    $ck('count unit: changing the bottle size in step 3 (1,000 ml) re-works the count: 57 / (1000 / 30) = 1.710002 bottles',
+        abs((float)($cItems()[$n('Premier C')]['balance'] ?? 0) - round(57 / 33.3333, 6)) < 1e-9, json_encode($cItems()[$n('Premier C')]['balance'] ?? null));
+    import_job_sizes_set($pdo, $jC, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'field' => 'ml', 'value' => '750']);
+    // one drink differs from its group
+    $rKs = import_job_count_row($pdo, $jC, $qid, $uidOf[$n('Klip C')] ?? '', 'stock', $admin);
+    $rBadU = import_job_count_row($pdo, $jC, $qid, 'nope', 'stock', $admin);
+    $rBadK = import_job_count_row($pdo, $jC, $qid, $uidOf[$n('Klip C')] ?? '', 'cases', $admin);
+    $I2 = $cItems();
+    $ck('count unit: a drink\'s own answer ("Klip C" in bottles: 50) wins over the group; a drink not in the question or a word that is not a choice is refused',
+        !empty($rKs['ok']) && abs((float)($I2[$n('Klip C')]['balance'] ?? 0) - 50) < 1e-9 && abs((float)($I2[$n('Premier C')]['balance'] ?? 0) - 2.28) < 1e-9
+        && empty($rBadU['ok']) && empty($rBadK['ok']), json_encode([$rKs['error'] ?? null, $rBadU['error'] ?? null, $I2[$n('Klip C')]['balance'] ?? null]));
+    import_job_count_row($pdo, $jC, $qid, $uidOf[$n('Klip C')] ?? '', '', $admin);
+    // "in bottles" = the result before this question; the menu cost of one is the same
+    import_job_answer($pdo, $jC, $qid, 'stock', $admin);
+    $I3 = $cItems();
+    [, $C3] = $view($jC, $admin);
+    $ck('count unit "in bottles": 57 bottles (today\'s result), no words; one shot still costs 1,200 on the menu',
+        abs((float)($I3[$n('Premier C')]['balance'] ?? 0) - 57) < 1e-9 && empty($I3[$n('Premier C')]['qty_words'])
+        && abs((float)($C3[$n('Premier C')]['cost'] ?? 0) - 1200) <= BALANCE_TOLERANCE, json_encode([$I3[$n('Premier C')]['balance'] ?? null, $C3[$n('Premier C')]['cost'] ?? null]));
+    // import it "in shots": the opening count gets 2.28 bottles at 30,000 (value 68,400), the step 3 bottle size is saved on the item
+    import_job_answer($pdo, $jC, $qid, 'measure', $admin);
+    $cC = import_commit_stock($pdo, $jC, $admin);
+    $ingC = (int)$col('SELECT id FROM stock_ingredients WHERE name = ?', [$n('Premier C')]);
+    $lnC = $pdo->prepare('SELECT actual_quantity, cost_per_unit FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
+    $lnC->execute([(int)($cC['result']['opening_count_id'] ?? 0), $ingC]);
+    $lnC = $lnC->fetch(PDO::FETCH_ASSOC) ?: [];
+    $ck('count unit at import: the opening count line is 2.28 bottles at 30,000 (value 68,400), the 750 ml bottle size typed in step 3 is saved on the item',
+        !empty($cC['ok']) && $ingC > 0 && abs((float)($lnC['actual_quantity'] ?? 0) - 2.28) < 0.0000005 && abs((float)($lnC['cost_per_unit'] ?? 0) - 30000) < 0.005
+        && abs((float)($lnC['actual_quantity'] ?? 0) * (float)($lnC['cost_per_unit'] ?? 0) - 68400) < 0.01
+        && abs((float)$col('SELECT volume_ml FROM stock_ingredients WHERE id = ?', [$ingC]) - 750) < 0.005,
+        json_encode([$cC['ok'] ?? null, $cC['error'] ?? null, $lnC]));
+
     // the import's own wording when a drink's stock item is gone (49ddf7d had made it "Nothing was saved.", the Put on the menu wording)
     $linkErr = '';
     try {

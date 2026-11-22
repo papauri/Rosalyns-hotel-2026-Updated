@@ -15,6 +15,9 @@
  *   import_measure_in_text($text, $words)   the first measure word written in a heading, or null
  *   import_measure_cell($v, $words)         "66 shots" -> ['value'=>66, 'word'=>'shots'] (number and word both from that cell), or null
  *   import_measure_decide(...)              where N comes from for one item: none / wait / n / ask
+ *   import_count_in_read(...)               the count-unit question (owner 2026-11-22): is a served-by cell a measure a plain count could be in?
+ *   import_count_in_step3($rd, $nk, $sizes)  the step 3 bottle / shot / glass sizes that give N for a count answered "in shots"
+ *   import_qty_words($qty, $cn)             "57 shots = 2 bottles + 7 shots" (display only; the stored figure is never changed)
  */
 
 require_once __DIR__ . '/text-util.php';
@@ -236,6 +239,31 @@ if (!function_exists('import_measure_words')) {
                 break;
             }
         }
+        // the count-unit answer "in shots" (owner 2026-11-22): the step 3 sizes come next after the item's own count measure, in the same order
+        // as step 3 shows them (own saved size / volume unit > the row's typed size > a size in the name > the group's size; shot: row > cell >
+        // group > the Drink measures list). Never an optional reading (a count is never set by a guess). Changing a size there re-works N here.
+        $sizeFrom = $size !== null ? (is_array($ex) ? ((($ex['_ml_source'] ?? '') === 'name') ? 'name' : 'item') : (import_measure_unit_ml($unit) !== null ? 'unit' : 'name')) : '';
+        $s3 = (isset($in['step3']) && is_array($in['step3'])) ? $in['step3'] : null;
+        $mFrom = $mml !== null ? 'list' : '';
+        if ($s3 !== null) {
+            $pos = function ($v): ?float {
+                return is_numeric($v) && (float)$v > 0 && is_finite((float)$v) ? (float)$v : null;
+            };
+            $typedOk = !$isCont || !empty($s3['pour']);       // a crate holds bottles: a bottle size is never the crate's (a carton of juice is poured from)
+            $rowMl = $typedOk ? $pos($s3['row_ml'] ?? null) : null;
+            $grpMl = $typedOk ? $pos($s3['group_ml'] ?? null) : null;
+            if ($rowMl !== null && ($size === null || $sizeFrom === 'name')) {
+                [$size, $sizeFrom] = [$rowMl, 'row'];
+            } elseif ($size === null && $grpMl !== null) {
+                [$size, $sizeFrom] = [$grpMl, 'group'];
+            }
+            $sm = $pos($s3['measure_ml'] ?? null);
+            if ($sm !== null) {
+                [$mml, $mFrom] = [$sm, (string)($s3['measure_from'] ?? 'step3')];
+            }
+        }
+        $out['size_from'] = $sizeFrom;
+        $out['measure_from'] = $mFrom;
         $out['size_ml'] = $size;
         $out['measure_ml'] = $mml;
         if ($size !== null && $mml !== null) {
@@ -666,5 +694,128 @@ if (!function_exists('import_measure_words')) {
         $s = ($plain > 0 ? $fmt($plain) . ' ' . import_measure_plural($unit, $plain) . ' + ' : '') . $fmt($amount) . ' ' . $word . ' = ' . $fmt($result) . ' ' . import_measure_plural($unit, $result)
             . ' (' . $fmt($n) . ' ' . import_measure_plural(import_measure_singular($word), $n) . ' in one ' . $unit . ': ' . $how . ').';
         return $s;
+    }
+
+    /**
+     * The count-unit question (owner 2026-11-22: "57 = 57 shots, not bottles"): what a served-by cell says one sale is, when it is a measure a
+     * plain count could be written in (a shot / tot, a glass, a one-word measure on the hotel's Drink measures list). null = not such a measure
+     * (the stock unit itself, a bare volume, a generic word like "single" or "double", words the plain rules cannot read).
+     * Returns ['kind' => shot|glass|measure, 'word' (singular, lower case), 'cell_ml' (a size written in the cell), 'list_ml', 'gkey' (the step 3
+     * size group of import_drinks_build: "m:shot|bottle", "gl:casket"), 'pour' (the stock unit is a carton / casket poured from)].
+     */
+    function import_count_in_read(string $served, string $unit, array $list, array $synonyms, array $shotSet, array $glassSet, array $pourSet = []): ?array
+    {
+        $served = trim($served);
+        if ($served === '') {
+            return null;
+        }
+        $u = mb_strtolower(trim($unit));
+        $pour = $u !== '' ? import_pour_container($unit, $pourSet) : null;
+        $sv = import_served_read($served, $unit, $list, $synonyms);
+        if ($sv['kind'] === 'unit') {
+            return null;            // served by the stock unit itself ("Bottle"): the count is in it, nothing to ask
+        }
+        $generic = array_flip(import_measure_generic_words());
+        $gr = in_array($sv['kind'], ['ml', 'as_is'], true) ? import_glass_read($served, $glassSet) : null;
+        if ($gr !== null) {
+            return ['kind' => 'glass', 'word' => (string)$gr['word'], 'cell_ml' => $gr['ml'] !== null ? (float)$gr['ml'] : null, 'list_ml' => null,
+                'gkey' => 'gl:' . ($pour !== null ? (string)$pour['word'] : $u), 'pour' => $pour !== null];
+        }
+        $w = import_measure_singular(mb_strtolower(trim($sv['kind'] === 'list' ? (string)$sv['measure'] : (string)$sv['word'])));
+        if ($w === '' || strpos($w, ' ') !== false || isset($generic[$w]) || ($u !== '' && import_measure_singular($u) === $w)) {
+            return null;
+        }
+        if (isset($shotSet[$w])) {
+            // the shot measure of the hotel's list (same name first, else its first shot measure), grouped the way step 3 groups it
+            $shotName = $w;
+            $listMl = null;
+            foreach ([true, false] as $same) {
+                foreach ($list as $dm) {
+                    $dn = is_array($dm) ? import_measure_singular(mb_strtolower(trim((string)($dm['name'] ?? '')))) : '';
+                    if ($dn !== '' && is_numeric($dm['ml'] ?? null) && (float)$dm['ml'] > 0 && ($same ? $dn === $w : isset($shotSet[$dn]))) {
+                        [$listMl, $shotName] = [(float)$dm['ml'], mb_strtolower((string)$dm['name'])];
+                        break 2;
+                    }
+                }
+            }
+            // a list measure of ANOTHER name ("Tot" with only "shot" on the list) gives the group, never the size of this tot
+            return ['kind' => 'shot', 'word' => $w, 'cell_ml' => $sv['kind'] === 'ml' ? (float)$sv['ml'] : null,
+                'list_ml' => import_measure_singular($shotName) === $w ? $listMl : null,
+                'gkey' => ($sv['kind'] === 'as_is' && $listMl === null) ? '' : 'm:' . $shotName . '|' . $u, 'pour' => $pour !== null];
+        }
+        if ($sv['kind'] === 'list') {
+            $listMl = null;
+            foreach ($list as $dm) {
+                if (is_array($dm) && import_measure_singular(mb_strtolower(trim((string)($dm['name'] ?? '')))) === $w && is_numeric($dm['ml'] ?? null) && (float)$dm['ml'] > 0) {
+                    $listMl = (float)$dm['ml'];
+                    break;
+                }
+            }
+            return ['kind' => 'measure', 'word' => $w, 'cell_ml' => null, 'list_ml' => $listMl, 'gkey' => 'm:' . mb_strtolower((string)$sv['word']) . '|' . $u, 'pour' => $pour !== null];
+        }
+        return null;
+    }
+
+    /**
+     * The step 3 sizes for one item counted in a measure ($rd = import_count_in_read, $nk = the item key, $sizes = answers['_sizes']): the typed
+     * bottle / container size of the row and of its group, and the measure size (row > the cell > group > the Drink measures list). Only what a
+     * person typed or the file / list says; never an optional reading. Fed to import_measure_decide() as 'step3'.
+     */
+    function import_count_in_step3(array $rd, string $nk, array $sizes): array
+    {
+        $pos = function ($v): ?float {
+            return is_numeric($v) && (float)$v > 0 && is_finite((float)$v) ? (float)$v : null;
+        };
+        $rowA = is_array($sizes['r'][$nk] ?? null) ? $sizes['r'][$nk] : [];
+        $grpA = ($rd['gkey'] ?? '') !== '' && is_array($sizes['g'][$rd['gkey']] ?? null) ? $sizes['g'][$rd['gkey']] : [];
+        $f = $rd['kind'] === 'glass' ? 'glass' : ($rd['kind'] === 'shot' ? 'shot' : '');
+        $mm = null;
+        $mf = '';
+        if ($f !== '' && ($v = $pos($rowA[$f] ?? null)) !== null) {
+            [$mm, $mf] = [$v, 'row'];
+        } elseif ($rd['cell_ml'] !== null) {
+            [$mm, $mf] = [(float)$rd['cell_ml'], 'cell'];
+        } elseif ($f !== '' && ($v = $pos($grpA[$f] ?? null)) !== null) {
+            [$mm, $mf] = [$v, 'group'];
+        } elseif ($rd['list_ml'] !== null) {
+            [$mm, $mf] = [(float)$rd['list_ml'], 'list'];
+        }
+        return ['row_ml' => $pos($rowA['ml'] ?? null), 'group_ml' => $pos($grpA['ml'] ?? null), 'measure_ml' => $mm, 'measure_from' => $mf, 'pour' => !empty($rd['pour'])];
+    }
+
+    /**
+     * A quantity of an item counted in a measure, in words (owner 2026-11-22: "57 shots = 2 bottles + 7 shots"), the same rounding as the Stock
+     * screens (rh_stock_qty_words: smalls to 1 dp, 29.99 of 30 is the next bottle). DISPLAY ONLY. $cn = ['n', 'small', 'big'] (N smalls in one big).
+     * Whole bottles: "50 shots = 2 bottles"; under one bottle: "7 shots"; 0: "0 shots". 'exact' = the stored figure in the stock unit (6 dp).
+     * No $cn (or a bad N) = today's text: the number and the unit.
+     */
+    function import_qty_words(float $qty, ?array $cn, string $unit = ''): array
+    {
+        $exact = import_measure_fmt($qty) . ($unit !== '' ? ' ' . import_measure_plural($unit, $qty) : '');
+        $n = is_array($cn) ? (float)($cn['n'] ?? 0) : 0.0;
+        if (!is_array($cn) || $n < 1 || !is_finite($n) || trim((string)($cn['small'] ?? '')) === '' || $qty < 0) {
+            return ['text' => $exact, 'exact' => $exact];
+        }
+        $big = trim((string)($cn['big'] ?? '')) !== '' ? trim((string)$cn['big']) : $unit;
+        $small = import_measure_singular(mb_strtolower(trim((string)$cn['small'])));
+        $exact = import_measure_fmt($qty) . ' ' . import_measure_plural($big, $qty);
+        $one = function (float $x): string {
+            return rtrim(rtrim(number_format($x, 1, '.', ','), '0'), '.');
+        };
+        $smalls = round($qty * $n, 1);
+        $bigs = (int)floor($smalls / $n + 1e-9);
+        $rest = round($smalls - $bigs * $n, 1);
+        if ($rest < 0.05) {
+            $rest = 0.0;
+        } elseif ($rest >= round($n, 1) - 1e-9) {
+            $bigs++;
+            $rest = 0.0;
+        }
+        $head = $one($smalls) . ' ' . import_measure_plural($small, $smalls);
+        if ($bigs === 0) {
+            return ['text' => $head, 'exact' => $exact];
+        }
+        $parts = $bigs . ' ' . import_measure_plural($big, (float)$bigs) . ($rest > 0 ? ' + ' . $one($rest) . ' ' . import_measure_plural($small, $rest) : '');
+        return ['text' => $head . ' = ' . $parts, 'exact' => $exact];
     }
 }
