@@ -11,10 +11,14 @@
  *   RhContextMenu.register(selector, build) right-click, the ContextMenu key / Shift+F10 and a long press (touch) on an
  *                                           element matching selector call build(el, event) -> items | {title, items}
  *                                           | null (null = the browser's own menu). Later registrations are asked first.
+ *   RhContextMenu.registerFallback(build)  asked LAST, for a right-click / ContextMenu key where no registration above
+ *                                           answered (admin/js/admin-row-context.js: any list row). Same return values.
  *   RhContextMenu.close(), .isOpen(), .wantsNative(event), .muteClicks(ms), .LONG_PRESS_MS
- *   item: {label, icon ('fa-...'), run(), href, danger, disabled, hint}. Disabled items stay listed, hint says why.
+ *   item: {label, icon ('fa-...'), run(), href, danger, disabled, hint} or {sep: true} (a divider line).
+ *   Disabled items stay listed, hint says why.
  *
- * The browser's own menu is kept on Shift+right-click, in text fields / selects / editable text, and on selected text.
+ * The browser's own menu is kept on Shift+right-click, in text fields / selects / editable text, on selected text and
+ * anywhere under [data-no-ctx].
  * Keyboard in the menu: arrows, Home / End, Enter / Space, Esc (focus goes back), Tab closes.
  * Labels reach the page only through textContent.
  */
@@ -25,6 +29,7 @@
     var LONG_PRESS_MS = 550;
     var cur = null;       // {el, anchor, opener}
     var regs = [];        // [{selector, build}]
+    var fallback = null;  // build(el, event) used when no registration answered
     var muteUntil = 0;    // a long press that opened the menu must not also click what is under the finger
     var press = null;
 
@@ -49,6 +54,7 @@
         if (!e) return false;
         if (e.type === 'contextmenu' && e.shiftKey) return true;
         var t = e.target;
+        if (t && t.closest && t.closest('[data-no-ctx]')) return true;
         if (t && t.closest && t.closest('textarea, select, [contenteditable=""], [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"])')) return true;
         var s = window.getSelection ? window.getSelection() : null;
         if (s && !s.isCollapsed && String(s).trim() !== '' && t && s.containsNode && s.containsNode(t, true)) return true;
@@ -81,6 +87,12 @@
             m.appendChild(head);
         }
         list.forEach(function (it) {
+            if (it.sep) {
+                var hr = el('hr', 'menu-divider');
+                hr.setAttribute('role', 'separator');
+                m.appendChild(hr);
+                return;
+            }
             var b;
             if (it.href && !it.disabled) {
                 b = el('a');
@@ -152,6 +164,7 @@
     function register(selector, build) {
         if (typeof selector === 'string' && typeof build === 'function') regs.push({ selector: selector, build: build });
     }
+    function registerFallback(build) { if (typeof build === 'function') fallback = build; }
     /** The registered target under node (last registered first): {reg, node}. */
     function find(node) {
         if (!node || !node.closest) return null;
@@ -171,6 +184,11 @@
             var s = spec(regs[i].build(hit, e));
             if (s) return { spec: s, node: hit };
         }
+        if (fallback && target.closest) {
+            var fs = null;
+            try { fs = spec(fallback(target, e)); } catch (err) { fs = null; }
+            if (fs) return { spec: fs, node: target };
+        }
         return null;
     }
 
@@ -179,7 +197,7 @@
     /* ---- right-click */
     document.addEventListener('contextmenu', function (e) {
         if (Date.now() < muteUntil) { e.preventDefault(); return; }
-        if (e.defaultPrevented || wantsNative(e) || !find(e.target)) return;
+        if (e.defaultPrevented || wantsNative(e) || !(fallback || find(e.target))) return;
         var b = build(e.target, e);
         if (!b) return;
         e.preventDefault();
@@ -189,7 +207,7 @@
     document.addEventListener('keydown', function (e) {
         if (!(e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) || e.defaultPrevented || cur) return;
         var t = document.activeElement;
-        if (!t || t === document.body || wantsNative({ type: 'keydown', target: t }) || !find(t)) return;
+        if (!t || t === document.body || wantsNative({ type: 'keydown', target: t }) || !(fallback || find(t))) return;
         var b = build(t, e);
         if (!b) return;
         e.preventDefault();
@@ -245,6 +263,7 @@
         close: close,
         isOpen: function () { return !!cur; },
         register: register,
+        registerFallback: registerFallback,
         wantsNative: wantsNative,
         muteClicks: muteClicks,
         LONG_PRESS_MS: LONG_PRESS_MS

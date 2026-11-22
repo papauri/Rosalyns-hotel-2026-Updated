@@ -14,6 +14,10 @@
 
 <!-- Admin Components (Modal, Alert/Toast, AdminConfirm, ButtonLoader) — guard prevents double-init -->
 <script src="js/admin-components.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-components.js'); ?>"></script>
+<!-- Right-click menu (RhContextMenu; guarded against double load by pages that also include it) + the shared row menu
+     for every admin list (admin-row-context.js, GRID_UNIFY_PLAN Phase 1b) -->
+<script src="js/admin-context-menu.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-context-menu.js'); ?>"></script>
+<script src="js/admin-row-context.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-row-context.js'); ?>"></script>
 <!-- Admin Core JS (burger menu, nav, modals) -->
 <script src="js/admin-main.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-main.js'); ?>"></script>
 <!-- Shared bulk-selection helper (select-all + bulk bar), delegated so it survives SPA navigation -->
