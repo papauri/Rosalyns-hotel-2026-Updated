@@ -8,7 +8,8 @@
  *   $opsPayload  rh_ops_payload() result (admin/includes/ops-timeline-data.php)
  *   $opsInitial  rh_ops_deeplink() result (id, room, room_id, date, view, days)
  *   $opsPage     ['list' => CSS selector of the list card, 'table' => selector of its table,
- *                 'confirm' => the page's confirm function, 'edit' => the page's edit function]
+ *                 'confirm' => the page's confirm function, 'edit' => the page's edit function,
+ *                 optional 'bulk' => selector of the list's bulk bar form, 'new' => the page's prefilled add function]
  * The grid is drawn by admin/js/room-timeline-ops.js (via RoomTimeline.init) from the JSON block below. The section is
  * hidden until the script runs, so without JavaScript the page shows its list and modals exactly as before.
  * Every change goes through the page's own POST handlers (same fields, CSRF token and confirm).
@@ -34,6 +35,9 @@ $opsJson = json_encode([
     'confirm' => $opsPage['confirm'],
     'edit' => $opsPage['edit'],
     'filter' => 'filterTable',
+    // Picks on the grid (admin/js/room-timeline-select.js): the list's bulk bar form, and the page's prefilled add form.
+    'bulk' => (string)($opsPage['bulk'] ?? ''),
+    'newFor' => (string)($opsPage['new'] ?? ''),
     'csrf' => (string)($csrf_token ?? ''),
 ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 $opsFloors = [];

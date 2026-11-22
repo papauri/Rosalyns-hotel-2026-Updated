@@ -824,7 +824,7 @@ if (!function_exists('rh_cal_timeline_payload')) {
     function rh_cal_timeline_can(int $uid): array
     {
         $keys = ['open_booking', 'checkin', 'checkout', 'assign', 'move', 'nights', 'edit_dates', 'payment', 'create', 'rooms_page',
-            'blocked_page', 'maint_page', 'hk_page'];
+            'blocked_page', 'maint_page', 'hk_page', 'block'];
         if ($uid <= 0 || !function_exists('rhCanLinkTo')) {
             return array_fill_keys($keys, false);
         }
@@ -846,6 +846,8 @@ if (!function_exists('rh_cal_timeline_payload')) {
             'blocked_page' => $link('blocked-dates.php'),
             'maint_page' => $link('room-maintenance.php'),
             'hk_page' => $link('housekeeping.php'),
+            // Block / Unblock picked nights: the same checks blocked-dates.php makes before grid_apply (page + Block Rooms).
+            'block' => $link('blocked-dates.php') && function_exists('rhCanBlockRooms') && rhCanBlockRooms($uid),
         ];
     }
 

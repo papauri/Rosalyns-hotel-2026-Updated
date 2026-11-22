@@ -2,8 +2,11 @@
  * Blocked Dates calendar grid (admin/blocked-dates.php, Calendar view).
  * Rows: All rooms, each room type, each room (a joined room is one row). Columns: the month's nights.
  * Select nights (click, drag a rectangle, shift-click a range, click a room name for its whole month,
- * arrow keys + Space), then Block or Unblock them in one save (action=grid_apply). The server decides
- * everything: past nights, joined rooms, rows blocked by a wider block.
+ * click a day for that night in every shown line, arrow keys + Space, Esc clears), then Block or Unblock them in
+ * one save (action=grid_apply). The server decides everything: past nights, joined rooms, rows blocked by a wider
+ * block. The actions sit in the shared sticky bulk bar (#bdgBar, the admin-bulk-bar look) and in the admin-wide
+ * right-click menu (RhContextMenu, admin/js/admin-context-menu.js: right-click, the ContextMenu key / Shift+F10, or a
+ * long press on touch), the same as on the Calendar, Housekeeping and Maintenance timelines (GRID_UNIFY_PLAN Phase 1).
  * The grid (#bdgWrap) is swapped after each save, so every handler is delegated.
  */
 (function () {
@@ -108,6 +111,11 @@
         });
         var n = cells.length;
         var text;
+        var groups = groupCells(cells);
+        var allRooms = groups.every(function (g) { return g.t === 'room'; });
+        var head = n + (n === 1 ? ' night' : ' nights') + (allRooms
+            ? ' in ' + groups.length + (groups.length === 1 ? ' room' : ' rooms')
+            : ' on ' + groups.length + (groups.length === 1 ? ' line' : ' lines'));
         if (n === 0) {
             text = 'No nights selected';
         } else if (n === 1) {
@@ -117,12 +125,22 @@
             if (direct) parts.push(direct + ' already blocked');
             if (inherited) parts.push(inherited + ' blocked by the room type or All rooms');
             if (open) parts.push(open + ' open');
-            text = n + ' nights selected: ' + whereText(groupCells(cells), 4) + ' (' + parts.join(', ') + ')';
+            text = whereText(groups, 4) + ' (' + parts.join(', ') + ')';
         }
         if (n > 0 && booked > 0) {
             text += '. ' + booked + ' selected night(s) already have a booking: blocking does not move the guest.';
         }
-        el.textContent = text;
+        el.textContent = '';
+        if (n > 0) {
+            var strong = document.createElement('strong');
+            strong.textContent = head;
+            el.appendChild(strong);
+            el.appendChild(document.createTextNode(': ' + text));
+        } else {
+            el.textContent = text;
+        }
+        var bar = document.getElementById('bdgBar');
+        if (bar) bar.hidden = n === 0 && !busy;
         var blockBtn = document.getElementById('bdgBlockBtn');
         var unblockBtn = document.getElementById('bdgUnblockBtn');
         var clearBtn = document.getElementById('bdgClearBtn');
@@ -200,6 +218,8 @@
 
     document.addEventListener('click', function (e) {
         if (busy) return;
+        var dh = e.target.closest && e.target.closest('#bdgTable thead th.bdg-dayhead');
+        if (dh) { selectColumn(dh.cellIndex); return; }
         var td = e.target.closest && e.target.closest('#bdgTable td[data-sel="1"]');
         if (td && (e.pointerType === 'touch' || lastPointer === 'touch')) { // a tap toggles one night
             toggle(td);
@@ -225,8 +245,83 @@
         paint();
     }
 
-    // ── Keyboard: arrows move, Shift+arrows extend, Space/Enter toggles; Enter on a room name selects its row. ──
+    /** Day head: every open night of that column in the shown lines, or clear them when all are selected. */
+    function selectColumn(ci) {
+        var cells = visibleRows().map(function (tr) { return tr.cells[ci]; }).filter(isSel);
+        if (!cells.length) return;
+        var all = cells.every(function (td) { return selected.has(keyOf(td)); });
+        cells.forEach(function (td) {
+            if (all) selected.delete(keyOf(td)); else selected.set(keyOf(td), true);
+        });
+        anchor = cells[0];
+        paint();
+    }
+
+    // ── The admin-wide right-click menu (RhContextMenu): the same Block / Unblock / Clear as the bar. ──
+    function menuApi() { return window.RhContextMenu || null; }
+    function actions() {
+        if (busy || asking) return null;
+        var cells = selectedCells();
+        if (!cells.length) return null;
+        var direct = cells.some(function (td) { return td.dataset.state === 'direct'; });
+        var n = cells.length;
+        return {
+            title: n + (n === 1 ? ' night selected' : ' nights selected'),
+            items: [
+                { label: 'Block', icon: 'fa-ban', run: function () { save('block'); } },
+                { label: 'Unblock', icon: 'fa-unlock', disabled: !direct, hint: direct ? '' : 'None of these nights has its own block.', run: function () { save('unblock'); } },
+                { label: 'Clear selection', icon: 'fa-xmark', run: function () { selected.clear(); paint(); } }
+            ]
+        };
+    }
+    /** Right-click outside the selection selects that night (or that line / that day) first. */
+    function pickFor(target) {
+        var td = target.closest('#bdgTable td[data-sel="1"]');
+        if (td) {
+            if (!selected.has(keyOf(td))) { selected = new Map(); selected.set(keyOf(td), true); anchor = td; paint(); }
+            return td;
+        }
+        var th = target.closest('#bdgTable th[data-row-select]');
+        if (th) {
+            var rowCells = Array.prototype.filter.call(th.parentElement.cells, isSel);
+            if (rowCells.length && !rowCells.every(function (c) { return selected.has(keyOf(c)); })) {
+                selected = new Map();
+                rowCells.forEach(function (c) { selected.set(keyOf(c), true); });
+                anchor = rowCells[0];
+                paint();
+            }
+            return rowCells.length ? th : null;
+        }
+        var dh = target.closest('#bdgTable thead th.bdg-dayhead');
+        if (dh) {
+            var colCells = visibleRows().map(function (tr) { return tr.cells[dh.cellIndex]; }).filter(isSel);
+            if (colCells.length && !colCells.every(function (c) { return selected.has(keyOf(c)); })) {
+                selected = new Map();
+                colCells.forEach(function (c) { selected.set(keyOf(c), true); });
+                anchor = colCells[0];
+                paint();
+            }
+            return colCells.length ? dh : null;
+        }
+        return null;
+    }
+    // Right-click, the ContextMenu key / Shift+F10 and a long press: outside the selection that night (line, day) first.
+    if (menuApi()) {
+        menuApi().register('#bdgTable', function (node, e) {
+            if (busy || asking || !e.target || !e.target.closest) return null;
+            return pickFor(e.target) ? actions() : null;
+        });
+    }
+
+    // ── Keyboard: arrows move, Shift+arrows extend, Space/Enter toggles; Enter on a room name selects its row;
+    //    Esc clears the selection. ──
     document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && selected.size && !busy && !asking && !document.body.classList.contains('modal-open')
+            && !(menuApi() && menuApi().isOpen()) && document.getElementById('bdgTable')) {
+            selected.clear();
+            paint();
+            return;
+        }
         var th = e.target.closest && e.target.closest('#bdgTable th[data-row-select]');
         if (th && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
@@ -284,7 +379,7 @@
     function feedback(ok, msg) {
         var fb = document.getElementById('bdgFeedback');
         if (!fb) return;
-        fb.className = 'admin-modal-feedback ' + (ok ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
+        fb.className = 'admin-modal-feedback bdg-feedback ' + (ok ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
         fb.textContent = '';
         var i = document.createElement('i');
         i.className = 'fas fa-' + (ok ? 'check-circle' : 'exclamation-circle');

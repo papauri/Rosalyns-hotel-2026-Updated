@@ -1410,7 +1410,8 @@ try {
     error_log('maintenance timeline: ' . $e->getMessage());
     $opsPayload = null;
 }
-$opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenanceSchedulesContainer table', 'confirm' => 'rmConfirm', 'edit' => 'editSchedule'];
+$opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenanceSchedulesContainer table', 'confirm' => 'rmConfirm', 'edit' => 'editSchedule',
+    'bulk' => '#maintenanceSchedulesContainer form[data-bulk-bar]', 'new' => 'rmNewJobFor'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1820,6 +1821,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
         <input type="hidden" name="action" id="formAction" value="add_schedule">
         <input type="hidden" name="id" id="scheduleId">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+        <p class="tl-multi-note" id="scheduleMultiNote" hidden></p>
         <div class="form-group">
             <label>Room *</label>
             <select name="individual_room_id" id="roomSelect" required>
@@ -2239,6 +2241,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
         });
 
         function openModal() {
+            rmSetMulti(null);
             document.getElementById('scheduleModal-title').textContent = 'Add Maintenance';
             document.getElementById('formAction').value = 'add_schedule';
             document.getElementById('scheduleForm').reset();
@@ -2256,6 +2259,102 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
             openAdminModal('scheduleModal');
         }
 
+        // New job for the rooms / days picked on a timeline (admin/js/room-timeline-select.js calls rmNewJobFor with
+        // [{room, date, label}]; the Calendar links here with ?new_job=1&rooms=&from=&to=). One job per room, from the
+        // first to the last picked day (08:00 to 17:00; a job holds a room for whole days, the same rule the calendar
+        // and the booking check use). Several rooms: the same form is sent once per room (add_schedule, checked by the
+        // server as usual) and the Room field is not shown.
+        var rmMulti = null;
+        var RM_MULTI_MAX = 30;
+        function rmSetMulti(rooms) {
+            rmMulti = rooms && rooms.length > 1 ? rooms.slice() : null;
+            var rg = document.getElementById('roomSelect').closest('.form-group');
+            if (rg) rg.style.display = rmMulti ? 'none' : '';
+            var note = document.getElementById('scheduleMultiNote');
+            if (!note) return;
+            note.hidden = !rmMulti;
+            note.textContent = rmMulti
+                ? 'This adds ' + rmMulti.length + ' jobs, one for each room: ' + rmMulti.map(function(r) { return r.label; }).join(', ') + '. Everything else below is the same for all of them.'
+                : '';
+        }
+        window.rmNewJobFor = function(list) {
+            if (!list || !list.length) return;
+            var rooms = [], seen = {}, from = null, to = null;
+            list.forEach(function(p) {
+                if (!seen[p.room]) { seen[p.room] = true; rooms.push({ room: String(p.room), label: p.label }); }
+                if (from === null || p.date < from) from = p.date;
+                if (to === null || p.date > to) to = p.date;
+            });
+            if (rooms.length > RM_MULTI_MAX) {
+                if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show('Pick at most ' + RM_MULTI_MAX + ' rooms at a time.', 'warning');
+                return;
+            }
+            openModal();
+            document.getElementById('roomSelect').value = rooms[0].room;
+            document.getElementById('due_date').value = from;
+            document.getElementById('start_date').value = from + 'T08:00';
+            document.getElementById('end_date').value = to + 'T17:00';
+            rmSetMulti(rooms);
+            if (rmMulti) document.getElementById('scheduleModal-title').textContent = 'Add ' + rmMulti.length + ' maintenance jobs';
+        };
+        function rmSaveMulti(form) {
+            var list = rmMulti.slice();
+            var saveBtn = document.getElementById('scheduleSaveBtn');
+            var fb = document.getElementById('scheduleFeedback');
+            var label = saveBtn.textContent;
+            saveBtn.disabled = true;
+            fb.className = 'admin-modal-feedback';
+            fb.textContent = '';
+            var done = 0, failed = [], lines = [];
+            // Read the form ONCE: if staff close the form and open Edit on a row while this runs, the remaining
+            // saves must still be these new jobs, never an update of that row.
+            var snap = Array.from(new FormData(form).entries());
+            var step = function(i) {
+                if (i >= list.length) return Promise.resolve();
+                saveBtn.textContent = 'Saving ' + (i + 1) + ' of ' + list.length + '...';
+                var fd = new FormData();
+                snap.forEach(function(kv) { fd.append(kv[0], kv[1]); });
+                fd.set('action', 'add_schedule');
+                fd.delete('schedule_id');
+                fd.delete('id');
+                fd.set('individual_room_id', list[i].room);
+                return fetch(window.location.pathname, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(function(res) {
+                        if (res && res.success) { done++; return; }
+                        failed.push(list[i]);
+                        lines.push(list[i].label + ': ' + ((res && res.message) || 'not added'));
+                    }, function() {
+                        failed.push(list[i]);
+                        lines.push(list[i].label + ': no answer from the server (check the list before trying again)');
+                    })
+                    .then(function() { return step(i + 1); });
+            };
+            step(0).then(function() {
+                saveBtn.disabled = false;
+                saveBtn.textContent = label;
+                if (done > 0) refreshMaintenanceTable();
+                if (document.getElementById('formAction').value !== 'add_schedule') {
+                    // The form was reused for something else meanwhile: report only, never touch it.
+                    if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show('Added ' + done + ' of ' + list.length + ' jobs.' + (lines.length ? ' Not added: ' + lines.join('; ') + '.' : ''), failed.length ? 'warning' : 'success');
+                    return;
+                }
+                if (!failed.length) {
+                    closeModal();
+                    if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show('Added ' + done + ' maintenance jobs.', 'success');
+                    return;
+                }
+                // Only the rooms that were not added stay in the form, so Save again never adds a job twice.
+                rmSetMulti(failed.length > 1 ? failed : null);
+                if (failed.length === 1) document.getElementById('roomSelect').value = failed[0].room;
+                fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
+                fb.textContent = 'Added ' + done + ' of ' + list.length + ' jobs. Not added: ' + lines.join('; ') + '.';
+            });
+        }
+
         function closeModal() {
             closeAdminModal('scheduleModal');
             var fb = document.getElementById('scheduleFeedback');
@@ -2266,6 +2365,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
         }
 
         function editSchedule(data) {
+            rmSetMulti(null);
             document.getElementById('scheduleModal-title').textContent = 'Edit Maintenance';
             document.getElementById('formAction').value = 'update_schedule';
             document.getElementById('scheduleId').value = data.id;
@@ -2442,6 +2542,10 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
 
         document.getElementById('scheduleForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            if (rmMulti && document.getElementById('formAction').value === 'add_schedule') {
+                rmSaveMulti(this);
+                return;
+            }
             var saveBtn = document.getElementById('scheduleSaveBtn');
             var fb = document.getElementById('scheduleFeedback');
             var origHtml = saveBtn.innerHTML;
@@ -2563,7 +2667,35 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
         document.getElementById('rmConfirmModal').addEventListener('click', function(e) {
             if (e.target === this) rmCloseConfirm();
         });
+
+        // From the Calendar: ?new_job=1&rooms=12,13&from=Y-m-d&to=Y-m-d opens the add form for those rooms and days.
+        // After DOMContentLoaded: the page fills the form's default dates then, and must not overwrite these.
+        (function() {
+            var run = function() {
+            var p = new URLSearchParams(window.location.search);
+            if (p.get('new_job') !== '1') return;
+            var ymd = /^\d{4}-\d{2}-\d{2}$/;
+            var from = p.get('from') || '', to = p.get('to') || '';
+            var ids = String(p.get('rooms') || '').split(',').filter(function(x) { return /^\d+$/.test(x); });
+            ['new_job', 'rooms', 'from', 'to'].forEach(function(k) { p.delete(k); });
+            try { window.history.replaceState(window.history.state, '', window.location.pathname + (p.toString() ? '?' + p.toString() : '') + window.location.hash); } catch (err) { /* keep the URL */ }
+            if (!ymd.test(from) || !ymd.test(to) || to < from || !ids.length) return;
+            var sel = document.getElementById('roomSelect');
+            var list = [];
+            ids.slice(0, RM_MULTI_MAX + 1).forEach(function(id) {
+                var o = sel ? sel.querySelector('option[value="' + id + '"]') : null;
+                if (o) list.push({ room: id, date: from, label: 'Room ' + o.textContent.trim() });
+            });
+            if (!list.length) return;
+            list.push({ room: list[0].room, date: to, label: list[0].label });
+            window.rmNewJobFor(list);
+            };
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+            else run();
+        })();
     </script>
+    <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-context-menu.js'); ?>"></script>
+    <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-select.js'); ?>"></script>
     <?php if ($opsPayload): ?>
     <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline.js'); ?>"></script>
     <script src="js/room-timeline-ops.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-ops.js'); ?>"></script>

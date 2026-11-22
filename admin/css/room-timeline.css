@@ -501,37 +501,31 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
 
 .tl.is-searching .tl-bar:not(.tl-bar--match) { opacity: .35; }
 
-/* Empty-cell selection (desktop) and its popover. */
+/* Picked nights, bars and bulk bar (admin/js/room-timeline-select.js; the right-click menu is .rh-ctx in admin-components.css, GRID_UNIFY_PLAN Phase 1).
+   A picked run of nights is one box over the cells (above blocks, see-through over bars, never catches the pointer). */
+.tl-grid { -webkit-touch-callout: none; }
+.tl-grid .tl-track { -webkit-user-select: none; user-select: none; }
 .tl-sel {
     position: absolute;
-    top: 3px;
-    bottom: 3px;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    top: 1px;
+    bottom: 2px;
+    z-index: 2;
     box-sizing: border-box;
     border: 2px solid var(--admin-accent, #766550);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, .7);
+    border-radius: 4px;
+    background: rgba(118, 101, 80, .12);
     pointer-events: none;
 }
-.tl-sel--bad { border-color: #b91c1c; }
-.tl-sel__label { font-size: 12px; font-weight: 600; }
-.tl-sel-pop {
-    position: absolute;
-    z-index: 30;
-    width: 280px;
-    max-width: calc(100% - 16px);
-    padding: 12px;
-    box-sizing: border-box;
-    background: #fff;
-    border: 1px solid var(--admin-surface-border, #d7dde6);
-    border-radius: var(--admin-radius, 10px);
-    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, .14));
-}
-.tl-sel-pop p { margin: 0 0 8px; font-size: 13px; }
-.tl-sel-pop .btn { margin-right: 6px; }
+.tl-cell:focus-visible { outline: var(--tl-focus); outline-offset: -3px; }
+.tl.has-cellsel .tl-head__day { cursor: pointer; }
+.tl.has-cellsel .tl-head__day:hover { background: var(--admin-hover-bg, #edf2f8); }
+.tl.has-cellsel .tl-lane:is([data-tl-lane], [data-ops-lane]) .tl-room { cursor: pointer; }
+.tl-ops.has-cellsel .tl-lane[data-ops-lane] .tl-cell:not(.tl-cell--past) { cursor: cell; }
+.tl-bar.is-picked { z-index: 2; outline: 3px solid var(--admin-accent, #766550); outline-offset: 1px; }
+.tl-bulkbar__detail, .tl-bulkbar__none { font-size: 13px; opacity: .85; }
+.tl-bulkbar .btn { min-height: 44px; }
+/* Add form opened for several picked rooms / days (Housekeeping, Maintenance): says what will be added. */
+.tl-multi-note { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--admin-surface-border, #e8e0d6); border-radius: 8px; background: var(--tl-soft, #f7f3ee); font-size: 13px; line-height: 1.4; }
 
 .tl-empty { margin: 16px 0; padding: 24px; text-align: center; color: var(--ck-muted, #786d62); background: var(--tl-surface); border: 1px dashed var(--tl-line); border-radius: var(--admin-radius, 10px); }
 .tl-muted { color: var(--ck-muted, #786d62); font-size: 13px; }
@@ -706,7 +700,6 @@ body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
     .tl-row--unassigned .tl-room__link > i { display: none; }
     .tl-group__cell { white-space: normal; }
     .tl-group__badge { font-size: 11px; }
-    .tl-sel-pop { left: 8px !important; right: 8px; width: auto; }
 }
 @media (pointer: coarse) {
     .tl-lane[data-tl-lane] .tl-cell { cursor: pointer; }

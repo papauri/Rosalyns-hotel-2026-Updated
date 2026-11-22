@@ -156,12 +156,6 @@ $tlDate = static function ($v, string $fmt = 'j M Y'): string {
 
         <div class="tl-agenda" data-tl-agenda hidden></div>
 
-        <div class="tl-sel-pop" data-tl-selpop hidden role="dialog" aria-label="New booking">
-            <p data-tl-selpop-text></p>
-            <a class="btn btn-primary" data-tl-selpop-go href="create-booking.php">New booking</a>
-            <button type="button" class="btn btn-secondary" data-tl-selpop-cancel>Cancel</button>
-        </div>
-
         <div class="tl-backdrop" data-tl-backdrop hidden></div>
         <aside class="tl-drawer" data-tl-drawer hidden role="dialog" aria-modal="false" aria-labelledby="tlDrawerTitle" tabindex="-1">
             <span class="tl-drawer__handle" aria-hidden="true"></span>
@@ -175,6 +169,8 @@ $tlDate = static function ($v, string $fmt = 'j M Y'): string {
 
         <script type="application/json" data-tl-json><?php echo $tlJson; ?></script>
     </section>
+    <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-context-menu.js'); ?>"></script>
+    <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/../js/room-timeline-select.js'); ?>"></script>
     <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/../js/room-timeline.js'); ?>"></script>
     <script>
         (function () {

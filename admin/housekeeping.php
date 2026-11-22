@@ -1570,7 +1570,8 @@ try {
     error_log('housekeeping timeline: ' . $e->getMessage());
     $opsPayload = null;
 }
-$opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'confirm' => 'hkConfirm', 'edit' => 'editAssignment'];
+$opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'confirm' => 'hkConfirm', 'edit' => 'editAssignment',
+    'bulk' => '#hkAssignmentsCard form[data-bulk-bar]', 'new' => 'hkNewTaskFor'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1961,6 +1962,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
         <input type="hidden" name="action" id="formAction" value="add_assignment">
         <input type="hidden" name="id" id="assignmentId">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+        <p class="tl-multi-note" id="assignmentMultiNote" hidden></p>
         <div class="form-group">
             <label>Room *</label>
             <select name="individual_room_id" id="roomSelect" required>
@@ -2333,6 +2335,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
         });
 
         function openModal() {
+            hkSetMulti(null);
             document.getElementById('assignmentModal-title').textContent = 'Add Assignment';
             document.getElementById('formAction').value = 'add_assignment';
             document.getElementById('assignmentForm').reset();
@@ -2340,6 +2343,110 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
             document.getElementById('due_date').min = rhYmd(new Date());
             document.getElementById('recurringOptions').style.display = 'none';
             openAdminModal('assignmentModal');
+        }
+
+        // New task for the rooms / days picked on the timeline (admin/js/room-timeline-select.js calls hkNewTaskFor with
+        // [{room, date, label}]). One room and day: the normal form, prefilled. Several: the same form is sent once per
+        // room and day (add_assignment, the server checks each one as usual); Room and Due date are then not shown.
+        var hkMulti = null;
+        var HK_MULTI_MAX = 60;
+        function hkDayText(d) {
+            var L = window.RhGridSel && window.RhGridSel.logic;
+            return L ? L.nightsText([d]) : d;
+        }
+        function hkSetMulti(list) {
+            hkMulti = list && list.length > 1 ? list.slice() : null;
+            var show = hkMulti ? 'none' : '';
+            var rg = document.getElementById('roomSelect').closest('.form-group');
+            var dg = document.getElementById('due_date').closest('.form-group');
+            if (rg) rg.style.display = show;
+            if (dg) dg.style.display = show;
+            var note = document.getElementById('assignmentMultiNote');
+            if (!note) return;
+            note.hidden = !hkMulti;
+            if (!hkMulti) { note.textContent = ''; return; }
+            var byRoom = {}, order = [];
+            hkMulti.forEach(function(p) {
+                if (!byRoom[p.label]) { byRoom[p.label] = []; order.push(p.label); }
+                byRoom[p.label].push(p.date);
+            });
+            var L = window.RhGridSel && window.RhGridSel.logic;
+            var parts = order.map(function(r) { return r + ' on ' + (L ? L.nightsText(byRoom[r]) : byRoom[r].join(', ')); });
+            note.textContent = 'This adds ' + hkMulti.length + ' tasks, one for each room and day: ' + parts.slice(0, 8).join('; ')
+                + (parts.length > 8 ? '; and ' + (parts.length - 8) + ' more rooms' : '') + '. Everything else below is the same for all of them.';
+        }
+        window.hkNewTaskFor = function(list) {
+            if (!list || !list.length) return;
+            if (list.length > HK_MULTI_MAX) {
+                if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show('Pick at most ' + HK_MULTI_MAX + ' room days at a time.', 'warning');
+                return;
+            }
+            openModal();
+            document.getElementById('roomSelect').value = list[0].room;
+            document.getElementById('due_date').value = list[0].date;
+            hkSetMulti(list);
+            if (hkMulti) document.getElementById('assignmentModal-title').textContent = 'Add ' + hkMulti.length + ' tasks';
+        };
+        function hkSaveMulti(form) {
+            var list = hkMulti.slice();
+            var saveBtn = document.getElementById('assignmentSaveBtn');
+            var fb = document.getElementById('assignmentFeedback');
+            var label = saveBtn.textContent;
+            saveBtn.disabled = true;
+            fb.className = 'admin-modal-feedback';
+            fb.textContent = '';
+            var done = 0, failed = [], lines = [];
+            // Read the form ONCE: if staff close the form and open Edit on a row while this runs, the remaining
+            // saves must still be these new tasks, never an update of that row.
+            var snap = Array.from(new FormData(form).entries());
+            var step = function(i) {
+                if (i >= list.length) return Promise.resolve();
+                saveBtn.textContent = 'Saving ' + (i + 1) + ' of ' + list.length + '...';
+                var fd = new FormData();
+                snap.forEach(function(kv) { fd.append(kv[0], kv[1]); });
+                fd.set('action', 'add_assignment');
+                fd.delete('assignment_id');
+                fd.delete('id');
+                fd.set('individual_room_id', list[i].room);
+                fd.set('due_date', list[i].date);
+                return fetch(window.location.pathname, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(function(res) {
+                        if (res && res.success) { done++; return; }
+                        failed.push(list[i]);
+                        lines.push(list[i].label + ' on ' + hkDayText(list[i].date) + ': ' + ((res && res.message) || 'not added'));
+                    }, function() {
+                        failed.push(list[i]);
+                        lines.push(list[i].label + ' on ' + hkDayText(list[i].date) + ': no answer from the server (check the list before trying again)');
+                    })
+                    .then(function() { return step(i + 1); });
+            };
+            step(0).then(function() {
+                saveBtn.disabled = false;
+                saveBtn.textContent = label;
+                if (done > 0) refreshAssignmentsTable();
+                if (document.getElementById('formAction').value !== 'add_assignment') {
+                    // The form was reused for something else meanwhile: report only, never touch it.
+                    if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show('Added ' + done + ' of ' + list.length + ' tasks.' + (lines.length ? ' Not added: ' + lines.join('; ') + '.' : ''), failed.length ? 'warning' : 'success');
+                    return;
+                }
+                if (!failed.length) {
+                    closeModal();
+                    if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show('Added ' + done + ' tasks.', 'success');
+                    return;
+                }
+                // Only the ones that were not added stay in the form, so Save again never adds a task twice.
+                hkSetMulti(failed.length > 1 ? failed : null);
+                if (failed.length === 1) {
+                    document.getElementById('roomSelect').value = failed[0].room;
+                    document.getElementById('due_date').value = failed[0].date;
+                }
+                fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
+                fb.textContent = 'Added ' + done + ' of ' + list.length + ' tasks. Not added: ' + lines.join('; ') + '.';
+            });
         }
 
         function closeModal() {
@@ -2352,6 +2459,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
         }
 
         function editAssignment(data) {
+            hkSetMulti(null);
             document.getElementById('assignmentModal-title').textContent = 'Edit Assignment';
             document.getElementById('formAction').value = 'update_assignment';
             document.getElementById('assignmentId').value = data.id;
@@ -2413,6 +2521,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
         }
 
         function quickAssignRoom(roomId) {
+            hkSetMulti(null);
             document.getElementById('assignmentModal-title').textContent = 'Assign Room';
             document.getElementById('formAction').value = 'add_assignment';
             document.getElementById('assignmentForm').reset();
@@ -2540,6 +2649,10 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
         // ── AJAX save for assignment modal ────────────────────────────────────
         document.getElementById('assignmentForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            if (hkMulti && document.getElementById('formAction').value === 'add_assignment') {
+                hkSaveMulti(this);
+                return;
+            }
             var saveBtn = document.getElementById('assignmentSaveBtn');
             var fb = document.getElementById('assignmentFeedback');
             var origHtml = saveBtn.innerHTML;
@@ -2667,6 +2780,8 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
             if (e.target === this) hkCloseConfirm();
         });
     </script>
+    <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-context-menu.js'); ?>"></script>
+    <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-select.js'); ?>"></script>
     <?php if ($opsPayload): ?>
     <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline.js'); ?>"></script>
     <script src="js/room-timeline-ops.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-ops.js'); ?>"></script>

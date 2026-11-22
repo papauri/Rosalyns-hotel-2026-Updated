@@ -1074,7 +1074,7 @@ $site_name = getSetting('site_name');
                     <div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> Some calendar data could not be loaded. Reload the page; if it keeps happening use the List view.</div>
                 <?php endif; ?>
                 <?php if ($canBlockRooms): ?>
-                    <p class="bdg-hint"><i class="fas fa-hand-pointer"></i> Click a night to select it, drag to select several nights or rooms, or click a room name to select its whole month. Shift-click selects a range.</p>
+                    <p class="bdg-hint"><i class="fas fa-hand-pointer"></i> Click a night to select it, drag to select several nights or rooms, click a room name for its whole month or a day for that night in every room. Shift-click selects a range; right-click (or press and hold) for the actions; Esc clears.</p>
                 <?php endif; ?>
 
                 <div class="bdg-scroll" id="bdgWrap">
@@ -1190,23 +1190,24 @@ $site_name = getSetting('site_name');
                 </div>
 
                 <?php if ($canBlockRooms): ?>
-                <div class="bdg-actionbar" id="bdgBar">
-                    <div class="bdg-actionbar__summary" id="bdgSummary" aria-live="polite">No nights selected</div>
-                    <div class="bdg-actionbar__fields">
+                <div id="bdgFeedback" class="admin-modal-feedback bdg-feedback" role="status"></div>
+                <?php /* The shared sticky bulk bar (admin-bulk-bar look): shown while nights are selected. */ ?>
+                <div class="admin-bulk-bar tl-bulkbar bdg-actionbar" id="bdgBar" role="region" aria-label="Selected nights" hidden>
+                    <div class="admin-bulk-bar__count bdg-actionbar__summary" id="bdgSummary" aria-live="polite">No nights selected</div>
+                    <div class="admin-bulk-bar__controls bdg-actionbar__fields">
                         <label class="rh-visually-hidden" for="bdgBlockType">Block type</label>
-                        <select id="bdgBlockType" class="form-select form-select-sm">
+                        <select id="bdgBlockType">
                             <option value="manual">Blocked</option>
                             <option value="maintenance">Maintenance</option>
                             <option value="event">Event</option>
                             <option value="full">Fully booked</option>
                         </select>
                         <label class="rh-visually-hidden" for="bdgReason">Reason (optional)</label>
-                        <input type="text" id="bdgReason" class="form-control form-control-sm" maxlength="255" placeholder="Reason (optional)">
+                        <input type="text" id="bdgReason" maxlength="255" placeholder="Reason (optional)">
                         <button type="button" class="btn btn-primary btn-sm" id="bdgBlockBtn" disabled><i class="fas fa-ban"></i> Block</button>
                         <button type="button" class="btn btn-secondary btn-sm" id="bdgUnblockBtn" disabled><i class="fas fa-unlock"></i> Unblock</button>
-                        <button type="button" class="btn btn-ghost btn-sm" id="bdgClearBtn" disabled>Clear</button>
                     </div>
-                    <div id="bdgFeedback" class="admin-modal-feedback" role="status"></div>
+                    <button type="button" class="btn btn-secondary btn-sm admin-bulk-bar__clear" id="bdgClearBtn" disabled>Clear</button>
                 </div>
                 <?php endif; ?>
             </div>
@@ -1741,6 +1742,8 @@ $site_name = getSetting('site_name');
         window.refreshBlockedDatesTable = refreshBlockedDatesTable;
     </script>
     <script src="js/admin-components.js"></script>
+    <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-context-menu.js'); ?>"></script>
+    <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-select.js'); ?>"></script>
     <?php if ($bdView === 'calendar' && $canBlockRooms): ?>
     <script src="js/blocked-dates-grid.js?v=<?php echo @filemtime(__DIR__ . '/js/blocked-dates-grid.js'); ?>"></script>
     <?php endif; ?>

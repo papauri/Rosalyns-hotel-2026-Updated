@@ -3644,6 +3644,19 @@ body:not(.pos-screen) .modal-content:has(> .modal-header, > form > .modal-header
     color: #b9201d;
 }
 
+/* Right-click menu (RhContextMenu, admin/js/admin-context-menu.js): the same menu with a title line and, on a
+   disabled item, the reason in small text. */
+.rh-ctx__head {
+    margin-bottom: 4px;
+    padding: 8px 12px 6px;
+    border-bottom: 1px solid var(--admin-surface-border, #e8e0d6);
+    color: var(--admin-muted, #786d62);
+    font-size: 12px;
+    font-weight: 600;
+}
+.rh-ctx__hint { margin-left: auto; padding-left: 12px; color: var(--admin-muted, #786d62); font-size: 11px; white-space: normal; }
+.rh-ctx [role="menuitem"][disabled] { opacity: .55; cursor: not-allowed; }
+
 /* Visually hidden but still focusable/submittable (e.g. the default submit of a form whose
    real buttons are elsewhere). */
 .rh-visually-hidden {

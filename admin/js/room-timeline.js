@@ -138,6 +138,7 @@
 
         bindRoot(st);
         bindDoc();
+        initPicks(st);
         go(st, st.start, st.days);
     }
 
@@ -402,6 +403,7 @@
 
         applySearch(st, false);
         setupRoving(st);
+        if (st.picks) st.picks.paint();
         renderAgenda(st);
         showMode(st);
         if (st.keepScroll) { // after a saved change: stay where the user was
@@ -1453,64 +1455,174 @@
             return dnum(b.ci) <= hi && dnum(b.eco) - 1 >= lo;
         });
     }
-    function clearSel(st) {
-        st.root.querySelectorAll('.tl-sel').forEach(function (s) { s.remove(); });
-        var pop = q(st, '[data-tl-selpop]');
-        if (pop) pop.hidden = true;
-        st.sel = null;
-    }
-    function drawSel(st) {
-        var s = st.sel;
-        st.root.querySelectorAll('.tl-sel').forEach(function (x) { x.remove(); });
-        var a = Math.min(s.a, s.b), z = Math.max(s.a, s.b);
-        var box = el('div', 'tl-sel' + (s.ok ? '' : ' tl-sel--bad'));
-        box.style.left = (a * st.dayW) + 'px';
-        box.style.width = ((z - a + 1) * st.dayW) + 'px';
-        box.appendChild(el('span', 'tl-sel__label', nightsWord(z - a + 1)));
-        s.row.querySelector('.tl-cell[data-tl-day="' + a + '"]').appendChild(box);
-    }
-    function finishSel(st) {
-        var s = st.sel;
-        if (!s) return;
-        var a = Math.min(s.a, s.b), z = Math.max(s.a, s.b);
-        var lane = s.lane;
-        s.ok = rangeFree(st, lane, a, z);
-        drawSel(st);
-        var pop = q(st, '[data-tl-selpop]');
-        var text = 'Room ' + lane.number + ', ' + fmtRange(st.dates[a].d, addDays(st.dates[z].d, 1)) + ', ' + nightsWord(z - a + 1) + '.';
-        var go = q(st, '[data-tl-selpop-go]');
-        if (!s.ok) {
-            text += ' This room is not free for all of these nights.';
-            go.hidden = true;
-        } else {
-            go.hidden = false;
-            go.href = newBookingHref(st, lane, a, z);
-        }
-        q(st, '[data-tl-selpop-text]').textContent = text;
-        var r = s.row.querySelector('.tl-cell[data-tl-day="' + z + '"]').getBoundingClientRect();
-        var host = st.root.getBoundingClientRect();
-        pop.hidden = false;
-        var pw = pop.offsetWidth || 260;
-        var left = Math.min(Math.max(8, r.right - host.left - pw / 2), host.width - pw - 8);
-        pop.style.left = left + 'px';
-        pop.style.top = (r.bottom - host.top + 6) + 'px';
-        (s.ok ? go : q(st, '[data-tl-selpop-cancel]')).focus({ preventScroll: true });
-    }
-    function tapEmpty(st, lane, idx, cell) {
-        var free = rangeFree(st, lane, idx, idx);
-        openDrawer(st, 'Room ' + lane.number, function (body) {
-            var list = el('dl', 'tl-dl');
-            dl(list, 'Night', fmt(st.dates[idx].d) + ' to ' + fmt(addDays(st.dates[idx].d, 1)));
-            dl(list, 'Room', lane.number + (lane.name ? ' ' + lane.name : ''));
-            dl(list, 'Housekeeping', lane.hk.label);
-            body.appendChild(list);
-            if (!free) body.appendChild(el('p', 'tl-drawer__note', 'This night is taken or blocked.'));
-        }, function (foot) {
-            if (free && st.data.can.create) {
-                foot.appendChild(linkBtn('btn btn-primary', newBookingHref(st, lane, idx, idx), 'New booking from ' + fmt(st.dates[idx].d), 'fa-plus'));
+    /* ---------------------------------------------------------------- selected nights (room-timeline-select.js)
+       Click / drag / Shift / Ctrl / room name / day head / keyboard / long press pick nights in any rooms; the bulk bar
+       and the right-click menu then offer: New booking (one room, back-to-back free nights), Block / Unblock nights
+       (admin/blocked-dates.php preview_block then grid_apply, the Blocked Dates confirm words) and New maintenance job
+       (room-maintenance.php opens its add form prefilled). Bars keep their own gestures (drag, end grip, drawer). */
+    function clearSel(st) { if (st.picks && st.picks.count()) st.picks.clear(); }
+    function initPicks(st) {
+        var G = window.RhGridSel;
+        if (!G) return;
+        st.pickBar = G.bar(st.root, 'Selected nights');
+        st.picks = G.cells({
+            root: st.root,
+            grid: q(st, '[data-tl-grid]'),
+            laneAttr: 'data-tl-lane',
+            dates: function () { return (st.dates || []).map(function (x) { return x.d; }); },
+            dayW: function () { return st.dayW || 44; },
+            selectable: function (lane, d) { return !!(st.lanesById && st.lanesById[lane]) && d >= st.data.today; },
+            cellLabel: function (lane, d) {
+                var l = st.lanesById[lane];
+                return 'Room ' + (l ? l.number : lane) + ', night of ' + fmt(d) + (nightBooked(st, lane, d) ? ', booked' : '') + (blockAt(st, lane, d) ? ', blocked' : '');
+            },
+            locked: function () { return !!(st.busy || st.drag); },
+            onChange: function () { picksChanged(st); },
+            cellMenu: function (api, hit) { return pickMenu(st, hit); },
+            barMenu: function (api, bar) {
+                var b = st.byId[bar.getAttribute('data-tl-booking')];
+                if (!b) return null;
+                var items = [{ label: 'Show details', icon: 'fa-circle-info', run: function () { openBooking(st, b, bar); } }];
+                if (st.data.can.open_booking) items.push({ label: 'Open booking', icon: 'fa-arrow-up-right-from-square', href: 'booking-details.php?id=' + b.id });
+                return { title: b.guest, items: items };
             }
-            if (!foot.childNodes.length) foot.appendChild(el('span', 'tl-muted', 'Nothing to do here.'));
-        }, cell);
+        });
+    }
+    function dayIdx(st, d) {
+        var i = dnum(d) - st.first;
+        return i >= 0 && i < st.dates.length ? i : -1;
+    }
+    function nightBooked(st, lane, d) {
+        var n = dnum(d);
+        return (st.lanesBookings[lane] || []).some(function (b) { return dnum(b.ci) <= n && dnum(b.eco) - 1 >= n; });
+    }
+    /** The block drawn on that room night (kind: only that kind), or null. */
+    function blockAt(st, lane, d, kind) {
+        var hit = null;
+        (st.blocksByLane[lane] || []).forEach(function (bl) {
+            if (!hit && bl.from <= d && bl.to >= d && (!kind || bl.kind === kind)) hit = bl;
+        });
+        return hit;
+    }
+    function pickActions(st, keys) {
+        var L = window.RhGridSel.logic, can = st.data.can || {}, out = [];
+        var one = L.oneRun(keys);
+        if (can.create && one) {
+            var lane = st.lanesById[one.lane], a = dayIdx(st, one.from), z = dayIdx(st, one.to);
+            if (lane && a !== -1 && z !== -1 && rangeFree(st, lane, a, z)) {
+                out.push({ label: 'New booking', icon: 'fa-plus', cls: 'btn-primary', href: newBookingHref(st, lane, a, z) });
+            }
+        }
+        if (can.block) {
+            out.push({ label: 'Block nights', icon: 'fa-ban', run: function () { blockPicks(st, 'block'); } });
+            var anyBlocked = keys.some(function (k) { var p = L.parts(k); return !!blockAt(st, p.lane, p.d, 'blocked'); });
+            if (anyBlocked) out.push({ label: 'Unblock nights', icon: 'fa-unlock', run: function () { blockPicks(st, 'unblock'); } });
+        }
+        if (can.maint_page) out.push({ label: 'New maintenance job', icon: 'fa-screwdriver-wrench', href: maintHref(st, keys) });
+        return out;
+    }
+    function picksChanged(st) {
+        if (!st.pickBar) return;
+        var keys = st.picks.keys();
+        if (!keys.length) { st.pickBar.hide(); return; }
+        var booked = keys.filter(function (k) { var p = window.RhGridSel.logic.parts(k); return nightBooked(st, p.lane, p.d); }).length;
+        st.pickBar.show(window.RhGridSel.logic.countWords(keys), booked ? '(' + booked + ' already booked)' : '', pickActions(st, keys), function () { st.picks.clear(); });
+    }
+    function pickMenu(st, hit) {
+        var L = window.RhGridSel.logic, can = st.data.can || {};
+        var keys = st.picks.keys();
+        var items = keys.length ? pickActions(st, keys) : [];
+        if (hit && hit.d) {
+            var bl = blockAt(st, hit.lane, hit.d);
+            if (bl && bl.href && can[bl.kind === 'blocked' ? 'blocked_page' : 'maint_page']) {
+                items.push({ label: bl.kind === 'blocked' ? 'Open on Blocked Dates' : 'Open the maintenance job', icon: 'fa-arrow-up-right-from-square', href: bl.href });
+            }
+        }
+        if (hit && hit.room && can.rooms_page && st.lanesById[hit.lane]) {
+            items.push({ label: 'Open rooms of this type', icon: 'fa-bed', href: 'individual-rooms.php?room_type=' + encodeURIComponent(st.lanesById[hit.lane].type_id) });
+        }
+        if (keys.length) items.push({ label: 'Clear selection', icon: 'fa-xmark', run: function () { st.picks.clear(); } });
+        if (!items.length) {
+            items.push({ label: 'Nothing to do here', disabled: true, hint: hit && hit.d && hit.d < st.data.today ? 'Past nights cannot be changed.' : 'Your role has no actions for these nights.' });
+        }
+        return { title: keys.length ? L.countWords(keys) : (hit && hit.d ? fmt(hit.d) : 'Room'), items: items };
+    }
+    /** room-maintenance.php opens its add form for these rooms (each room of a joined room) and nights. */
+    function maintHref(st, keys) {
+        var L = window.RhGridSel.logic, g = L.byLane(keys, st.picks.lanes()), b = L.bounds(keys), ids = [];
+        g.lanes.forEach(function (l) {
+            var lane = st.lanesById[l];
+            ((lane && lane.room_ids && lane.room_ids.length) ? lane.room_ids : [l]).forEach(function (id) {
+                if (ids.indexOf(String(id)) === -1) ids.push(String(id));
+            });
+        });
+        return 'room-maintenance.php?new_job=1&rooms=' + encodeURIComponent(ids.join(',')) + '&from=' + encodeURIComponent(b.from) + '&to=' + encodeURIComponent(b.to);
+    }
+    /* POST to admin/blocked-dates.php (its CSRF, Block Rooms permission and lock run there). */
+    function postBlocks(fields) {
+        var fd = new FormData();
+        Object.keys(fields).forEach(function (k) { fd.append(k, String(fields[k])); });
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        var tok = window._rhCsrf || (meta ? (meta.getAttribute('content') || '') : '');
+        if (tok) fd.append('csrf_token', tok);
+        return fetch(new URL('blocked-dates.php', window.location.href).pathname, {
+            method: 'POST',
+            body: fd,
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+        }).then(function (r) {
+            var ct = r.headers.get('content-type') || '';
+            if (!r.ok || ct.indexOf('application/json') === -1) throw new Error('The server did not confirm this. Reload the page and check Blocked Dates before trying again.');
+            return r.json();
+        }, function () {
+            throw new Error('Could not reach the server. Check the connection and try again.');
+        });
+    }
+    /** Block / Unblock the picked nights: the same check, words and save as the Blocked Dates calendar. */
+    function blockPicks(st, op) {
+        if (st.blockBusy || !st.picks) return;
+        var L = window.RhGridSel.logic, keys = st.picks.keys();
+        if (!keys.length) return;
+        var g = L.byLane(keys, st.picks.lanes());
+        var items = g.lanes.map(function (l) { return { t: 'room', id: Number(l), d: g.map[l] }; });
+        var local = g.lanes.map(function (l) { return 'Room ' + (st.lanesById[l] ? st.lanesById[l].number : l) + ' on ' + L.nightsText(g.map[l]); }).join('; ');
+        st.blockBusy = true;
+        var check = postBlocks({ action: 'preview_block', items: JSON.stringify(items) }).catch(function () { return null; });
+        check.then(function (p) {
+            if (p && p.success === false) throw new Error(p.message || 'The selection could not be checked.');
+            var where = p && p.where ? p.where : local;
+            var msg = op === 'block'
+                ? 'Block ' + where + '? Guests will not be able to book them.'
+                  + (p ? (p.booking_count > 0
+                      ? ' Warning: ' + p.booking_count + ' booking(s) already sleep on these nights and will NOT be moved or cancelled: ' + p.bookings + '. Each booking\'s History will get a note.'
+                      : ' No bookings sleep on these nights.') : '')
+                : 'Unblock ' + where + '? Nights blocked by a room type or All rooms stay blocked; unblock those on Blocked Dates.';
+            return window.RhGridSel.ask({
+                title: op === 'block' ? 'Block nights' : 'Unblock nights',
+                message: msg,
+                confirmText: op === 'block' ? 'Block' : 'Unblock',
+                icon: op === 'block' ? 'fa-ban' : 'fa-unlock',
+                input: op === 'block',
+                inputLabel: 'Reason (optional)'
+            });
+        }).then(function (ans) {
+            if (!ans || !ans.confirmed) return null;
+            return postBlocks({ action: 'grid_apply', op: op, items: JSON.stringify(items), block_type: 'manual', reason: op === 'block' ? String(ans.value || '') : '' });
+        }).then(function (res) {
+            st.blockBusy = false;
+            if (!res) return;
+            var msg = dot(res.message || (res.success ? 'Saved.' : 'Nothing was changed.'));
+            if (!res.success) { toast(st, msg, 'error'); return; }
+            st.picks.clear();
+            toast(st, msg, 'success');
+            st.flash = msg;
+            var sc = q(st, '[data-tl-scroller]');
+            st.keepScroll = sc ? { top: sc.scrollTop, left: sc.scrollLeft, win: window.scrollY } : null;
+            go(st, st.start, st.days, true);
+        }).catch(function (err) {
+            st.blockBusy = false;
+            toast(st, (err && err.message) || 'That did not work. Try again.', 'error');
+        });
     }
 
     /* ---------------------------------------------------------------- agenda (phone) */
@@ -1720,7 +1832,6 @@
                 return;
             }
             if ((x = t.closest('[data-tl-drawer-close]')) || t.closest('[data-tl-backdrop]')) { closeDrawer(st); return; }
-            if ((x = t.closest('[data-tl-selpop-cancel]'))) { clearSel(st); return; }
             if ((x = t.closest('[data-tl-open]'))) {
                 var ab = st.agendaById[x.getAttribute('data-tl-open')] || st.byId[x.getAttribute('data-tl-open')];
                 if (ab) openBooking(st, ab, x);
@@ -1772,56 +1883,21 @@
             }
         });
 
-        // Empty-cell selection: click-drag on desktop, tap on touch.
+        // Bar drag (move room / end grip). Night selection on empty cells: room-timeline-select.js (initPicks).
         var grid = q(st, '[data-tl-grid]');
         grid.addEventListener('pointerdown', function (e) {
             if (e.button !== 0) return;
             var onBar = e.target.closest('.tl-bar');
-            if (onBar) { beginDrag(st, e, onBar); return; }
-            var cell = e.target.closest('.tl-cell');
-            if (!cell || e.target.closest('.tl-bar, .tl-block, .tl-sel')) return;
-            var row = cell.closest('.tl-lane');
-            if (!row || !row.hasAttribute('data-tl-lane')) return;
-            var lane = st.lanesById[row.getAttribute('data-tl-lane')];
-            var idx = Number(cell.getAttribute('data-tl-day'));
-            if (!lane || st.dates[idx].d < st.data.today) return;
-            clearSel(st);
-            if (e.pointerType !== 'mouse' || mqCoarse.matches) {
-                st.tap = { lane: lane, idx: idx, cell: cell, x: e.clientX, y: e.clientY };
-                return;
-            }
-            if (!st.data.can.create) return;
-            e.preventDefault();
-            st.sel = { lane: lane, row: row, a: idx, b: idx, ok: true, dragging: true };
-            drawSel(st);
+            if (onBar) beginDrag(st, e, onBar);
         });
         grid.addEventListener('pointermove', function (e) {
-            if (st.drag) { dragMove(st, e); return; }
-            if (!st.sel || !st.sel.dragging) return;
-            var hit = document.elementFromPoint(e.clientX, e.clientY);
-            var cell = hit && hit.closest('.tl-cell');
-            if (!cell || cell.closest('.tl-lane') !== st.sel.row) return;
-            var idx = Number(cell.getAttribute('data-tl-day'));
-            if (st.dates[idx].d < st.data.today || idx === st.sel.b) return;
-            st.sel.b = idx;
-            drawSel(st);
+            if (st.drag) dragMove(st, e);
         });
-        grid.addEventListener('pointerup', function (e) {
-            if (st.drag) { dragEnd(st); return; }
-            if (st.tap) {
-                var tp = st.tap;
-                st.tap = null;
-                if (Math.abs(e.clientX - tp.x) < 10 && Math.abs(e.clientY - tp.y) < 10) tapEmpty(st, tp.lane, tp.idx, tp.cell);
-                return;
-            }
-            if (!st.sel || !st.sel.dragging) return;
-            st.sel.dragging = false;
-            finishSel(st);
+        grid.addEventListener('pointerup', function () {
+            if (st.drag) dragEnd(st);
         });
         grid.addEventListener('pointercancel', function () {
-            st.tap = null;
             if (st.drag) { st.drag = null; endDrag(st); }
-            if (st.sel && st.sel.dragging) clearSel(st);
         });
     }
 
@@ -1848,7 +1924,7 @@
             if (!st || e.key !== 'Escape') return;
             if (st.drag) { st.drag = null; endDrag(st); return; }
             if (st.root.querySelector('.tl-more.open')) { closeMenus(st); return; }
-            if (st.sel) { clearSel(st); return; }
+            if (st.picks && st.picks.count()) { st.picks.clear(); return; }
             if (st.root.classList.contains('is-filters-open')) { toggleFilters(st, false); return; }
             var lg = st.root.querySelector('#tlLegend');
             if (lg && !lg.hidden) { lg.hidden = true; return; }
@@ -1866,7 +1942,6 @@
                     if (b) b.setAttribute('aria-expanded', 'false');
                 }
             }
-            if (st.sel && !st.sel.dragging && !e.target.closest('[data-tl-selpop], .tl-cell')) clearSel(st);
             if (st.root.classList.contains('is-filters-open') && e.target.closest('[data-tl-backdrop]')) toggleFilters(st, false);
         });
         var t = null;

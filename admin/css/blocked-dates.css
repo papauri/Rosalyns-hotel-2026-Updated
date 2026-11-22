@@ -742,29 +742,15 @@
 .bdg-cell.is-selected { box-shadow: inset 0 0 0 3px var(--admin-accent); }
 .bdg-cell.is-selected:not(.is-blocked) { background: #efe9e2; }
 
-/* Action bar under the grid */
-.bdg-actionbar {
-    position: sticky;
-    bottom: 0;
-    z-index: 5;
-    margin-top: 0.75rem;
-    padding: 0.7rem 0.9rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
-    background: var(--admin-surface);
-    border: 1px solid var(--admin-surface-border);
-    border-radius: 8px;
-    box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.06);
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem 1rem;
-}
-
+/* Action bar: the shared sticky bulk bar (.admin-bulk-bar in admin-styles.css), shown while nights are selected. */
 .bdg-actionbar__summary {
     flex: 1 1 18rem;
-    font-size: 0.82rem;
-    color: var(--admin-text);
     min-width: 0;
+    font-size: 0.82rem;
+    white-space: normal;
 }
+.bdg-feedback { margin: 0.75rem 0 0; }
+.bdg-feedback:empty { display: none; }
 
 .bdg-actionbar__fields {
     display: flex;
@@ -773,10 +759,9 @@
     gap: 0.45rem;
 }
 
-.blocked-dates-page .bdg-actionbar__fields select.form-select { width: auto; min-width: 9rem; }
+.bdg-actionbar__fields select { width: auto; min-width: 9rem; }
 .bdg-actionbar__fields input { width: 14rem; max-width: 100%; }
-.bdg-actionbar .admin-modal-feedback { flex-basis: 100%; margin: 0; }
-.bdg-actionbar .admin-modal-feedback:empty { display: none; }
+.bdg-table thead th.bdg-dayhead:not(.is-past) { cursor: pointer; }
 
 /* Touch tablets and phones: every night and every button is at least 44 x 44. */
 @media (pointer: coarse) {
@@ -785,8 +770,8 @@
     .bdg-dayhead__n { min-width: 44px; }
     .bdg-rowhead { height: 44px; }
     .bdg-actionbar .btn,
-    .bdg-actionbar .form-select,
-    .bdg-actionbar .form-control,
+    .bdg-actionbar select,
+    .bdg-actionbar input,
     .bdg-monthnav .btn,
     .bdg-monthnav input,
     .blocked-dates-page .bdg-typefilter select.form-select { min-height: 44px; min-width: 44px; }

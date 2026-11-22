@@ -88,6 +88,11 @@ when prompted."
   Booking History. Assistant: new admin_activity_log actions room_block / room_unblock; new booking_timeline_logs note
   actions (no table/setting change).
 
+### Grid Phase 1: select many, right-click, bulk bar on Calendar / Housekeeping / Maintenance / Blocked Dates (2026-11-23, owner FEATURE) - Liwonde 0bb811a / Rosalyn's port
+- **Guides (calendar, housekeeping, maintenance, blocked dates):** drag a box across rooms and days, Shift+click a range, Ctrl+click to add, click a room name (its days) or a day head (that night for all rooms); right-click (or long-press, or the Menu key) opens the actions; a bar at the bottom shows what is picked. Calendar right-click: New booking (one room, free nights), Block / Unblock nights (same check as Blocked Dates), New maintenance job. Housekeeping / Maintenance timelines: pick several tasks/jobs for the list's bulk actions; pick days to add tasks/jobs for those rooms in one go. Lists: Shift+click ticks a range; right-click a row for its actions. Clicking a room name or a calendar block now selects it (Enter opens it). Shift+right-click = the browser's own menu.
+- **Assistant:** no change (no tables, settings or statuses changed).
+- **Manager Guides:** Bookings / Rooms guide may mention right-click + drag-select (check at sync).
+
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 
 ### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md

@@ -130,6 +130,7 @@
             root.hidden = false;
             bindRoot(st);
             bindDoc();
+            initPicks(st);
             showView(st);
             render(st);
             deepLink(st, ini);
@@ -335,6 +336,7 @@
 
             applySearch(st, false);
             setupRoving(st);
+            if (st.picks) st.picks.paint();
             syncCards(st);
             var t = tableEl(st);
             if (st.filters.card || (t && t.rhOpsFilter)) applyList(st);
@@ -706,6 +708,99 @@
             postAction(st, key, it);
         }
 
+        /* ------------------------------------------------------------ picks (admin/js/room-timeline-select.js)
+           Ctrl/Cmd or Shift + click picks several jobs / tasks: the bulk bar and the right-click menu then offer the
+           list's own bulk actions (the page's bulk_schedules / bulk_assignments form: same fields, CSRF token and
+           confirm words). Picked days (click, drag, Shift, room name, day head, keyboard, long press) offer New job /
+           New task: the page's add form, prefilled (cfg.newFor). Only on pages that pass cfg.bulk / cfg.newFor. */
+        function initPicks(st) {
+            var G = window.RhGridSel;
+            if (!G || (!st.cfg.bulk && !st.cfg.newFor)) return;
+            st.pickBar = G.bar(st.root, 'Selection');
+            st.picks = G.cells({
+                root: st.root,
+                grid: q(st, '[data-tl-grid]'),
+                laneAttr: 'data-ops-lane',
+                dates: function () { return (st.cols || []).map(function (x) { return x.d; }); },
+                dayW: function () { return st.dayW || 44; },
+                selectable: function (lane, d) { return !!st.cfg.newFor && !!(st.lanesById && st.lanesById[lane]) && d >= st.data.today; },
+                cellLabel: function (lane, d) { var l = st.lanesById[lane]; return 'Room ' + (l ? l.number : lane) + ', ' + fmt(d); },
+                onChange: function () { picksChanged(st); },
+                cellMenu: function (api, hit) { return cellMenu(st, hit); },
+                barIds: st.cfg.bulk ? function (bar) { return barIds(st, bar); } : null,
+                barMenu: function (api, bar) { return barMenu(st, bar); }
+            });
+        }
+        function barIds(st, bar) {
+            var id = bar.getAttribute('data-ops-item');
+            if (id) return [String(id)];
+            var k = bar.getAttribute('data-ops-multi');
+            return k && st.multi && st.multi[k] ? st.multi[k].map(function (it) { return String(it.id); }) : [];
+        }
+        function bulkSpec(st) {
+            return st.cfg.bulk ? window.RhGridSel.listBulk(document.querySelector(st.cfg.bulk)) : null;
+        }
+        function bulkActs(st, ids) {
+            var spec = bulkSpec(st);
+            if (!spec) return [];
+            var out = spec.fields.map(function (fld) { return { node: fld }; });
+            spec.ops.forEach(function (o) {
+                out.push({ label: o.label, icon: o.icon, cls: o.cls, run: function () { window.RhGridSel.runListBulk(spec, o, ids); } });
+            });
+            return out;
+        }
+        function dayWords(st, keys) {
+            var w = window.RhGridSel.logic.countWords(keys);
+            return st.page === 'housekeeping' ? w.replace(/^(\d+) nights?/, function (m, n) { return n + (n === '1' ? ' day' : ' days'); }) : w;
+        }
+        function cellActs(st, keys) {
+            var fn = st.cfg.newFor ? window[st.cfg.newFor] : null;
+            if (typeof fn !== 'function' || !keys.length) return [];
+            return [{
+                label: st.page === 'housekeeping' ? 'New task' : 'New job',
+                icon: 'fa-plus',
+                cls: 'btn-primary',
+                run: function () {
+                    var list = window.RhGridSel.logic.pairs(keys, st.picks.lanes()).map(function (p) {
+                        var l = st.lanesById[p.lane];
+                        return { room: p.lane, date: p.d, label: 'Room ' + (l ? l.number : p.lane) };
+                    });
+                    st.picks.clear();
+                    fn(list);
+                }
+            }];
+        }
+        function picksChanged(st) {
+            if (!st.pickBar) return;
+            var ids = st.picks.barIds(), keys = st.picks.keys();
+            var clear = function () { st.picks.clear(); };
+            if (ids.length) st.pickBar.show(ids.length + ' ' + st.A.noun(ids.length) + ' selected', '', bulkActs(st, ids), clear);
+            else if (keys.length) st.pickBar.show(dayWords(st, keys), '', cellActs(st, keys), clear);
+            else st.pickBar.hide();
+        }
+        function cellMenu(st, hit) {
+            var keys = st.picks.keys();
+            var items = cellActs(st, keys);
+            if (keys.length) items.push({ label: 'Clear selection', icon: 'fa-xmark', run: function () { st.picks.clear(); } });
+            if (!items.length) items.push({ label: 'Nothing to do here', disabled: true, hint: hit && hit.d && hit.d < st.data.today ? 'Past days cannot be planned.' : '' });
+            return { title: keys.length ? dayWords(st, keys) : (hit && hit.d ? fmt(hit.d) : 'Room'), items: items };
+        }
+        function barMenu(st, bar) {
+            var ids = st.picks.barIds(), items = [];
+            var multi = bar.getAttribute('data-ops-multi');
+            var one = bar.getAttribute('data-ops-item') ? st.byId[bar.getAttribute('data-ops-item')] : null;
+            if (one) items.push({ label: 'Open', icon: 'fa-circle-info', run: function () { openItem(st, one, bar); } });
+            else if (multi) items.push({ label: 'Show the list', icon: 'fa-list', run: function () { openMulti(st, multi, bar); } });
+            var spec = ids.length ? bulkSpec(st) : null;
+            if (spec) {
+                spec.ops.forEach(function (o) {
+                    items.push({ label: o.label, icon: o.icon, danger: o.cls === 'btn-danger', run: function () { window.RhGridSel.runListBulk(spec, o, ids); } });
+                });
+            }
+            if (ids.length) items.push({ label: 'Clear selection', icon: 'fa-xmark', run: function () { st.picks.clear(); } });
+            return { title: ids.length ? ids.length + ' ' + st.A.noun(ids.length) + ' selected' : st.A.noun(1), items: items };
+        }
+
         /* ------------------------------------------------------------ cards and the list */
         function cardNodes() { return document.querySelectorAll('[data-ops-card]'); }
         function syncCards(st) {
@@ -750,6 +845,7 @@
                 b.classList.toggle('is-active', on);
                 b.setAttribute('aria-pressed', on ? 'true' : 'false');
             });
+            if (list && st.picks) st.picks.clear(); // the list has its own ticks and bulk bar
             if (list && window.AdminAutoSectionPagination) window.AdminAutoSectionPagination.init();
         }
 
@@ -963,6 +1059,7 @@
                 if (st.root.classList.contains('is-filters-open')) { toggleFilters(st, false); return; }
                 var lg = q(st, '[data-tl-legend-box]');
                 if (lg && !lg.hidden) { lg.hidden = true; return; }
+                if (st.picks && st.picks.count()) { st.picks.clear(); return; }
                 closeDrawer(st);
             });
             document.addEventListener('click', function (e) {
