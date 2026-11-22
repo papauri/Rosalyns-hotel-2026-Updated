@@ -10,12 +10,22 @@
  *   - an item already on the drinks menu (its stock link first, else the same name in any category) shows "Update price X -> Y" and keeps
  *     its category; a new one is added with a one-measure stock link (what one sale takes off stock);
  *   - cost of one measure comes from the item's current main unit and cost (rh_drink_measure_cost in config/database.php).
- * Answers: answers_json['_drinks'][item key] = {tick, cat, by, at}. Nothing about the price is stored: it is read again from the file's
- * cells every time, and at import only the rows that are still tickable are written (import_drinks_commit, inside the import's
- * transaction). Ticking and importing ticked rows need the Menu permission as well as Import.
+ * Since 2026-11-22 (owner: "not just drinks, any sort of menu item ... 100% confident ... grouped"): step 3 "Put items on the menu" lists ANY
+ * item with a selling price, a price typed in step 3, or a served-by cell, grouped by the file's category heading; each row goes to the Drinks
+ * or the Food menu (food_menu, station kitchen) only from certain signals (already on a menu, the strongest: never changed by a group
+ * answer, and a row answer for the other menu makes the row untickable; a kilo unit; a drink-only measure in the file's own served-by cell,
+ * never the Assistant's reading of it; import_menu_words_hit on menu_drink_words / menu_food_words minus import_menu_ambiguous_words), then
+ * the person's answer for the row, then for its group (rows with no certain signal only); else it cannot be ticked.
+ * Profit = price - cost of one to 2 dp (as Stock Items > Put on the menu). A typed price changes the menu price only.
+ * Answers: answers_json['_drinks'][item key] = {tick, cat, price, menu, by, at}; ['_menu_g'][group key] = {menu, cat, by, at}; Assistant
+ * suggestions (never applied until accepted) in ['_sizes']['ai'][key]['menu' | 'menu_cat']. The file's price is read again from its cells
+ * every time, and at import only the rows that are still tickable are written (import_drinks_commit, inside the import's transaction).
+ * Ticking, typing a price, choosing a menu and importing ticked rows need the Menu permission as well as Import.
  *
- *   import_job_drinks_view($pdo, $jobId, $userId, $p)    the paged list (q, show, page, size)
- *   import_job_drinks_set($pdo, $jobId, $userId, $p)     mode tick (key, on) | category (key, value) | category_all (value) | tick_all (on, q, show)
+ *   import_job_menu_view($pdo, $jobId, $userId, $p)      step 3: counts, groups, one group's rows (q, show, mgroup, page, size 10|25|50|0=all)
+ *   import_job_drinks_view($pdo, $jobId, $userId, $p)    the flat paged list (q, show, page, size)
+ *   import_job_drinks_set($pdo, $jobId, $userId, $p)     mode tick | tick_all | price | menu | menu_keys | category | category_keys | category_all
+ *                                                        | group_menu | group_cat | accept (see the function)
  *   import_drinks_commit($pdo, $items, $answers, $jobId, $userId)   writes the ticked rows (caller holds the transaction + menu lock)
  */
 
@@ -57,7 +67,9 @@ if (!function_exists('import_drinks_build')) {
     /** What the database says about the drinks menu and the stock items this list touches (read once per build). */
     function import_drinks_db(PDO $pdo, array $ingIds): array
     {
-        $db = ['menu' => [], 'by_name' => [], 'cats' => [], 'links' => [], 'ing' => [], 'drink_ready' => function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo)];
+        // drinks menu: menu / by_name / cats (as before); food menu (2026-11-22, any item on the menu): fmenu / fby_name / fcats
+        $db = ['menu' => [], 'by_name' => [], 'cats' => [], 'fmenu' => [], 'fby_name' => [], 'fcats' => [], 'links' => [], 'ing' => [],
+            'drink_ready' => function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo)];
         foreach ($pdo->query('SELECT id, item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service FROM drink_menu ORDER BY id')->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $db['menu'][(int)$r['id']] = $r;
             $db['by_name'][mb_strtolower(rh_clean_text((string)$r['item_name']))][] = (int)$r['id'];
@@ -66,10 +78,23 @@ if (!function_exists('import_drinks_build')) {
                 $db['cats'][$ck] = rh_clean_text((string)$r['category']);
             }
         }
+        try {
+            $food = $pdo->query('SELECT id, item_name, description, price, category, is_available, display_order, station, show_pos, show_room_service FROM food_menu ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            $food = [];         // no food menu table in this database: nothing to match against
+        }
+        foreach ($food as $r) {
+            $db['fmenu'][(int)$r['id']] = $r;
+            $db['fby_name'][mb_strtolower(rh_clean_text((string)$r['item_name']))][] = (int)$r['id'];
+            $ck = mb_strtolower(rh_clean_text((string)$r['category']));
+            if ($ck !== '' && !isset($db['fcats'][$ck])) {
+                $db['fcats'][$ck] = rh_clean_text((string)$r['category']);
+            }
+        }
         $ingIds = array_values(array_unique(array_filter(array_map('intval', $ingIds))));
         if ($ingIds) {
             $in = implode(',', array_fill(0, count($ingIds), '?'));
-            $st = $pdo->prepare('SELECT id, name, unit, cost_per_unit, is_archived' . rh_drink_ing_cols('') . " FROM stock_ingredients WHERE id IN ($in)");
+            $st = $pdo->prepare('SELECT id, name, category, unit, cost_per_unit, is_archived' . rh_drink_ing_cols('') . " FROM stock_ingredients WHERE id IN ($in)");
             $st->execute($ingIds);
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $db['ing'][(int)$r['id']] = $r;
@@ -101,6 +126,105 @@ if (!function_exists('import_drinks_build')) {
             }
         }
         return $out;
+    }
+
+    /** The food-menu rows a till item (name + category) belongs to (the food twin of import_drinks_menu_ids_for). */
+    function import_food_menu_ids_for(array $db, string $name, string $category): array
+    {
+        $out = [];
+        foreach ($db['fby_name'][mb_strtolower(rh_clean_text($name))] ?? [] as $id) {
+            if (mb_strtolower(rh_clean_text((string)$db['fmenu'][$id]['category'])) === mb_strtolower(rh_clean_text($category))) {
+                $out[] = $id;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Which menu a text says for certain (a category heading, a stock category, a served-by cell): its whole wording, any two words together or
+     * any one word on the alias lists menu_drink_words / menu_food_words (import_aliases, seed v10). ['drink' => bool, 'food' => bool]; both or
+     * neither = not certain (the person chooses).
+     */
+    function import_menu_words_hit(string $text, array $drinkSet, array $foodSet): array
+    {
+        $out = ['drink' => false, 'food' => false];
+        $n = import_norm_text($text);
+        if ($n === '') {
+            return $out;
+        }
+        $w = preg_split('/\s+/u', $n, -1, PREG_SPLIT_NO_EMPTY);
+        $cands = [$n];
+        foreach ($w as $i => $t) {
+            $cands[] = $t;
+            $cands[] = import_measure_singular($t);
+            if (isset($w[$i + 1])) {
+                $cands[] = $t . ' ' . $w[$i + 1];
+            }
+        }
+        foreach ($cands as $c) {
+            $out['drink'] = $out['drink'] || isset($drinkSet[$c]);
+            $out['food'] = $out['food'] || isset($foodSet[$c]);
+        }
+        return $out;
+    }
+
+    /**
+     * Words that never say Drinks or Food on their own (QA 2026-11-22, owner rule "100% confident"): containers and words used on both menus
+     * ("can" of Coke or of baked beans, "bottle", "water", "hot chocolate", "side", "double" ...). Taken out of menu_drink_words / menu_food_words
+     * even when a hotel's saved alias list still has them, and never a drink measure for the menu choice. Two words together still count
+     * ("soft drinks" is not here).
+     */
+    function import_menu_ambiguous_words(): array
+    {
+        return import_word_set([
+            'can', 'cans', 'tin', 'tins', 'bottle', 'bottles', 'btl', 'btls', 'jar', 'jars', 'jug', 'jugs', 'carton', 'cartons', 'box', 'boxes',
+            'pack', 'packs', 'packet', 'packets', 'sachet', 'sachets', 'tub', 'tubs', 'bag', 'bags', 'each', 'piece', 'pieces', 'unit', 'units',
+            'water', 'waters', 'soda', 'sodas', 'bar', 'bars', 'chocolate', 'chocolates', 'side', 'sides', 'main', 'cup', 'cups', 'bowl', 'bowls',
+            'portion', 'portions', 'serving', 'servings', 'measure', 'measures', 'single', 'singles', 'double', 'doubles', 'half', 'scoop', 'scoops',
+            'slice', 'slices', 'pour', 'pours',
+        ]);
+    }
+
+    /**
+     * A served-by cell that is a drink-only measure (QA 2026-11-22): a glass ("Glass", "Glass of wine 175ml"), a shot / tot, or a measure whose
+     * word is a drink word (pint, carafe ...) or a name on the hotel's Drink measures list, never an ambiguous word (import_menu_ambiguous_words)
+     * and never a bare volume ("330ml" can be soup). $sv = import_served_read() of the same cell.
+     */
+    function import_menu_drink_measure(string $served, array $sv, array $glassSet, array $shotSet, array $drinkWords, array $ambWords): bool
+    {
+        if ($served === '') {
+            return false;
+        }
+        if (import_glass_read($served, $glassSet) !== null) {
+            return true;
+        }
+        if (!in_array($sv['kind'] ?? '', ['list', 'ml'], true)) {
+            return false;
+        }
+        $w = import_norm_text($sv['kind'] === 'list' ? (string)$sv['measure'] : (string)$sv['word']);
+        if ($w === '') {
+            return false;
+        }
+        $w1 = import_measure_singular($w);
+        if (isset($ambWords[$w]) || isset($ambWords[$w1])) {
+            return false;
+        }
+        return $sv['kind'] === 'list' || isset($shotSet[$w1]) || isset($glassSet[$w1]) || isset($drinkWords[$w]) || isset($drinkWords[$w1]);
+    }
+
+    /** A typed menu price ("1,500.50"): the parser of Stock Items > Put on the menu (commas only between thousands, > 0, 2 dp, at most 8 digits). */
+    function import_menu_price_parse($raw)
+    {
+        if (!function_exists('stm_parse_price')) {
+            require_once dirname(__DIR__, 2) . '/admin/includes/stock-to-menu-lib.php';
+        }
+        return stm_parse_price($raw);
+    }
+
+    /** Menu money as the screens show it: profit = price - (cost of one to 2 dp), so the shown cost + the shown profit always add up to the price. */
+    function import_menu_profit(?float $price, ?float $cost): ?float
+    {
+        return ($price !== null && $cost !== null) ? round($price - round($cost, 2), 2) : null;
     }
 
     /**
@@ -200,13 +324,14 @@ if (!function_exists('import_drinks_build')) {
     {
         $ingIds = [];
         foreach ($items as $it) {
-            if (!empty($it['sells']) && $it['match']) {
+            if ($it['match']) {
                 $ingIds[] = (int)$it['match']['id'];
             }
         }
         $db = import_drinks_db($pdo, $ingIds);
         $list = function_exists('rh_drink_measures_list') ? rh_drink_measures_list() : [];
         $ans = (array)($answers['_drinks'] ?? []);
+        $grpMenu = (array)($answers['_menu_g'] ?? []);       // one answer per group (the file's category heading): menu (drink | food) + category
         $sizeAns = (array)($answers['_sizes'] ?? []);      // step 3 bottle sizes: g = per group, r = per row (optional, never guessed)
         $aliases = import_load_aliases($pdo);
         $synonyms = (array)($aliases['unit_synonyms'] ?? []);      // "btl" = bottle (import_aliases, seeded)
@@ -217,10 +342,17 @@ if (!function_exists('import_drinks_build')) {
         $vocabSet = import_word_set(array_merge((array)($aliases['portion_words'] ?? []), (array)($aliases['glass_words'] ?? []), (array)($aliases['container_words'] ?? []), (array)($aliases['pour_containers'] ?? []), (array)($aliases['units'] ?? []), array_keys((array)($aliases['unit_synonyms'] ?? []))));
         $shotSet = import_word_set((array)($aliases['shot_words'] ?? []));       // "shot", "tot" (v9): a drink sold by one gets a shot size in step 3
         $soldOpts = import_drinks_sold_options($list, $shotSet, $glassSet);      // step 3 "Sold as" answers (menu side only)
+        $ambWords = import_menu_ambiguous_words();      // "can", "bottle", "water", "chocolate", "side" ...: never decide a menu on their own
+        $drinkWords = array_diff_key(import_word_set((array)($aliases['menu_drink_words'] ?? [])), $ambWords);      // v10: a word that says "Drinks menu" for certain
+        $foodWords = array_diff_key(import_word_set((array)($aliases['menu_food_words'] ?? [])), $ambWords);        // ... and "Food menu"
         $rows = [];
         $waiting = 0;
         foreach ($items as $it) {
-            if (empty($it['sells'])) {
+            $key = (string)$it['key'];
+            $a = is_array($ans[$key] ?? null) ? $ans[$key] : [];
+            $typedPrice = isset($a['price']) && is_numeric($a['price']) && (float)$a['price'] > 0 ? round((float)$a['price'], 2) : null;
+            // listed (owner 2026-11-22, any item on the menu): a selling price in the file, a price typed here, or sold by something (a served-by cell)
+            if (empty($it['sells']) && $typedPrice === null && trim((string)($it['served_by'] ?? '')) === '') {
                 continue;
             }
             if (($it['status'] ?? '') !== 'ready') {
@@ -231,9 +363,10 @@ if (!function_exists('import_drinks_build')) {
             }
             $ex = $it['match'] ? ($db['ing'][(int)$it['match']['id']] ?? null) : null;
             $unit = $ex ? (string)$ex['unit'] : (string)($it['unit'] ?? '');
-            if ($unit === '' || rh_drink_unit_is_weight($unit)) {
-                continue;               // food (kg, g ...) never goes on the drinks menu
+            if ($unit === '') {
+                continue;               // no stock unit: one sale cannot be worked out
             }
+            $isWeight = rh_drink_unit_is_weight($unit);      // kept by weight (kg, g): never a drink; one sale = one stock unit on the food menu
             $why = '';
             // ---- the price: every selling-price cell of the item, exactly as written; two different ones are shown, never picked
             $prices = [];
@@ -248,8 +381,8 @@ if (!function_exists('import_drinks_build')) {
                     $prices[] = ['v' => (float)$pn['value'], 'src' => (string)$s['source']];
                 }
             }
-            if (!$prices && !$unknown) {
-                continue;               // a blank or 0 selling price: nothing to offer
+            if (!$prices && !$unknown && $typedPrice === null && trim((string)($it['served_by'] ?? '')) === '') {
+                continue;               // a blank or 0 selling price and nothing else to go on: nothing to offer
             }
             $price = $prices ? $prices[0]['v'] : null;
             $priceSrc = $prices ? $prices[0]['src'] : (string)($it['sells'][0]['source'] ?? '');
@@ -259,16 +392,21 @@ if (!function_exists('import_drinks_build')) {
                     $other[] = import_fmt_money($pp['v']) . ' (' . $pp['src'] . ')';
                 }
             }
-            if ($price === null) {
-                $why = 'The selling price cell is a formula with no saved value, so the price is not known. Open the file in Excel, save it, and import it again.';
-            } elseif ($other) {
-                $why = 'Your file gives two different selling prices: ' . import_fmt_money($price) . ' (' . $priceSrc . ') and ' . implode(', ', $other) . '. Fix the file, or set the price on the Menu page.';
-            } elseif (preg_match('/\.\d{3,}$/', rtrim(rtrim(sprintf('%.6F', $price), '0'), '.'))) {
+            $filePrice = $price;
+            if ($typedPrice !== null) {
+                // the price typed in step 3 wins over the file's (the menu price only: never stock cost, the count, sizes or measures)
+                $price = $typedPrice;
+            } elseif ($price === null && $unknown) {
+                $why = 'The selling price cell is a formula with no saved value, so the price is not known. Type the selling price here, or save the file in Excel and import it again.';
+            } elseif ($price !== null && $other) {
+                $why = 'Your file gives two different selling prices: ' . import_fmt_money($price) . ' (' . $priceSrc . ') and ' . implode(', ', $other) . '. Type the right selling price here.';
+            } elseif ($price !== null && preg_match('/\.\d{3,}$/', rtrim(rtrim(sprintf('%.6F', $price), '0'), '.'))) {
                 // decimals counted on the written number (6 places, trailing zeros dropped), not by float arithmetic
-                $why = 'The price ' . import_fmt_money($price) . ' has more than 2 decimal places, and menu prices keep 2. Fix the cell or set the price on the Menu page.';
-            } elseif ($price > 99999999) {
-                $why = 'The price is too large for the menu.';
+                $why = 'The price ' . import_fmt_money($price) . ' has more than 2 decimal places, and menu prices keep 2. Type the selling price here (2 decimals).';
+            } elseif ($price !== null && $price > 99999999) {
+                $why = 'The price is too large for the menu. Type the selling price here.';
             }
+            $priceFrom = $typedPrice !== null ? 'typed' : ($filePrice !== null ? 'file' : '');
             // ---- one measure: what one sale is (the "served by" cell; none = one main unit) and its cost now
             $served = trim((string)($it['served_by'] ?? ''));
             if ($ex) {
@@ -353,6 +491,91 @@ if (!function_exists('import_drinks_build')) {
                 $sizeable = $db['drink_ready'] && !$worksNow && (!$isCont || $pour !== null);
                 $gr = $sizeable && in_array($sv['kind'], ['ml', 'as_is'], true) ? import_glass_read($served, $glassSet) : null;
             }
+            // ---- which menu (owner 2026-11-22: "any sort of menu item ... 100% confident"): see below for the order (certain signals, the
+            // row answer, the group answer). Anything else stays blank: the person chooses (never a guess).
+            $fileCat = rh_clean_text((string)($it['category'] ?? ''));
+            $gKey = 'c:' . mb_strtolower($fileCat);
+            $gA = is_array($grpMenu[$gKey] ?? null) ? $grpMenu[$gKey] : [];
+            $ansMenu = in_array($a['menu'] ?? '', ['drink', 'food'], true) ? (string)$a['menu'] : '';
+            $grpKind = in_array($gA['menu'] ?? '', ['drink', 'food'], true) ? (string)$gA['menu'] : '';
+            // already on a menu: its stock link first (a till item of exactly one line of this item), then the same name, on either menu
+            $cand = ['drink' => [], 'food' => []];
+            $how = '';
+            if ($ex) {
+                foreach ($db['links'][(int)$ex['id']] ?? [] as $lk) {
+                    foreach (import_drinks_menu_ids_for($db, $lk['name'], $lk['category']) as $mid) {
+                        $cand['drink'][$mid] = true;
+                    }
+                    foreach (import_food_menu_ids_for($db, $lk['name'], $lk['category']) as $mid) {
+                        $cand['food'][$mid] = true;
+                    }
+                }
+                $how = ($cand['drink'] || $cand['food']) ? 'link' : '';
+            }
+            if (!$cand['drink'] && !$cand['food']) {
+                foreach ([(string)$it['name'], (string)($it['typed_name'] ?? '')] as $nm) {
+                    foreach ($db['by_name'][mb_strtolower(rh_clean_text($nm))] ?? [] as $mid) {
+                        $cand['drink'][$mid] = true;
+                    }
+                    foreach ($db['fby_name'][mb_strtolower(rh_clean_text($nm))] ?? [] as $mid) {
+                        $cand['food'][$mid] = true;
+                    }
+                }
+                $how = ($cand['drink'] || $cand['food']) ? 'name' : '';
+            }
+            // the CERTAIN signals first (QA 2026-11-22): already on exactly one menu is the strongest and is never changed by a group answer;
+            // then kept by weight, a drink-only measure or word in the served-by cell (the file's own cell: never the Assistant's reading of it),
+            // a drink / food word in the category heading or the stock category, or that heading being a category of exactly one menu
+            $onKind = ($cand['drink'] xor $cand['food']) ? ($cand['drink'] ? 'drink' : 'food') : '';
+            $certKind = '';
+            $certFrom = '';
+            if ($onKind !== '') {
+                [$certKind, $certFrom] = [$onKind, 'menu'];
+            } elseif ($isWeight) {
+                [$certKind, $certFrom] = ['food', 'unit'];
+            } else {
+                $sigServed = $servedFrom === 'ai' ? trim((string)($it['served_by'] ?? '')) : $served;
+                $sigSv = $servedFrom === 'ai' ? import_served_read($sigServed, $unit, $list, $synonyms) : $sv;
+                $servedHit = import_menu_words_hit($sigServed, $drinkWords, $foodWords);
+                $drinkServed = import_menu_drink_measure($sigServed, $sigSv, $glassSet, $shotSet, $drinkWords, $ambWords);
+                if ($drinkServed || ($servedHit['drink'] && !$servedHit['food'])) {
+                    [$certKind, $certFrom] = ['drink', 'served'];
+                } elseif ($servedHit['food'] && !$servedHit['drink']) {
+                    [$certKind, $certFrom] = ['food', 'served'];
+                } else {
+                    $inD = $fileCat !== '' && isset($db['cats'][mb_strtolower($fileCat)]);
+                    $inF = $fileCat !== '' && isset($db['fcats'][mb_strtolower($fileCat)]);
+                    $hit = import_menu_words_hit($fileCat, $drinkWords, $foodWords);
+                    $sHit = $ex ? import_menu_words_hit((string)($ex['category'] ?? ''), $drinkWords, $foodWords) : ['drink' => false, 'food' => false];
+                    $d = $inD || $hit['drink'] || $sHit['drink'];
+                    $f = $inF || $hit['food'] || $sHit['food'];
+                    if ($d xor $f) {
+                        [$certKind, $certFrom] = [$d ? 'drink' : 'food', ($inD || $inF) ? 'menu_cat' : 'words'];
+                    }
+                }
+            }
+            // then the person: a row answer (never moving an item off the menu it is already on: that row cannot be ticked, it is changed in
+            // Menu Management), and a group answer only for a row with no certain signal (an item on both menus needs its own row answer)
+            $kind = '';
+            $kindFrom = '';
+            $menuClash = '';
+            if ($onKind !== '' && $ansMenu !== '' && $ansMenu !== $onKind) {
+                [$kind, $kindFrom] = [$onKind, 'menu'];
+                $menuClash = 'Already on the ' . ($onKind === 'drink' ? 'Drinks' : 'Food') . ' menu; change it in Menu Management.';
+            } elseif ($ansMenu !== '') {
+                [$kind, $kindFrom] = [$ansMenu, 'row'];
+            } elseif ($certKind !== '') {
+                [$kind, $kindFrom] = [$certKind, $certFrom];
+            } elseif ($grpKind !== '' && !($cand['drink'] && $cand['food'])) {
+                [$kind, $kindFrom] = [$grpKind, 'group'];
+            }
+            if ($kind === 'drink' && $isWeight) {
+                $why = $why !== '' ? $why : 'It is kept by weight (' . $unit . '), so it cannot go on the Drinks menu. Choose Food.';
+            }
+            if ($kind === 'food') {
+                $gr = null;             // food: no glass, shot or bottle sizes; one sale is one stock unit (or its Sold-as / count measure)
+                $sizeable = false;
+            }
             $isGlass = $gr !== null;
             // ---- a SHOT (owner 2026-11-21: "set the shot size in advance in step 3 ... same as Glass size"): sold by a measure named by a shot
             // word (alias shot_words: the hotel's "shot" on its Drink measures list, or "Tot 35ml" written in the cell). Listed in step 3 even when
@@ -362,7 +585,7 @@ if (!function_exists('import_drinks_build')) {
             $shotName = '';
             $cmShot = null;         // the item's own count measure of a shot ("bottle of 25 shots"), kept as it is
             $cmOwn = false;         // ... and it is the very measure this drink is sold by
-            if (!$isGlass && $db['drink_ready'] && (!$isCont || $pour !== null) && in_array($sv['kind'], ['list', 'ml'], true) && $shotSet) {
+            if (!$isGlass && $kind !== 'food' && $db['drink_ready'] && (!$isCont || $pour !== null) && in_array($sv['kind'], ['list', 'ml'], true) && $shotSet) {
                 $sw = import_measure_singular(mb_strtolower(trim($sv['kind'] === 'list' ? (string)$sv['measure'] : (string)$sv['word'])));
                 if ($sw !== '' && isset($shotSet[$sw])) {
                     $isShot = true;
@@ -537,6 +760,8 @@ if (!function_exists('import_drinks_build')) {
                     $why = ($contTxt === 'bottle' ? 'Add bottle size in Step 3 (optional)' : 'Add ' . $contTxt . ' size in Step 3 (optional)') . ': how many ml one ' . $unit . ' of it holds. Without it the cost of one ' . $saleTxt . ' is not known.';
                 } elseif ($isCont && $sv['kind'] !== 'unit' && $served !== '') {
                     $why = 'Kept in ' . import_measure_plural($unit, 2) . ': one ' . $unit . ' holds several, so a bottle size cannot be used to work out one ' . ($sv['word'] !== '' ? $sv['word'] : 'sale') . '. Set a count measure on the item in Stock, or add it on the Menu page after the import.';
+                } elseif ($kind === 'food' && $served !== '') {
+                    $why = 'Sold by "' . $served . '", which cannot be worked out for "' . (string)$it['name'] . '". If one sale is one ' . $unit . ', choose "One whole unit" under Sold as.';
                 } elseif ($sv['kind'] === 'as_is' && $served !== '') {
                     $why = 'Sold by "' . $served . '", which is not on your Drink measures list (Stock Items), so one sale of "' . (string)$it['name'] . '" cannot be worked out. Add "' . ($sv['word'] !== '' ? $sv['word'] : $served) . '" to that list with its ml, or set a count measure on the item in Stock, then open this list again.';
                 } else {
@@ -544,55 +769,113 @@ if (!function_exists('import_drinks_build')) {
                 }
             }
             $cost = $mc['cost'] ?? null;
-            $profit = ($cost !== null && $price !== null) ? round($price - $cost, 4) : null;
+            $profit = import_menu_profit($price, $cost !== null ? (float)$cost : null);      // as Stock Items > Put on the menu: price - cost to 2 dp
             $below = $cost !== null && $price !== null && rh_menu_cost_over_price((float)$cost, (float)$price);
-            // ---- already on the drinks menu? Its stock link first, then the same name in any category
+            // ---- already on a menu? (the candidates found above; a menu the person chose narrows them to that menu)
             $menuIds = [];
-            $how = '';
-            if ($ex) {
-                foreach ($db['links'][(int)$ex['id']] ?? [] as $lk) {
-                    foreach (import_drinks_menu_ids_for($db, $lk['name'], $lk['category']) as $mid) {
-                        $menuIds[$mid] = true;
+            foreach (['drink', 'food'] as $mk) {
+                if ($kind === '' || $kind === $mk) {
+                    foreach (array_keys($cand[$mk]) as $mid) {
+                        $menuIds[] = [$mk, $mid];
                     }
                 }
-                $how = $menuIds ? 'link' : '';
             }
-            if (!$menuIds) {
-                foreach ([(string)$it['name'], (string)($it['typed_name'] ?? '')] as $nm) {
-                    foreach ($db['by_name'][mb_strtolower(rh_clean_text($nm))] ?? [] as $mid) {
-                        $menuIds[$mid] = true;
-                    }
-                }
-                $how = $menuIds ? 'name' : '';
-            }
-            $menuIds = array_keys($menuIds);
             $menu = null;
+            $menuKind = '';
             $action = 'add';
+            $rowOf = function (array $c) use ($db) {
+                return $c[0] === 'food' ? $db['fmenu'][$c[1]] : $db['menu'][$c[1]];
+            };
             if (count($menuIds) > 1) {
-                $names = array_map(function ($id) use ($db) {
-                    return '"' . rh_clean_text((string)$db['menu'][$id]['item_name']) . '" in ' . rh_clean_text((string)$db['menu'][$id]['category']);
+                $names = array_map(function ($c) use ($rowOf) {
+                    $m = $rowOf($c);
+                    return '"' . rh_clean_text((string)$m['item_name']) . '" in ' . rh_clean_text((string)$m['category']) . ($c[0] === 'food' ? ' (Food)' : ' (Drinks)');
                 }, array_slice($menuIds, 0, 3));
                 $action = 'none';
                 if ($why === '') {
-                    $why = 'More than one drink on the menu matches it (' . implode(', ', $names) . '). Change the right one on the Menu page.';
+                    $why = 'More than one item on the menu matches it (' . implode(', ', $names) . '). Change the right one on the Menu page.';
                 }
             } elseif ($menuIds) {
-                $menu = $db['menu'][$menuIds[0]];
+                $menu = $rowOf($menuIds[0]);
+                $menuKind = $menuIds[0][0];
                 $action = ($price !== null && abs((float)$menu['price'] - $price) <= BALANCE_TOLERANCE) ? 'same' : 'update';
             }
-            // ---- category: the menu's own (an update never moves a drink); else the answer, the sheet's category column, or "Bar"
-            $catDefault = !empty($it['category_col']) && trim((string)$it['category']) !== '' ? rh_clean_text((string)$it['category']) : import_drinks_default_category();
-            $a = is_array($ans[$it['key']] ?? null) ? $ans[$it['key']] : [];
-            $cat = isset($a['cat']) && rh_clean_text((string)$a['cat']) !== '' ? rh_clean_text((string)$a['cat']) : $catDefault;
+            if ($menu === null) {
+                $how = '';
+            }
+            // ---- menu category: the menu's own (an update never moves an item); else the person's answer for the row, for its group, then
+            // the file's category when it is a category of that menu or the file has a category column, else "Bar" for a drink (owner
+            // 2026-11-19); a food item with none of these is asked (never guessed)
+            $catsOf = $kind === 'food' ? $db['fcats'] : $db['cats'];
+            $catDefault = '';
+            $catFrom = '';
+            if ($kind !== '') {
+                if ($fileCat !== '' && isset($catsOf[mb_strtolower($fileCat)])) {
+                    [$catDefault, $catFrom] = [$catsOf[mb_strtolower($fileCat)], 'menu_cat'];
+                } elseif (!empty($it['category_col']) && $fileCat !== '') {
+                    [$catDefault, $catFrom] = [$fileCat, 'column'];
+                } elseif ($kind === 'food' && ($it['category_how'] ?? '') === 'section-row' && $fileCat !== '') {
+                    [$catDefault, $catFrom] = [$fileCat, 'column'];
+                } elseif ($kind === 'drink') {
+                    [$catDefault, $catFrom] = [import_drinks_default_category(), 'default'];
+                }
+            }
+            $cat = $catDefault;
+            if (isset($a['cat']) && rh_clean_text((string)$a['cat']) !== '') {
+                [$cat, $catFrom] = [mb_substr(rh_clean_text((string)$a['cat']), 0, 100), 'row'];
+            } elseif (isset($gA['cat']) && rh_clean_text((string)$gA['cat']) !== '') {
+                [$cat, $catFrom] = [mb_substr(rh_clean_text((string)$gA['cat']), 0, 100), 'group'];
+            }
             if ($menu) {
-                $cat = rh_clean_text((string)$menu['category']);
-            } else {
-                $cat = $db['cats'][mb_strtolower($cat)] ?? $cat;      // "bar" joins an existing "Bar" (no two spellings of one category)
+                [$cat, $catFrom] = [rh_clean_text((string)$menu['category']), 'menu'];
+                if ($kind === '') {
+                    [$kind, $kindFrom] = [$menuKind, 'menu'];
+                }
+            } elseif ($cat !== '') {
+                $cat = $catsOf[mb_strtolower($cat)] ?? $cat;      // "bar" joins an existing "Bar" (no two spellings of one category)
+            }
+            // what is still missing, in the order the person fixes it: which menu, its category, the price (the sizes said above)
+            $needSize = !empty($size['need']) && !import_drinks_size_done(['size_need' => $size['need'], 'cont_need' => $size['cont_need'], 'size_ml' => $size['ml'],
+                'cont_optional' => $size['cont_optional'], 'glass_need' => $size['glass_need'], 'glass_ml' => $size['glass_ml'], 'shot_need' => $size['shot_need'],
+                'shot_ml' => $size['shot_ml'], 'shot_from' => $size['shot_from']]);
+            $sizeWhy = $needSize ? $why : '';
+            if ($kind === '') {
+                $why = 'Choose Drinks or Food for it (or for its group "' . ($fileCat !== '' ? $fileCat : 'no category') . '"). Its name and category do not say for certain which menu it belongs to.';
+            } elseif ($cat === '' && $action === 'add' && $why === '') {
+                $why = 'Choose its menu category (or one for its group).';
+            } elseif ($price === null && $why === '') {
+                $why = 'Type the selling price (VAT included).';
+            }
+            if ($menuClash !== '') {
+                $why = $menuClash;      // the person chose the other menu for an item already on this one: never moved, never doubled
+            }
+            // a suggestion (the Assistant, when it is set up): shown, never used until a person accepts it
+            // only for a row the rules leave unclear; never against a menu already known for certain (it only fills the category then), never
+            // Drinks for an item kept by weight; the category joins an existing one of that menu whatever its case, else it is shown as new
+            $sug = null;
+            if (($kind === '' || ($cat === '' && $action === 'add')) && isset($aiA['menu']['v']) && in_array($aiA['menu']['v'], ['drink', 'food'], true)) {
+                $sMenu = (string)$aiA['menu']['v'];
+                $sCat = isset($aiA['menu_cat']['v']) && is_string($aiA['menu_cat']['v']) ? mb_substr(rh_clean_text($aiA['menu_cat']['v']), 0, 100) : '';
+                $sCats = $sMenu === 'food' ? $db['fcats'] : $db['cats'];
+                $sCatOld = $sCat !== '' && isset($sCats[mb_strtolower($sCat)]);
+                $sCat = $sCatOld ? $sCats[mb_strtolower($sCat)] : $sCat;
+                if (!($isWeight && $sMenu === 'drink') && ($kind === '' || ($kind === $sMenu && $sCat !== ''))) {
+                    $sug = ['menu' => $sMenu, 'cat' => $sCat, 'cat_new' => $sCat !== '' && !$sCatOld, 'src' => (string)($aiA['menu']['src'] ?? '')];
+                }
+            }
+            // the Assistant's reading of the served-by cell (a drink measure) is never a certain signal: at most "Suggested: Drinks", used by "Use this"
+            if ($sug === null && $kind === '' && !$isWeight && $servedFrom === 'ai' && import_menu_drink_measure($served, $sv, $glassSet, $shotSet, $drinkWords, $ambWords)) {
+                $sug = ['menu' => 'drink', 'cat' => '', 'cat_new' => false, 'src' => $servedSrc];
             }
             $rows[] = [
                 'key' => (string)$it['key'], 'name' => mb_substr(rh_clean_text((string)$it['name']), 0, 200), 'name_source' => (string)($it['name_source'] ?? ''),
                 'ing_id' => $ex ? (int)$ex['id'] : 0,
-                'price' => $price, 'price_source' => $priceSrc,
+                'price' => $price, 'price_source' => $priceSrc, 'price_from' => $priceFrom, 'file_price' => $filePrice, 'typed_price' => $typedPrice,
+                'menu' => $kind, 'menu_from' => $kindFrom, 'group' => $gKey, 'group_label' => $fileCat !== '' ? $fileCat : 'No category',
+                'group_menu' => $grpKind, 'group_cat' => isset($gA['cat']) ? rh_clean_text((string)$gA['cat']) : '', 'row_menu' => $ansMenu,
+                'suggest' => $sug, 'weight' => $isWeight, 'menu_clash' => $menuClash !== '',
+                'need_size' => $needSize, 'size_why' => $sizeWhy, 'need_price' => $price === null, 'need_menu' => $kind === '',
+                'need_cat' => $kind !== '' && $cat === '' && $action === 'add',
                 'measure' => $measureLabel, 'measure_source' => $servedSrc, 'measure_from' => $servedFrom, 'served' => $served,
                 'served_cell' => trim((string)($it['served_by'] ?? '')), 'served_unread' => $unread,
                 'served_cell_source' => (string)($it['served_by_source'] ?? ''), 'sold' => $soldServed !== null ? $soldV : '',
@@ -609,18 +892,21 @@ if (!function_exists('import_drinks_build')) {
                 'shot_count_n' => $isShot && $cmShot !== null ? (float)$cmShot['n'] : null,
                 'cost' => $cost, 'profit' => $profit, 'below' => $below,
                 'cost_note' => $mc === null ? 'Not known: the measure cannot be worked out.' : ($cost === null ? 'Not known: this item has no cost yet.' : ''),
-                'category' => $cat, 'category_default' => $catDefault, 'category_from' => $menu ? 'menu' : (!empty($it['category_col']) ? 'column' : 'default'),
+                'category' => $cat, 'category_default' => $catDefault, 'category_from' => $catFrom,
                 'action' => $action, 'match_how' => $how,
                 'menu_id' => $menu ? (int)$menu['id'] : 0, 'menu_name' => $menu ? rh_clean_text((string)$menu['item_name']) : '',
                 'old_price' => $menu ? (float)$menu['price'] : null,
-                'why_not' => $why, 'tickable' => $why === '' && in_array($action, ['add', 'update'], true),
+                'why_not' => $why, 'tickable' => $why === '' && $kind !== '' && $price !== null && in_array($action, ['add', 'update'], true),
                 'ticked' => !empty($a['tick']),
             ];
         }
-        // two rows of the file that end up as the same menu drink: neither is offered (never a silent pick)
+        // two rows of the file that end up as the same menu item: neither is offered (never a silent pick)
         $seen = [];
         foreach ($rows as $i => $r) {
-            $k = $r['menu_id'] > 0 ? 'm' . $r['menu_id'] : 'n' . mb_strtolower($r['name']);
+            if ($r['menu'] === '') {
+                continue;
+            }
+            $k = $r['menu'] . ($r['menu_id'] > 0 ? 'm' . $r['menu_id'] : 'n' . mb_strtolower($r['name']));
             $seen[$k][] = $i;
         }
         foreach ($seen as $idxs) {
@@ -628,7 +914,7 @@ if (!function_exists('import_drinks_build')) {
                 foreach ($idxs as $i) {
                     $rows[$i]['tickable'] = false;
                     if ($rows[$i]['why_not'] === '') {
-                        $rows[$i]['why_not'] = 'Two rows of your file are the same drink on the menu. Skip one of them in step 3, or set the price on the Menu page.';
+                        $rows[$i]['why_not'] = 'Two rows of your file are the same item on the menu. Skip one of them in step 3, or set the price on the Menu page.';
                     }
                 }
             }
@@ -638,21 +924,79 @@ if (!function_exists('import_drinks_build')) {
                 $r['why_not'] = 'Already on the menu at this price. Nothing to change.';
             }
             $r['ticked'] = $r['ticked'] && $r['tickable'];
+            [$r['status'], $r['status_text']] = import_menu_row_status($r);
         }
         unset($r);
         $cats = array_values($db['cats']);
         sort($cats, SORT_NATURAL | SORT_FLAG_CASE);
-        return ['rows' => $rows, 'waiting' => $waiting, 'cats' => $cats];
+        $fcats = array_values($db['fcats']);
+        sort($fcats, SORT_NATURAL | SORT_FLAG_CASE);
+        return ['rows' => $rows, 'waiting' => $waiting, 'cats' => $cats, 'fcats' => $fcats];
+    }
+
+    /**
+     * The short status of one row of "Put items on the menu" (the full reason is why_not): [code, text]. code: menu | size | price | cat |
+     * blocked | same | below | update | ready. A row that needs more than one thing names the first one to fix.
+     */
+    function import_menu_row_status(array $r): array
+    {
+        if (!empty($r['need_menu'])) {
+            return ['menu', 'Choose menu'];
+        }
+        if (!empty($r['menu_clash'])) {
+            return ['blocked', 'Already on the ' . (($r['menu'] ?? '') === 'food' ? 'Food' : 'Drinks') . ' menu'];
+        }
+        if (!empty($r['need_size']) && !empty($r['need_price'])) {
+            return ['size', 'Needs size and price'];
+        }
+        if (!empty($r['need_size'])) {
+            return ['size', 'Needs size'];
+        }
+        if (!empty($r['need_cat'])) {
+            return ['cat', 'Choose category'];
+        }
+        if (!empty($r['need_price'])) {
+            return ['price', 'Needs price'];
+        }
+        if (($r['action'] ?? '') === 'same') {
+            return ['same', 'Already on the menu'];
+        }
+        if (empty($r['tickable'])) {
+            return ['blocked', 'Cannot go on the menu'];
+        }
+        if (!empty($r['below'])) {
+            return ['below', 'Sells below cost'];
+        }
+        if (($r['action'] ?? '') === 'update') {
+            return ['update', 'Price change'];
+        }
+        return ['ready', 'Ready'];
     }
 
     /** The rows the screen shows for a search ($p['q']) and a Show filter ($p['show']), every page. Also what "Tick all" acts on. */
     function import_drinks_filter(array $all, array $p): array
     {
         $q = mb_strtolower(trim(mb_substr((string)($p['q'] ?? ''), 0, 100)));
-        $show = in_array($p['show'] ?? '', ['ticked', 'below', 'add', 'update'], true) ? (string)$p['show'] : 'all';
-        return array_values(array_filter($all, function ($r) use ($q, $show) {
-            if ($q !== '' && mb_strpos(mb_strtolower($r['name'] . ' ' . $r['category'] . ' ' . $r['price_source']), $q) === false) {
+        $show = in_array($p['show'] ?? '', ['ticked', 'below', 'add', 'update', 'ready', 'need_size', 'need_price', 'need_menu', 'todo', 'drink', 'food'], true) ? (string)$p['show'] : 'all';
+        $grp = (string)($p['mgroup'] ?? '');        // one group of "Put items on the menu" (the file's category heading)
+        return array_values(array_filter($all, function ($r) use ($q, $show, $grp) {
+            if ($grp !== '' && ($r['group'] ?? '') !== $grp) {
                 return false;
+            }
+            if ($q !== '' && mb_strpos(mb_strtolower($r['name'] . ' ' . $r['category'] . ' ' . $r['price_source'] . ' ' . $r['name_source'] . ' ' . ($r['group_label'] ?? '')), $q) === false) {
+                return false;
+            }
+            if ($show === 'ready') {
+                return $r['tickable'] && !$r['ticked'];
+            }
+            if ($show === 'need_size' || $show === 'need_price' || $show === 'need_menu') {
+                return !empty($r[$show]);
+            }
+            if ($show === 'todo') {       // still needs something from the person
+                return !empty($r['need_menu']) || !empty($r['need_cat']) || !empty($r['need_size']) || !empty($r['need_price']);
+            }
+            if ($show === 'drink' || $show === 'food') {
+                return ($r['menu'] ?? '') === $show;
             }
             if ($show === 'ticked') {
                 return $r['ticked'];
@@ -697,84 +1041,372 @@ if (!function_exists('import_drinks_build')) {
             'currency' => function_exists('getSetting') ? (string)getSetting('currency_symbol', '') : ''];
     }
 
-    /** Tick / untick one drink, tick / untick every drink the list shows (tick_all), set its category, or set one category for every drink that would be added. Needs the Menu permission. */
+    /** Whole-list counts of "Put items on the menu" (step 3 live line, step 4 summary line). */
+    function import_menu_counts(array $all): array
+    {
+        $c = ['listed' => count($all), 'ticked' => 0, 'ticked_drink' => 0, 'ticked_food' => 0, 'add' => 0, 'update' => 0, 'below' => 0, 'below_all' => 0,
+            'tickable' => 0, 'need_size' => 0, 'need_price' => 0, 'need_menu' => 0, 'need_cat' => 0, 'todo' => 0, 'drink' => 0, 'food' => 0];
+        foreach ($all as $r) {
+            $t = !empty($r['ticked']);
+            $c['ticked'] += $t ? 1 : 0;
+            $c['ticked_drink'] += ($t && $r['menu'] === 'drink') ? 1 : 0;
+            $c['ticked_food'] += ($t && $r['menu'] === 'food') ? 1 : 0;
+            $c['add'] += ($t && $r['action'] === 'add') ? 1 : 0;
+            $c['update'] += ($t && $r['action'] === 'update') ? 1 : 0;
+            $c['below'] += ($t && $r['below']) ? 1 : 0;
+            $c['below_all'] += $r['below'] ? 1 : 0;
+            $c['tickable'] += $r['tickable'] ? 1 : 0;
+            foreach (['need_size', 'need_price', 'need_menu', 'need_cat'] as $k) {
+                $c[$k] += !empty($r[$k]) ? 1 : 0;
+            }
+            $c['todo'] += (!empty($r['need_menu']) || !empty($r['need_cat']) || !empty($r['need_size']) || !empty($r['need_price'])) ? 1 : 0;
+            if (in_array($r['menu'], ['drink', 'food'], true)) {
+                $c[$r['menu']]++;
+            }
+        }
+        return $c;
+    }
+
+    /** The size groups of the drinks sold by a measure (one shot / glass / bottle size for many drinks at once), as the sizes list gives them. */
+    function import_sizes_groups(array $all, array $gAns): array
+    {
+        $pos = function ($v): ?float {
+            return is_numeric($v) && (float)$v > 0 ? (float)$v : null;
+        };
+        $groups = [];
+        foreach ($all as $r) {
+            $g = !empty($r['size_need']) ? (string)$r['size_group'] : '';
+            if ($g === '') {
+                continue;
+            }
+            if (!isset($groups[$g])) {
+                $groups[$g] = ['key' => $g, 'label' => $r['size_group_label'], 'unit' => $r['unit'], 'count' => 0, 'filled' => 0, 'blank' => 0,
+                    'kind' => $r['size_kind'], 'word' => $r['size_word'], 'ml' => $pos($gAns[$g]['ml'] ?? null), 'glass' => $pos($gAns[$g]['glass'] ?? null),
+                    'cont' => false, 'glass_q' => $r['size_kind'] === 'glass',
+                    'shot' => $pos($gAns[$g]['shot'] ?? null), 'shot_q' => !empty($r['shot_need']), 'shot_list_ml' => $r['shot_list_ml'] ?? null, 'shot_list_name' => (string)($r['shot_list_name'] ?? '')];
+            }
+            $groups[$g]['count']++;
+            $groups[$g]['cont'] = $groups[$g]['cont'] || (!empty($r['cont_need']) && empty($r['cont_optional']));
+            $groups[$g][import_drinks_size_done($r) ? 'filled' : 'blank']++;
+        }
+        $groups = array_values($groups);
+        usort($groups, function ($a, $b) {
+            return $b['count'] <=> $a['count'] ?: strcmp($a['label'], $b['label']);
+        });
+        return $groups;
+    }
+
+    /**
+     * Step 3 "Put items on the menu" (owner 2026-11-22: one table, any item, grouped by the file's category heading). $p: q, show, mgroup (a group
+     * key: its rows come back paged; '' = the overview only), page, size (10 / 25 / 50, 0 = all), ai (false = never ask the optional reader:
+     * tests only). Always: the counts, the groups (name, count, on the menu, what is still needed, the group's answer, a suggestion when every
+     * suggestion of its rows agrees), the size groups and choices the size boxes use.
+     */
+    function import_job_menu_view(PDO $pdo, int $jobId, int $userId, array $p): array
+    {
+        $state = import_job_state($pdo, $jobId);
+        if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing', 'confirmed'], true)) {
+            return ['ok' => false, 'error' => 'This import cannot be reviewed any more.'];
+        }
+        $editable = in_array($state['job']['status'], ['analysed', 'reviewing'], true);
+        if ($editable && ($p['ai'] ?? true) !== false && import_job_sizes_ai_fill($pdo, $jobId, null, true) > 0) {
+            $state = import_job_state($pdo, $jobId) ?: $state;
+        }
+        $answers = (array)$state['answers'];
+        $b = import_drinks_build($pdo, (array)$state['res']['items'], $answers);
+        $all = $b['rows'];
+        $shown = import_drinks_filter($all, ['q' => $p['q'] ?? '', 'show' => $p['show'] ?? 'all']);
+        $shownKeys = array_flip(array_column($shown, 'key'));
+        $groups = [];
+        foreach ($all as $r) {
+            $g = $r['group'];
+            if (!isset($groups[$g])) {
+                $groups[$g] = ['key' => $g, 'label' => $r['group_label'], 'count' => 0, 'shown' => 0, 'ticked' => 0, 'tickable' => 0, 'tickable_shown' => 0,
+                    'todo' => 0, 'need_menu' => 0, 'need_cat' => 0, 'drink' => 0, 'food' => 0, 'add' => 0, 'menu_answer' => $r['group_menu'], 'cat_answer' => $r['group_cat'],
+                    'cats' => [], 'sugs' => [], 'weight' => 0];
+            }
+            $G = &$groups[$g];
+            $G['count']++;
+            $isShown = isset($shownKeys[$r['key']]);
+            $G['shown'] += $isShown ? 1 : 0;
+            $G['ticked'] += $r['ticked'] ? 1 : 0;
+            $G['tickable'] += $r['tickable'] ? 1 : 0;
+            $G['tickable_shown'] += ($r['tickable'] && !$r['ticked'] && $isShown) ? 1 : 0;
+            $G['todo'] += (!empty($r['need_menu']) || !empty($r['need_cat']) || !empty($r['need_size']) || !empty($r['need_price'])) ? 1 : 0;
+            $G['need_menu'] += $r['need_menu'] ? 1 : 0;
+            $G['need_cat'] += $r['need_cat'] ? 1 : 0;
+            $G['add'] += $r['action'] === 'add' ? 1 : 0;
+            $G['weight'] += !empty($r['weight']) ? 1 : 0;
+            if (in_array($r['menu'], ['drink', 'food'], true)) {
+                $G[$r['menu']]++;
+            }
+            if ($r['category'] !== '') {
+                $G['cats'][$r['category']] = true;
+            }
+            $G['sugs'][] = $r;
+            unset($G);
+        }
+        foreach ($groups as &$G) {
+            $G['menu'] = $G['drink'] === $G['count'] ? 'drink' : ($G['food'] === $G['count'] ? 'food' : (($G['drink'] || $G['food']) ? 'mixed' : ''));
+            $G['category'] = count($G['cats']) === 1 ? (string)array_key_first($G['cats']) : '';
+            $G['suggest'] = import_menu_group_suggest($G['sugs']);
+            unset($G['cats'], $G['sugs']);
+        }
+        unset($G);
+        $groups = array_values($groups);
+        $out = ['ok' => true, 'counts' => import_menu_counts($all), 'groups' => $groups, 'waiting' => $b['waiting'], 'cats' => $b['cats'], 'fcats' => $b['fcats'],
+            'default_category' => import_drinks_default_category(), 'can_menu' => import_drinks_can_menu($userId), 'editable' => $editable,
+            'drink_ready' => function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo),
+            'size_groups' => import_sizes_groups($all, (array)($answers['_sizes']['g'] ?? [])),
+            'currency' => function_exists('getSetting') ? (string)getSetting('currency_symbol', '') : '', 'shown' => count($shown),
+            'tickable_shown' => count(array_filter($shown, function ($r) {
+                return $r['tickable'] && !$r['ticked'];
+            })), 'ticked_shown' => count(array_filter($shown, function ($r) {
+                return $r['ticked'];
+            }))];
+        $aliases = import_load_aliases($pdo);
+        $out['sold_options'] = array_map(function ($o) {
+            return ['v' => $o['v'], 'label' => $o['label']];
+        }, import_drinks_sold_options(function_exists('rh_drink_measures_list') ? rh_drink_measures_list() : [],
+            import_word_set((array)($aliases['shot_words'] ?? [])), import_word_set((array)($aliases['glass_words'] ?? []))));
+        $mg = (string)($p['mgroup'] ?? '');
+        if ($mg !== '') {
+            $rows = import_drinks_filter($all, ['q' => $p['q'] ?? '', 'show' => $p['show'] ?? 'all', 'mgroup' => $mg]);
+            $size = (int)($p['size'] ?? 10);
+            $size = in_array($size, [10, 25, 50, 0], true) ? $size : 10;
+            $per = $size === 0 ? max(1, count($rows)) : $size;
+            $pages = max(1, (int)ceil(count($rows) / $per));
+            $page = min($pages, max(1, (int)($p['page'] ?? 1)));
+            $out['rows'] = array_map(function ($r) {
+                unset($r['link'], $r['ing_id']);
+                $r['size_done'] = import_drinks_size_done($r);
+                return $r;
+            }, array_slice($rows, ($page - 1) * $per, $per));
+            $out += ['mgroup' => $mg, 'total' => count($rows), 'page' => $page, 'pages' => $pages, 'size' => $size, 'keys' => array_column($rows, 'key')];
+        }
+        return $out;
+    }
+
+    /**
+     * The group's suggestion (shown as "Suggested: Food · Snacks"; used only by its "Use this" click, as the person's group answer): only for a
+     * group where EVERY row is unclear (needs its menu or its category) and every row carries the very same suggestion. A group with one row
+     * known for certain, one row without a suggestion or two suggestions that differ gets none (never a pick, never over a certain answer).
+     */
+    function import_menu_group_suggest(array $rows): ?array
+    {
+        $one = null;
+        foreach ($rows as $r) {
+            if ((empty($r['need_menu']) && empty($r['need_cat'])) || empty($r['suggest'])) {
+                return null;
+            }
+            $k = $r['suggest']['menu'] . '|' . $r['suggest']['cat'];
+            if ($one !== null && $one[0] !== $k) {
+                return null;
+            }
+            $one = $one ?? [$k, $r['suggest']];
+        }
+        return $one[1] ?? null;
+    }
+
+    /**
+     * Change "Put items on the menu" (step 3). Needs the Menu permission (and Import: the page checks it). Modes:
+     *   tick (key, on) | tick_all (on, q, show, mgroup: every row the list shows, all pages; on = only rows that can be ticked)
+     *   price (key, value; '' = back to the file's price): the menu price only, checked as Stock Items > Put on the menu checks it
+     *   menu (key, value drink | food | '' = clear) | menu_keys (keys[], value) : which menu, the person's answer for rows
+     *   category (key, value) | category_keys (keys[], value) | category_all (value: every item that would be added)
+     *   group_menu (group, value drink | food | '') | group_cat (group, value; '' = clear): one answer for every row of a group (a row answer wins)
+     *   accept (group or key): use the suggestion shown for it (a suggestion is never used until this)
+     * Any ticked row that can no longer go on the menu after the change is unticked in the same save.
+     */
     function import_job_drinks_set(PDO $pdo, int $jobId, int $userId, array $p): array
     {
         if (!import_drinks_can_menu($userId)) {
-            return ['ok' => false, 'error' => 'Your account cannot change the menu (it needs the Menu permission), so drinks cannot be ticked here.'];
+            return ['ok' => false, 'error' => 'Your account cannot change the menu (it needs the Menu permission), so items cannot be ticked or priced here.'];
         }
         $state = import_job_state($pdo, $jobId);
         if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
             return ['ok' => false, 'error' => 'That import cannot be changed.'];
         }
-        $b = import_drinks_build($pdo, (array)$state['res']['items'], (array)$state['answers']);
+        $items = (array)$state['res']['items'];
+        $b = import_drinks_build($pdo, $items, (array)$state['answers']);
         $byKey = [];
+        $groupKeys = [];
         foreach ($b['rows'] as $r) {
             $byKey[$r['key']] = $r;
+            $groupKeys[$r['group']][] = $r['key'];
         }
         $mode = (string)($p['mode'] ?? '');
         $key = (string)($p['key'] ?? '');
-        $cat = rh_clean_text(mb_substr((string)($p['value'] ?? ''), 0, 200));
-        if (in_array($mode, ['category', 'category_all'], true) && ($cat === '' || mb_strlen($cat) > 100)) {
+        $grp = (string)($p['group'] ?? '');
+        $raw = (string)($p['value'] ?? '');
+        $cat = rh_clean_text(mb_substr($raw, 0, 200));
+        $keys = [];
+        $vals = [];         // what is written on each row of $keys
+        if (in_array($mode, ['category', 'category_all', 'category_keys'], true) && ($cat === '' || mb_strlen($cat) > 100)) {
             return ['ok' => false, 'error' => 'Type a category (100 characters at most).'];
         }
-        if ($mode === 'tick' || $mode === 'category') {
-            $r = $byKey[$key] ?? null;
+        if ($mode === 'group_cat' && mb_strlen($cat) > 100) {
+            return ['ok' => false, 'error' => 'Type a category (100 characters at most).'];
+        }
+        if (in_array($mode, ['menu', 'menu_keys', 'group_menu'], true) && !in_array($raw, ['drink', 'food', ''], true)) {
+            return ['ok' => false, 'error' => 'Choose Drinks or Food.'];
+        }
+        $oneRow = function (string $k) use ($byKey) {
+            return $byKey[$k] ?? null;
+        };
+        $pickKeys = function () use ($p, $byKey): array {
+            $o = [];
+            foreach ((array)($p['keys'] ?? []) as $k) {
+                if (is_string($k) && isset($byKey[$k])) {
+                    $o[$k] = true;
+                }
+            }
+            return array_slice(array_keys($o), 0, 5000);
+        };
+        if (in_array($mode, ['tick', 'category', 'price', 'menu'], true) || ($mode === 'accept' && $grp === '')) {
+            $r = $oneRow($key);
             if (!$r) {
-                return ['ok' => false, 'error' => 'That drink is not in this list any more. Reload the list.'];
+                return ['ok' => false, 'error' => 'That item is not in this list any more. Reload the list.'];
             }
             if ($mode === 'tick' && !empty($p['on']) && !$r['tickable']) {
-                return ['ok' => false, 'error' => $r['why_not'] !== '' ? $r['why_not'] : 'That drink cannot be ticked.'];
+                return ['ok' => false, 'error' => $r['why_not'] !== '' ? $r['why_not'] : 'That item cannot be ticked.'];
             }
             if ($mode === 'category' && $r['action'] !== 'add') {
-                return ['ok' => false, 'error' => 'This drink is already on the menu, so it keeps its category. Change it on the Menu page.'];
+                return ['ok' => false, 'error' => 'This item is already on the menu, so it keeps its category. Change it on the Menu page.'];
+            }
+            if ($mode === 'menu' && $raw === 'drink' && !empty($r['weight'])) {
+                return ['ok' => false, 'error' => 'It is kept by weight (' . $r['unit'] . '), so it cannot go on the Drinks menu.'];
+            }
+            $keys = [$key];
+            if ($mode === 'tick') {
+                $vals = ['tick' => !empty($p['on']) ? 1 : 0];
+            } elseif ($mode === 'category') {
+                $vals = ['cat' => $cat];
+            } elseif ($mode === 'menu') {
+                $vals = ['menu' => $raw === '' ? null : $raw];
+            } elseif ($mode === 'accept') {
+                if (!$r['suggest']) {
+                    return ['ok' => false, 'error' => 'There is no suggestion for this item any more. Reload the list.'];
+                }
+                $vals = ['menu' => $r['suggest']['menu']] + ($r['suggest']['cat'] !== '' && $r['action'] === 'add' ? ['cat' => mb_substr($r['suggest']['cat'], 0, 100)] : []);
+            } else {
+                // price: blank = back to the file's own price; else a price above 0 with at most 2 decimals (VAT included)
+                $pv = import_menu_price_parse($raw);
+                if ($pv === false) {
+                    return ['ok' => false, 'error' => function_exists('stm_price_comma_wrong') && stm_price_comma_wrong($raw)
+                        ? 'Use a dot for decimals, e.g. 1.50, and commas only between thousands, e.g. 1,500.'
+                        : 'The price must be a number above 0 with at most 2 decimals (VAT included), up to 99,999,999.99.'];
+                }
+                $same = $pv !== null && $r['file_price'] !== null && abs((float)$r['file_price'] - $pv) <= BALANCE_TOLERANCE;
+                $vals = ['price' => ($pv === null || $same) ? null : $pv];
+            }
+        } elseif ($mode === 'menu_keys' || $mode === 'category_keys') {
+            $keys = $pickKeys();
+            if (!$keys) {
+                return ['ok' => false, 'error' => 'Select at least one item first.'];
+            }
+            if ($mode === 'menu_keys' && $raw === 'drink') {
+                $keys = array_values(array_filter($keys, function ($k) use ($byKey) {
+                    return empty($byKey[$k]['weight']);
+                }));
+            } elseif ($mode === 'category_keys') {
+                $keys = array_values(array_filter($keys, function ($k) use ($byKey) {
+                    return $byKey[$k]['action'] === 'add';
+                }));
+            }
+            if (!$keys) {
+                return ['ok' => false, 'error' => $mode === 'menu_keys' ? 'Items kept by weight cannot go on the Drinks menu.' : 'Every selected item is already on the menu, so each keeps its category.'];
+            }
+            $vals = $mode === 'menu_keys' ? ['menu' => $raw === '' ? null : $raw] : ['cat' => $cat];
+        } elseif (in_array($mode, ['group_menu', 'group_cat'], true) || ($mode === 'accept' && $grp !== '')) {
+            if (!isset($groupKeys[$grp])) {
+                return ['ok' => false, 'error' => 'That group is not in this list any more. Reload the list.'];
             }
         } elseif ($mode === 'category_all') {
-            $keys = [];
             foreach ($b['rows'] as $r) {
                 if ($r['action'] === 'add') {
                     $keys[] = $r['key'];
                 }
             }
             if (!$keys) {
-                return ['ok' => false, 'error' => 'No drink in this list would be added, so there is no category to set.'];
+                return ['ok' => false, 'error' => 'No item in this list would be added, so there is no category to set.'];
             }
+            $vals = ['cat' => $cat];
         } elseif ($mode === 'tick_all') {
-            // every drink the list shows now (search + Show filter, all pages): on = tick the ones that can be ticked; off = untick them all
-            $keys = [];
+            // every row the list shows now (search + Show + group, all pages): on = tick the ones that can be ticked; off = untick them all
             foreach (import_drinks_filter($b['rows'], $p) as $r) {
                 if (!empty($p['on']) ? ($r['tickable'] && !$r['ticked']) : $r['ticked']) {
                     $keys[] = $r['key'];
                 }
             }
             if (!$keys) {
-                return ['ok' => false, 'error' => !empty($p['on']) ? 'Every drink in this list that can go on the menu is already ticked.' : 'No drink in this list is ticked.'];
+                return ['ok' => false, 'error' => !empty($p['on']) ? 'Every item in this list that can go on the menu is already ticked.' : 'No item in this list is ticked.'];
             }
+            $vals = ['tick' => !empty($p['on']) ? 1 : 0];
         } else {
             return ['ok' => false, 'error' => 'Unknown change.'];
         }
-        $now = date('Y-m-d H:i:s');
-        return import_cont_save($pdo, $jobId, '', function (array &$answers) use ($mode, $key, $cat, $p, $userId, $now, &$keys) {
-            $set = function (string $k, array $vals) use (&$answers, $userId, $now) {
-                $cur = is_array($answers['_drinks'][$k] ?? null) ? $answers['_drinks'][$k] : [];
-                $answers['_drinks'][$k] = array_merge($cur, $vals, ['by' => $userId > 0 ? $userId : null, 'at' => $now]);
-            };
-            if ($mode === 'tick') {
-                $set($key, ['tick' => !empty($p['on']) ? 1 : 0]);
-            } elseif ($mode === 'category') {
-                $set($key, ['cat' => $cat]);
-            } elseif ($mode === 'tick_all') {
-                foreach ($keys as $k) {
-                    $set($k, ['tick' => !empty($p['on']) ? 1 : 0]);
-                }
-                return ['changed' => count($keys)];
-            } else {
-                foreach ($keys as $k) {
-                    $set($k, ['cat' => $cat]);
-                }
-                return ['changed' => count($keys)];
+        // a group's suggestion: only when every suggestion of its rows says the same thing (as the list shows it)
+        $gSug = null;
+        if ($mode === 'accept' && $grp !== '') {
+            $gSug = import_menu_group_suggest(array_map(function ($k) use ($byKey) {
+                return $byKey[$k];
+            }, $groupKeys[$grp]));
+            if ($gSug === null) {
+                return ['ok' => false, 'error' => 'There is no single suggestion for this group. Choose Drinks or Food yourself.'];
             }
-            return ['changed' => 1];
+        }
+        $now = date('Y-m-d H:i:s');
+        return import_cont_save($pdo, $jobId, '', function (array &$answers) use ($pdo, $items, $mode, $grp, $raw, $cat, $keys, $vals, $gSug, $userId, $now) {
+            $who = ['by' => $userId > 0 ? $userId : null, 'at' => $now];
+            foreach ($keys as $k) {
+                $cur = is_array($answers['_drinks'][$k] ?? null) ? $answers['_drinks'][$k] : [];
+                foreach ($vals as $f => $v) {
+                    if ($v === null) {
+                        unset($cur[$f]);
+                    } else {
+                        $cur[$f] = $v;
+                    }
+                }
+                $answers['_drinks'][$k] = array_merge($cur, $who);
+            }
+            if ($grp !== '' && in_array($mode, ['group_menu', 'group_cat', 'accept'], true)) {
+                $g = is_array($answers['_menu_g'][$grp] ?? null) ? $answers['_menu_g'][$grp] : [];
+                if ($mode === 'group_menu') {
+                    if ($raw === '') {
+                        unset($g['menu']);
+                    } else {
+                        $g['menu'] = $raw;
+                    }
+                } elseif ($mode === 'group_cat') {
+                    if ($cat === '') {
+                        unset($g['cat']);
+                    } else {
+                        $g['cat'] = mb_substr($cat, 0, 100);
+                    }
+                } else {
+                    $g['menu'] = $gSug['menu'];
+                    if ($gSug['cat'] !== '') {
+                        $g['cat'] = mb_substr($gSug['cat'], 0, 100);
+                    }
+                }
+                if (isset($g['menu']) || isset($g['cat'])) {
+                    $answers['_menu_g'][$grp] = array_merge(array_diff_key($g, ['by' => 1, 'at' => 1]), $who);
+                } else {
+                    unset($answers['_menu_g'][$grp]);
+                }
+            }
+            // a ticked row that can no longer go on the menu (a cleared price, another menu ...) is unticked in the same save
+            $unticked = 0;
+            if ($mode !== 'tick' && $mode !== 'tick_all') {
+                foreach (import_drinks_build($pdo, $items, $answers)['rows'] as $r) {
+                    if (!$r['tickable'] && !empty($answers['_drinks'][$r['key']]['tick'])) {
+                        $answers['_drinks'][$r['key']]['tick'] = 0;
+                        $unticked++;
+                    }
+                }
+            }
+            return ['changed' => $keys ? count($keys) : 1, 'unticked' => $unticked];
         });
     }
 
@@ -1008,8 +1640,15 @@ if (!function_exists('import_drinks_build')) {
             if (($r['measure_from'] ?? '') === 'answer') {
                 unset($f['portion_ml']);    // the person said how it is sold: a reading of the file's cell is not used for its glass / shot size
             }
+            if (!empty($r['need_menu']) || !empty($r['need_cat'])) {
+                // which menu (Drinks or Food) and its category, when the rules are not certain (2026-11-22): a suggestion only, accepted by a click
+                $f['menu'] = true;
+                $f['menu_cat'] = true;
+            }
             if ($f) {
-                $ask[] = ['key' => $r['key'], 'name' => $r['name'], 'unit' => $r['unit'], 'served' => $r['served_cell']];
+                // ask_menu: only a row the rules leave unclear is asked which menu (a certain row is never sent for it, never overridden)
+                $ask[] = ['key' => $r['key'], 'name' => $r['name'], 'unit' => $r['unit'], 'served' => $r['served_cell'], 'category' => (string)($r['group_label'] ?? '')]
+                    + (!empty($f['menu']) ? ['ask_menu' => true] : []);
                 $allowed[$r['key']] = $f;
             }
         }
@@ -1215,7 +1854,8 @@ if (!function_exists('import_drinks_build')) {
             return ['ok' => false, 'error' => 'That "Sold as" choice is not on the list any more. Reload the list. Nothing was changed.'];
         }
         $items = (array)$state['res']['items'];
-        $all = import_sizes_all(import_drinks_build($pdo, $items, (array)$state['answers'])['rows']);
+        $allRows = import_drinks_build($pdo, $items, (array)$state['answers'])['rows'];
+        $all = import_sizes_all($allRows);
         if (!empty($p['all'])) {
             $keys = array_column(import_sizes_filter($all, $p), 'key');
         } else {
@@ -1230,7 +1870,8 @@ if (!function_exists('import_drinks_build')) {
         if (!$keys) {
             return ['ok' => false, 'error' => 'Tick at least one drink first. Nothing was changed.'];
         }
-        if (!empty($p['one']) && !in_array($keys[0], array_column($all, 'key'), true)) {
+        // any row of "Put items on the menu" can take a Sold as answer or a size it uses (a size it does not use is skipped with the reason)
+        if (!empty($p['one']) && !in_array($keys[0], array_column($allRows, 'key'), true)) {
             return ['ok' => false, 'error' => 'That drink is not in this list any more. Reload the list.'];
         }
         $now = date('Y-m-d H:i:s');
@@ -1258,7 +1899,7 @@ if (!function_exists('import_drinks_build')) {
             $strip = function ($a): array {
                 return is_array($a) ? array_diff_key($a, ['by' => 1, 'at' => 1]) : [];
             };
-            $inList = array_flip(array_column(import_sizes_all(array_values($byKey())), 'key'));
+            $inList = array_flip(array_keys($byKey()));
             $orig = [];
             $skip = [];         // key => why
             $applied = [];      // key => true when at least one value is for it
@@ -1461,44 +2102,53 @@ if (!function_exists('import_drinks_build')) {
         $oldPrice = null;
         $menuId = 0;
         $price = number_format((float)$r['price'], 2, '.', '');
+        // which menu (2026-11-22): 'food' = the food menu (station kitchen), else the drinks menu (station bar), as Menu Management writes them
+        $food = ($r['menu'] ?? 'drink') === 'food';
+        $table = $food ? 'food_menu' : 'drink_menu';
+        $menuWord = $food ? 'food menu' : 'drinks menu';
         if ($r['action'] === 'add') {
             $category = $r['category'];
             if ($category === '' || mb_strlen($category) > 100) {
                 throw new RuntimeException('"' . $r['name'] . '": its menu category is missing or too long.');
             }
-            $dup = rh_find_duplicate($pdo, 'drink_menu', 'item_name', $r['name'], ['category' => $category]);
+            $dup = rh_find_duplicate($pdo, $table, 'item_name', $r['name'], ['category' => $category]);
             if ($dup) {
-                throw new RuntimeException('A drink called "' . $dup['value'] . '" is already in "' . $category . '". Please review the drinks list again.');
+                throw new RuntimeException('An item called "' . $dup['value'] . '" is already in "' . $category . '" on the ' . $menuWord . '. Please review the menu list again.');
             }
-            $ord = $pdo->prepare('SELECT COALESCE(MAX(display_order), 0) + 1 FROM drink_menu WHERE category = ?');
+            $ord = $pdo->prepare("SELECT COALESCE(MAX(display_order), 0) + 1 FROM `$table` WHERE category = ?");
             $ord->execute([$category]);
             $displayOrder = (int)$ord->fetchColumn();
-            $pdo->prepare('INSERT INTO drink_menu (item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$r['name'], '', $price, $category, 1, $displayOrder, '', 'bar', 1, 1]);
+            if ($food) {
+                $pdo->prepare('INSERT INTO food_menu (item_name, description, price, category, is_available, display_order, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$r['name'], '', $price, $category, 1, $displayOrder, 'kitchen', 1, 1]);
+            } else {
+                $pdo->prepare('INSERT INTO drink_menu (item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$r['name'], '', $price, $category, 1, $displayOrder, '', 'bar', 1, 1]);
+            }
             $menuId = (int)$pdo->lastInsertId();
-            $pos = rh_menu_pos_sync_item($pdo, 'drink', [
-                'item_name' => $r['name'], 'description' => '', 'price' => $price, 'category' => $category, 'station' => 'bar',
+            $pos = rh_menu_pos_sync_item($pdo, $food ? 'food' : 'drink', [
+                'item_name' => $r['name'], 'description' => '', 'price' => $price, 'category' => $category, 'station' => $food ? 'kitchen' : 'bar',
                 'is_available' => 1, 'display_order' => $displayOrder, 'show_pos' => 1, 'show_room_service' => 1, 'tags' => '',
             ], null, null);
-            $what = 'added "' . $r['name'] . '" to the drinks menu (' . $category . ') at ' . $price . ' per ' . $r['measure'] . ' (' . $priceNote . ')';
+            $what = 'added "' . $r['name'] . '" to the ' . $menuWord . ' (' . $category . ') at ' . $price . ' per ' . $r['measure'] . ' (' . $priceNote . ')';
         } else {
-            $st = $pdo->prepare('SELECT * FROM drink_menu WHERE id = ? FOR UPDATE');
+            $st = $pdo->prepare("SELECT * FROM `$table` WHERE id = ? FOR UPDATE");
             $st->execute([$r['menu_id']]);
             $cur = $st->fetch(PDO::FETCH_ASSOC);
             if (!$cur) {
-                throw new RuntimeException('"' . $r['menu_name'] . '" is no longer on the drinks menu. Please review the drinks list again.');
+                throw new RuntimeException('"' . $r['menu_name'] . '" is no longer on the ' . $menuWord . '. Please review the menu list again.');
             }
             $oldPrice = number_format((float)$cur['price'], 2, '.', '');
-            $pdo->prepare('UPDATE drink_menu SET price = ? WHERE id = ?')->execute([$price, (int)$cur['id']]);
+            $pdo->prepare("UPDATE `$table` SET price = ? WHERE id = ?")->execute([$price, (int)$cur['id']]);
             // the till's copy, exactly as Menu Management does on an edit that changes only the price: same name and category (so an
             // item on an open order is never moved), its availability left as the till has it
-            $pos = rh_menu_pos_sync_item($pdo, 'drink', [
+            $pos = rh_menu_pos_sync_item($pdo, $food ? 'food' : 'drink', [
                 'item_name' => (string)$cur['item_name'], 'description' => (string)($cur['description'] ?? ''), 'price' => $price, 'category' => (string)$cur['category'],
-                'station' => (string)($cur['station'] ?? 'bar'), 'is_available' => null, 'display_order' => (int)$cur['display_order'],
+                'station' => (string)($cur['station'] ?? ($food ? 'kitchen' : 'bar')), 'is_available' => null, 'display_order' => (int)$cur['display_order'],
                 'show_pos' => (int)$cur['show_pos'], 'show_room_service' => (int)$cur['show_room_service'], 'tags' => (string)($cur['tags'] ?? ''),
             ], ['item_name' => (string)$cur['item_name'], 'category' => (string)$cur['category']], null);
             $menuId = (int)$cur['id'];
-            $what = 'changed the price of "' . rh_clean_text((string)$cur['item_name']) . '" (' . rh_clean_text((string)$cur['category']) . ') from ' . $oldPrice . ' to ' . $price
+            $what = 'changed the price of "' . rh_clean_text((string)$cur['item_name']) . '" (' . rh_clean_text((string)$cur['category']) . ', ' . $menuWord . ') from ' . $oldPrice . ' to ' . $price
                 . ' (' . $priceNote . ')';
         }
         // the stock link: one measure per sale, only when the drink has none (an existing link, maybe with more lines, is never replaced)
@@ -1524,12 +2174,12 @@ if (!function_exists('import_drinks_build')) {
      */
     function import_drinks_commit(PDO $pdo, array $items, array $answers, int $jobId, int $userId): array
     {
-        $out = ['added' => 0, 'updated' => 0, 'linked' => 0, 'names' => []];
+        $out = ['added' => 0, 'updated' => 0, 'linked' => 0, 'names' => [], 'food_added' => 0, 'food_updated' => 0];
         if (!import_drinks_any_ticked($answers)) {
             return $out;
         }
         if (!import_drinks_can_menu($userId)) {
-            throw new RuntimeException('drinks are ticked for the menu, and your account cannot change the menu (it needs the Menu permission). Untick them or ask a manager who has it.');
+            throw new RuntimeException('items are ticked for the menu, and your account cannot change the menu (it needs the Menu permission). Untick them or ask a manager who has it.');
         }
         $b = import_drinks_build($pdo, $items, $answers);
         $drinkReady = function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo);
@@ -1559,8 +2209,14 @@ if (!function_exists('import_drinks_build')) {
                 $find->execute([$r['name']]);
                 $ingId = (int)$find->fetchColumn();
             }
-            $w = import_drinks_menu_write($pdo, $r, $ingId, $userId, $drinkReady, 'selling price from ' . $r['price_source'] . ', VAT included');
+            $note = ($r['price_from'] ?? '') === 'typed'
+                ? 'selling price typed in step 3' . ($r['file_price'] !== null ? ' (file: ' . number_format((float)$r['file_price'], 2, '.', '') . ')' : '') . ', VAT included'
+                : 'selling price from ' . $r['price_source'] . ', VAT included';
+            $w = import_drinks_menu_write($pdo, $r, $ingId, $userId, $drinkReady, $note);
             $out[$w['action'] === 'add' ? 'added' : 'updated']++;
+            if (($r['menu'] ?? '') === 'food') {
+                $out[$w['action'] === 'add' ? 'food_added' : 'food_updated']++;
+            }
             if ($w['linked']) {
                 $out['linked']++;
             }

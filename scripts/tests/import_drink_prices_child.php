@@ -91,12 +91,12 @@ try {
         [$n('Cola'), $n('Softs'), 'bottle', '500', '10', '1234.50', ''],
         [$n('Lager'), $n('Softs'), 'bottle', '1000', '5', '2500', ''],
         [$n('Cheap'), $n('Softs'), 'bottle', '3000', '5', '2000', ''],
-        [$n('Rice'), $n('Food'), 'kg', '1500', '5', '3000', ''],
+        [$n('Rice'), $n('Food'), 'kg', '1500', '5', '', ''],
         [$n('Water'), $n('Softs'), 'bottle', '300', '5', '', ''],
         [$n('Gin'), $n('Spirits'), 'bottle', '20000', '2', '1500', $measureOn ? 'shot' : ''],
     ], 'a.csv'), 'zzd-a-' . $run . '.csv');
     [$vA, $A] = $view($jA, $admin);
-    $ck('list: only drinks with a selling price are offered (food by weight and a blank price are not)', $vA['ok'] && isset($A[$n('Cola')], $A[$n('Lager')], $A[$n('Cheap')], $A[$n('Gin')]) && !isset($A[$n('Rice')]) && !isset($A[$n('Water')]), json_encode(array_keys($A)) . ' ' . json_encode($vA['error'] ?? ''));
+    $ck('list: only items with a selling price (or a served-by cell) are offered; no price and nothing else = not listed (Rice, Water)', $vA['ok'] && isset($A[$n('Cola')], $A[$n('Lager')], $A[$n('Cheap')], $A[$n('Gin')]) && !isset($A[$n('Rice')]) && !isset($A[$n('Water')]), json_encode(array_keys($A)) . ' ' . json_encode($vA['error'] ?? ''));
     $ck('list: every row is unticked by default', array_sum(array_map(function ($r) { return $r['ticked'] ? 1 : 0; }, $A)) === 0 && ($vA['counts']['ticked'] ?? -1) === 0);
     $co = $A[$n('Cola')] ?? [];
     $ck('list: the price is the sheet\'s cell exactly (VAT included, nothing added) with its cell', abs((float)($co['price'] ?? 0) - 1234.5) < 0.000001 && preg_match('/F2$/', (string)($co['price_source'] ?? '')) === 1, json_encode($co));
@@ -206,7 +206,17 @@ try {
     // ---- file B: no category column, nothing ticked -> nothing on the menu; then "Bar" when ticked ------------------------------
     $headB = ['Item Name', 'Unit', 'Unit Price', 'Balance', 'Selling Price'];
     $jB = $start($file($headB, [[$n('Tonic'), 'can', '400', '6', '900'], [$n('Soda'), 'can', '350', '6', '800']], 'b.csv'), 'zzd-b-' . $run . '.csv');
+    // nothing in this file says which menu (no category, no served-by): never guessed, the person answers once for the group; Assistant off
+    [, $B0] = $view($jB, $admin);
+    $tB0 = import_job_drinks_set($pdo, $jB, $admin, ['mode' => 'tick', 'key' => $B0[$n('Tonic')]['key'] ?? '', 'on' => true]);
+    $aiOffB = import_job_sizes_ai_fill($pdo, $jB, null, false);
+    $gB = (string)($B0[$n('Tonic')]['group'] ?? '');
+    $rGB = import_job_drinks_set($pdo, $jB, $admin, ['mode' => 'group_menu', 'group' => $gB, 'value' => 'drink']);
     [, $B] = $view($jB, $admin);
+    $ck('menu: uncertain rows (no category, no served-by) say "Choose menu" and cannot be ticked; with the Assistant off nothing is asked; one group answer makes both tickable',
+        ($B0[$n('Tonic')]['status'] ?? '') === 'menu' && empty($B0[$n('Tonic')]['tickable']) && empty($tB0['ok']) && stripos((string)($tB0['error'] ?? ''), 'Drinks or Food') !== false
+        && $aiOffB === 0 && !empty($rGB['ok']) && ($B[$n('Tonic')]['menu'] ?? '') === 'drink' && ($B[$n('Tonic')]['menu_from'] ?? '') === 'group'
+        && !empty($B[$n('Tonic')]['tickable']) && !empty($B[$n('Soda')]['tickable']), json_encode([$B0[$n('Tonic')]['status'] ?? null, $tB0, $rGB, $B[$n('Tonic')]['menu_from'] ?? null]));
     $ck('category: with no category column the drink goes to "Bar"', mb_strtolower((string)($B[$n('Tonic')]['category'] ?? '')) === 'bar' && ($B[$n('Tonic')]['category_from'] ?? '') === 'default', json_encode($B[$n('Tonic')] ?? null));
     import_job_drinks_set($pdo, $jB, $admin, ['mode' => 'tick', 'key' => $B[$n('Soda')]['key'], 'on' => true]);
     $menuBefore = (int)$col('SELECT COUNT(*) FROM drink_menu');
@@ -778,6 +788,359 @@ try {
             (float)$col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Vodka H4')]) === 750.0
             && (float)$col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Mini H5')]) === 50.0);
     }
+    // ---- file F (owner 2026-11-22): any item on the menu (food too), grouped by category, a typed price, a suggestion, the money maths ----------
+    $headF = ['Item Name', 'Category', 'Unit', 'Unit Price', 'Balance', 'Selling Price', 'Served By'];
+    $jF = $start($file($headF, [
+        [$n('Crisps'), $n('Snacks'), 'packet', '500', '10', '1200', ''],
+        [$n('Burger'), $n('Kitchen'), 'each', '2500', '4', '6000', ''],
+        [$n('Rice F'), $n('Kitchen'), 'kg', '1500', '5', '3000', ''],
+        [$n('Mystery A'), $n('Misc'), 'each', '400', '3', '1000', ''],
+        [$n('Mystery B'), $n('Misc'), 'each', '700', '3', '2000', ''],
+        [$n('Tonic NP'), $n('Beers'), 'bottle', '400', '6', '', 'Bottle'],
+        [$n('Kuche'), $n('Beers'), 'bottle', '2066.115', '6', '5000', 'Bottle'],
+        [$n('Special'), $n('Beers'), 'bottle', '2521.0085', '6', '6000', 'Bottle'],
+    ], 'f.csv'), 'zzd-f-' . $run . '.csv');
+    $mv = function (array $p = []) use ($pdo, $jF, $admin) {
+        $v = import_job_menu_view($pdo, $jF, $admin, $p + ['ai' => false]);
+        $g = [];
+        foreach ((array)($v['groups'] ?? []) as $x) { $g[$x['label']] = $x; }
+        return [$v, $g];
+    };
+    $rowsF = function () use ($pdo, $jF) {
+        $st = import_job_state($pdo, $jF);
+        $by = [];
+        foreach (import_drinks_build($pdo, (array)$st['res']['items'], (array)$st['answers'])['rows'] as $r) { $by[$r['name']] = $r; }
+        return $by;
+    };
+    [$vF0, $GF0] = $mv();
+    $F0 = $rowsF();
+    $ck('groups: one group per category heading of the file; Snacks and Kitchen go to Food, Beers to Drinks (certain words); Misc says nothing for certain',
+        ($GF0[$n('Snacks')]['menu'] ?? '') === 'food' && ($GF0[$n('Kitchen')]['menu'] ?? '') === 'food' && ($GF0[$n('Beers')]['menu'] ?? '') === 'drink'
+        && ($GF0[$n('Misc')]['need_menu'] ?? 0) === 2 && ($GF0[$n('Misc')]['menu'] ?? 'x') === '' && count($vF0['groups'] ?? []) === 4, json_encode($vF0['groups'] ?? $vF0));
+    $ck('food: a kg item with a selling price goes to Food (kept by weight), one sale = 1 kg: cost 1500, profit 1500; it can never be a drink',
+        ($F0[$n('Rice F')]['menu'] ?? '') === 'food' && ($F0[$n('Rice F')]['menu_from'] ?? '') === 'unit' && abs((float)($F0[$n('Rice F')]['cost'] ?? 0) - 1500) < 0.0001
+        && abs((float)($F0[$n('Rice F')]['profit'] ?? 0) - 1500) < 0.0001 && empty(import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'menu', 'key' => $F0[$n('Rice F')]['key'] ?? '', 'value' => 'drink'])['ok']),
+        json_encode($F0[$n('Rice F')] ?? null));
+    $ck('food: no glass / shot / bottle size is asked for a food item, its category is the file\'s', empty($F0[$n('Crisps')]['size_need']) && ($F0[$n('Crisps')]['category'] ?? '') === $n('Snacks')
+        && !empty($F0[$n('Crisps')]['tickable']), json_encode($F0[$n('Crisps')] ?? null));
+    $tMis = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'tick', 'key' => $F0[$n('Mystery A')]['key'] ?? '', 'on' => true]);
+    $ck('menu: an uncertain row cannot be ticked until a person answers (Choose menu)', empty($tMis['ok']) && ($F0[$n('Mystery A')]['status'] ?? '') === 'menu', json_encode($tMis));
+    // the Assistant (a test double, no paid call): suggests Food + "ZZD Bites" for both Misc rows; shown, never applied until accepted
+    $mGroup = (string)($F0[$n('Mystery A')]['group'] ?? '');
+    $sugFn = function (array $ask) use ($n) {
+        $o = [];
+        foreach ($ask as $x) {
+            if (strpos((string)$x['name'], 'Mystery') !== false) {
+                $o[] = ['key' => $x['key'], 'field' => 'menu', 'value' => 'food', 'source' => (string)$x['name']];
+                $o[] = ['key' => $x['key'], 'field' => 'menu_cat', 'value' => $n('Bites'), 'source' => (string)$x['name']];
+                $o[] = ['key' => $x['key'], 'field' => 'menu', 'value' => 'pudding', 'source' => 'x'];         // not drink / food: dropped
+            }
+        }
+        return $o;
+    };
+    $nSug = import_job_sizes_ai_fill($pdo, $jF, $sugFn);
+    [, $GF1] = $mv();
+    $F1 = $rowsF();
+    $ck('suggestion: kept as "Suggested" for the group (menu Food, category Bites), NOT applied: rows still need a menu and cannot be ticked',
+        $nSug >= 4 && ($GF1[$n('Misc')]['suggest']['menu'] ?? '') === 'food' && ($GF1[$n('Misc')]['suggest']['cat'] ?? '') === $n('Bites')
+        && !empty($F1[$n('Mystery A')]['need_menu']) && empty($F1[$n('Mystery A')]['tickable']), json_encode([$nSug, $GF1[$n('Misc')] ?? null]));
+    $acc = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'accept', 'group' => $mGroup]);
+    $F2 = $rowsF();
+    $ck('suggestion: one click accepts it for the group: both rows Food, category Bites, tickable (nothing ticked by itself)',
+        !empty($acc['ok']) && ($F2[$n('Mystery A')]['menu'] ?? '') === 'food' && ($F2[$n('Mystery B')]['menu_from'] ?? '') === 'group' && ($F2[$n('Mystery B')]['category'] ?? '') === $n('Bites')
+        && !empty($F2[$n('Mystery A')]['tickable']) && empty($F2[$n('Mystery A')]['ticked']), json_encode([$acc, $F2[$n('Mystery A')] ?? null]));
+    $ovr = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'menu', 'key' => $F2[$n('Mystery B')]['key'] ?? '', 'value' => 'drink']);
+    $F3 = $rowsF();
+    $ovrClr = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'menu', 'key' => $F2[$n('Mystery B')]['key'] ?? '', 'value' => '']);
+    $F3b = $rowsF();
+    $ck('group answer applies to every row; a row answer wins (Mystery B -> Drinks) and clearing it goes back to the group (Food)',
+        !empty($ovr['ok']) && ($F3[$n('Mystery B')]['menu'] ?? '') === 'drink' && ($F3[$n('Mystery B')]['menu_from'] ?? '') === 'row' && ($F3[$n('Mystery A')]['menu'] ?? '') === 'food'
+        && !empty($ovrClr['ok']) && ($F3b[$n('Mystery B')]['menu'] ?? '') === 'food', json_encode([$ovr, $F3[$n('Mystery B')]['menu_from'] ?? null]));
+    // a typed price: validation, set, clear, "same as the file" = no override; stock untouched
+    $kNP = (string)($F0[$n('Tonic NP')]['key'] ?? '');
+    $ck('price: an item with no price in the file is listed (heading Beers: Drinks) as Needs price, not tickable',
+        ($F0[$n('Tonic NP')]['status'] ?? '') === 'price' && ($F0[$n('Tonic NP')]['menu'] ?? '') === 'drink' && empty($F0[$n('Tonic NP')]['tickable']), json_encode($F0[$n('Tonic NP')] ?? null));
+    $bad = [];
+    foreach (['1,50', 'abc', '0', '-5', '123456789', '12.345'] as $bp) {
+        $rb = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'price', 'key' => $kNP, 'value' => $bp]);
+        if (!empty($rb['ok'])) { $bad[] = $bp; }
+    }
+    $rNoPerm = import_job_drinks_set($pdo, $jF, $mgrNoMenu, ['mode' => 'price', 'key' => $kNP, 'value' => '1500']);
+    $ck('price: refused when not a price (1,50 abc 0 -5 123456789 12.345) and without the Menu permission', !$bad && empty($rNoPerm['ok']) && stripos((string)$rNoPerm['error'], 'Menu permission') !== false, json_encode($bad));
+    $rP = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'price', 'key' => $kNP, 'value' => '1,500.50']);
+    $F4 = $rowsF();
+    $ck('price: "1,500.50" typed -> 1500.50, from you, the row is tickable; profit 1500.50 - 400 = 1100.50',
+        !empty($rP['ok']) && abs((float)($F4[$n('Tonic NP')]['price'] ?? 0) - 1500.5) < 0.000001 && ($F4[$n('Tonic NP')]['price_from'] ?? '') === 'typed'
+        && !empty($F4[$n('Tonic NP')]['tickable']) && abs((float)($F4[$n('Tonic NP')]['profit'] ?? 0) - 1100.5) < 0.000001, json_encode($F4[$n('Tonic NP')] ?? null));
+    $kCr = (string)($F0[$n('Crisps')]['key'] ?? '');
+    import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'price', 'key' => $kCr, 'value' => '1300']);
+    $F5 = $rowsF();
+    import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'price', 'key' => $kCr, 'value' => '1200']);
+    $F5b = $rowsF();
+    $ck('price: a typed price wins over the file (Crisps 1300, file 1200); typing the file\'s own price again leaves no override',
+        abs((float)($F5[$n('Crisps')]['price'] ?? 0) - 1300) < 0.000001 && abs((float)($F5[$n('Crisps')]['file_price'] ?? 0) - 1200) < 0.000001
+        && ($F5b[$n('Crisps')]['price_from'] ?? '') === 'file' && !isset(import_job_answers(import_job_get($pdo, $jF))['_drinks'][$kCr]['price']), json_encode([$F5[$n('Crisps')]['price'] ?? null, $F5b[$n('Crisps')]['price_from'] ?? null]));
+    import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'tick', 'key' => $kNP, 'on' => true]);
+    $rClr = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'price', 'key' => $kNP, 'value' => '']);
+    $F6 = $rowsF();
+    $ck('price: clearing it goes back to the file (none here: Needs price again) and unticks the row', !empty($rClr['ok']) && (int)($rClr['unticked'] ?? 0) === 1
+        && ($F6[$n('Tonic NP')]['status'] ?? '') === 'price' && empty($F6[$n('Tonic NP')]['ticked']), json_encode($rClr));
+    import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'price', 'key' => $kNP, 'value' => '1500']);
+    import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'price', 'key' => $kCr, 'value' => '1300']);
+    // money maths: shown cost (2 dp) + profit = price on every row; Kuche 2066.115 -> 2066.12 + 2933.88; Special 2521.0085 -> 2521.01 + 3478.99
+    $F7 = $rowsF();
+    $sumOk = true;
+    foreach ($F7 as $r) {
+        if ($r['cost'] !== null && $r['price'] !== null && abs(round((float)$r['cost'], 2) + (float)$r['profit'] - (float)$r['price']) > 0.000001) { $sumOk = false; }
+    }
+    $ck('maths: profit = price - cost of one to 2 dp (as Stock Items > Put on the menu): shown cost + profit = price on every row (Kuche 2933.88, Special 3478.99)',
+        $sumOk && abs((float)($F7[$n('Kuche')]['profit'] ?? 0) - 2933.88) < 0.000001 && abs((float)($F7[$n('Special')]['profit'] ?? 0) - 3478.99) < 0.000001
+        && abs((float)($F7[$n('Special')]['cost'] ?? 0) - 2521.0085) < 0.00001, json_encode([$F7[$n('Kuche')]['cost'] ?? null, $F7[$n('Kuche')]['profit'] ?? null, $F7[$n('Special')]['cost'] ?? null]));
+    $stm = function ($ingCost, $price) { return round($price - round($ingCost, 2), 2); };     // admin/includes/stock-to-menu-lib.php stm_build, the same sum
+    $ck('maths: the same profit as Stock Items > Put on the menu for the same cost and price', abs($stm(2066.115, 5000) - (float)import_menu_profit(5000.0, 2066.115)) < 0.000001
+        && abs($stm(2521.0085, 6000) - (float)import_menu_profit(6000.0, 2521.0085)) < 0.000001 && import_menu_profit(null, 1.0) === null);
+    // tick all within a group, then the whole list; the step 4 counts (drinks and food apart)
+    $gBeers = (string)($F0[$n('Kuche')]['group'] ?? '');
+    $taG = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'tick_all', 'on' => true, 'mgroup' => $gBeers]);
+    [$vF8, $GF8] = $mv();
+    $ck('tick all in one group: only that group\'s tickable rows (3 Beers), nothing elsewhere', !empty($taG['ok']) && (int)$taG['changed'] === 3 && ($GF8[$n('Beers')]['ticked'] ?? 0) === 3
+        && ($vF8['counts']['ticked'] ?? 0) === 3, json_encode([$taG, $vF8['counts'] ?? null]));
+    $taAll = import_job_drinks_set($pdo, $jF, $admin, ['mode' => 'tick_all', 'on' => true]);
+    [$vF9] = $mv();
+    $c9 = $vF9['counts'] ?? [];
+    $ck('tick all: every tickable row (8); step 4 counts: 3 drinks + 5 food, 8 new, 0 price changes, 0 below cost',
+        !empty($taAll['ok']) && ($c9['ticked'] ?? 0) === 8 && ($c9['ticked_drink'] ?? 0) === 3 && ($c9['ticked_food'] ?? 0) === 5 && ($c9['add'] ?? 0) === 8 && ($c9['update'] ?? -1) === 0
+        && ($c9['below'] ?? -1) === 0 && ($c9['todo'] ?? -1) === 0, json_encode($c9));
+    $cF = import_commit_stock($pdo, $jF, $admin);
+    $resF = $cF['result'] ?? [];
+    $fm = $pdo->prepare('SELECT * FROM food_menu WHERE item_name = ?');
+    $fm->execute([$n('Crisps')]);
+    $crispsMenu = $fm->fetchAll(PDO::FETCH_ASSOC);
+    $cpos = rh_menu_pos_find($pdo, $n('Crisps'), $n('Snacks'));
+    $crIng = (int)$col('SELECT id FROM stock_ingredients WHERE name = ?', [$n('Crisps')]);
+    $link->execute([$cpos['id'] ?? 0, $cpos['slug'] ?? '']);
+    $crLk = $link->fetchAll(PDO::FETCH_ASSOC);
+    $ck('food import: Crisps is on the FOOD menu once at the typed 1300.00 (kitchen), not the drinks menu; the till has it at 1300; its stock link is one packet',
+        !empty($cF['ok']) && count($crispsMenu) === 1 && (string)$crispsMenu[0]['price'] === '1300.00' && $crispsMenu[0]['station'] === 'kitchen' && $crispsMenu[0]['category'] === $n('Snacks')
+        && (int)$col('SELECT COUNT(*) FROM drink_menu WHERE item_name = ?', [$n('Crisps')]) === 0 && $cpos && abs((float)$col('SELECT price FROM menu_items WHERE id = ?', [$cpos['id']]) - 1300) < 0.000001
+        && count($crLk) === 1 && (int)$crLk[0]['ingredient_id'] === $crIng && abs((float)$crLk[0]['quantity_per_portion'] - 1) < 0.000001, json_encode([$cF['error'] ?? null, $crispsMenu, $crLk]));
+    $ck('food import: the result counts drinks and food apart (3 drinks added, 5 food added); Mystery A in Bites, Rice F per kg',
+        ($resF['drinks_added'] ?? -1) === 3 && ($resF['food_added'] ?? -1) === 5 && (int)$col('SELECT COUNT(*) FROM food_menu WHERE item_name = ? AND category = ?', [$n('Mystery A'), $n('Bites')]) === 1
+        && (int)$col('SELECT COUNT(*) FROM food_menu WHERE item_name = ?', [$n('Rice F')]) === 1, json_encode($resF));
+    $ck('price override never touches stock: Crisps cost stays 500 (the file\'s unit price), the opening count line stays 10 packets',
+        abs((float)$col('SELECT cost_per_unit FROM stock_ingredients WHERE id = ?', [$crIng]) - 500) < 0.000001
+        && abs((float)$col('SELECT actual_quantity FROM stock_count_lines WHERE ingredient_id = ? ORDER BY id DESC LIMIT 1', [$crIng]) - 10) < 0.000001);
+    $tl = (string)$col("SELECT details FROM admin_activity_log WHERE action = 'drink_menu_import' AND details LIKE ? ORDER BY id DESC LIMIT 1", ['Import #' . $jF . ':%' . $n('Tonic NP') . '%']);
+    $ck('history: a typed price is logged as typed in step 3', strpos($tl, 'typed in step 3') !== false && strpos($tl, '1500.00') !== false, $tl);
+
+    // ---- file M (2026-11-22): the Assistant's menu suggestion rides on the ONE reader call per import, for unclear groups only ----------
+    // the reader is the test double rh_ai_import_measure_suggest (never the real one: no paid call from a test shell)
+    $stubM = !empty($stubOurs);
+    if (!function_exists('rh_ai_import_measure_suggest')) {
+        function rh_ai_import_measure_suggest(array $items): array { $GLOBALS['zzd_ai_calls'][] = $items; return (array)($GLOBALS['zzd_ai_reply'] ?? []); }
+        $stubM = true;
+    }
+    if (!function_exists('rh_ai_enabled') && is_file($root . '/includes/ai/ai-core.php')) {
+        require_once $root . '/includes/ai/ai-core.php';
+    }
+    $aiSwitch = function (string $v) use ($pdo) {
+        $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('ai_enabled', ?, 'ai') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")->execute([$v]);
+        $pdo->prepare("UPDATE site_settings SET setting_value = '' WHERE setting_key IN ('ai_paused_reason', 'ai_paused_kind')")->execute();
+        $pdo->prepare("UPDATE enabled_modules SET is_enabled = 1 WHERE module_key = 'ai_assistant'")->execute();
+        if (function_exists('rh_ai_settings')) { rh_ai_settings($pdo, true); }
+    };
+    $jM = $start($file($headF, [
+        [$n('Thing A'), $n('Odds'), 'each', '300', '4', '900', ''],
+        [$n('Thing B'), $n('Odds'), 'each', '350', '4', '950', ''],
+        [$n('Gadget C'), $n('Gizmo'), 'each', '200', '2', '700', ''],
+        [$n('Gadget D'), $n('Gear'), 'each', '200', '2', '700', ''],
+        [$n('Chips M'), $n('Snacks'), 'packet', '500', '10', '1200', ''],
+        [$n('Pop M'), $n('Mixbag'), 'bottle', '400', '6', '1000', 'Pint'],    // a drink-only measure ("Bottle" alone decides nothing since QA 2026-11-22)
+        [$n('Widget M'), $n('Mixbag'), 'each', '400', '6', '1100', ''],
+    ], 'm.csv'), 'zzd-m-' . $run . '.csv');
+    $mvM = function (array $p = []) use ($pdo, $jM, $admin) {
+        $v = import_job_menu_view($pdo, $jM, $admin, $p);
+        $g = [];
+        foreach ((array)($v['groups'] ?? []) as $x) { $g[$x['label']] = $x; }
+        return [$v, $g];
+    };
+    $rowsM = function () use ($pdo, $jM) {
+        $st = import_job_state($pdo, $jM);
+        $by = [];
+        foreach (import_drinks_build($pdo, (array)$st['res']['items'], (array)$st['answers'])['rows'] as $r) { $by[$r['name']] = $r; }
+        return $by;
+    };
+    $noSug = function ($g) { return is_array($g) && array_key_exists('suggest', $g) && $g['suggest'] === null; };
+    $ansM = function () use ($pdo, $jM) { return import_job_answers(import_job_get($pdo, $jM)); };
+    $M0 = $rowsM();
+    $kM = function (string $nm) use (&$M0, $n) { return (string)($M0[$n($nm)]['key'] ?? ''); };
+    $long = str_repeat('Long category ', 36);      // ~500 characters
+    $GLOBALS['zzd_ai_calls'] = [];
+    $GLOBALS['zzd_ai_reply'] = [
+        ['key' => $kM('Thing A'), 'field' => 'menu', 'value' => 'food', 'source' => $n('Thing A')],
+        ['key' => $kM('Thing A'), 'field' => 'menu_cat', 'value' => mb_strtolower($n('Bites')), 'source' => $n('Thing A')],   // an existing Food category, other case
+        ['key' => $kM('Thing B'), 'field' => 'menu', 'value' => 'Food', 'source' => $n('Thing B')],
+        ['key' => $kM('Thing B'), 'field' => 'menu_cat', 'value' => mb_strtoupper($n('Bites')), 'source' => $n('Thing B')],
+        ['key' => $kM('Gadget C'), 'field' => 'menu', 'value' => 'pizza', 'source' => 'x'],
+        ['key' => $kM('Gadget C'), 'field' => 'menu', 'value' => '', 'source' => 'x'],
+        ['key' => $kM('Gadget C'), 'field' => 'menu_cat', 'value' => 'Snacks', 'source' => 'x'],
+        ['key' => $kM('Gadget D'), 'field' => 'menu', 'value' => 'food', 'source' => 'x'],
+        ['key' => $kM('Gadget D'), 'field' => 'menu_cat', 'value' => $long, 'source' => 'x'],
+        ['key' => $kM('Chips M'), 'field' => 'menu', 'value' => 'drink', 'source' => 'x'],          // a certain row: never asked, never used
+        ['key' => $kM('Chips M'), 'field' => 'menu_cat', 'value' => 'Beers', 'source' => 'x'],
+        ['key' => $kM('Pop M'), 'field' => 'menu', 'value' => 'food', 'source' => 'x'],
+        ['key' => $kM('Widget M'), 'field' => 'menu', 'value' => 'drink', 'source' => 'x'],
+        ['key' => $kM('Widget M'), 'field' => 'menu_cat', 'value' => $n('Fizz new'), 'source' => 'x'],
+    ];
+    // Assistant off: no call at all, nothing marked, the same list as with the reader never asked
+    $aiSwitch('0');
+    [$vOff, $GOff] = $mvM();
+    [$vNo] = $mvM(['ai' => false]);
+    $strip = function (array $v) { unset($v['size_groups']); return json_encode($v['groups'] ?? null) . json_encode($v['counts'] ?? null); };
+    $ck('menu suggestion: Assistant off = no reader call, no suggestion, nothing marked, the list is exactly as without it',
+        !empty($vOff['ok']) && $GLOBALS['zzd_ai_calls'] === [] && empty($ansM()['_sizes']['ai_done']) && $strip($vOff) === $strip($vNo)
+        && $noSug($GOff[$n('Odds')] ?? null) && ($GOff[$n('Odds')]['need_menu'] ?? 0) === 2, json_encode([$GLOBALS['zzd_ai_calls'], $GOff[$n('Odds')] ?? null]));
+    // Assistant on: the page's own load asks the reader once (through the hook when it can: the stub), never again
+    $aiSwitch('1');
+    $viaHook = $stubM && function_exists('rh_ai_enabled') && rh_ai_enabled($pdo) && is_callable(import_measure_ai_hook($pdo));
+    if ($viaHook) {
+        [$vOn1] = $mvM();
+        [$vOn2, $GM1] = $mvM();
+    } else {
+        import_job_sizes_ai_fill($pdo, $jM, $stubFn ?? function (array $i): array { $GLOBALS['zzd_ai_calls'][] = $i; return (array)($GLOBALS['zzd_ai_reply'] ?? []); });
+        [$vOn2, $GM1] = $mvM(['ai' => false]);
+    }
+    import_job_sizes_ai_fill($pdo, $jM, function (array $i): array { $GLOBALS['zzd_ai_calls'][] = $i; return []; });
+    $sentM = (array)($GLOBALS['zzd_ai_calls'][0] ?? []);
+    $askedMenu = array_column(array_filter($sentM, function ($x) { return !empty($x['ask_menu']); }), 'key');
+    sort($askedMenu);
+    $wantAsk = [$kM('Thing A'), $kM('Thing B'), $kM('Gadget C'), $kM('Gadget D'), $kM('Widget M')];
+    sort($wantAsk);
+    $ck('menu suggestion: exactly ONE reader call for the import (page loads + a later ask), the menu asked only for the unclear rows (never Chips M, never Pop M)' . ($viaHook ? ' [through the page hook]' : ' [direct]'),
+        count($GLOBALS['zzd_ai_calls']) === 1 && $askedMenu === $wantAsk, json_encode(['via_hook' => $viaHook, 'calls' => count($GLOBALS['zzd_ai_calls']), 'asked' => $askedMenu]));
+    $M1 = $rowsM();
+    $sO = $GM1[$n('Odds')]['suggest'] ?? null;
+    $ck('menu suggestion: the unclear group gets "Suggested: Food · Bites" (joined to the existing category whatever its case), not new',
+        is_array($sO) && $sO['menu'] === 'food' && $sO['cat'] === $n('Bites') && empty($sO['cat_new']), json_encode($GM1[$n('Odds')] ?? null));
+    $ck('menu suggestion: NOT applied until accepted: no group answer, rows still need a menu, not tickable, nothing ticked',
+        !isset($ansM()['_menu_g'][$M1[$n('Thing A')]['group'] ?? '-']) && !empty($M1[$n('Thing A')]['need_menu']) && !empty($M1[$n('Thing B')]['need_menu'])
+        && empty($M1[$n('Thing A')]['tickable']) && ($GM1[$n('Odds')]['ticked'] ?? -1) === 0, json_encode($M1[$n('Thing A')] ?? null));
+    $ck('menu suggestion: bad replies are ignored: menu "pizza" / empty = no suggestion (Gizmo); a 500-character category is dropped (Gear: Food, no category)',
+        $noSug($GM1[$n('Gizmo')] ?? null) && empty($M1[$n('Gadget C')]['suggest'])
+        && ($M1[$n('Gadget D')]['suggest']['menu'] ?? '') === 'food' && ($M1[$n('Gadget D')]['suggest']['cat'] ?? 'x') === '' && strpos(json_encode($M1[$n('Gadget D')]), 'Long category') === false,
+        json_encode([$M1[$n('Gadget C')]['suggest'] ?? null, $M1[$n('Gadget D')]['suggest'] ?? null]));
+    $ck('menu suggestion: a certain group is never overridden: Chips M stays Food from its heading with no suggestion; Pop M stays a drink',
+        ($M1[$n('Chips M')]['menu'] ?? '') === 'food' && empty($M1[$n('Chips M')]['suggest']) && $noSug($GM1[$n('Snacks')] ?? null)
+        && ($M1[$n('Pop M')]['menu'] ?? '') === 'drink' && empty($M1[$n('Pop M')]['suggest']), json_encode([$M1[$n('Chips M')]['suggest'] ?? null, $M1[$n('Pop M')]['menu'] ?? null]));
+    $accMix = import_job_drinks_set($pdo, $jM, $admin, ['mode' => 'accept', 'group' => (string)($M1[$n('Widget M')]['group'] ?? '')]);
+    $ck('menu suggestion: a group with a certain row gets no group suggestion (accepting it is refused); its unclear row keeps its own, new category marked',
+        $noSug($GM1[$n('Mixbag')] ?? null) && empty($accMix['ok']) && ($M1[$n('Widget M')]['suggest']['menu'] ?? '') === 'drink'
+        && !empty($M1[$n('Widget M')]['suggest']['cat_new']) && ($rowsM()[$n('Pop M')]['menu_from'] ?? '') !== 'group', json_encode([$accMix, $M1[$n('Widget M')]['suggest'] ?? null]));
+    $accO = import_job_drinks_set($pdo, $jM, $admin, ['mode' => 'accept', 'group' => (string)($M1[$n('Thing A')]['group'] ?? '')]);
+    $M2 = $rowsM();
+    $gAnsO = $ansM()['_menu_g'][$M1[$n('Thing A')]['group'] ?? '-'] ?? [];
+    $ck('menu suggestion: "Use this" answers the whole group as a person would (group answer Food + Bites): both rows Food in Bites, tickable, none ticked',
+        !empty($accO['ok']) && ($gAnsO['menu'] ?? '') === 'food' && ($gAnsO['cat'] ?? '') === $n('Bites')
+        && ($M2[$n('Thing A')]['menu_from'] ?? '') === 'group' && ($M2[$n('Thing B')]['menu'] ?? '') === 'food' && ($M2[$n('Thing B')]['category'] ?? '') === $n('Bites')
+        && !empty($M2[$n('Thing A')]['tickable']) && empty($M2[$n('Thing A')]['ticked']) && empty($M2[$n('Thing B')]['ticked'])
+        && ($M2[$n('Chips M')]['menu'] ?? '') === 'food' && ($M2[$n('Pop M')]['menu'] ?? '') === 'drink', json_encode([$accO, $gAnsO, $M2[$n('Thing A')] ?? null]));
+    [, $GM2] = $mvM(['ai' => false]);
+    $ck('menu suggestion: once answered the group shows no suggestion any more', $noSug($GM2[$n('Odds')] ?? null), json_encode($GM2[$n('Odds')] ?? null));
+    $aiSwitch('0');
+
+    // ---- file N (QA 2026-11-22): "already on a menu" always beats a group answer; "can" and the Assistant's reading never decide a menu ----
+    // one group (no category column) with drinks and food; Lager is on the Drinks menu by its stock link (file A's import)
+    $headN = ['Item Name', 'Unit', 'Unit Price', 'Balance', 'Selling Price', 'Served By'];
+    $jN = $start($file($headN, [
+        [$n('Lager'), 'bottle', '1000', '5', '2700', ''],
+        [$n('Pie N'), 'each', '800', '5', '1500', ''],
+        [$n('Baked beans N'), 'each', '300', '5', '700', 'Can'],
+        [$n('Coke N'), 'each', '300', '5', '600', 'Can'],
+        [$n('Odd N'), 'bottle', '9000', '2', '900', 'Sngl msr'],
+        [$n('Juice N1'), 'bottle', '1000', '2', '500', 'Glass'],
+        [$n('Juice N2'), 'bottle', '1000', '2', '500', 'Glass'],
+    ], 'n.csv'), 'zzd-n-' . $run . '.csv');
+    $rowsN = function () use ($pdo, $jN) {
+        $st = import_job_state($pdo, $jN);
+        $by = [];
+        foreach (import_drinks_build($pdo, (array)$st['res']['items'], (array)$st['answers'])['rows'] as $r) { $by[$r['name']] = $r; }
+        return $by;
+    };
+    $N0 = $rowsN();
+    $ck('menu: "Can" decides nothing on its own (Baked beans N and Coke N, no category: a person chooses); Lager, on the Drinks menu by its stock link, is Drinks with a price change',
+        !empty($N0[$n('Baked beans N')]['need_menu']) && !empty($N0[$n('Coke N')]['need_menu']) && empty($N0[$n('Coke N')]['tickable'])
+        && ($N0[$n('Lager')]['menu'] ?? '') === 'drink' && ($N0[$n('Lager')]['menu_from'] ?? '') === 'menu' && ($N0[$n('Lager')]['match_how'] ?? '') === 'link'
+        && ($N0[$n('Lager')]['action'] ?? '') === 'update', json_encode([$N0[$n('Coke N')] ?? null, $N0[$n('Lager')] ?? null]));
+    if ($shotMl !== null) {
+        import_job_sizes_ai_fill($pdo, $jN, function (array $ask) use ($n) {
+            $o = [];
+            foreach ($ask as $x) {
+                if ($x['name'] === $n('Odd N')) { $o[] = ['key' => $x['key'], 'field' => 'served_by', 'value' => 'shot', 'source' => 'cell F6 "Sngl msr"']; }
+            }
+            return $o;
+        });
+        $N1 = $rowsN();
+        $ck('menu: the Assistant reading "Sngl msr" as a shot is not certain: Odd N is read as a shot, still needs a person (only "Suggested: Drinks")',
+            ($N1[$n('Odd N')]['measure_from'] ?? '') === 'ai' && !empty($N1[$n('Odd N')]['need_menu']) && empty($N1[$n('Odd N')]['tickable'])
+            && ($N1[$n('Odd N')]['suggest']['menu'] ?? '') === 'drink', json_encode($N1[$n('Odd N')] ?? null));
+    }
+    $gN = (string)($N0[$n('Lager')]['group'] ?? '');
+    $oneGroupN = ($N0[$n('Pie N')]['group'] ?? '-') === $gN && ($N0[$n('Juice N1')]['group'] ?? '-') === $gN;
+    $rGN = import_job_drinks_set($pdo, $jN, $admin, ['mode' => 'group_menu', 'group' => $gN, 'value' => 'food']);
+    $rGNc = import_job_drinks_set($pdo, $jN, $admin, ['mode' => 'group_cat', 'group' => $gN, 'value' => $n('Pies')]);
+    $N2 = $rowsN();
+    $ck('group answer Food on a mixed group fills only rows with no certain signal (Pie N, Coke N); Lager stays Drinks with its price change, Juice N1 (by the glass) stays Drinks',
+        $oneGroupN && !empty($rGN['ok']) && !empty($rGNc['ok']) && ($N2[$n('Pie N')]['menu'] ?? '') === 'food' && ($N2[$n('Pie N')]['menu_from'] ?? '') === 'group'
+        && ($N2[$n('Coke N')]['menu'] ?? '') === 'food' && ($N2[$n('Lager')]['menu'] ?? '') === 'drink' && ($N2[$n('Lager')]['menu_from'] ?? '') === 'menu'
+        && ($N2[$n('Lager')]['action'] ?? '') === 'update' && ($N2[$n('Lager')]['menu_id'] ?? 0) === $lagerMenu && !empty($N2[$n('Lager')]['tickable'])
+        && ($N2[$n('Juice N1')]['menu'] ?? '') === 'drink', json_encode([$rGN, $N2[$n('Lager')] ?? null, $N2[$n('Juice N1')]['menu_from'] ?? null]));
+    $kLag = (string)($N2[$n('Lager')]['key'] ?? '');
+    $rOv = import_job_drinks_set($pdo, $jN, $admin, ['mode' => 'menu', 'key' => $kLag, 'value' => 'food']);
+    $N3 = $rowsN();
+    $tOv = import_job_drinks_set($pdo, $jN, $admin, ['mode' => 'tick', 'key' => $kLag, 'on' => true]);
+    $stN = import_job_state($pdo, $jN);
+    $ansForced = (array)$stN['answers'];
+    $ansForced['_drinks'][$kLag]['tick'] = 1;       // a forced tick (never saved): the import must refuse it
+    $cErr = '';
+    try {
+        import_drinks_commit($pdo, (array)$stN['res']['items'], $ansForced, $jN, $admin);
+    } catch (RuntimeException $e) {
+        $cErr = $e->getMessage();
+    }
+    $ck('row answer Food on an item already on the Drinks menu: not tickable ("Already on the Drinks menu; change it in Menu Management"), the tick and the import refuse it',
+        !empty($rOv['ok']) && empty($N3[$n('Lager')]['tickable']) && strpos((string)($N3[$n('Lager')]['why_not'] ?? ''), 'Already on the Drinks menu; change it in Menu Management') === 0
+        && ($N3[$n('Lager')]['status'] ?? '') === 'blocked' && ($N3[$n('Lager')]['menu'] ?? '') === 'drink' && empty($tOv['ok'])
+        && strpos($cErr, 'Already on the Drinks menu') !== false && (int)$col('SELECT COUNT(*) FROM food_menu WHERE item_name = ?', [$n('Lager')]) === 0,
+        json_encode([$N3[$n('Lager')]['why_not'] ?? null, $N3[$n('Lager')]['status'] ?? null, $tOv, $cErr]));
+    $rOvClr = import_job_drinks_set($pdo, $jN, $admin, ['mode' => 'menu', 'key' => $kLag, 'value' => '']);
+    foreach (['Lager', 'Pie N'] as $nm) {
+        $r = import_job_drinks_set($pdo, $jN, $admin, ['mode' => 'tick', 'key' => $N2[$n($nm)]['key'] ?? '', 'on' => true]);
+        if (empty($r['ok'])) { $ck('file N: tick ' . $nm, false, json_encode([$r, $rOvClr])); }
+    }
+    $tillLager = (int)$col('SELECT COUNT(*) FROM menu_items WHERE item_name = ?', [$n('Lager')]);
+    $cN = import_commit_stock($pdo, $jN, $admin);
+    $lposN = rh_menu_pos_find($pdo, $n('Lager'), $lagerCat);
+    $ck('import: Lager keeps its one Drinks menu row, now 2700.00: no Food copy, no new till item, still one stock link line; Pie N goes on the Food menu',
+        !empty($cN['ok']) && (string)$col('SELECT price FROM drink_menu WHERE id = ?', [$lagerMenu]) === '2700.00' && (int)$col('SELECT COUNT(*) FROM drink_menu WHERE item_name = ?', [$n('Lager')]) === 1
+        && (int)$col('SELECT COUNT(*) FROM food_menu WHERE item_name = ?', [$n('Lager')]) === 0 && $tillLager === 1 && (int)$col('SELECT COUNT(*) FROM menu_items WHERE item_name = ?', [$n('Lager')]) === 1
+        && $lposN && (int)$col('SELECT COUNT(*) FROM stock_recipes sr JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id WHERE sr.menu_item_id = ? AND sr.menu_type = ?', [$lposN['id'], $lposN['slug']]) === 1
+        && (int)$col('SELECT COUNT(*) FROM food_menu WHERE item_name = ?', [$n('Pie N')]) === 1 && ($cN['result']['drinks_updated'] ?? -1) === 1 && ($cN['result']['drinks_added'] ?? -1) === 0,
+        json_encode([$cN['ok'] ?? null, $cN['error'] ?? null, $cN['result'] ?? null]));
+    // "Can" with a category that IS certain: an existing Drinks menu category (no drink word in it) makes Coke P a drink; "Tins" / "Sides" do not
+    $pdo->prepare("INSERT INTO drink_menu (item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service) VALUES (?, '', '1000.00', ?, 1, 1, '', 'bar', 1, 1)")
+        ->execute([$n('Pop holder'), $n('Pops')]);
+    $jP = $start($file($headF, [
+        [$n('Coke P'), $n('Pops'), 'each', '300', '5', '600', 'Can'],
+        [$n('Beans P'), $n('Tins'), 'each', '300', '5', '700', 'Can'],
+        [$n('Hot chocolate P'), $n('Sides'), 'each', '300', '5', '900', 'Cup'],
+    ], 'p.csv'), 'zzd-p-' . $run . '.csv');
+    $stP = import_job_state($pdo, $jP);
+    $P0 = [];
+    foreach (import_drinks_build($pdo, (array)$stP['res']['items'], (array)$stP['answers'])['rows'] as $r) { $P0[$r['name']] = $r; }
+    $ck('menu: Coke P sold by "Can" is a drink only because its category is an existing Drinks menu category; Beans P ("Tins", "Can") and Hot chocolate P ("Sides") need a person',
+        ($P0[$n('Coke P')]['menu'] ?? '') === 'drink' && ($P0[$n('Coke P')]['menu_from'] ?? '') === 'menu_cat' && !empty($P0[$n('Beans P')]['need_menu'])
+        && !empty($P0[$n('Hot chocolate P')]['need_menu']), json_encode([$P0[$n('Coke P')] ?? null, $P0[$n('Beans P')]['menu'] ?? null, $P0[$n('Hot chocolate P')]['menu'] ?? null]));
+
     // the import's own wording when a drink's stock item is gone (49ddf7d had made it "Nothing was saved.", the Put on the menu wording)
     $linkErr = '';
     try {

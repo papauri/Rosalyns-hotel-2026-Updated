@@ -33,7 +33,9 @@ if (!function_exists('import_default_aliases')) {
             // v8 (2026-11-20, review): quantity_words (half, double, dbl, triple ...) reach hotels already seeded at v7 through the top-up.
             // v9 (2026-11-21, shot size in step 3): shot_words ("shot", "tot"): a drink sold by one of these is a SHOT row in step 3, whose shot size
             // (ml) can be set in advance for the menu link and the cost of one shot (never the opening count, never the Drink measures list).
-            'version' => 9,
+            // v10 (2026-11-22, any item on the menu): menu_drink_words / menu_food_words: a category heading, a stock category or a served-by cell
+            // with one of these words says for certain which menu an item belongs to (Drinks or Food). Both or neither = the person chooses.
+            'version' => 10,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -169,6 +171,24 @@ if (!function_exists('import_default_aliases')) {
             // written in the served-by cell) gets an optional shot size in step 3, pre-filled from that list or the file. A word alone never reads as
             // a measure the hotel does not have ("Tot" with no ml and no "tot" on the list stays as written).
             'shot_words' => ['shot', 'shots', 'tot', 'tots'],
+            // v10: words that put an item on the DRINKS menu for certain (in its category heading, its stock category or its served-by cell) ...
+            // Never a word used on both menus (QA 2026-11-22: "can", "bottle", "water", "soda", "bar", "chocolate", "side", "main"): those
+            // are also dropped in code (import_menu_ambiguous_words, includes/import/drinks.php) for a hotel whose saved list still has them.
+            'menu_drink_words' => [
+                'drink', 'drinks', 'beverage', 'beverages', 'beer', 'beers', 'lager', 'lagers', 'cider', 'ciders', 'wine', 'wines',
+                'champagne', 'sparkling', 'spirit', 'spirits', 'whisky', 'whiskys', 'whiskies', 'whiskey', 'whiskeys', 'gin', 'gins', 'vodka', 'vodkas',
+                'rum', 'rums', 'brandy', 'brandys', 'brandies', 'cognac', 'cognacs', 'tequila', 'tequilas', 'liqueur', 'liqueurs', 'liquer', 'liquers',
+                'aperitif', 'aperitifs', 'shooter', 'shooters', 'cocktail', 'cocktails', 'soft drink', 'soft drinks', 'softs', 'minerals', 'mixer', 'mixers',
+                'juice', 'juices', 'cordial', 'cordials', 'energy drink', 'energy drinks',
+                'shot', 'shots', 'tot', 'tots', 'glass', 'glasses', 'pint', 'pints', 'carafe',
+            ],
+            // ... and words that put it on the FOOD menu for certain
+            'menu_food_words' => [
+                'food', 'foods', 'kitchen', 'snack', 'snacks', 'meal', 'meals', 'starter', 'starters', 'mains', 'main course', 'main courses',
+                'dessert', 'desserts', 'breakfast', 'lunch', 'dinner', 'sandwich', 'sandwiches', 'burger', 'burgers', 'pizza', 'pizzas', 'salad', 'salads',
+                'soup', 'soups', 'grill', 'grills', 'bakery', 'pastry', 'pastries', 'cake', 'cakes', 'crisps', 'chips', 'nuts',
+                'confectionery', 'sweets', 'biscuit', 'biscuits', 'plate', 'plates',
+            ],
             // v7: stock units a drink is POURED from by the glass (a carton of juice, a casket of wine): their size in ml (optional) is asked in step 3.
             // Crates, cases and packs are not here: they hold bottles, and a size in the name is one bottle.
             'pour_containers' => [

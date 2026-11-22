@@ -4,8 +4,13 @@
  * shots because column wording could be different"). Owned by the AI lead; dept-import-lead calls it once per import with
  * every row whose measure wording the plain rules (includes/import/measure.php, pack-rule.php) could not read.
  *
- *   rh_ai_import_measure_suggest([['key','name','unit','served'], ...])
- *     -> [['key', 'field' => 'served_by'|'portion_ml'|'container_ml', 'value' => string|number, 'source' => exact text read], ...]
+ *   rh_ai_import_measure_suggest([['key','name','unit','served', 'category'?, 'ask_menu'?], ...])
+ *     -> [['key', 'field' => 'served_by'|'portion_ml'|'container_ml'|'menu'|'menu_cat', 'value' => string|number, 'source' => exact text read], ...]
+ *
+ *  - Which menu (owner 2026-11-22): a row sent with ask_menu (the Import's rules could not tell Drinks from Food) also gets
+ *    menu = drink | food and menu_cat = a short category, in the SAME one call (no second call). Only for those rows; the
+ *    source must be words of its own name or category; menu_cat only with a menu, at most RH_AI_IMS_CAT_CHARS characters.
+ *    Never from the word list (always the model or its cached answer). A suggestion only: the Import shows it, a person accepts it.
  *
  * Rules (each one tested in scripts/tests/ai_import_suggest_test.php):
  *  - Suggestions only. A person confirms each one on the Import screen; nothing here writes stock or import rows.
@@ -36,6 +41,7 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
     define('RH_AI_IMS_MAX_SEND', 40);             // rows sent in the one call
     define('RH_AI_IMS_FIELD_CHARS', 60);          // characters sent per field
     define('RH_AI_IMS_CACHE_DAYS', 180);          // a learned reading is kept this long
+    define('RH_AI_IMS_CAT_CHARS', 60);            // longest menu category taken from a reply (a longer one is dropped, not cut)
 
     /** Closed list of served words: what a sale is called. Abbreviations as hotels write them map to the full word. */
     function rh_ai_ims_served_words(): array
@@ -118,7 +124,9 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
             return null;
         }
         $cut = static fn($v): string => mb_substr(trim((string)preg_replace('/\s+/u', ' ', is_scalar($v) ? (string)$v : '')), 0, 120);
-        return ['key' => $key, 'name' => $cut($r['name'] ?? ''), 'unit' => $cut($r['unit'] ?? ''), 'served' => $cut($r['served'] ?? '')];
+        $menu = !empty($r['ask_menu']);
+        return ['key' => $key, 'name' => $cut($r['name'] ?? ''), 'unit' => $cut($r['unit'] ?? ''), 'served' => $cut($r['served'] ?? ''),
+            'category' => $menu ? $cut($r['category'] ?? '') : '', 'ask_menu' => $menu];
     }
 
     /**
@@ -233,6 +241,9 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
         if ($row['name'] === '' && $row['unit'] === '' && $row['served'] === '') {
             return false;
         }
+        if (!empty($row['ask_menu']) && $row['name'] !== '') {
+            return true;  // which menu is never read from the word list
+        }
         if ($row['served'] !== '') {
             foreach ($local as $r) {
                 if ($r['field'] !== 'container_ml' || $r['source'] === $row['served']) {
@@ -247,7 +258,7 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
     /** Text that is never sent: an email, a long number (phone, booking reference), instruction-like wording, a web address. */
     function rh_ai_ims_unsafe(array $row): bool
     {
-        $t = $row['name'] . ' | ' . $row['unit'] . ' | ' . $row['served'];
+        $t = $row['name'] . ' | ' . $row['unit'] . ' | ' . $row['served'] . ' | ' . ($row['category'] ?? '');
         return (bool)preg_match('/@|https?:|www\.|\d{7,}|\d{3}[\s\-]\d{3}[\s\-]\d{3}/i', $t)
             || (bool)preg_match('/\b(ignore|disregard|instruction|instructions|prompt|system|assistant|reply|respond|answer)\b/i', $t)
             || count(preg_split('/\s+/u', $row['name'], -1, PREG_SPLIT_NO_EMPTY) ?: []) > 12;
@@ -272,6 +283,25 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
                 return null;
             }
             return ['field' => 'served_by', 'value' => $v, 'source' => $src];
+        }
+        if ($field === 'menu' || $field === 'menu_cat') {
+            // only a row asked about its menu; the words that say it must be in its own name or category
+            if (empty($row['ask_menu']) || !is_string($value)) {
+                return null;
+            }
+            $src = rh_ai_ims_find($row['name'], $source) ?? rh_ai_ims_find((string)($row['category'] ?? ''), $source);
+            if ($src === null) {
+                return null;
+            }
+            if ($field === 'menu') {
+                $v = ['drink' => 'drink', 'drinks' => 'drink', 'food' => 'food'][rh_ai_ims_norm($value)] ?? null;
+                return $v === null ? null : ['field' => 'menu', 'value' => $v, 'source' => $src];
+            }
+            $v = trim((string)preg_replace('/\s+/u', ' ', (string)preg_replace('/[\x00-\x1F\x7F<>{}]+/u', ' ', $value)));
+            if ($v === '' || mb_strlen($v) > RH_AI_IMS_CAT_CHARS || !preg_match('/\p{L}/u', $v)) {
+                return null;
+            }
+            return ['field' => 'menu_cat', 'value' => $v, 'source' => $src];
         }
         if ($field !== 'portion_ml' && $field !== 'container_ml') {
             return null;
@@ -309,7 +339,9 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
 
     function rh_ai_ims_cache_key(array $row): string
     {
-        return hash('sha256', 'import_measure|' . rh_ai_ims_norm($row['name']) . '|' . rh_ai_ims_norm($row['unit']) . '|' . rh_ai_ims_norm($row['served']));
+        // a row asked about its menu is learned apart (with its category): an earlier answer without the menu is never taken for one
+        return hash('sha256', 'import_measure|' . rh_ai_ims_norm($row['name']) . '|' . rh_ai_ims_norm($row['unit']) . '|' . rh_ai_ims_norm($row['served'])
+            . (!empty($row['ask_menu']) ? '|menu|' . rh_ai_ims_norm((string)($row['category'] ?? '')) : ''));
     }
 
     /** Learned readings for these rows (key => list or null when not learned yet). */
@@ -355,7 +387,11 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
             . 'portion_ml = millilitres in one sale, only when a number is written in the served text ("Glass 175" = 175, "Tot 25ml" = 25); '
             . 'container_ml = millilitres in one bottle or container, only when a size is written ("70cl" = 700, "1lt" = 1000). '
             . 'Never guess a usual size; a field the words do not state is left out. source = the exact words you read, copied from that line. '
-            . 'Reply with JSON only: {"r":[{"i":1,"field":"served_by","value":"shot","source":"Sgl"}]} and {"r":[]} when nothing is stated.';
+            . 'A line ending in "| category | menu" also asks which menu the item is sold on: menu = "drink" or "food", only when its name or category makes it '
+            . 'certain, and menu_cat = a short menu category for it (under 40 characters, for example "Snacks", "Soft drinks"), only together with menu; '
+            . 'their source = the words of its name or category that say it. When unsure, leave both out. '
+            . 'Reply with JSON only: {"r":[{"i":1,"field":"served_by","value":"shot","source":"Sgl"},{"i":2,"field":"menu","value":"food","source":"Samosa"}]} '
+            . 'and {"r":[]} when nothing is stated.';
     }
 
     function rh_ai_ims_payload(array $send): string
@@ -363,7 +399,8 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
         $q = static fn(string $s): string => (string)json_encode(mb_substr($s, 0, RH_AI_IMS_FIELD_CHARS), JSON_UNESCAPED_UNICODE);
         $lines = [];
         foreach ($send as $i => $row) {
-            $lines[] = $i . ' | ' . $q($row['name']) . ' | ' . $q($row['unit']) . ' | ' . $q($row['served']);
+            $lines[] = $i . ' | ' . $q($row['name']) . ' | ' . $q($row['unit']) . ' | ' . $q($row['served'])
+                . (!empty($row['ask_menu']) ? ' | ' . $q((string)($row['category'] ?? '')) . ' | menu' : '');
         }
         return "Stock lines:\n" . implode("\n", $lines);
     }
@@ -528,8 +565,9 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
             if ($send) {
                 $model = (string)$sel['model']['model_id'];
                 $sendClean = array_map(static fn($r) => ['name' => mb_substr($r['name'], 0, RH_AI_IMS_FIELD_CHARS), 'unit' => mb_substr($r['unit'], 0, RH_AI_IMS_FIELD_CHARS),
-                    'served' => mb_substr($r['served'], 0, RH_AI_IMS_FIELD_CHARS)], $send);
-                $r = rh_ai_chat(['provider' => $sel['provider'], 'model' => $model, 'max_tokens' => count($send) * 60 + 200,
+                    'served' => mb_substr($r['served'], 0, RH_AI_IMS_FIELD_CHARS), 'category' => mb_substr($r['category'], 0, RH_AI_IMS_FIELD_CHARS), 'ask_menu' => $r['ask_menu']], $send);
+                $menuRows = count(array_filter($send, static fn($r) => $r['ask_menu']));
+                $r = rh_ai_chat(['provider' => $sel['provider'], 'model' => $model, 'max_tokens' => count($send) * 60 + $menuRows * 50 + 200,
                     'effort' => 'minimal', 'timeout' => 20, 'no_retry' => true, 'system_frozen' => rh_ai_ims_prompt(),
                     'messages' => [['role' => 'user', 'content' => rh_ai_ims_payload($sendClean)]], 'tools' => []]);
                 $usage = (array)($r['usage'] ?? []);
@@ -561,12 +599,13 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
                     return []; // an error or an unreadable answer = no suggestions at all (contract)
                 }
             }
-            // one reading per row and field; the word list wins
+            // one reading per row and field; the word list wins; a menu category only with a menu
             $out = [];
             foreach ($found as $key => $list) {
                 $seen = [];
+                $hasMenu = in_array('menu', array_column($list, 'field'), true);
                 foreach ($list as $v) {
-                    if (isset($seen[$v['field']])) {
+                    if (isset($seen[$v['field']]) || ($v['field'] === 'menu_cat' && !$hasMenu)) {
                         continue;
                     }
                     $seen[$v['field']] = true;

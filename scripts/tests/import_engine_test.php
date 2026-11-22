@@ -1884,7 +1884,7 @@ $t(count($fxRun([['Wren Gin', 3, 60000, 2000, 6000, 'Case', 12, 'Glass']])['open
 // The column is still kept out of stock (derived), but the mapping table must say it is recognised and where it is used.
 $diJs = (string)file_get_contents($root . '/admin/js/data-import.js');
 $diSell = preg_match("/c\\.field === 'sell_price'\\) \\{ what = '([^']*)'/", $diJs, $diM) ? $diM[1] : '';
-$t($diSell !== '' && stripos($diSell, 'not imported') === false && strpos($diSell, 'Recognised') === 0 && strpos($diSell, 'Drinks for the menu') !== false
+$t($diSell !== '' && stripos($diSell, 'not imported') === false && strpos($diSell, 'Recognised') === 0 && strpos($diSell, 'Put items on the menu') !== false
     && strpos($diSell, 'tick') !== false && strpos($diSell, 'below') !== false
     && strpos($diJs, "(c.derived && c.field !== 'sell_price') || !c.field ? 'is-grey'") !== false && strpos($diJs, "c.derived && c.field === 'sell_price') { sellCols++;") !== false,
     'Step 2: the selling price column reads as recognised and used in Step 4 "Drinks for the menu" (tick), not "Not imported", is not greyed or counted as a column left out ' . json_encode($diSell));
@@ -1916,13 +1916,15 @@ $t(import_served_volume_in('1,000ml')[0] === 1000.0 && import_served_volume_in('
     'served by: volumes read from a cell (1,000ml, 1,5L, 1 litre); a bare number or 0 ml is not a volume');
 $drJs = (string)file_get_contents($root . '/admin/js/data-import.js');
 $drPhp = (string)file_get_contents($root . '/includes/import/drinks.php');
-$drFrom = (int)strpos($drJs, 'function sizesSection');
+// owner 2026-11-22: the sizes and the menu table are ONE optional step 3 section, "Put items on the menu" (step 4 keeps a summary line only)
+$drFrom = (int)strpos($drJs, 'function menuSection');
 $drBody = $drFrom > 0 ? substr($drJs, $drFrom, (int)strpos($drJs, 'function fixedSections') - $drFrom) : '';
-$t($drBody !== '' && strpos($drJs, "'Optional: add sizes so these can go on the menu") !== false && strpos($drJs, 'sizesSection(p);') !== false
-    && strpos($drBody, "post('sizes_list'") !== false && strpos($drBody, "post('sizes_set'") !== false
+$t($drBody !== '' && strpos($drJs, "'Put items on the menu'") !== false && strpos($drJs, 'menuSection(p);') !== false && strpos($drJs, 'menuSummary(p, menuLi);') !== false
+    && strpos($drBody, "post('menu_list'") !== false && strpos($drBody, "post('sizes_set'") !== false && strpos($drBody, "post('drinks_set'") !== false
     && strpos($drBody, 'showStep') === false && strpos($drBody, 'next.') === false
-    && strpos($drPhp, "'Add bottle size in Step 3 (optional)") !== false && stripos($drBody, 'smart') === false && stripos($drBody, 'magic') === false,
-    'Step 3 bottle sizes: an optional section with its own list that never touches Next; a drink without one says "Add bottle size in Step 3"');
+    && strpos($drPhp, "'Add bottle size in Step 3 (optional)") !== false && stripos($drBody, 'smart') === false && stripos($drBody, 'magic') === false
+    && !preg_match('/[\'"][^\'"]*\bAI\b[^\'"]*[\'"]/', $drBody),
+    'Step 3 "Put items on the menu": one optional section with its own list that never touches Next; no "AI" wording; a drink without a size says "Add bottle size in Step 3"');
 $skV = import_pack_vocab($al);
 $skOk = true;
 foreach (['Shot' => 'portion', 'Per shot' => 'portion', '1 Shot' => 'portion', 'Tot 25ml' => 'portion', 'Glass 175 ml' => 'portion', '25ml' => 'portion', 'Glasses of wine' => 'portion',

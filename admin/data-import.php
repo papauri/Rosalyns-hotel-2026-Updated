@@ -10,9 +10,10 @@
  * Access: admin-init.php (session, data_import permission, stock module) + this file (kill switch data_import_enabled, fail-closed,
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
- * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | drinks_list | drinks_set | sizes_list | sizes_set | cancel | confirm | list | delete.
- * drinks_list / drinks_set = Step 4 "Drinks for the menu" (includes/import/drinks.php): rows with a selling price, ticked one by one (unticked by
- * default); ticking and importing a ticked drink also need the Menu permission.
+ * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | drinks_list | drinks_set | menu_list | sizes_list | sizes_set | sizes_bulk | cancel | confirm | list | delete.
+ * menu_list / drinks_set = Step 3 "Put items on the menu" (includes/import/drinks.php): any item with a selling price (or one typed here), drinks
+ * and food, grouped by the file's category heading; ticked one by one or all at once (unticked by default); ticking, typing a price, choosing the
+ * menu and importing a ticked item also need the Menu permission.
  * delete = remove one finished entry from Import history (owner 2026-11-15): same high-level permission as Clear Stock Data (rh_sc_authorize:
  * administrator + data_reset), the typed word DELETE and the person's own password; a backup is written first (includes/import/delete.php).
  * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out;
@@ -411,7 +412,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'sizes_bulk', 'menu_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -564,10 +565,22 @@ if ($isAjax) {
     if ($action === 'drinks_list') {
         di_json(import_job_drinks_view($pdo, $jobId, $uid, $drinksQuery()));
     }
-    if ($action === 'drinks_set') {      // mode tick (key, on) | category (key, value) | category_all (value) | tick_all (on, q, show); needs the Menu permission too
+    // Step 3 "Put items on the menu" (2026-11-22): the counts, the groups (the file's category headings) and one group's rows, paged
+    $menuQuery = function () {
+        return ['q' => (string)($_POST['q'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'), 'mgroup' => (string)($_POST['mgroup'] ?? ''),
+            'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 10), 'ai' => ($_POST['ai'] ?? '1') !== '0'];      // ai 0: never ask the optional reader on this call
+    };
+    if ($action === 'menu_list') {
+        di_json(import_job_menu_view($pdo, $jobId, $uid, $menuQuery()));
+    }
+    // mode tick | tick_all | price | menu | menu_keys | category | category_keys | category_all | group_menu | group_cat | accept (includes/import/drinks.php);
+    // needs the Menu permission too
+    if ($action === 'drinks_set') {
         $r = import_job_drinks_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''),
-            'on' => ($_POST['on'] ?? '0') === '1', 'value' => (string)($_POST['value'] ?? ''), 'q' => (string)($_POST['q'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all')]);
-        if (!empty($r['ok'])) {
+            'on' => ($_POST['on'] ?? '0') === '1', 'value' => (string)($_POST['value'] ?? ''), 'q' => (string)($_POST['q'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'),
+            'mgroup' => (string)($_POST['mgroup'] ?? ''), 'group' => (string)($_POST['group'] ?? ''),
+            'keys' => is_array($_POST['keys'] ?? null) ? array_values(array_filter($_POST['keys'], 'is_string')) : []]);
+        if (!empty($r['ok']) && empty($_POST['menu'])) {
             $r['list'] = import_job_drinks_view($pdo, $jobId, $uid, $drinksQuery());
         }
         di_json($r);
@@ -671,7 +684,7 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
             <ol class="di-steps" id="diSteps" aria-label="Import steps">
                 <li data-step="1" class="is-current"><span class="di-step-n">1</span><span class="di-step-t">Upload<small>Pick your file</small></span></li>
                 <li data-step="2"><span class="di-step-n">2</span><span class="di-step-t">What we found<small>Check how it was read</small></span></li>
-                <li data-step="3"><span class="di-step-n">3</span><span class="di-step-t">Review and answer<small>Answer what is unclear</small></span></li>
+                <li data-step="3"><span class="di-step-n">3</span><span class="di-step-t">Review and menu<small>Answer questions, set menu prices</small></span></li>
                 <li data-step="4"><span class="di-step-n">4</span><span class="di-step-t">Confirm<small>Check and import</small></span></li>
             </ol>
 

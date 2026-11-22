@@ -87,6 +87,25 @@ check($pp['ok'] && $pp['by'][1] === [['field' => 'served_by', 'value' => 'shot',
 check(!rh_ai_ims_parse('no json', [1 => $row])['ok'] && !rh_ai_ims_parse('{"r":[{"i":1,"field":"served_by","value":"glass","source":"glass"},{"i":1,"field":"portion_ml","value":150,"source":"150ml"}]}', [1 => $row])['ok'],
     'ims_parse_bad: unreadable or mostly invalid = nothing from the model');
 
+// ---- pure: which menu (2026-11-22), only for a row sent with ask_menu ----
+$mr = rh_ai_ims_row(['key' => 'k', 'name' => 'Beef samosa', 'unit' => 'each', 'served' => '', 'category' => 'Misc', 'ask_menu' => true]);
+$nr = rh_ai_ims_row(['key' => 'k', 'name' => 'Beef samosa', 'unit' => 'each', 'served' => '', 'category' => 'Misc']);
+check(rh_ai_ims_validate($mr, 'menu', 'Food', 'samosa') === ['field' => 'menu', 'value' => 'food', 'source' => 'samosa']
+    && rh_ai_ims_validate($mr, 'menu_cat', ' Snacks ', 'Beef samosa') === ['field' => 'menu_cat', 'value' => 'Snacks', 'source' => 'Beef samosa']
+    && rh_ai_ims_validate($mr, 'menu', 'drinks', 'misc') === ['field' => 'menu', 'value' => 'drink', 'source' => 'Misc'],
+    'ims_menu_validate: drink / food and a short category, the source found in its own name or category');
+check(rh_ai_ims_validate($nr, 'menu', 'food', 'samosa') === null && rh_ai_ims_validate($mr, 'menu', 'pizza', 'samosa') === null
+    && rh_ai_ims_validate($mr, 'menu', '', 'samosa') === null && rh_ai_ims_validate($mr, 'menu', 'food', 'pastry') === null
+    && rh_ai_ims_validate($mr, 'menu_cat', str_repeat('Snacks ', 72), 'samosa') === null && rh_ai_ims_validate($mr, 'menu_cat', '123', 'samosa') === null
+    && rh_ai_ims_validate($mr, 'menu', ['food'], 'samosa') === null,
+    'ims_menu_validate_bad: not asked, "pizza", empty, a source not in the row, a 500-character or number-only category, a non-text value = nothing');
+check($nr['category'] === '' && $nr['ask_menu'] === false && rh_ai_ims_cache_key($mr) !== rh_ai_ims_cache_key($nr)
+    && rh_ai_ims_needs_model($mr, rh_ai_ims_local($mr)) && !rh_ai_ims_needs_model(rh_ai_ims_row(['key' => 'k', 'name' => 'Gin', 'unit' => 'bottle', 'served' => 'Single', 'ask_menu' => false]), [['field' => 'served_by', 'value' => 'shot', 'source' => 'Single']]),
+    'ims_menu_row: the category is kept only for a menu row, learned apart, and a menu row always needs the model');
+$pl = rh_ai_ims_payload([1 => ['name' => 'Beef samosa', 'unit' => 'each', 'served' => '', 'category' => 'Misc', 'ask_menu' => true], 2 => ['name' => 'Gin', 'unit' => 'bottle', 'served' => 'Spirit msr', 'category' => 'Secret heading', 'ask_menu' => false]]);
+check(strpos($pl, '1 | "Beef samosa" | "each" | "" | "Misc" | menu') !== false && strpos($pl, 'Secret heading') === false && strpos($pl, '2 | "Gin" | "bottle" | "Spirit msr"' . "\n") === false
+    && substr($pl, -strlen('2 | "Gin" | "bottle" | "Spirit msr"')) === '2 | "Gin" | "bottle" | "Spirit msr"', 'ims_menu_payload: only a menu row carries its category and the menu marker');
+
 // ---- DB part: one transaction, rolled back ----
 $adminId = (int)col($pdo, "SELECT id FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1");
 $calls = 0;
@@ -205,6 +224,34 @@ try {
         $many[] = ['key' => 'n' . $k, 'name' => $u . 'Item ' . $k, 'unit' => 'bottle', 'served' => 'Odd word ' . $k];
     }
     check(rh_ai_import_measure_suggest($many) === [] && $calls === 1 && substr_count($lastText, "\n") === RH_AI_IMS_MAX_SEND, 'ims_batch_cap: at most ' . RH_AI_IMS_MAX_SEND . ' rows in the one call');
+
+    // 6b. which menu rides on the same ONE call: a measure row and a menu row together; a menu row the word list reads is still sent;
+    // menu_cat without a menu is dropped; a row not asked about its menu never gets one
+    $calls = 0;
+    $mixM = [
+        ['key' => 'q1', 'name' => $u . 'Gin Q', 'unit' => 'bottle', 'served' => 'Spirit msr Q'],
+        ['key' => 'q2', 'name' => $u . 'Beef samosa', 'unit' => 'each', 'served' => '', 'category' => 'Misc Q', 'ask_menu' => true],
+        ['key' => 'q3', 'name' => $u . 'Lemonade Q', 'unit' => 'bottle', 'served' => 'Bottle', 'category' => 'Odds Q', 'ask_menu' => true],
+        ['key' => 'q4', 'name' => $u . 'Thing Q', 'unit' => 'each', 'served' => '', 'category' => 'Odds Q', 'ask_menu' => true],
+    ];
+    $reply = static function (string $text) use ($idx, $u): string {
+        return json_encode(['r' => [
+            ['i' => $idx($text, $u . 'Gin Q'), 'field' => 'served_by', 'value' => 'shot', 'source' => 'Spirit msr Q'],
+            ['i' => $idx($text, $u . 'Gin Q'), 'field' => 'menu', 'value' => 'drink', 'source' => 'Gin'],
+            ['i' => $idx($text, $u . 'Beef samosa'), 'field' => 'menu', 'value' => 'food', 'source' => 'samosa'],
+            ['i' => $idx($text, $u . 'Beef samosa'), 'field' => 'menu_cat', 'value' => 'Snacks', 'source' => 'samosa'],
+            ['i' => $idx($text, $u . 'Lemonade Q'), 'field' => 'menu', 'value' => 'drink', 'source' => 'Lemonade'],
+            ['i' => $idx($text, $u . 'Lemonade Q'), 'field' => 'menu_cat', 'value' => 'Soft drinks', 'source' => 'Lemonade'],
+            ['i' => $idx($text, $u . 'Thing Q'), 'field' => 'menu_cat', 'value' => 'Snacks', 'source' => 'Thing'],
+        ]]);
+    };
+    $out = rh_ai_import_measure_suggest($mixM);
+    check($calls === 1 && $idx($lastText, $u . 'Lemonade Q') > 0 && strpos($lastText, '"Misc Q" | menu') !== false, 'ims_menu_one_call: measure and menu rows go in the SAME one call', "calls=$calls");
+    check(got($out, 'q1') === ['served_by' => 'shot'] && got($out, 'q2') === ['menu' => 'food', 'menu_cat' => 'Snacks'] && got($out, 'q3') === ['served_by' => 'bottle', 'menu' => 'drink', 'menu_cat' => 'Soft drinks']
+        && got($out, 'q4') === [], 'ims_menu_readings: menu + category only for rows asked; a category without a menu is dropped', json_encode($out));
+    $calls = 0;
+    check(got(rh_ai_import_measure_suggest($mixM), 'q2') === ['menu' => 'food', 'menu_cat' => 'Snacks'] && $calls === 0, 'ims_menu_learned: the same menu rows again cost nothing', "calls=$calls");
+    rh_ai_breaker_ok($pdo, RH_AI_IMS_TOOL);
 
     // 7. AI off gives [] and no call, even for word-list rows
     $calls = 0;

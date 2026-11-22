@@ -599,7 +599,7 @@ if (!function_exists('import_measure_words')) {
 
     /**
      * Optional help reading what the plain rules could not (wiring only; the Assistant side is the AI lead's). $ask = [['key','name','unit','served']],
-     * $allowed = [key => [field => true]] (only the blanks of that row: served_by | portion_ml | container_ml), $fn = the suggester or null (off / missing).
+     * $allowed = [key => [field => true]] (only the blanks of that row: served_by | portion_ml | container_ml | menu | menu_cat), $fn = the suggester or null (off / missing).
      * Every suggestion is checked here: a known key, an allowed field, an ml of 0 < x <= 100000 (2 dp), a short plain served-by text; anything else is
      * dropped. Never throws. Returns [key => [field => ['v' => value, 'src' => plain text]]]: only ever a pre-fill the person can change or clear.
      */
@@ -625,7 +625,19 @@ if (!function_exists('import_measure_words')) {
             }
             $src = trim((string)preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', mb_substr(is_scalar($s['source'] ?? null) ? (string)$s['source'] : '', 0, 120)));
             $v = $s['value'] ?? null;
-            if ($field === 'served_by') {
+            if ($field === 'menu') {
+                // which menu (2026-11-22): only "drink" or "food"; a suggestion only, shown as "Suggested" until a person accepts it
+                $v = is_string($v) ? mb_strtolower(trim($v)) : '';
+                $v = ['drink' => 'drink', 'drinks' => 'drink', 'food' => 'food', 'foods' => 'food'][$v] ?? '';
+                if ($v === '') {
+                    continue;
+                }
+            } elseif ($field === 'menu_cat') {
+                $v = is_string($v) ? trim((string)preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', $v)) : '';
+                if ($v === '' || mb_strlen($v) > 100) {
+                    continue;
+                }
+            } elseif ($field === 'served_by') {
                 $v = is_string($v) ? trim((string)preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', $v)) : '';
                 if ($v === '' || mb_strlen($v) > 60) {
                     continue;

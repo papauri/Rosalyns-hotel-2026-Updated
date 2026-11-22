@@ -262,7 +262,8 @@ if (!function_exists('import_commit_stock')) {
                 'stock_not_counted_no_cost' => $nc['no_cost']['names'], 'stock_not_counted_not_ticked' => $nc['not_ticked']['names'],
                 'stock_not_counted_cost_not_ticked' => $nc['cost_not_ticked']['names'], 'stock_not_counted_same' => $nc['same']['names'], 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
                 'measures_saved' => $measureSaved, 'sizes_saved' => $sizes['saved'], 'sizes_names' => $sizes['names'],
-                'drinks_added' => $drinks['added'], 'drinks_updated' => $drinks['updated'], 'drinks_linked' => $drinks['linked'], 'drinks_names' => $drinks['names'],
+                'drinks_added' => $drinks['added'] - $drinks['food_added'], 'drinks_updated' => $drinks['updated'] - $drinks['food_updated'], 'drinks_linked' => $drinks['linked'], 'drinks_names' => $drinks['names'],
+                'food_added' => $drinks['food_added'], 'food_updated' => $drinks['food_updated'],      // 2026-11-22: food / snack items put on the food menu
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
                 'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',
             ];
