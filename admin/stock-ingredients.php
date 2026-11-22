@@ -11,6 +11,7 @@ require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/stock-list-filters.php';
+require_once __DIR__ . '/includes/stock-measure-bulk-lib.php';
 
 // Dashboard filter (?filter=low): exactly the items the low-stock alert counts (rh_stock_alert_summary 'attention').
 $ingFilter = rh_stock_ingredient_filter_key($_GET['filter'] ?? '');
@@ -68,6 +69,49 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['unit_change_
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     echo json_encode($out, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/* Set count measure for several items (owner 2026-11-23): preview (nothing saved) and apply, both JSON. Same page permission as
+ * editing one item's measure; each item is saved through rh_stock_measure_save in its own transaction (stock-measure-bulk-lib.php). */
+if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['preview_measure_bulk', 'measure_bulk_apply'], true)) {
+    $smbOut = ['ok' => false, 'errors' => []];
+    $smbApply = (string)$_POST['action'] === 'measure_bulk_apply';
+    if (!validateCsrfToken((string)($_POST['csrf_token'] ?? ''))) {
+        $smbOut['errors'][] = 'Security token invalid. Please reload the page.';
+        http_response_code(403);
+    } elseif (!rh_stock_measure_ready($pdo)) {
+        $smbOut['errors'][] = 'Count measures are not set up on this system yet.';
+    } else {
+        try {
+            $smbSpec = rh_smb_read_spec($_POST);
+            $smbSel = rh_smb_select($pdo, $_POST);
+            $smbOut['errors'] = array_merge($smbSpec['errors'], $smbSel['ok'] ? [] : $smbSel['errors']);
+            if ($smbSpec['ok'] && $smbSel['ok']) {
+                $smbN = rh_stock_qty_fmt((float)$smbSpec['spec']['n'], 0);
+                if (!$smbApply) {
+                    $smbPlan = rh_smb_plan($pdo, $smbSel['items'], $smbSpec['spec']);
+                    $smbOut = ['ok' => true, 'errors' => [], 'rows' => rh_smb_public_rows($smbPlan['rows']), 'counts' => $smbPlan['counts'],
+                        'fingerprint' => $smbPlan['fingerprint'], 'n' => $smbN, 'from_ml' => $smbSpec['spec']['from_ml']];
+                } else {
+                    $smbRes = rh_smb_apply($pdo, $smbSel['items'], $smbSpec['spec'], (string)($_POST['fingerprint'] ?? ''), (int)$user['id']);
+                    $smbOut = $smbRes + ['n' => $smbN];
+                    if (!empty($smbRes['ok']) && ($smbRes['set'] || $smbRes['changed']) && function_exists('deleteCache')) {
+                        rh_clear_stock_dashboard_cache();
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('stock-ingredients measure bulk: ' . $e->getMessage());
+            $smbOut = ['ok' => false, 'errors' => ['The count measures could not be worked out. Nothing was saved. Reload the page and try again.']];
+        }
+    }
+    if ($smbApply && empty($smbOut['ok']) && http_response_code() < 400) {
+        http_response_code(409); // refused: nothing saved (the staff-activity hook records only real saves)
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode($smbOut, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -713,22 +757,16 @@ $drinkList = $drinkReady ? rh_drink_measures_list() : [];
 // Put on the menu (owner 2026-11-22): tick stock items and open admin/stock-to-menu.php; only for people who may change the menu
 $canPutOnMenu = function_exists('hasPermission') && hasPermission((int)$user['id'], 'menu')
     && ($user['role'] === 'admin' || !function_exists('rh_module_key_enabled') || rh_module_key_enabled('pos'));
+// Set count measure for several items (owner 2026-11-23): anyone who may edit an item's measure here (this page's permission)
+$canBulkMeasure = !$error && $measureReady;
+$showTicks = $canPutOnMenu || $canBulkMeasure;
 try {
     $supplierOptions = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { $supplierOptions = []; }
 if (!$error || strpos($error, 'Stock tables not yet') === false) {
     try {
-        $histSql = rh_stock_history_sql($pdo, 'i'); // shared "has stock history" rule
-        $attentionSql = rh_stock_attention_sql(rh_stock_threshold_sql('i'), $histSql, 'i'); // the low-stock alert rule
-        $stmt = $pdo->query("
-            SELECT i.*,
-                   (CASE WHEN {$histSql} THEN 0 ELSE 1 END) AS never_stocked,
-                   (CASE WHEN {$attentionSql} THEN 1 ELSE 0 END) AS needs_attention,
-                   (SELECT MIN(b.expiry_date) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active' AND b.expiry_date IS NOT NULL AND b.quantity_remaining > 0) AS next_expiry
-            FROM stock_ingredients i
-            ORDER BY i.is_archived ASC, i.category ASC, i.name ASC
-        ");
-        $ingredients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // The same rows (and status rule) "Tick all shown" re-reads on the server (stock-measure-bulk-lib.php).
+        $ingredients = rh_smb_list_rows($pdo);
         // Read-only flags for the screen, mirroring the server rules: the Unit is locked once an
         // ingredient has stock, batches, adjustments or recipes; Delete is only offered when it
         // has no stock and no history at all (everything else is archived).
@@ -953,12 +991,25 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             <?php endif; ?>
         </div>
 
+        <?php if ($showTicks && !empty($ingredients)): ?>
+            <div class="smb-bar" id="smb-bar" data-list-filter="<?php echo htmlspecialchars($ingFilter); ?>">
+                <button type="button" class="btn-secondary" id="smb-tick-all" onclick="stmTickAll(true)" title="Tick every item the search, category and status boxes show, on every page"><i class="fas fa-check-double"></i> Tick all shown</button>
+                <button type="button" class="btn-secondary" id="smb-clear" onclick="stmTickAll(false)" disabled><i class="fas fa-xmark"></i> Clear ticks</button>
+                <span class="smb-ticked" id="smb-ticked" aria-live="polite">No items ticked</span>
+                <?php if ($canBulkMeasure): ?>
+                    <button type="button" class="btn-primary" id="smb-open" onclick="smbOpen()" disabled><i class="fas fa-ruler"></i> <span id="smb-open-text">Set count measure</span></button>
+                    <i class="help" data-tip="Count measure: how you count part-used bottles, e.g. 25 shots in one bottle. Tick the items (or Tick all shown after a search or category, every page), then choose the measure once. You see what happens to each item before anything is saved. Stock, costs and batches do not change.">?</i>
+                <?php endif; ?>
+                <span class="smb-note" id="smb-note" role="status" hidden></span>
+            </div>
+        <?php endif; ?>
+
         <div class="table-responsive" data-rh-results>
             <table class="stock-table" id="stock-table">
                 <thead>
                     <tr>
-                        <?php if ($canPutOnMenu): ?>
-                            <th class="stm-tick-col"><input type="checkbox" id="stm-tick-all" aria-label="Tick all shown" title="Tick every item the search and filters show, on all pages" onchange="stmTickAll(this.checked)"> <i class="help" data-tip="Tick the items to put on the drinks menu. The box here ticks every item the search, category and status boxes show, on every page (archived items are left out).">?</i></th>
+                        <?php if ($showTicks): ?>
+                            <th class="stm-tick-col"><label class="stm-tick-label"><input type="checkbox" id="stm-tick-all" aria-label="Tick all shown" title="Tick every item the search and filters show, on all pages" onchange="stmTickAll(this.checked)"></label> <i class="help" data-tip="Tick the items to <?php echo $canPutOnMenu && $canBulkMeasure ? 'put on the drinks menu or to set their count measure' : ($canPutOnMenu ? 'put on the drinks menu' : 'set their count measure'); ?>. The box here (and Tick all shown) ticks every item the search, category and status boxes show, on every page (archived items are left out).">?</i></th>
                         <?php endif; ?>
                         <th>Name <i class="help" data-tip="The ingredient's display name. Used everywhere — recipes, stock-in logs, wastage reports.">?</i></th>
                         <th class="col-optional-lg">Category <i class="help" data-tip="Free-text grouping (e.g. Dairy, Meat, Pantry). Used to keep the recipe-builder dropdown tidy.">?</i></th>
@@ -978,18 +1029,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         $min = (float)$i['reorder_point'] > 0 ? (float)$i['reorder_point'] : (float)$i['min_quantity']; // shared threshold rule
                         $neverStocked = ($cur <= 0 && !empty($i['never_stocked']));
                         // Days until next expiry (null if no batch with expiry)
-                        $expDays = null;
-                        if (!empty($i['next_expiry'])) {
-                            $expDays = (int)(new DateTime('today'))->diff(new DateTime($i['next_expiry']))->format('%r%a');
-                        }
-                        $isExpiringSoon = ($expDays !== null && $expDays >= 0 && $expDays <= 7);
-                        $isExpired      = ($expDays !== null && $expDays < 0);
-                        $rowStatus = ((int)$i['is_archived'] === 1) ? 'archived'
-                            : ($neverStocked ? 'unstocked'
-                            : ($cur <= 0     ? 'critical'
-                            : ($isExpired    ? 'critical'
-                            : ($min > 0 && $cur <= $min ? 'low'
-                            : ($isExpiringSoon ? 'expiring' : 'ok')))));
+                        $expDays = rh_smb_exp_days($i);
+                        $rowStatus = rh_smb_row_status($i); // the status filter value; "Tick all shown" uses the same rule on the server
                         $qtyClass = $neverStocked ? '' : ($cur <= 0 ? 'qty-critical' : ($min > 0 && $cur <= $min ? 'qty-low' : ''));
 
                         // Expiry pill class
@@ -1016,8 +1057,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             data-name="<?php echo htmlspecialchars(strtolower($i['name'])); ?>"
                             data-category="<?php echo htmlspecialchars($i['category']); ?>"
                             data-status="<?php echo $rowStatus; ?>">
-                            <?php if ($canPutOnMenu): ?>
-                                <td class="stm-tick-col"><?php if (!$i['is_archived']): ?><label class="stm-tick-label"><input type="checkbox" class="stm-tick" value="<?php echo (int)$i['id']; ?>" aria-label="Tick <?php echo htmlspecialchars($i['name']); ?>" onchange="stmCount()"></label><?php endif; ?></td>
+                            <?php if ($showTicks): ?>
+                                <td class="stm-tick-col"><?php if (!$i['is_archived']): ?><label class="stm-tick-label"><input type="checkbox" class="stm-tick" value="<?php echo (int)$i['id']; ?>" aria-label="Tick <?php echo htmlspecialchars($i['name']); ?>" onchange="stmCount(this)"></label><?php endif; ?></td>
                             <?php endif; ?>
                             <td>
                                 <strong><?php echo htmlspecialchars($i['name']); ?></strong>
@@ -1111,11 +1152,11 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <?php endforeach; ?>
                     <?php if (empty($ingredients) && $ingFilter === 'low'): ?>
                         <tr>
-                            <td colspan="<?php echo $canPutOnMenu ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">Nothing needs restocking right now. <a href="stock-ingredients.php">Show all <?php echo strtolower($stockNounPl); ?></a></td>
+                            <td colspan="<?php echo $showTicks ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">Nothing needs restocking right now. <a href="stock-ingredients.php">Show all <?php echo strtolower($stockNounPl); ?></a></td>
                         </tr>
                     <?php elseif (empty($ingredients)): ?>
                         <tr>
-                            <td colspan="<?php echo $canPutOnMenu ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
+                            <td colspan="<?php echo $showTicks ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -1582,6 +1623,80 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             </form>
         </div>
     </div>
+    <?php endif; ?>
+
+    <?php if ($canBulkMeasure): ?>
+    <!-- Set count measure for several items (owner 2026-11-23): preview per item first, nothing is saved until Apply. -->
+    <div class="modal-overlay" id="smbModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Set count measure for <span id="smb_count">0</span> <span id="smb_count_word">items</span></h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="smbClose()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="field-note">Count measure: how you count part-used bottles, e.g. 25 shots in one bottle. A stock count can then be typed as 2 bottles + 7 shots, and stock screens show it that way. Quantities, costs and batches do not change. Nothing is saved until you press Apply.</p>
+                <div class="smb-grid" id="smb_form">
+                    <div>
+                        <label for="smb_big">Bigger unit <i class="help" data-tip="The whole container, e.g. bottle, casket, box. Leave it empty to use each item's own stock unit. When stock is kept in the bigger unit it must be the item's own unit: an item with another unit is skipped with the reason, never converted.">?</i></label>
+                        <input type="text" id="smb_big" maxlength="30" placeholder="Each item's own unit" autocomplete="off">
+                    </div>
+                    <div>
+                        <label for="smb_small">Smaller measure <i class="help" data-tip="What is poured or served from it: shot, tot, glass, double, or a name from the Drink measures list. Type your own word if it is not in the list.">?</i></label>
+                        <input type="text" id="smb_small" maxlength="30" placeholder="e.g. shot" list="smb_measures" autocomplete="off">
+                    </div>
+                    <div>
+                        <label for="smb_n" id="smb_n_lbl">How many smaller in one bigger <i class="help" data-tip="How many of the smaller measure make one of the bigger, e.g. 25 shots of 30 ml in a 750 ml bottle. 1 to <?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>, at most 4 decimals. Or type both sizes in ml below.">?</i></label>
+                        <input type="number" id="smb_n" step="any" min="1" max="<?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>" placeholder="e.g. 25" inputmode="decimal">
+                    </div>
+                    <div>
+                        <label for="smb_side">Stock is kept in <i class="help" data-tip="Which of the two IS the unit stock is kept in. Normally the bigger unit (stock kept in bottles, counted in shots): quantities then stay exactly as they are. An item whose stock unit is not that word is skipped.">?</i></label>
+                        <select id="smb_side">
+                            <option value="big">The bigger unit (quantities stay as they are)</option>
+                            <option value="small">The smaller measure</option>
+                        </select>
+                    </div>
+                </div>
+                <fieldset class="smb-ml">
+                    <legend>Or work it out from sizes in ml (optional) <i class="help" data-tip="Type the size of one bigger unit and of one smaller measure in ml, e.g. 750 and 30. It is used only when it comes out exact (at most 4 decimals): 750 / 30 = 25. 1000 / 30 = 33.33... is refused; then type the number yourself.">?</i></legend>
+                    <div class="smb-grid smb-grid-2">
+                        <div>
+                            <label for="smb_bottle_ml" id="smb_bottle_ml_lbl">One bigger unit in ml</label>
+                            <input type="number" id="smb_bottle_ml" step="any" min="0" max="<?php echo (int)RH_SMB_MAX_BOTTLE_ML; ?>" placeholder="e.g. 750" inputmode="decimal">
+                        </div>
+                        <div>
+                            <label for="smb_measure_ml" id="smb_measure_ml_lbl">One smaller measure in ml</label>
+                            <input type="number" id="smb_measure_ml" step="any" min="0" max="<?php echo (int)RH_DRINK_MEASURE_MAX_ML; ?>" placeholder="e.g. 30" inputmode="decimal">
+                        </div>
+                    </div>
+                    <p class="field-note" id="smb_ml_line" aria-live="polite" hidden></p>
+                </fieldset>
+                <label class="smb-change" id="smb_change_wrap" hidden><input type="checkbox" id="smb_change"> <span id="smb_change_text">Change these too</span> <i class="help" data-tip="Items that already have a different count measure keep it unless you tick this. An item with lines on open stock counts typed in its old measure is never changed (those lines would be read in the new measure).">?</i></label>
+                <div class="smb-errors" id="smb_errors" role="alert" hidden></div>
+                <div id="smb_result" hidden>
+                    <p class="smb-summary" id="smb_summary"></p>
+                    <div id="smb_table_wrap"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="smb_cancel" onclick="smbClose()">Cancel</button>
+                <button type="button" class="btn-secondary" id="smb_preview" onclick="smbPreview()">Preview</button>
+                <button type="button" class="btn-primary" id="smb_apply" onclick="smbApply()" disabled>Apply</button>
+            </div>
+        </div>
+    </div>
+    <datalist id="smb_measures">
+        <?php foreach ($drinkList as $dm): ?>
+            <option value="<?php echo htmlspecialchars((string)$dm['name']); ?>"></option>
+        <?php endforeach; ?>
+    </datalist>
+    <script>
+        window.SMB_CFG = <?php echo json_encode([
+            'csrf' => (string)$csrf_token,
+            'maxN' => (int)RH_STOCK_MEASURE_MAX_N,
+            'measures' => array_values(array_map(static fn(array $dm): array => ['name' => (string)$dm['name'], 'ml' => (float)$dm['ml']], $drinkList)),
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    </script>
+    <script src="js/stock-ingredients-measure-bulk.js?v=<?php echo @filemtime(__DIR__ . '/js/stock-ingredients-measure-bulk.js'); ?>"></script>
     <?php endif; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
     <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
@@ -2170,20 +2285,61 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             openModal('discardBatchModal');
         }
 
-        // Put on the menu (owner 2026-11-22): ticked items open admin/stock-to-menu.php
-        function stmCount() {
+        /* Ticks (owner 2026-11-22 Put on the menu; 2026-11-23 Set count measure). "Tick all shown" remembers the search and
+         * filters it ticked with, so Set count measure sends those (the server reads the same list again, never a long id
+         * list); a box unticked afterwards is sent as an exception. Changing the search or filters then clears the ticks. */
+        let stmAll = null; // {q, category, status, shown, except: Set} while "Tick all shown" is on
+        function stmCount(box) {
+            if (stmAll && box && box.classList && box.classList.contains('stm-tick')) {
+                if (box.checked) stmAll.except.delete(box.value); else stmAll.except.add(box.value);
+            }
             const n = document.querySelectorAll('.ing-row .stm-tick:checked').length;
             const btn = document.getElementById('stm-put-btn');
-            if (!btn) return;
-            btn.disabled = n === 0;
-            document.getElementById('stm-put-text').textContent = n ? 'Put ' + n + ' on the menu' : 'Put on the menu';
+            if (btn) {
+                btn.disabled = n === 0;
+                document.getElementById('stm-put-text').textContent = n ? 'Put ' + n + ' on the menu' : 'Put on the menu';
+            }
+            const ticked = document.getElementById('smb-ticked');
+            if (ticked) ticked.textContent = n ? n + (n === 1 ? ' item ticked' : ' items ticked') + (stmAll ? ' (all shown, every page)' : '') : 'No items ticked';
+            const clear = document.getElementById('smb-clear');
+            if (clear) clear.disabled = n === 0;
+            const open = document.getElementById('smb-open');
+            if (open) {
+                open.disabled = n === 0;
+                document.getElementById('smb-open-text').textContent = n ? 'Set count measure for ' + n + (n === 1 ? ' item' : ' items') : 'Set count measure';
+            }
+            const head = document.getElementById('stm-tick-all');
+            if (head) head.checked = !!stmAll && stmAll.except.size === 0 && n > 0;
         }
         function stmTickAll(on) {
-            document.querySelectorAll('.ing-row').forEach(row => {
-                const box = row.querySelector('.stm-tick');
-                if (box && row.dataset.filterHidden !== '1') box.checked = on;
-            });
+            document.querySelectorAll('.ing-row .stm-tick').forEach(box => { box.checked = false; });
+            stmAll = null;
+            if (on) {
+                let shown = 0;
+                document.querySelectorAll('.ing-row').forEach(row => {
+                    const box = row.querySelector('.stm-tick');
+                    if (box && row.dataset.filterHidden !== '1') { box.checked = true; shown++; }
+                });
+                stmAll = {
+                    q: document.getElementById('filter-search').value.toLowerCase(),
+                    category: document.getElementById('filter-category').value,
+                    status: document.getElementById('filter-status').value,
+                    shown: shown,
+                    except: new Set()
+                };
+            }
+            const note = document.getElementById('smb-note');
+            if (note) note.hidden = true;
             stmCount();
+        }
+        // What is ticked, for Set count measure: the remembered search and filters, or the ids of the boxes ticked by hand.
+        function stmSelection() {
+            const bar = document.getElementById('smb-bar');
+            if (stmAll) {
+                return { mode: 'all', q: stmAll.q, category: stmAll.category, status: stmAll.status, shown: String(stmAll.shown),
+                    except: Array.from(stmAll.except).join(','), list_filter: bar ? (bar.dataset.listFilter || '') : '' };
+            }
+            return { mode: 'ids', ids: Array.from(document.querySelectorAll('.ing-row .stm-tick:checked')).map(b => b.value).join(',') };
         }
         // the ids go by POST in ONE field (never the URL, never one field each): no URL length or max_input_vars limit can cut the list
         function stmPutOnMenu() {
@@ -2228,6 +2384,16 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 table.rhPagerRefresh(true);
             } else if (table) {
                 rows.forEach(row => { row.hidden = false; });
+            }
+            // "Tick all shown" belonged to the old search and filters: clear those ticks rather than send a list nobody sees.
+            if (stmAll) {
+                const hadTicks = document.querySelectorAll('.ing-row .stm-tick:checked').length > 0;
+                stmTickAll(false);
+                const note = document.getElementById('smb-note');
+                if (note && hadTicks) {
+                    note.textContent = 'Ticks cleared because the search or filters changed. Press Tick all shown again.';
+                    note.hidden = false;
+                }
             }
             const tickAll = document.getElementById('stm-tick-all');
             if (tickAll) tickAll.checked = false;

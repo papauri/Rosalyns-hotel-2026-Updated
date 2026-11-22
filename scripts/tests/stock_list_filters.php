@@ -107,7 +107,9 @@ check(strpos($bp, "'filter'        => \$batchFilter") !== false, 'batches: POST 
 check(strpos($bp, 'name="filter"') !== false, 'batches: toolbar form carries the filter');
 check(strpos($bp, '>Clear</a>') !== false, 'batches: notice has Clear');
 check(strpos($ip, "rh_stock_ingredient_filter_key(\$_GET['filter'] ?? '')") !== false, 'ingredients: filter whitelisted');
-check(strpos($ip, "rh_stock_attention_sql(rh_stock_threshold_sql('i'), \$histSql, 'i')") !== false, 'ingredients: low uses the alert rule');
+// the list query lives in rh_smb_list_rows() (shared with "Tick all shown", 2026-11-23); the page must call it
+$ipLib = (string)file_get_contents($root . '/admin/includes/stock-measure-bulk-lib.php');
+check(strpos($ip, '$ingredients = rh_smb_list_rows($pdo);') !== false && strpos($ipLib, "rh_stock_attention_sql(rh_stock_threshold_sql('i'), \$histSql, 'i')") !== false, 'ingredients: low uses the alert rule');
 check(strpos($ip, "header('Location: stock-ingredients.php' . (\$ingFilter !== ''") !== false, 'ingredients: POST redirect keeps the filter');
 check(strpos($ip, '>Clear</a>') !== false, 'ingredients: notice has Clear');
 
