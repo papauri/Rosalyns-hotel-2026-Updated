@@ -253,6 +253,56 @@ try {
     check(got(rh_ai_import_measure_suggest($mixM), 'q2') === ['menu' => 'food', 'menu_cat' => 'Snacks'] && $calls === 0, 'ims_menu_learned: the same menu rows again cost nothing', "calls=$calls");
     rh_ai_breaker_ok($pdo, RH_AI_IMS_TOOL);
 
+    // 6c. #10: column headings the Import's rules could not place ride in the SAME one call, with up to 5 values each; the reading is
+    // field / measure / unit with the heading's own words as source; anything else is dropped
+    $calls = 0;
+    $cidx = static function (string $text, string $head): int {
+        return preg_match('/^(\d+) \| column \| ' . preg_quote((string)json_encode($head, JSON_UNESCAPED_UNICODE), '/') . ' \|/m', $text, $m) ? (int)$m[1] : 0;
+    };
+    $mixC = [
+        ['key' => 'k1', 'name' => $u . 'Gin K', 'unit' => 'bottle', 'served' => 'Spirit msr K'],
+        ['key' => 'col:S!E1', 'column' => $u . 'Tots ea btl', 'samples' => ['30', '25', '30', '30', '25', '99']],
+        ['key' => 'col:S!F1', 'column' => $u . 'Cap K', 'samples' => ['750']],
+        ['key' => 'col:S!G1', 'column' => $u . 'Odd K', 'samples' => ['1']],
+        ['key' => 'col:S!H1', 'column' => $u . 'Mail K', 'samples' => ['a@b.co']],
+    ];
+    $reply = static function (string $text) use ($idx, $cidx, $u): string {
+        return json_encode(['r' => [
+            ['i' => $idx($text, $u . 'Gin K'), 'field' => 'served_by', 'value' => 'shot', 'source' => 'Spirit msr K'],
+            ['i' => $cidx($text, $u . 'Tots ea btl'), 'field' => 'column', 'value' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'btl', 'source' => 'Tots ea btl'],
+            ['i' => $cidx($text, $u . 'Cap K'), 'field' => 'column', 'value' => 'unit_ml', 'measure' => '', 'unit' => 'bottle', 'source' => 'Cap K'],
+            ['i' => $cidx($text, $u . 'Odd K'), 'field' => 'column', 'value' => 'none', 'measure' => '', 'unit' => '', 'source' => 'Odd K'],
+        ]]);
+    };
+    $out = rh_ai_import_measure_suggest($mixC);
+    check($calls === 1 && $cidx($lastText, $u . 'Tots ea btl') > 0 && strpos($lastText, "\nColumns:\n") !== false && strpos($lastText, '"30", "25", "30", "30", "25"') !== false
+        && strpos($lastText, '"99"') === false && strpos($lastText, 'col:S!') === false && strpos($lastText, 'a@b.co') === false,
+        'ims_columns_one_call: rows and column headings go in the SAME one call, at most 5 values each, no keys, an unsafe column is not sent', "calls=$calls");
+    check(got($out, 'k1') === ['served_by' => 'shot'] && got($out, 'col:S!E1') === ['column' => ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'btl']]
+        && src($out, 'col:S!E1', 'column') === 'Tots ea btl' && got($out, 'col:S!F1') === ['column' => ['field' => 'unit_ml', 'measure' => '', 'unit' => 'bottle']]
+        && got($out, 'col:S!G1') === ['column' => ['field' => 'none', 'measure' => '', 'unit' => '']] && got($out, 'col:S!H1') === [],
+        'ims_columns_readings: field + measure + unit with the heading as source (the Import checks the words against its lists and the heading)', json_encode($out));
+    $calls = 0;
+    check(got(rh_ai_import_measure_suggest($mixC), 'col:S!E1') === ['column' => ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'btl']] && $calls === 0,
+        'ims_columns_learned: the same headings and values again cost nothing', "calls=$calls");
+    rh_ai_breaker_ok($pdo, RH_AI_IMS_TOOL);
+    $colRow = rh_ai_ims_row(['key' => 'c', 'column' => 'Tots ea btl', 'samples' => ['30']]);
+    check(rh_ai_ims_validate($colRow, 'column', ['field' => 'qty_single', 'measure' => '', 'unit' => ''], 'Tots') === null
+        && rh_ai_ims_validate($colRow, 'column', ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'], 'Shots per bottle') === null
+        && rh_ai_ims_validate($colRow, 'column', ['field' => 'measures_per_unit', 'measure' => 'tot 25', 'unit' => ''], 'Tots') === null
+        && rh_ai_ims_validate($colRow, 'column', 'measures_per_unit', 'Tots') === null
+        && rh_ai_ims_validate($colRow, 'served_by', 'shot', 'Tots ea btl') === null
+        && rh_ai_ims_validate(rh_ai_ims_row(['key' => 'r', 'name' => 'Gin', 'unit' => 'bottle', 'served' => 'Tot']), 'column', ['field' => 'unit_ml'], 'Gin') === null,
+        'ims_columns_bad: another field, a source not in the heading, words that are not one word, a bare value, a row field on a column or a column reading on a row = nothing');
+    $calls = 0;
+    $reply = static function (string $text) use ($cidx, $u): string {
+        return json_encode(['r' => [['i' => $cidx($text, $u . 'Bad K1'), 'field' => 'column', 'value' => 'pack_size', 'source' => 'Bad K1'],
+            ['i' => $cidx($text, $u . 'Bad K2'), 'field' => 'column', 'value' => 'unit_ml', 'unit' => 'bottle', 'source' => 'Bottle size']]]);
+    };
+    check(rh_ai_import_measure_suggest([['key' => 'col:S!J1', 'column' => $u . 'Bad K1', 'samples' => ['5']], ['key' => 'col:S!K1', 'column' => $u . 'Bad K2', 'samples' => ['5']]]) === [] && $calls === 1,
+        'ims_columns_bad_reply: a reply of invented fields / sources = no suggestions at all');
+    rh_ai_breaker_ok($pdo, RH_AI_IMS_TOOL);
+
     // 7. AI off gives [] and no call, even for word-list rows
     $calls = 0;
     rh_ai_save_settings(['ai_enabled' => '0'], $pdo);

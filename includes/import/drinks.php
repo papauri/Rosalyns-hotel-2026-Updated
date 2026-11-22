@@ -1670,7 +1670,7 @@ if (!function_exists('import_drinks_build')) {
      * only ever pre-fill step 3 as read from the file: the person's own answers always win, and clearing a row clears its reading.
      * $fn null + $useHook = the Assistant hook (none = nothing asked). Returns the number of readings kept.
      */
-    function import_job_sizes_ai_fill(PDO $pdo, int $jobId, ?callable $fn = null, bool $useHook = false): int
+    function import_job_sizes_ai_fill(PDO $pdo, int $jobId, ?callable $fn = null, bool $useHook = false, bool $colsOnly = false): int
     {
         $state = import_job_state($pdo, $jobId);
         if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
@@ -1680,11 +1680,30 @@ if (!function_exists('import_drinks_build')) {
         if (!empty($answers['_sizes']['ai_done'])) {
             return 0;               // one call per import, ever (each call costs money): never again on a reload or a repeated request
         }
+        // #10: the columns the rules could not place ride in the SAME one call (step 2 makes it only when there is such a column; step 3 as before)
+        if ($fn === null) {
+            $fn = $useHook ? import_measure_ai_hook($pdo) : null;
+            if ($fn === null) {
+                return 0;           // off: nothing asked, nothing marked (asked again once it is on)
+            }
+        }
+        $colAliases = import_job_engine_opts($pdo, $answers, (array)$state['ctx'])['aliases'];
+        $cols = import_cols_ai_ask($state, $colAliases);
+        if ($colsOnly && !$cols) {
+            return 0;
+        }
         $asked = (array)($answers['_sizes']['ai_asked'] ?? []);
         $ask = [];
         $allowed = [];
+        $colByKey = [];
+        foreach ($cols as $cq) {
+            $ask[] = ['key' => $cq['key'], 'column' => $cq['column'], 'samples' => $cq['samples']];
+            $allowed[$cq['key']] = ['column' => true];
+            $colByKey[$cq['key']] = $cq;
+        }
+        $nCols = count($ask);
         foreach (import_drinks_build($pdo, (array)$state['res']['items'], $answers)['rows'] as $r) {
-            if (isset($asked[$r['key']]) || count($ask) >= 40) {
+            if (isset($asked[$r['key']]) || count($ask) - $nCols >= 40) {
                 continue;
             }
             $f = [];
@@ -1723,12 +1742,6 @@ if (!function_exists('import_drinks_build')) {
         if (!$ask) {
             return 0;
         }
-        if ($fn === null) {
-            $fn = $useHook ? import_measure_ai_hook($pdo) : null;
-            if ($fn === null) {
-                return 0;           // off: nothing asked, nothing marked (asked again once it is on)
-            }
-        }
         // claim the one call for this import under the job's row lock BEFORE asking, so two loads at once never both pay for a call
         $claimed = false;
         $cl = import_cont_save($pdo, $jobId, '', function (array &$a) use (&$claimed) {
@@ -1740,18 +1753,35 @@ if (!function_exists('import_drinks_build')) {
             return 0;
         }
         $got = import_measure_ai_merge($ask, $allowed, $fn);
-        $n = 0;
+        // #10: a column reading is kept only when the hotel's words, the heading and the column's values all agree with it (else dropped)
+        $colGot = [];
+        foreach ($colByKey as $ck => $cq) {
+            $s = $got[$ck]['column'] ?? null;
+            unset($got[$ck]);
+            $chk = is_array($s) ? import_col_ai_check((array)$s['v'], ['header' => $cq['column'], 'samples' => $cq['samples']], $colAliases) : null;
+            if ($chk !== null) {
+                $colGot[$cq['ref']] = $chk + ['src' => (string)$s['src'], 'at' => date('Y-m-d H:i:s')];
+            }
+        }
+        $n = count($colGot);
         foreach ($got as $f) {
             $n += count($f);
         }
-        $res = import_cont_save($pdo, $jobId, '', function (array &$a) use ($ask, $got) {
+        $res = import_cont_save($pdo, $jobId, '', function (array &$a) use ($ask, $got, $colByKey, $colGot) {
             foreach ($ask as $row) {
+                if (isset($colByKey[$row['key']])) {
+                    $a['_cols_ai_asked'][$colByKey[$row['key']]['ref']] = 1;
+                    continue;
+                }
                 $a['_sizes']['ai_asked'][$row['key']] = 1;
             }
             foreach ($got as $k => $fields) {
                 foreach ($fields as $field => $s) {
                     $a['_sizes']['ai'][$k][$field] = $s;
                 }
+            }
+            foreach ($colGot as $ref => $s) {
+                $a['_cols_ai'][$ref] = $s;          // shown as "Suggested: ..." in step 2; used only by a person's "Use this"
             }
             return ['changed' => 1];
         });

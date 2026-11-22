@@ -229,7 +229,81 @@ if (!function_exists('rh_import_setting_defaults')) {
         }
         // an asked phrase only ever asks, never maps: the built-in ones always apply, also where this version's seed top-up already ran
         $res['ask_phrases'] = array_values(array_unique(array_merge((array)$res['ask_phrases'], (array)($out['ask_phrases'] ?? []))));
+        // #10: what a person told us about a "how many / how big" heading in step 2 (saved when they answered): read next time, with the date
+        // shown ("you told us on ..."); a "not this" answer is never asked again for that field. Only rows a person wrote (is_hotel_learned = 1).
+        // learned_heads[heading] lists the fields a person gave it, OLDEST answer first: the mapper reads the heading as the LAST one (their latest
+        // answer), ahead of any seed alias of another field with the same words ("Volume (ml)" answered shot size stays shot size).
+        try {
+            $st = $pdo->query("SELECT kind, term, maps_to, created_at FROM import_aliases WHERE is_hotel_learned = 1 AND ((kind = 'field' AND maps_to IN ('measures_per_unit','unit_ml','measure_ml')) OR kind IN ('field_yes', 'field_not')) ORDER BY created_at, id LIMIT 5000");
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $t = import_norm_text((string)$r['term']);
+                if ($r['kind'] === 'field' || $r['kind'] === 'field_yes') {
+                    unset($res['learned_heads'][$t][(string)$r['maps_to']]);           // re-added at the end: the latest answer is last
+                    $res['learned_heads'][$t][(string)$r['maps_to']] = (string)$r['created_at'];
+                    if ($r['kind'] === 'field_yes' && !in_array((string)$r['term'], (array)($res['fields'][(string)$r['maps_to']] ?? []), true)) {
+                        $res['fields'][(string)$r['maps_to']][] = (string)$r['term'];      // the heading reads as that field (also when only this row exists)
+                    }
+                } else {
+                    $res['field_not'][$t][(string)$r['maps_to']] = (string)$r['created_at'];
+                }
+            }
+        } catch (Throwable $e) {
+            // read-only extras: without them headings are simply asked as before
+        }
+        // (the asked phrases stay as they are: a learned heading is read word for word by the mapper, other headings keep being asked)
         return $res;
+    }
+
+    /**
+     * #10: a person said a heading is NOT one of the read fields (step 2 "not this"): kind 'field_not', term = the normalised heading, maps_to = the
+     * field, is_hotel_learned = 1 with who / when. Saved when they answer; idempotent. A later "use it as" answer for that field removes it.
+     */
+    function import_save_field_not(PDO $pdo, string $header, array $fields, ?int $userId): int
+    {
+        return import_save_field_mark($pdo, 'field_not', $header, $fields, $userId);
+    }
+
+    /**
+     * #10: a person said a heading IS one of the three read fields: kind 'field_yes' (term, field, who / when). Needed besides the learned 'field'
+     * alias because a heading that is also a SEED alias ("Volume ml", "No of shots": asked phrases) cannot get a second 'field' row (one row per
+     * kind + term + field); this row is what stops it being asked again and gives the "you told us on" date.
+     */
+    function import_save_field_yes(PDO $pdo, string $header, string $field, ?int $userId): int
+    {
+        return import_save_field_mark($pdo, 'field_yes', $header, [$field], $userId);
+    }
+
+    function import_save_field_mark(PDO $pdo, string $kind, string $header, array $fields, ?int $userId): int
+    {
+        $term = mb_substr(import_norm_text($header), 0, 191);
+        if ($term === '' || !in_array($kind, ['field_not', 'field_yes'], true)) {
+            return 0;
+        }
+        $ins = $pdo->prepare('INSERT IGNORE INTO import_aliases (kind, term, maps_to, alias_hash, is_hotel_learned, created_by) VALUES (?, ?, ?, ?, 1, ?)');
+        // a "yes" given again (after another answer in between) becomes the latest answer again: that one row is written anew (new id, date now)
+        $del = $kind === 'field_yes' ? $pdo->prepare("DELETE FROM import_aliases WHERE kind = 'field_yes' AND is_hotel_learned = 1 AND alias_hash = ?") : null;
+        $n = 0;
+        foreach ($fields as $f) {
+            if (!in_array((string)$f, ['measures_per_unit', 'unit_ml', 'measure_ml'], true)) {
+                continue;
+            }
+            if ($del) {
+                $del->execute([import_alias_hash($kind, $term, (string)$f)]);
+            }
+            $ins->execute([$kind, $term, (string)$f, import_alias_hash($kind, $term, (string)$f), $userId]);
+            $n += $ins->rowCount();
+        }
+        return $n;
+    }
+
+    /** #10: a person now says the heading IS this field: their earlier "not this" for it is taken back (that row only). */
+    function import_forget_field_not(PDO $pdo, string $header, string $field): void
+    {
+        $term = mb_substr(import_norm_text($header), 0, 191);
+        if ($term !== '') {
+            $pdo->prepare("DELETE FROM import_aliases WHERE kind = 'field_not' AND is_hotel_learned = 1 AND alias_hash = ?")
+                ->execute([import_alias_hash('field_not', $term, $field)]);
+        }
     }
 
     /** Learned name corrections: normalised typed name => the existing ingredient name a person chose for it. */

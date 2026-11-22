@@ -450,7 +450,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'count_row', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'sizes_bulk', 'menu_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'col_use', 'count_row', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'sizes_bulk', 'menu_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -476,6 +476,10 @@ if ($isAjax) {
             if (empty($a['ok'])) {
                 di_json(['ok' => false, 'error' => (string)$a['error']]);
             }
+        }
+        // #10: a column the rules could not place gets the optional Assistant reading in the import's ONE call (Assistant off = nothing asked)
+        if (in_array($job['status'], ['analysed', 'reviewing'], true)) {
+            import_job_sizes_ai_fill($pdo, $jobId, null, true, true);
         }
         // Lean overview (no item list: that is paged below). With paged=1 the first page comes back in the same reply.
         $s = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
@@ -511,6 +515,16 @@ if ($isAjax) {
         }
         $r = import_job_answer($pdo, $jobId, $qid, $answer, $uid);
         if (!empty($r['ok'])) {          // the fresh picture comes back with the answer (one round trip, not two)
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
+    if ($action === 'col_use') {
+        // #10: "Use this" on a suggested reading of a column = the same as the person answering it (read now, learned for the next import)
+        $r = import_job_column_use($pdo, $jobId, mb_substr((string)($_POST['ref'] ?? ''), 0, 300), (string)($_POST['field'] ?? ''), $uid);
+        if (!empty($r['ok'])) {
             $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
         }

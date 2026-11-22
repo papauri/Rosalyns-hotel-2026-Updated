@@ -742,7 +742,7 @@ if (!function_exists('import_rv_build')) {
                     'created_at' => $state['job']['created_at']],
                 'file' => $an['file'], 'warnings' => $an['warnings'] ?? [], 'totals' => $an['totals'] ?? [], 'counts' => $res['counts'], 'by_sheet' => $res['by_sheet'],
                 'can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'], 'open_sheet_questions' => $res['open_sheet_questions'],
-                'sheets' => import_review_sheets_payload($an), 'unit_options' => $state['ctx']['unit_options'], 'lean' => true,
+                'sheets' => import_review_sheets_payload($an, (array)$state['answers']), 'unit_options' => $state['ctx']['unit_options'], 'lean' => true,
                 'questions' => array_map(function ($id) use ($V) {
                     return $V['qs'][$id];
                 }, $V['struct_qids']),

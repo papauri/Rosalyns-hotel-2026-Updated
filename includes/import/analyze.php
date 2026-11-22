@@ -72,6 +72,12 @@ if (!function_exists('import_analyze_file')) {
     function import_analyze_file(string $path, string $origName, array $aliases, array $opts = []): array
     {
         $display = basename(str_replace('\\', '/', $origName));
+        if (!isset($aliases['measure_names']) && !empty($opts['drink_measures'])) {
+            // #10: the hotel's Drink measures list names are measure words of the header grammar ("Jiggers per bottle")
+            $aliases['measure_names'] = array_values(array_filter(array_map(function ($dm) {
+                return is_array($dm) ? (string)($dm['name'] ?? '') : '';
+            }, (array)$opts['drink_measures'])));
+        }
         $maxBytes = (int)($opts['max_bytes'] ?? 25 * 1024 * 1024);
         $ext = '';
         $err = import_precheck_file($path, $origName, $maxBytes, $ext);

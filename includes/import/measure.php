@@ -797,6 +797,18 @@ if (!function_exists('import_measure_words')) {
             }
             $src = trim((string)preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', mb_substr(is_scalar($s['source'] ?? null) ? (string)$s['source'] : '', 0, 120)));
             $v = $s['value'] ?? null;
+            if ($field === 'column') {
+                // #10: what a column holds: {field: measures_per_unit | unit_ml | measure_ml, measure, unit}; 'none' and anything else = nothing.
+                // The hotel's words, the heading and the values are checked by import_col_ai_check() before anything is shown.
+                $f = is_array($v) && is_string($v['field'] ?? null) ? trim((string)$v['field']) : '';
+                $mw = is_array($v) && is_string($v['measure'] ?? null) ? mb_substr(trim((string)$v['measure']), 0, 40) : '';
+                $uw = is_array($v) && is_string($v['unit'] ?? null) ? mb_substr(trim((string)$v['unit']), 0, 40) : '';
+                if (!in_array($f, ['measures_per_unit', 'unit_ml', 'measure_ml'], true)) {
+                    continue;
+                }
+                $out[$key][$field] = ['v' => ['field' => $f, 'measure' => $mw, 'unit' => $uw], 'src' => $src];
+                continue;
+            }
             if ($field === 'menu') {
                 // which menu (2026-11-22): only "drink" or "food"; a suggestion only, shown as "Suggested" until a person accepts it
                 $v = is_string($v) ? mb_strtolower(trim($v)) : '';

@@ -11,6 +11,7 @@
 require_once __DIR__ . '/text-util.php';
 require_once __DIR__ . '/pack-rule.php';
 require_once __DIR__ . '/measure.php';           // import_parse_volume(): a size column ("750ml", "0.75 L")
+require_once __DIR__ . '/header-grammar.php';    // #10: "Glasses from a casket", "Btl = 25 shots", "Casket capacity (L)" read from the hotel's own words
 
 if (!function_exists('import_match_header')) {
 
@@ -100,9 +101,34 @@ if (!function_exists('import_match_header')) {
             return $none;
         }
         $key = implode(' ', $tokens);
+        $normText = import_norm_text($text);
+        // #10: a heading this hotel said is NOT one of the read fields ("not this" in step 2): THAT field only is never read or asked for it
+        // again (it is left out of the matching below); every other field's aliases still match as before
+        $notThis = empty($aliases['field_not']) ? [] : (array)($aliases['field_not'][$key] ?? []) + (array)($aliases['field_not'][$normText] ?? []);
+        // #10: a heading a person answered in step 2 is read as THEIR latest answer, word for word, ahead of a seed alias of another field with
+        // the same words ("Volume (ml)" answered "shot size" is never read as the bottle size by the seed alias "volume ml")
+        if (!empty($aliases['learned_heads'])) {
+            $lh = array_diff_key((array)($aliases['learned_heads'][$normText] ?? ($aliases['learned_heads'][$key] ?? [])), $notThis);
+            if ($lh) {
+                $lf = (string)array_key_last($lh);
+                return ['field' => $lf, 'conf' => 1.0, 'alias' => $key, 'candidates' => [['field' => $lf, 'conf' => 1.0, 'alias' => $key]]];
+            }
+        }
+        $dropped = null;        // a field the heading matched that the hotel said it is not
         $cands = [];
-        if (isset($idx['exact'][$key])) {
-            $cands[] = ['field' => $idx['exact'][$key], 'conf' => 1.0, 'alias' => $key];
+        $exactField = $idx['exact'][$key] ?? null;
+        if ($exactField !== null && isset($notThis[$exactField])) {
+            $dropped = $exactField;
+            $exactField = null;
+            foreach ($idx['list'] as $a) {
+                if ($a['norm'] === $key && !isset($notThis[$a['field']])) {
+                    $exactField = $a['field'];          // another field with the same words still reads it
+                    break;
+                }
+            }
+        }
+        if ($exactField !== null) {
+            $cands[] = ['field' => $exactField, 'conf' => 1.0, 'alias' => $key];
         }
         // contiguous containment of an alias inside the header
         $nTok = count($tokens);
@@ -117,6 +143,10 @@ if (!function_exists('import_match_header')) {
                     $found = true;
                     break;
                 }
+            }
+            if ($found && isset($notThis[$a['field']])) {
+                $dropped = $dropped ?? (string)$a['field'];
+                continue;
             }
             if ($found && $a['norm'] !== $key) {
                 $cov = $a['n'] / $nTok;
@@ -139,13 +169,62 @@ if (!function_exists('import_match_header')) {
                 }
                 $sim = import_similarity($key, $a['norm']);
                 if ($sim >= 0.8) {
+                    if (isset($notThis[$a['field']])) {
+                        $dropped = $dropped ?? (string)$a['field'];
+                        continue;
+                    }
                     $cands[] = ['field' => $a['field'], 'conf' => 0.6, 'alias' => $a['norm'], 'sim' => $sim];
                     $seen[$a['field']] = true;
                 }
             }
         }
+        // #10: the header grammar ("Glasses from a casket", "Btl = 25 shots", "Casket capacity (L)"): only when no alias matches word for word
+        // (an exact alias keeps working: "Carton size" stays the pack size), and only when every word of the heading is a grammar word
+        if ($exactField === null) {
+            $g = import_header_grammar($text, $aliases);
+            if ($g !== null && $notThis) {
+                // a field the hotel said "not this" to is never offered again; a question keeps the fields it still has, else it says nothing
+                $alts = array_values(array_filter((array)$g['alts'], function ($f) use ($notThis) {
+                    return !isset($notThis[$f]);
+                }));
+                $keep = array_values(array_intersect($alts, import_hg_fields()));
+                if (!isset($notThis[$g['field']])) {
+                    $g['alts'] = $alts;
+                } elseif ($g['ask'] && $keep) {
+                    $g['field'] = $keep[0];
+                    $g['alts'] = $alts;
+                } else {
+                    $dropped = $dropped ?? (string)$g['field'];
+                    $g = null;
+                }
+            }
+            if ($g !== null) {
+                $other = 0.0;
+                foreach ($cands as $c) {
+                    if ($c['field'] !== $g['field'] && $c['conf'] > $other) {
+                        $other = $c['conf'];
+                    }
+                }
+                // a heading another field also matches (at any score) keeps exactly the reading / question it had before the grammar
+                // ("Qty of shots" stays a quantity question, "Glass" a category question, "Shot measure" a unit question): the grammar only
+                // asks where nothing else matched, and only reads where nothing else reads it on its own
+                if ($other > 0.0 && ($g['ask'] || $other >= import_map_auto_threshold())) {
+                    $g = null;
+                }
+            }
+            if ($g !== null) {
+                $conf = (float)$g['conf'];
+                $list = [['field' => $g['field'], 'conf' => $conf, 'alias' => $key]];
+                foreach ($cands as $c) {
+                    if ($c['field'] !== $g['field']) {
+                        $list[] = ['field' => $c['field'], 'conf' => $c['conf'], 'alias' => $c['alias']];
+                    }
+                }
+                return ['field' => $g['field'], 'conf' => $conf, 'alias' => $key, 'candidates' => $list, 'grammar' => $g];
+            }
+        }
         if (!$cands) {
-            return $none;
+            return $dropped !== null ? $none + ['not_this' => $dropped] : $none;        // #10: shown as "not read: you told us ..."
         }
         usort($cands, function ($x, $y) {
             if ($x['conf'] !== $y['conf']) {
@@ -311,6 +390,27 @@ if (!function_exists('import_match_header')) {
                 } else {
                     $info['state'] = 'unmapped';
                 }
+                // #10: which fields a question about this heading offers (the grammar's, else the one suggested); what this hotel told us before.
+                // Keys are added only when they apply, so every other analysis stays byte-identical.
+                $sug = (string)($m['field'] ?? '');
+                if ($info['state'] === 'question' && (in_array($sug, import_hg_fields(), true) || !empty($m['grammar']))) {
+                    $g = $m['grammar'] ?? import_header_grammar($text, $aliases);
+                    $info['hg_alts'] = $g !== null && in_array($sug, (array)$g['alts'], true) ? array_values((array)$g['alts']) : [$sug];
+                    $hgNot = (array)($aliases['field_not'][import_norm_text($text)] ?? []);
+                    if ($hgNot) {           // a field the hotel said "not this" to is never offered again (the suggested one is never one of them)
+                        $info['hg_alts'] = array_values(array_filter($info['hg_alts'], function ($f) use ($hgNot, $sug) {
+                            return $f === $sug || !isset($hgNot[$f]);
+                        }));
+                    }
+                }
+                $nk = import_norm_text($text);
+                if ($info['state'] === 'mapped' && isset($aliases['learned_heads'][$nk][$sug])) {
+                    $info['learned'] = ['field' => $sug, 'at' => (string)$aliases['learned_heads'][$nk][$sug]];
+                }
+                if (!empty($m['not_this'])) {
+                    $nf = (string)$m['not_this'];
+                    $info['learned_not'] = ['field' => $nf, 'at' => (string)($aliases['field_not'][$nk][$nf] ?? '')];
+                }
             }
             $columns[$c] = $info;
         }
@@ -470,9 +570,10 @@ if (!function_exists('import_match_header')) {
     function import_per_unit_words(string $header, array $aliases): array
     {
         $measSet = import_word_set(array_merge((array)($aliases['shot_words'] ?? []), (array)($aliases['glass_words'] ?? []), (array)($aliases['portion_words'] ?? []),
-            ['double', 'doubles']));
+            ['double', 'doubles'], (array)($aliases['measure_names'] ?? [])));       // #10: + the hotel's Drink measures list names ("Jiggers per bottle")
+        $glassSet = import_word_set((array)($aliases['glass_words'] ?? []));
         $generic = ['measure' => true, 'serving' => true, 'portion' => true, 'unit' => true, 'single' => true];
-        $syn = (array)($aliases['unit_synonyms'] ?? []);
+        $syn = (array)($aliases['unit_synonyms'] ?? []) + import_hg_abbreviations();
         $unitSet = import_word_set(array_merge((array)($aliases['units'] ?? []), (array)($aliases['pour_containers'] ?? []), array_keys($syn)));
         $m = '';
         $u = '';
@@ -486,7 +587,7 @@ if (!function_exists('import_match_header')) {
                 if (isset($generic[$s])) {
                     $isGeneric = true;
                 } else {
-                    $m = $s;
+                    $m = (isset($glassSet[$tok]) || isset($glassSet[$s])) ? 'glass' : $s;        // #10: "Gls per btl" is a glass
                 }
                 continue;
             }

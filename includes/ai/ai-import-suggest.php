@@ -11,6 +11,10 @@
  *    menu = drink | food and menu_cat = a short category, in the SAME one call (no second call). Only for those rows; the
  *    source must be words of its own name or category; menu_cat only with a menu, at most RH_AI_IMS_CAT_CHARS characters.
  *    Never from the word list (always the model or its cached answer). A suggestion only: the Import shows it, a person accepts it.
+ *  - Columns (owner 2026-11-23, build #10): an item ['key', 'column' => heading, 'samples' => up to 5 values] is a column heading the
+ *    Import's rules could not place. In the SAME one call (at most RH_AI_IMS_MAX_COLS) it gets field 'column', value
+ *    {field: measures_per_unit | unit_ml | measure_ml | none, measure, unit}; the source must be words of the heading. The Import then
+ *    checks the words against the hotel's own lists and the heading, and the values against the field, before showing anything.
  *
  * Rules (each one tested in scripts/tests/ai_import_suggest_test.php):
  *  - Suggestions only. A person confirms each one on the Import screen; nothing here writes stock or import rows.
@@ -42,6 +46,7 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
     define('RH_AI_IMS_FIELD_CHARS', 60);          // characters sent per field
     define('RH_AI_IMS_CACHE_DAYS', 180);          // a learned reading is kept this long
     define('RH_AI_IMS_CAT_CHARS', 60);            // longest menu category taken from a reply (a longer one is dropped, not cut)
+    define('RH_AI_IMS_MAX_COLS', 20);             // #10: column headings sent in the same one call (up to 5 values each)
 
     /** Closed list of served words: what a sale is called. Abbreviations as hotels write them map to the full word. */
     function rh_ai_ims_served_words(): array
@@ -124,6 +129,17 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
             return null;
         }
         $cut = static fn($v): string => mb_substr(trim((string)preg_replace('/\s+/u', ' ', is_scalar($v) ? (string)$v : '')), 0, 120);
+        if (isset($r['column'])) {
+            // #10: a column heading the Import's rules could not place, with up to 5 of its values (never a name, never a row key)
+            $smp = [];
+            foreach (array_slice(is_array($r['samples'] ?? null) ? array_values($r['samples']) : [], 0, 5) as $s) {
+                $s = mb_substr($cut($s), 0, 40);
+                if ($s !== '') {
+                    $smp[] = $s;
+                }
+            }
+            return ['key' => $key, 'column' => $cut($r['column']), 'samples' => $smp, 'name' => '', 'unit' => '', 'served' => '', 'category' => '', 'ask_menu' => false];
+        }
         $menu = !empty($r['ask_menu']);
         return ['key' => $key, 'name' => $cut($r['name'] ?? ''), 'unit' => $cut($r['unit'] ?? ''), 'served' => $cut($r['served'] ?? ''),
             'category' => $menu ? $cut($r['category'] ?? '') : '', 'ask_menu' => $menu];
@@ -258,7 +274,8 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
     /** Text that is never sent: an email, a long number (phone, booking reference), instruction-like wording, a web address. */
     function rh_ai_ims_unsafe(array $row): bool
     {
-        $t = $row['name'] . ' | ' . $row['unit'] . ' | ' . $row['served'] . ' | ' . ($row['category'] ?? '');
+        $t = $row['name'] . ' | ' . $row['unit'] . ' | ' . $row['served'] . ' | ' . ($row['category'] ?? '')
+            . (isset($row['column']) ? ' | ' . $row['column'] . ' | ' . implode(' | ', (array)($row['samples'] ?? [])) : '');
         return (bool)preg_match('/@|https?:|www\.|\d{7,}|\d{3}[\s\-]\d{3}[\s\-]\d{3}/i', $t)
             || (bool)preg_match('/\b(ignore|disregard|instruction|instructions|prompt|system|assistant|reply|respond|answer)\b/i', $t)
             || count(preg_split('/\s+/u', $row['name'], -1, PREG_SPLIT_NO_EMPTY) ?: []) > 12;
@@ -273,6 +290,37 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
         $source = trim($source);
         if ($source === '' || mb_strlen($source) > 120) {
             return null;
+        }
+        if ($field === 'column' || isset($row['column'])) {
+            // #10: only a column line, only the three readings; the source must be words of its own heading; the measure / unit words are
+            // short single words (the Import checks them against the hotel's own lists, the heading and the values before showing anything)
+            if ($field !== 'column' || !isset($row['column']) || !is_array($value)) {
+                return null;
+            }
+            $f = is_string($value['field'] ?? null) ? rh_ai_ims_norm($value['field']) : '';
+            if (!in_array($f, ['measures_per_unit', 'unit_ml', 'measure_ml', 'none'], true)) {
+                return null;
+            }
+            $src = rh_ai_ims_find((string)$row['column'], $source);
+            if ($src === null) {
+                return null;
+            }
+            $w = static function ($x): ?string {
+                if ($x === null || $x === '') {
+                    return '';
+                }
+                if (!is_string($x)) {
+                    return null;
+                }
+                $x = rh_ai_ims_norm($x);
+                return ($x === '' || mb_strlen($x) > 30 || !preg_match('/^[\p{L}]+$/u', $x)) ? null : $x;
+            };
+            $m = $w($value['measure'] ?? '');
+            $u = $w($value['unit'] ?? '');
+            if ($m === null || $u === null) {
+                return null;
+            }
+            return ['field' => 'column', 'value' => ['field' => $f, 'measure' => $m, 'unit' => $u], 'source' => $src];
         }
         if ($field === 'served_by') {
             // the whole served cell is the source: one word picked out of "Half tot" is not a reading of it
@@ -339,6 +387,9 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
 
     function rh_ai_ims_cache_key(array $row): string
     {
+        if (isset($row['column'])) {
+            return hash('sha256', 'import_measure|column|' . rh_ai_ims_norm((string)$row['column']) . '|' . rh_ai_ims_norm(implode("\x1f", (array)($row['samples'] ?? []))));
+        }
         // a row asked about its menu is learned apart (with its category): an earlier answer without the menu is never taken for one
         return hash('sha256', 'import_measure|' . rh_ai_ims_norm($row['name']) . '|' . rh_ai_ims_norm($row['unit']) . '|' . rh_ai_ims_norm($row['served'])
             . (!empty($row['ask_menu']) ? '|menu|' . rh_ai_ims_norm((string)($row['category'] ?? '')) : ''));
@@ -390,7 +441,13 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
             . 'A line ending in "| category | menu" also asks which menu the item is sold on: menu = "drink" or "food", only when its name or category makes it '
             . 'certain, and menu_cat = a short menu category for it (under 40 characters, for example "Snacks", "Soft drinks"), only together with menu; '
             . 'their source = the words of its name or category that say it. When unsure, leave both out. '
-            . 'Reply with JSON only: {"r":[{"i":1,"field":"served_by","value":"shot","source":"Sgl"},{"i":2,"field":"menu","value":"food","source":"Samosa"}]} '
+            . 'A line "index | column | heading | values" is a column heading of the stock list with some of its values: field = "column", '
+            . 'value = what the column holds, one of: measures_per_unit (how many shots / glasses / measures one bottle or container holds), '
+            . 'unit_ml (the size in ml of one bottle or container), measure_ml (the size in ml of one shot or glass), none (anything else, also a count in stock); '
+            . 'measure = the measure word of the heading (for example shot, tot, glass) or ""; unit = the container word of the heading (for example bottle, casket) or ""; '
+            . 'source = the words of the heading you read. Both words must be written in the heading; never add one. '
+            . 'Reply with JSON only: {"r":[{"i":1,"field":"served_by","value":"shot","source":"Sgl"},{"i":2,"field":"menu","value":"food","source":"Samosa"},'
+            . '{"i":3,"field":"column","value":"measures_per_unit","measure":"tot","unit":"bottle","source":"Tots ea btl"}]} '
             . 'and {"r":[]} when nothing is stated.';
     }
 
@@ -398,11 +455,16 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
     {
         $q = static fn(string $s): string => (string)json_encode(mb_substr($s, 0, RH_AI_IMS_FIELD_CHARS), JSON_UNESCAPED_UNICODE);
         $lines = [];
+        $colLines = [];
         foreach ($send as $i => $row) {
+            if (isset($row['column'])) {
+                $colLines[] = $i . ' | column | ' . $q((string)$row['column']) . ' | ' . implode(', ', array_map($q, (array)($row['samples'] ?? [])));
+                continue;
+            }
             $lines[] = $i . ' | ' . $q($row['name']) . ' | ' . $q($row['unit']) . ' | ' . $q($row['served'])
                 . (!empty($row['ask_menu']) ? ' | ' . $q((string)($row['category'] ?? '')) . ' | menu' : '');
         }
-        return "Stock lines:\n" . implode("\n", $lines);
+        return "Stock lines:\n" . implode("\n", $lines) . ($colLines ? "\nColumns:\n" . implode("\n", $colLines) : '');
     }
 
     /**
@@ -431,7 +493,8 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
                 $invalid++;
                 continue;
             }
-            $v = rh_ai_ims_validate($send[$i], $field, $e['value'] ?? null, (string)$e['source']);
+            $val = $field === 'column' ? ['field' => $e['value'] ?? null, 'measure' => $e['measure'] ?? '', 'unit' => $e['unit'] ?? ''] : ($e['value'] ?? null);
+            $v = rh_ai_ims_validate($send[$i], $field, $val, (string)$e['source']);
             if ($v === null) {
                 $invalid++;
                 continue;
@@ -531,6 +594,13 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
             $found = [];
             $ask = [];
             foreach ($rows as $key => $row) {
+                if (isset($row['column'])) {
+                    $found[$key] = [];                      // #10: a column is never read from the word list (the Import's rules already tried)
+                    if ($row['column'] !== '' && $row['samples']) {
+                        $ask[$key] = rh_ai_ims_cache_key($row);
+                    }
+                    continue;
+                }
                 $found[$key] = rh_ai_ims_local($row);
                 if (rh_ai_ims_needs_model($row, $found[$key])) {
                     $ask[$key] = rh_ai_ims_cache_key($row);
@@ -553,21 +623,26 @@ if (!function_exists('rh_ai_import_measure_suggest')) {
             // 3. one batched call for the rest
             $send = [];
             $i = 0;
+            $nRows = 0;
+            $nCols = 0;
             foreach ($ask as $key => $ck) {
-                if (count($send) >= RH_AI_IMS_MAX_SEND) {
-                    break;
+                $isCol = isset($rows[$key]['column']);
+                if ($isCol ? $nCols >= RH_AI_IMS_MAX_COLS : $nRows >= RH_AI_IMS_MAX_SEND) {
+                    continue;
                 }
                 if (rh_ai_ims_unsafe($rows[$key])) {
                     continue;
                 }
+                $isCol ? $nCols++ : $nRows++;
                 $send[++$i] = $rows[$key] + ['ck' => $ck];
             }
             if ($send) {
                 $model = (string)$sel['model']['model_id'];
                 $sendClean = array_map(static fn($r) => ['name' => mb_substr($r['name'], 0, RH_AI_IMS_FIELD_CHARS), 'unit' => mb_substr($r['unit'], 0, RH_AI_IMS_FIELD_CHARS),
-                    'served' => mb_substr($r['served'], 0, RH_AI_IMS_FIELD_CHARS), 'category' => mb_substr($r['category'], 0, RH_AI_IMS_FIELD_CHARS), 'ask_menu' => $r['ask_menu']], $send);
+                    'served' => mb_substr($r['served'], 0, RH_AI_IMS_FIELD_CHARS), 'category' => mb_substr($r['category'], 0, RH_AI_IMS_FIELD_CHARS), 'ask_menu' => $r['ask_menu']]
+                    + (isset($r['column']) ? ['column' => mb_substr((string)$r['column'], 0, RH_AI_IMS_FIELD_CHARS), 'samples' => (array)$r['samples']] : []), $send);
                 $menuRows = count(array_filter($send, static fn($r) => $r['ask_menu']));
-                $r = rh_ai_chat(['provider' => $sel['provider'], 'model' => $model, 'max_tokens' => count($send) * 60 + $menuRows * 50 + 200,
+                $r = rh_ai_chat(['provider' => $sel['provider'], 'model' => $model, 'max_tokens' => count($send) * 60 + $menuRows * 50 + $nCols * 30 + 200,
                     'effort' => 'minimal', 'timeout' => 20, 'no_retry' => true, 'system_frozen' => rh_ai_ims_prompt(),
                     'messages' => [['role' => 'user', 'content' => rh_ai_ims_payload($sendClean)]], 'tools' => []]);
                 $usage = (array)($r['usage'] ?? []);

@@ -487,10 +487,48 @@ if (!function_exists('import_structure_sheet')) {
 
         // value-shape checks on the item rows, then derive questions / unmapped / ignored columns
         import_map_check_shapes($map, $sheet, $res['item_rows'], $aliases);
+        // #10: up to 5 values of a column the rules could not place (unread, or asked about): what the optional Assistant reading sees
+        // and what its suggestion is checked against. Display / checking only, never imported.
+        foreach ($map['columns'] as $c => $info) {
+            if (!in_array($info['state'], ['unmapped', 'question'], true) || ($info['header'] ?? '') === '' || !empty($info['learned_not'])) {
+                continue;
+            }
+            $smp = [];
+            foreach ($res['item_rows'] as $r) {
+                $cell = $sheet['cells'][$r][$c] ?? null;
+                if (!import_cell_usable($cell) || is_bool($cell['v'])) {
+                    continue;
+                }
+                $sv = is_string($cell['v']) ? import_norm_ws($cell['v']) : $cell['v'];
+                if ($sv === '' || (is_string($sv) && import_is_empty_marker($sv))) {
+                    continue;
+                }
+                $smp[] = is_string($sv) ? mb_substr($sv, 0, 40) : $sv;
+                if (count($smp) >= 5) {
+                    break;
+                }
+            }
+            if ($smp) {
+                $map['columns'][$c]['samples'] = $smp;
+            }
+        }
         $res['columns'] = $map['columns'];
         $res['by_field'] = $map['by_field'];
         foreach ($map['columns'] as $c => $info) {
-            if ($info['state'] === 'question') {
+            if ($info['state'] === 'question' && !empty($info['hg_alts']) && empty($info['clash']) && empty($info['shape_fail'])) {
+                // #10: a heading that may say how many shots one bottle holds / how big one bottle or shot is: each meaning it could have, or none
+                $per = import_per_unit_words((string)$info['header'], $aliases);
+                $opts = [];
+                foreach ((array)$info['hg_alts'] as $alt) {
+                    $opts[] = ['key' => 'use:' . $alt, 'label' => import_col_option_label((string)$alt, $per)];
+                }
+                $opts[] = ['key' => 'ignore', 'label' => count($opts) > 1 ? 'None of these: ignore this column' : 'No, not that: ignore this column'];
+                $res['questions'][] = import_q('mapping-unsure', 'Column ' . $info['letter'] . ' "' . $info['header'] . '" in ' . $name . ' can mean more than one thing'
+                    . (in_array('measures_per_unit', (array)$info['hg_alts'], true) && count((array)$info['hg_alts']) === 1 ? ' (how many in one bottle, or the count in stock?)' : '')
+                    . '. What does it hold? Your answer is remembered for the next import.', [
+                    'sheet' => $name, 'cells' => [$info['header_ref']], 'options' => $opts,
+                ]);
+            } elseif ($info['state'] === 'question') {
                 $res['questions'][] = import_q('mapping-unsure', import_map_question_text($info, $name), [
                     'sheet' => $name, 'cells' => [$info['header_ref']],
                     'options' => [

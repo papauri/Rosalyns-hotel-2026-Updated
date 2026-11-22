@@ -265,6 +265,10 @@ if (!function_exists('import_job_analyse')) {
                 return !isset($okd[import_norm_text((string)$p)]);
             }));
         }
+        // #10: the hotel's Drink measures list names are measure words of the header grammar
+        $aliases['measure_names'] = array_values(array_filter(array_map(function ($dm) {
+            return is_array($dm) ? (string)($dm['name'] ?? '') : '';
+        }, (array)($ctx['drink_measures'] ?? []))));
         return [
             'aliases' => $aliases,
             'opts' => [
@@ -505,6 +509,19 @@ if (!function_exists('import_job_analyse')) {
             }
             $ov['aliases'][$field] = array_values(array_unique(array_merge((array)($ov['aliases'][$field] ?? []), [$col['header']])));
             $reanalyse = true;
+            import_job_learn_column($pdo, (string)$col['header'], $field, $userId);       // #10: the next import reads this heading by itself
+        } elseif ($type === 'mapping-unsure' && $a['key'] === 'ignore') {
+            // #10: "not this" for a "how many / how big" heading is remembered too, so it is not asked again for those fields
+            $col = import_job_column_of($state['analysis'], (string)$q['sheet'], (string)($q['cells'][0] ?? ''));
+            $offered = [];
+            foreach ((array)$q['options'] as $o) {
+                if (strpos((string)$o['key'], 'use:') === 0) {
+                    $offered[] = substr((string)$o['key'], 4);
+                }
+            }
+            if ($col && ($col['header'] ?? '') !== '' && !empty($col['hg_alts']) && function_exists('import_save_field_not')) {
+                import_save_field_not($pdo, (string)$col['header'], array_values(array_intersect($offered, import_hg_fields())), $userId > 0 ? $userId : null);
+            }
         } elseif ($type === 'no-item-column' && strpos($a['key'], 'col:') === 0) {
             $col = import_job_column_of($state['analysis'], (string)$q['sheet'], '', substr($a['key'], 4));
             if (!$col || $col['header'] === '') {
@@ -526,6 +543,131 @@ if (!function_exists('import_job_analyse')) {
             }
         }
         return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => $reanalyse];
+    }
+
+    /**
+     * #10 (owner 2026-11-23): a person said what a "how many / how big" heading holds (their own answer, or "Use this" on a suggestion): saved
+     * at once as this hotel's own header word (import_aliases kind 'field', is_hotel_learned = 1, who / when, normalised) so the next import
+     * reads it without a question; an earlier "not this" for that field is taken back. Only the three read fields; other answers learn at commit
+     * as before (import_save_learned_headers). Never throws: learning is extra.
+     */
+    function import_job_learn_column(PDO $pdo, string $header, string $field, int $userId): void
+    {
+        if (!in_array($field, import_hg_fields(), true) || trim($header) === '' || !function_exists('import_save_learned_headers')) {
+            return;
+        }
+        try {
+            import_save_learned_headers($pdo, [$field => [$header]], $userId > 0 ? $userId : null);
+            import_save_field_yes($pdo, $header, $field, $userId > 0 ? $userId : null);     // also for a heading that is a seed alias ("Volume ml")
+            import_forget_field_not($pdo, $header, $field);
+        } catch (Throwable $e) {
+            error_log('Import: learning a heading failed: ' . $e->getMessage());
+        }
+    }
+
+    /** The analysis column whose heading cell is $ref ("Sheet1!F1"), with its sheet name; null when there is none. */
+    function import_job_column_by_ref(array $analysis, string $ref): ?array
+    {
+        foreach ((array)($analysis['sheets'] ?? []) as $sh) {
+            foreach ((array)($sh['columns'] ?? []) as $c) {
+                if ($ref !== '' && ($c['header_ref'] ?? '') === $ref) {
+                    return $c + ['_sheet' => (string)$sh['name']];
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * #10: "Use this" on a suggested reading of a column (step 2): the SAME as a person's answer: the heading is read as that field in this import
+     * (the file is read again) and learned for the next one. Only a suggestion stored for that very column and field (answers _cols_ai, checked
+     * when it was made) can be used; a column already read, two columns competing or values that do not fit are refused.
+     */
+    function import_job_column_use(PDO $pdo, int $jobId, string $ref, string $field, int $userId = 0): array
+    {
+        $fail = function (string $m) {
+            return ['ok' => false, 'error' => $m, 'can_confirm' => false, 'reanalysed' => false];
+        };
+        $state = import_job_state($pdo, $jobId);
+        if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
+            return $fail('This import cannot be changed.');
+        }
+        $answers = $state['answers'];
+        $sug = $answers['_cols_ai'][$ref] ?? null;
+        if (!is_array($sug) || ($sug['field'] ?? '') !== $field || !in_array($field, import_hg_fields(), true)) {
+            return $fail('There is no such suggestion for this column.');
+        }
+        $col = import_job_column_by_ref($state['analysis'], $ref);
+        if (!$col || ($col['header'] ?? '') === '' || ($col['state'] ?? '') === 'mapped') {
+            return $fail('This column is already read. Reload the page.');
+        }
+        if (!empty($col['clash']) || !empty($col['shape_fail'])) {
+            return $fail('This column cannot be switched on from here (the values under it do not fit, or two columns compete).');
+        }
+        $ov = (array)($answers['_overrides'] ?? []);
+        $ov['aliases'][$field] = array_values(array_unique(array_merge((array)($ov['aliases'][$field] ?? []), [(string)$col['header']])));
+        $answers['_overrides'] = $ov;
+        $answers['_cols_ai'][$ref]['used'] = ['by' => $userId > 0 ? $userId : null, 'at' => date('Y-m-d H:i:s')];
+        // the column's own question (if it was asked) is answered by the same click
+        foreach (array_merge((array)$state['res']['questions'], (array)$state['res']['extra_questions']) as $q) {
+            if (($q['type'] ?? '') === 'mapping-unsure' && (string)($q['cells'][0] ?? '') === $ref && ($q['answer'] ?? null) === null) {
+                $answers[$q['qkey']] = ['key' => 'use:' . $field, 'by' => $userId > 0 ? $userId : null, 'at' => date('Y-m-d H:i:s'), 'from' => 'suggestion'];
+            }
+        }
+        $pdo->prepare("UPDATE import_jobs SET answers_json = ?, status = 'reviewing' WHERE id = ? AND status IN ('analysed','reviewing')")
+            ->execute([import_json($answers), $jobId]);
+        import_job_learn_column($pdo, (string)$col['header'], $field, $userId);
+        $r = import_job_analyse($pdo, $jobId);
+        if (!$r['ok']) {
+            return $fail($r['error']);
+        }
+        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => true];
+    }
+
+    /**
+     * #10: the columns the rules could not place, for the optional Assistant reading (in the ONE call per import): unread columns with values and
+     * unanswered "how many / how big" questions; never one already asked, one with a stored suggestion, one used, or one whose fields were all
+     * answered "not this". At most $max, each with up to 5 values. Returns [['key' => 'col:<ref>', 'column', 'samples', 'ref'], ...].
+     */
+    function import_cols_ai_ask(array $state, array $aliases, int $max = 20): array
+    {
+        $answers = (array)$state['answers'];
+        $openQ = [];
+        foreach (array_merge((array)$state['res']['questions'], (array)$state['res']['extra_questions']) as $q) {
+            if (($q['type'] ?? '') === 'mapping-unsure' && ($q['answer'] ?? null) === null) {
+                $openQ[(string)($q['cells'][0] ?? '')] = true;
+            }
+        }
+        $out = [];
+        foreach ((array)($state['analysis']['sheets'] ?? []) as $sh) {
+            if (($sh['triage']['action'] ?? '') !== 'import') {
+                continue;
+            }
+            foreach ((array)($sh['columns'] ?? []) as $c) {
+                $ref = (string)($c['header_ref'] ?? '');
+                if (count($out) >= $max) {
+                    break 2;
+                }
+                if ($ref === '' || empty($c['samples']) || isset($answers['_cols_ai_asked'][$ref]) || isset($answers['_cols_ai'][$ref])) {
+                    continue;
+                }
+                $st = (string)($c['state'] ?? '');
+                if ($st === 'question' && (empty($c['hg_alts']) || !isset($openQ[$ref]))) {
+                    continue;           // only an open "how many / how big" question; a clash or a value problem is the person's
+                }
+                if ($st !== 'question' && $st !== 'unmapped') {
+                    continue;
+                }
+                $nk = import_norm_text((string)$c['header']);
+                if (count(array_intersect_key((array)($aliases['field_not'][$nk] ?? []), array_flip(import_hg_fields()))) === 3) {
+                    continue;
+                }
+                $out[] = ['key' => 'col:' . $ref, 'column' => (string)$c['header'], 'samples' => array_slice(array_map(function ($v) {
+                    return is_string($v) ? $v : (string)$v;
+                }, (array)$c['samples']), 0, 5), 'ref' => $ref];
+            }
+        }
+        return $out;
     }
 
     /**
@@ -750,6 +892,14 @@ if (!function_exists('import_job_analyse')) {
                 'count_rows' => $q['count_rows'] ?? null, 'count_rows_n' => $q['count_rows_n'] ?? null, 'suggest' => $q['suggest'] ?? null,
                 'count_words' => $q['count_words'] ?? null,
             ];
+            // #10: a suggested reading of this column ("Suggested: Shots per bottle (measure: shot, unit: bottle)"); applied only by "Use this"
+            if ($q['type'] === 'mapping-unsure' && ($q['answer'] ?? null) === null) {
+                $sg = $state['answers']['_cols_ai'][(string)($q['cells'][0] ?? '')] ?? null;
+                if (is_array($sg) && empty($sg['used'])) {
+                    $qs[count($qs) - 1]['col_suggest'] = ['field' => (string)$sg['field'], 'measure' => (string)($sg['measure'] ?? ''), 'unit' => (string)($sg['unit'] ?? ''),
+                        'label' => (string)($sg['label'] ?? ''), 'ref' => (string)($q['cells'][0] ?? '')];
+                }
+            }
         }
         return $qs;
     }
@@ -783,16 +933,34 @@ if (!function_exists('import_job_analyse')) {
     }
 
     /** Per-sheet block of the summary (columns, categories, headings and totals that are not items). */
-    function import_review_sheets_payload(array $an): array
+    function import_review_sheets_payload(array $an, array $answers = []): array
     {
-        return array_map(function ($sh) {
+        $aiCols = (array)($answers['_cols_ai'] ?? []);
+        $day = function (string $at): string {
+            $t = $at !== '' ? strtotime($at) : false;
+            return $t ? date('j M Y', $t) : '';
+        };
+        return array_map(function ($sh) use ($aiCols, $day) {
             return ['name' => $sh['name'], 'action' => $sh['triage']['action'], 'reason' => $sh['triage']['reason'], 'counts' => $sh['counts'],
                 'ignored_columns' => $sh['ignored_columns'], 'unmapped_columns' => $sh['unmapped_columns'],
                 'header_row' => $sh['header_row'] ?? null, 'hidden' => !empty($sh['hidden']), 'categories' => $sh['categories'] ?? [],
-                'columns' => array_map(function ($c) {
-                    return ['letter' => $c['letter'], 'header' => $c['header'], 'ref' => $c['header_ref'], 'field' => $c['field'], 'derived' => !empty($c['derived']),
+                'columns' => array_map(function ($c) use ($aiCols, $day) {
+                    $o = ['letter' => $c['letter'], 'header' => $c['header'], 'ref' => $c['header_ref'], 'field' => $c['field'], 'derived' => !empty($c['derived']),
                         'state' => $c['state'] ?? '', 'filled' => $c['shape']['filled'] ?? null, 'fallback_from' => $c['fallback_from'] ?? null,
                         'how_values' => $c['how_values'] ?? null, 'per' => $c['per'] ?? null];      // v11: "Shots per bottle" -> shot / bottle
+                    // #10: "Read as Shots per bottle (you told us on 23 Nov 2026)"; "not this" remembered; a suggested reading with its "Use this"
+                    if (!empty($c['learned']) && ($c['state'] ?? '') === 'mapped' && ($c['field'] ?? '') === $c['learned']['field']) {
+                        $o['learned'] = ['label' => import_col_label((string)$c['field'], (string)($c['per']['measure'] ?? ''), (string)($c['per']['unit'] ?? '')),
+                            'on' => $day((string)$c['learned']['at'])];
+                    }
+                    if (!empty($c['learned_not'])) {
+                        $o['learned_not'] = ['label' => import_col_label((string)$c['learned_not']['field']), 'on' => $day((string)$c['learned_not']['at'])];
+                    }
+                    $sg = $aiCols[(string)$c['header_ref']] ?? null;
+                    if (is_array($sg) && empty($sg['used']) && in_array($c['state'] ?? '', ['unmapped', 'question'], true) && empty($c['clash']) && empty($c['shape_fail'])) {
+                        $o['suggest'] = ['field' => (string)$sg['field'], 'measure' => (string)($sg['measure'] ?? ''), 'unit' => (string)($sg['unit'] ?? ''), 'label' => (string)($sg['label'] ?? '')];
+                    }
+                    return $o;
                 }, $sh['columns'] ?? []),
                 'non_item_rows' => array_slice(array_map(function ($r) {
                     return ['row' => $r['row'], 'kind' => $r['kind'], 'label' => $r['label'], 'source' => $r['source'], 'reason' => $r['reason']];
@@ -834,7 +1002,7 @@ if (!function_exists('import_job_analyse')) {
             ],
             'file' => $an['file'], 'warnings' => $an['warnings'] ?? [], 'totals' => $an['totals'] ?? [],
             'counts' => $res['counts'], 'by_sheet' => $res['by_sheet'], 'can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'],
-            'open_sheet_questions' => $res['open_sheet_questions'], 'sheets' => import_review_sheets_payload($an),
+            'open_sheet_questions' => $res['open_sheet_questions'], 'sheets' => import_review_sheets_payload($an, (array)$state['answers']),
             'items' => $items, 'rows' => array_values($res['rows']), 'questions' => $qs, 'unit_options' => $state['ctx']['unit_options'],
         ];
     }

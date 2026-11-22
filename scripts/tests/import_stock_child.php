@@ -1306,6 +1306,118 @@ try {
         import_job_cancel($pdo, $jN, $admin);
     }
 
+    // ---- #10 (owner 2026-11-23): a person's answer about a "how many / how big" heading is learned at once; "not this" too ----------
+    $csvOf = function (array $rows): string { $fh = fopen('php://memory', 'w+'); foreach ($rows as $r0) { fputcsv($fh, $r0); } rewind($fh); return (string)stream_get_contents($fh); };
+    $hdrL = ['Item Name', 'Balance', 'Unit', 'Unit Price', 'Served By', 'Shots', 'Volume (ml)', 'Size ml'];
+    $colsOf = function (array $s) { $o = []; foreach ($s['sheets'][0]['columns'] ?? [] as $c0) { $o[$c0['header']] = $c0; } return $o; };
+    $mqOf = function (array $s, string $head) { foreach ($s['questions'] as $q0) { if ($q0['type'] === 'mapping-unsure' && strpos($q0['text'], '"' . $head . '"') !== false) { return $q0; } } return null; };
+    $learnedRow = function (string $kind, string $term, string $maps) use ($pdo) {
+        $st = $pdo->prepare('SELECT created_at FROM import_aliases WHERE kind = ? AND term = ? AND maps_to = ? AND is_hotel_learned = 1');
+        $st->execute([$kind, $term, $maps]);
+        return $st->fetchColumn();
+    };
+    $hadShots = $learnedRow('field', 'shots', 'measures_per_unit') !== false;
+    $uL1 = $upload($put($csvOf([$hdrL, [$n('LR Gin'), '2', 'bottle', '9000', 'Bottle', '30', '750', '750'], [$n('LR Rum'), '3', 'bottle', '9000', 'Bottle', '25', '750', '750'], [$n('LR Vodka'), '1', 'bottle', '9000', 'Bottle', '30', '750', '750']]), 'learn1.csv'), 'zzt-learn1-' . $run . '.csv', $admin);
+    $jL1 = (int)($uL1['job_id'] ?? 0);
+    if ($jL1 > 0 && !$hadShots) {
+        import_job_analyse($pdo, $jL1);
+        $sL1 = import_job_review_summary($pdo, $jL1);
+        $qS = $mqOf($sL1, 'Shots');
+        $qV = $mqOf($sL1, 'Volume (ml)');
+        $ck('learning (database): "Shots" (a measure, no container) and "Volume (ml)" (a size, no container) are asked; each meaning it can have is offered',
+            $qS && array_column($qS['options'], 'key') === ['use:measures_per_unit', 'ignore'] && $qV && array_column($qV['options'], 'key') === ['use:unit_ml', 'use:measure_ml', 'ignore'],
+            json_encode([$qS['options'] ?? null, $qV['options'] ?? null]));
+        $aS = $qS ? import_job_answer($pdo, $jL1, $qS['id'], 'use:measures_per_unit', $admin) : ['ok' => false];
+        $sL1b = import_job_review_summary($pdo, $jL1);
+        $qV2 = $mqOf($sL1b, 'Volume (ml)');
+        $aV = $qV2 ? import_job_answer($pdo, $jL1, $qV2['id'], 'ignore', $admin) : ['ok' => false];
+        $qT = $mqOf(import_job_review_summary($pdo, $jL1), 'Size ml');
+        $aT = $qT ? import_job_answer($pdo, $jL1, $qT['id'], 'use:unit_ml', $admin) : ['ok' => false];
+        $ck('learning (database): a heading that is a seed alias asked on purpose (\"Size ml\") is remembered too (kind field_yes: a second \"field\" row cannot be written)',
+            !empty($aT['ok']) && $learnedRow('field_yes', 'size ml', 'unit_ml') !== false, json_encode($aT));
+        $ck('learning (database): the answers are saved at once as this hotel\'s own (is_hotel_learned = 1): "shots" = measures per unit; "volume ml" is NOT the bottle size nor the shot size',
+            !empty($aS['ok']) && !empty($aV['ok']) && $learnedRow('field', 'shots', 'measures_per_unit') !== false && $learnedRow('field_not', 'volume ml', 'unit_ml') !== false
+            && $learnedRow('field_not', 'volume ml', 'measure_ml') !== false, json_encode([$aS, $aV]));
+        import_job_cancel($pdo, $jL1, $admin);
+        // the next import reads "Shots" by itself and does not ask about "Volume (ml)" again
+        $uL2 = $upload($put($csvOf([$hdrL, [$n('LR2 Gin'), '2', 'bottle', '9000', 'Bottle', '30', '750', '750'], [$n('LR2 Rum'), '3', 'bottle', '9000', 'Bottle', '25', '750', '750'], [$n('LR2 Gin B'), '1', 'bottle', '9000', 'Bottle', '30', '750', '750']]), 'learn2.csv'), 'zzt-learn2-' . $run . '.csv', $admin);
+        $jL2 = (int)($uL2['job_id'] ?? 0);
+        if ($jL2 > 0) {
+            import_job_analyse($pdo, $jL2);
+            $sL2 = import_job_review_summary($pdo, $jL2);
+            $cL2 = $colsOf($sL2);
+            $ck('learning (database): the next import reads "Shots" without a question, shown "Read as Shots per unit (you told us on <date>)"; "Volume (ml)" is not asked again (shown as not read)',
+                ($cL2['Shots']['field'] ?? '') === 'measures_per_unit' && ($cL2['Shots']['learned']['label'] ?? '') === 'Shots per unit' && ($cL2['Shots']['learned']['on'] ?? '') !== ''
+                && $mqOf($sL2, 'Shots') === null && $mqOf($sL2, 'Volume (ml)') === null && $mqOf($sL2, 'Size ml') === null && ($cL2['Size ml']['field'] ?? '') === 'unit_ml' && !empty($cL2['Size ml']['learned']) && ($cL2['Volume (ml)']['state'] ?? '') === 'unmapped' && !empty($cL2['Volume (ml)']['learned_not']),
+                json_encode([$cL2['Shots'] ?? null, $cL2['Volume (ml)'] ?? null]));
+            import_job_cancel($pdo, $jL2, $admin);
+        }
+    } elseif ($jL1 > 0) {
+        $ck('learning (database): skipped (this database already has a learned "Shots" heading)', true);
+        import_job_cancel($pdo, $jL1, $admin);
+    }
+
+    // ---- #10 QA round 1: a learned answer for a heading that is also a SEED alias of another field ("Volume (ml)" = seed bottle size) --------
+    // (inside the harness transaction: every row written here is rolled back at the end)
+    $vmOf = function () use ($pdo) { return import_match_header('Volume (ml)', import_load_aliases($pdo)); };
+    import_job_learn_column($pdo, 'Volume (ml)', 'measure_ml', $admin);
+    $vm1 = $vmOf();
+    import_job_learn_column($pdo, 'Volume (ml)', 'unit_ml', $admin);
+    $vm2 = $vmOf();
+    import_job_learn_column($pdo, 'Volume (ml)', 'measure_ml', $admin);
+    $vm3 = $vmOf();
+    $ck('learning (database): "Volume (ml)" answered shot size is read as the shot size (conf 1.0, no question), never as the bottle size of the seed alias; answered bottle size = bottle size; the latest answer wins',
+        $vm1['field'] === 'measure_ml' && $vm1['conf'] === 1.0 && $vm2['field'] === 'unit_ml' && $vm2['conf'] === 1.0 && $vm3['field'] === 'measure_ml' && $vm3['conf'] === 1.0,
+        json_encode([$vm1['field'], $vm2['field'], $vm3['field']]));
+    $pdo->exec("DELETE FROM import_aliases WHERE is_hotel_learned = 1 AND kind IN ('field', 'field_yes', 'field_not') AND term = 'volume ml'");
+    import_save_field_not($pdo, 'Volume (ml)', ['unit_ml'], $admin ?: null);
+    $vm4 = $vmOf();
+    $ck('learning (database): "not this" for the bottle size only takes that field away: "Volume (ml)" is still asked, as the shot size',
+        $vm4['field'] === 'measure_ml' && $vm4['conf'] < import_map_auto_threshold() && !in_array('unit_ml', array_column($vm4['candidates'], 'field'), true), json_encode($vm4));
+    $pdo->exec("DELETE FROM import_aliases WHERE is_hotel_learned = 1 AND kind IN ('field', 'field_yes', 'field_not') AND term = 'volume ml'");
+
+    // ---- #10: the optional Assistant reading of an unplaced column: shown, never applied or learned until "Use this"; one call per import ------
+    $hdrA = ['Item Name', 'Balance', 'Unit', 'Unit Price', 'Served By', 'Tots in btl (approx)', 'Odd stuff'];
+    $uA = $upload($put($csvOf([$hdrA, [$n('AS Gin'), '2', 'bottle', '9000', 'Bottle', '30', 'red'], [$n('AS Rum'), '3', 'bottle', '9000', 'Bottle', '25', 'blue'], [$n('AS Vodka'), '1', 'bottle', '9000', 'Bottle', '30', 'red']]), 'assist.csv'), 'zzt-assist-' . $run . '.csv', $admin);
+    $jA = (int)($uA['job_id'] ?? 0);
+    if ($jA > 0) {
+        import_job_analyse($pdo, $jA);
+        $sA0 = import_job_review_summary($pdo, $jA);
+        $cA0 = $colsOf($sA0);
+        $refT = (string)($cA0['Tots in btl (approx)']['ref'] ?? '');
+        $refO = (string)($cA0['Odd stuff']['ref'] ?? '');
+        $offN = import_job_sizes_ai_fill($pdo, $jA, null, false, true);
+        $ansA = function () use ($pdo, $jA) { return import_job_answers(import_job_get($pdo, $jA)); };
+        $ck('Assistant (database): switched off = nothing asked, nothing marked (the import works exactly as with the rules only)',
+            $offN === 0 && empty($ansA()['_sizes']['ai_done']) && ($cA0['Tots in btl (approx)']['state'] ?? '') === 'unmapped' && empty($cA0['Tots in btl (approx)']['suggest']));
+        $calls = [];
+        $stub = function (array $items) use (&$calls, $refT, $refO) {
+            $calls[] = $items;
+            return [['key' => 'col:' . $refT, 'field' => 'column', 'value' => ['field' => 'measures_per_unit', 'measure' => 'tots', 'unit' => 'btl'], 'source' => 'Tots in btl'],
+                ['key' => 'col:' . $refO, 'field' => 'column', 'value' => ['field' => 'unit_ml', 'measure' => '', 'unit' => ''], 'source' => 'Odd stuff']];
+        };
+        $nA = import_job_sizes_ai_fill($pdo, $jA, $stub, false, true);
+        $nA2 = import_job_sizes_ai_fill($pdo, $jA, $stub, false, false);
+        $sentCols = array_values(array_filter((array)($calls[0] ?? []), function ($i) { return isset($i['column']); }));
+        $sA1 = import_job_review_summary($pdo, $jA);
+        $cA1 = $colsOf($sA1);
+        $ck('Assistant (database): ONE call for the import (step 2 and step 3 share it), the unplaced headings sent with up to 5 values; the checked suggestion is shown, a reading that does not fit the values ("red" as a size) is dropped',
+            $nA === 1 && $nA2 === 0 && count($calls) === 1 && count($sentCols) === 2 && ($sentCols[0]['samples'] ?? null) === ['30', '25', '30']
+            && ($cA1['Tots in btl (approx)']['suggest'] ?? null) === ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle', 'label' => 'Tots per bottle'] && empty($cA1['Odd stuff']['suggest']),
+            json_encode([$nA, $nA2, count($calls), $sentCols, $cA1['Tots in btl (approx)'] ?? null]));
+        $ck('Assistant (database): a suggestion is never applied or learned without the click (column still not read, nothing in import_aliases)',
+            ($cA1['Tots in btl (approx)']['state'] ?? '') === 'unmapped' && $learnedRow('field', 'tots in btl approx', 'measures_per_unit') === false);
+        $badUse = import_job_column_use($pdo, $jA, $refT, 'unit_ml', $admin);
+        $useA = import_job_column_use($pdo, $jA, $refT, 'measures_per_unit', $admin);
+        $sA2 = import_job_review_summary($pdo, $jA);
+        $cA2 = $colsOf($sA2);
+        $ck('Assistant (database): "Use this" = the person\'s own answer: the column is read now (tot / bottle) and learned for the next import; another field than the suggestion is refused',
+            empty($badUse['ok']) && !empty($useA['ok']) && ($cA2['Tots in btl (approx)']['field'] ?? '') === 'measures_per_unit' && ($cA2['Tots in btl (approx)']['per']['measure'] ?? '') === 'tot'
+            && ($cA2['Tots in btl (approx)']['per']['unit'] ?? '') === 'bottle' && $learnedRow('field', 'tots in btl approx', 'measures_per_unit') !== false,
+            json_encode([$badUse, $useA, $cA2['Tots in btl (approx)'] ?? null]));
+        import_job_cancel($pdo, $jA, $admin);
+    }
+
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);
     $ck('purge: runs and reports counts', is_array($pg) && isset($pg['files_deleted']));

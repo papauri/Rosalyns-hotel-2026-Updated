@@ -547,6 +547,7 @@
             if (q.bad && !answered) {
                 c.appendChild(h('p', 'di-q-note', 'This cannot be imported as it is. Correct the cell in your file and upload the file again, or leave the row out and carry on.'));
             }
+            if (q.col_suggest && !answered) { c.appendChild(colSuggestBlock(q.col_suggest, c)); }
             if (q.type === 'no-unit' && q.unit_items) { c.appendChild(unitItemsBlock(q)); }
             if (q.type === 'count-in') {
                 // "is the count in bottles or in shots?" (owner 2026-11-22): a suggestion from the file's own figures still needs a click
@@ -634,6 +635,37 @@
             }
             c.appendChild(h('span', 'di-q-saved', ''));
             return c;
+        }
+        // #10: a suggested reading of a column ("Suggested: Shots per bottle (measure: shot, unit: bottle)"): used only when the person clicks "Use this",
+        // which counts as their own answer (read now, remembered for the next import)
+        function colSuggestText(s) {
+            var bits = [];
+            if (s.measure) { bits.push('measure: ' + s.measure); }
+            if (s.unit) { bits.push('unit: ' + s.unit); }
+            return 'Suggested: ' + (s.label || FIELD_LABEL[s.field] || s.field) + (bits.length ? ' (' + bits.join(', ') + ')' : '');
+        }
+        function colSuggestBlock(s, cardEl) {
+            var box = h('div', 'di-q-note di-colsug');
+            var b = h('button', 'btn-secondary di-btn di-btn--quiet', 'Use this');
+            b.type = 'button';
+            b.addEventListener('click', function () { colUse(s, cardEl || box); });
+            add(box, h('span', null, colSuggestText(s) + '. '), b, h('span', 'di-help', ' Nothing is used until you click; your choice is remembered for the next import.'));
+            return box;
+        }
+        function colUse(s, el) {
+            el.classList.add('is-saving');
+            Array.prototype.forEach.call(el.querySelectorAll('input,button'), function (x) { x.disabled = true; });
+            var d = Object.assign({ job: S.job, ref: s.ref, field: s.field }, pagedExtra());
+            S.chain = S.chain.then(function () { return post('col_use', d); }).then(function (r) {
+                if (!r.ok) {
+                    msg(r.error || 'That could not be saved.');
+                    el.classList.remove('is-saving');
+                    Array.prototype.forEach.call(el.querySelectorAll('input,button'), function (x) { x.disabled = false; });
+                    return;
+                }
+                msg('');
+                refresh(r.summary);
+            });
         }
         function save(q, key, pack, cardEl) {
             if (q.type === 'case-price' && key === 'per-case') {
@@ -1123,6 +1155,7 @@
                     else if (c.field === 'sell_price') { what = 'Recognised. Used in step 3 "Put items on the menu", where you tick drinks or food to put them on the menu and till at this price (VAT included, nothing added). Also checks that the cost of one unit is below it.'; }
                     else { what = 'Not imported: worked out from other columns.'; }
                 }
+                else if (!c.field && c.state === 'question') { as = '—'; what = 'Not sure: you are asked about it below.'; }
                 else if (!c.field) { as = '—'; what = c.header ? 'Not imported: not recognised as stock data.' : 'Empty column.'; }
                 else if (c.state === 'question') { as = FIELD_LABEL[c.field] || c.field; what = 'Not sure: you are asked in the next step.'; }
                 else if (c.field === 'measures_per_unit' || c.field === 'unit_ml' || c.field === 'measure_ml') {
@@ -1151,11 +1184,15 @@
                     if (c.field === 'pack_price') { what += ' A price for a whole pack: divided by the pack size into the cost of one unit.'; }
                     if (c.how_values) { what += ' (Recognised from the values in the column: ' + c.how_values + '.)'; }
                 }
+                // #10: what this hotel told us before about this heading
+                if (c.learned && c.field) { what = 'Read as ' + c.learned.label + (c.learned.on ? ' (you told us on ' + c.learned.on + ')' : ' (you told us before)') + '. ' + what; }
+                if (c.learned_not && !c.field) { what = 'Not read: you told us' + (c.learned_not.on ? ' on ' + c.learned_not.on : ' before') + ' that it is not ' + c.learned_not.label + '.'; }
                 var td1 = h('td', null, c.letter); td1.setAttribute('data-label', 'Column');
                 var td2 = h('td'); td2.setAttribute('data-label', 'Heading in your file');
                 add(td2, h('span', null, c.header || '(no heading)'), ' ', src(c.ref));
                 var td3 = h('td', null, as); td3.setAttribute('data-label', 'Read as');
                 var td4 = h('td', null, what); td4.setAttribute('data-label', 'What happens');
+                if (c.suggest && c.state === 'unmapped') { td4.appendChild(colSuggestBlock(Object.assign({ ref: c.ref }, c.suggest), null)); }
                 add(r, td1, td2, td3, td4);
                 body.appendChild(r);
             });

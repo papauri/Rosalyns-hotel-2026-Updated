@@ -2050,7 +2050,7 @@ $t($aiBad === [] && import_measure_ai_merge($aiAsk, $aiAllowed, null) === [] && 
     && import_measure_ai_merge([], $aiAllowed, $aiStub) === [] && import_measure_ai_merge($aiAsk, $aiAllowed, function () { return 'nonsense'; }) === [],
     'optional reader: bad values (-5, 200000 ml, 61 characters, "abc") are dropped; off / missing / failing / nonsense = nothing, everything works as before');
 $t(strpos($drPhp, "function_exists('rh_ai_import_measure_suggest')") !== false && strpos($drPhp, 'rh_ai_enabled($pdo)') !== false && strpos($drPhp, "'/ai/ai-import-suggest.php'") !== false
-    && strpos($drPhp, 'count($ask) >= 40') !== false,
+    && strpos($drPhp, 'count($ask) - $nCols >= 40') !== false,
     'optional reader: loaded only when its file is there, used only while the Assistant is switched on, at most 40 rows a call');
 // the cell's own words decide before any reading of "served by" is used (review 2026-11-20: "Half tot" / "Dbl tot" are never one shot)
 $qSet = import_word_set((array)($gaDef['quantity_words'] ?? []));
@@ -2528,6 +2528,150 @@ $t(import_measure_plural('glass of wine', 2) === 'glasses of wine' && import_mea
 $t(strpos($djs, "measure-file': 'File columns disagree'") !== false && strpos($djs, "c.field === 'measures_per_unit'") !== false && strpos($djs, "' from your file, ' + srcRef") !== false
     && strpos($djs, "if (of) { return plural(of[1], q) + of[2]; }") !== false,
     'screen: step 2 says what each new column is ("Shots per bottle: how many shots one bottle holds"), step 3 size boxes say "from your file, Sheet1!J12", the same plural in the browser');
+
+echo "-- #10 (owner 2026-11-23): a header grammar from the hotel's own words, learned answers, a checked suggestion --\n";
+$hgAl = $al + ['measure_names' => ['jigger', 'shot']];
+$hgM = function (string $h, array $a = null) use ($hgAl) { return import_match_header($h, $a ?? $hgAl); };
+$hgRead = ['Glasses from a casket' => ['measures_per_unit', 'glass', 'casket'], 'Tots in each bottle' => ['measures_per_unit', 'tot', 'bottle'],
+    'No. of 25ml measures per btl' => ['measures_per_unit', '', 'bottle'], 'Shots/bottle' => ['measures_per_unit', 'shot', 'bottle'], 'Btl = 25 shots' => ['measures_per_unit', 'shot', 'bottle'],
+    'How many tots in a bottle' => ['measures_per_unit', 'tot', 'bottle'], 'Number of glasses per casket' => ['measures_per_unit', 'glass', 'casket'], 'Jiggers per bottle' => ['measures_per_unit', 'jigger', 'bottle'],
+    'Gls per bttl' => ['measures_per_unit', 'glass', 'bottle'], 'Shots x btl' => ['measures_per_unit', 'shot', 'bottle'], 'Pints in a keg' => ['measures_per_unit', 'pint', 'keg'],
+    'Qty of shots per bottle' => ['measures_per_unit', 'shot', 'bottle'], 'Casket capacity (L)' => ['unit_ml', '', 'casket'], 'Size of bottle' => ['unit_ml', '', 'bottle'],
+    'ml in a btl' => ['unit_ml', '', 'bottle'], 'Btl vol (cl)' => ['unit_ml', '', 'bottle'], 'Keg capacity (ltr)' => ['unit_ml', '', 'keg'], 'Glass volume (cl)' => ['measure_ml', 'glass', ''],
+    'Tot size (ml)' => ['measure_ml', 'tot', ''], 'Size of a shot' => ['measure_ml', 'shot', ''], 'Jigger ml' => ['measure_ml', 'jigger', '']];
+$hgBad = [];
+foreach ($hgRead as $hh => [$want, $mw, $uw]) {
+    $mm = $hgM($hh);
+    $gw = $mm['grammar'] ?? null;
+    if ($mm['field'] !== $want || $mm['conf'] < import_map_auto_threshold() || ($gw !== null && ($gw['measure'] !== $mw || $gw['unit'] !== $uw))) { $hgBad[] = $hh . ' -> ' . $mm['field'] . ' ' . $mm['conf'] . ' ' . json_encode($gw); }
+}
+$t($hgBad === [] && count($hgRead) === 21, 'grammar: 21 wordings read with the measure and unit words from the heading ("Glasses from a casket", "Tots in each bottle", "No. of 25ml measures per btl", "Shots/bottle", "Btl = 25 shots", "Casket capacity (L)", "Glass volume (cl)", a Drink measures list name "Jiggers per bottle" ...) ' . json_encode($hgBad));
+$hgKeep = ['Total Per Unit' => 'pack_size', 'Units per case' => 'pack_size', 'Unit Price' => 'unit_price', 'Total Balance' => 'qty_total', 'Selling price' => 'sell_price',
+    'Stock Value' => 'total_cost', 'Carton size' => 'pack_size', 'Bottles per crate' => 'pack_size', 'Qty (glasses)' => 'qty_single', 'Shots in stock' => 'qty_single',
+    'Bar Balance (tots)' => 'qty_primary', 'Shot count' => 'qty_single', 'Price per shot' => 'sell_price', 'Serving size' => 'served_by', 'Pour size' => 'served_by', 'Measure' => 'unit',
+    'Bottle size (ml)' => 'unit_ml', 'Shots per bottle' => 'measures_per_unit'];
+$hgKb = [];
+foreach ($hgKeep as $hh => $want) {
+    $mm = $hgM($hh);
+    if ($mm['field'] !== $want || $mm['conf'] < import_map_auto_threshold() || isset($mm['grammar'])) { $hgKb[] = $hh . ' -> ' . $mm['field'] . ' ' . $mm['conf']; }
+}
+$t($hgKb === [], 'grammar never steals: "Total Per Unit", "Units per case", "Unit Price", "Total Balance", "Selling price", "Stock Value", "Carton size", "Qty (glasses)", "Shots in stock" ... read as before; exact aliases keep working ' . json_encode($hgKb));
+$hgNone = [];
+foreach (['Size', 'Volume', 'Bottles', 'Btl', 'Shot bottle', 'Shots per glass per bottle', 'Bottle 750ml', 'Glass 175', 'Tot 25ml', '750ml', 'Kg per bag', 'Shots per kg', 'Per unit'] as $hh) {
+    $mm = $hgM($hh);
+    if (isset($mm['grammar']) || ($mm['field'] !== null && $mm['conf'] >= import_map_auto_threshold() && in_array($mm['field'], import_hg_fields(), true))) { $hgNone[] = $hh . ' -> ' . $mm['field'] . ' ' . $mm['conf']; }
+}
+$t($hgNone === [], 'grammar says nothing for words it does not know, two measures / containers, a measure next to a container with no connector, a cell value ("Bottle 750ml", "Glass 175"), a weight ' . json_encode($hgNone));
+$hgAsk = ['Shots' => ['measures_per_unit'], 'No of shots' => null, 'Volume (ml)' => null, 'Size ml' => null,
+    'Litres' => ['unit_ml', 'measure_ml'], 'Capacity (cl)' => ['unit_ml', 'measure_ml'], 'Box size' => ['unit_ml', 'pack_size'], 'Portion size' => ['measure_ml'],
+    'Bottle shot size' => ['measures_per_unit', 'unit_ml', 'measure_ml']];
+$hgAb = [];
+foreach ($hgAsk as $hh => $alts) {
+    $mm = $hgM($hh);
+    if ($mm['field'] === null || $mm['conf'] >= import_map_auto_threshold() || ($alts !== null && (($mm['grammar']['alts'] ?? null) !== $alts))) { $hgAb[] = $hh . ' -> ' . $mm['field'] . ' ' . $mm['conf'] . ' ' . json_encode($mm['grammar']['alts'] ?? null); }
+}
+$t($hgAb === [], 'asked, never read on its own: a measure with no container ("Shots", "No of shots"), a size with no container ("Volume (ml)", "Litres"), "Unit size", "Box size" (ml or units in the box?), "Portion size" ' . json_encode($hgAb));
+$t(($hgM('Casket capacity (L)')['grammar']['ml_mul'] ?? null) === 1000.0 && ($hgM('Glass volume (cl)')['grammar']['ml_mul'] ?? null) === 10.0 && ($hgM('Btl vol (cl)')['grammar']['ml_mul'] ?? null) === 10.0
+    && ($hgM('Keg capacity (ltr)')['grammar']['ml_mul'] ?? null) === 1000.0 && array_key_exists('ml_mul', (array)($hgM('Size of bottle')['grammar'] ?? [])) && $hgM('Size of bottle')['grammar']['ml_mul'] === null,
+    'grammar: the unit of a size heading: cl = 10 ml, L / ltr = 1000 ml, none = a bare number is ml from 10 up');
+// a sheet with grammar headings: read, converted, question options, values kept for the optional reading
+$hgRows = [['Item Name', 'Balance', 'Unit', 'Unit Price', 'Tots in each bottle', 'Casket capacity (L)', 'Glass volume (cl)', 'Volume (ml)', 'Box size', 'Shots', 'Pours'],
+    ['Gin H', '2', 'bottle', '9000', '30', '', '2.5', '750', '12', '30', 'x1'], ['Wine H', '1', 'casket', '60000', '', '5', '17.5', '5000', '12', '20', 'x2'], ['Rum H', '3', 'bottle', '9000', '25', '', '2.5', '750', '12', '25', 'x3']];
+$hgAn = import_analyze_file($csvRows($hgRows, 'hg.csv'), 'hg.csv', $al, ['drink_measures' => [['name' => 'shot', 'ml' => 25]]]);
+$hgCols = []; foreach ($hgAn['sheets'][0]['columns'] as $c0) { $hgCols[$c0['header']] = $c0; }
+$hgRow = function (string $name) use ($hgAn) { foreach ($hgAn['sheets'][0]['rows'] as $r0) { if (($r0['fields']['item_name']['value'] ?? '') === $name) { return $r0; } } return []; };
+$hgQs = []; foreach ($hgAn['questions'] as $q0) { if ($q0['type'] === 'mapping-unsure') { $hgQs[preg_match('/"([^"]+)"/', $q0['text'], $mq) ? $mq[1] : ''] = array_column($q0['options'], 'key'); } }
+$t(($hgCols['Tots in each bottle']['field'] ?? '') === 'measures_per_unit' && ($hgCols['Tots in each bottle']['per']['measure'] ?? '') === 'tot'
+    && ($hgCols['Casket capacity (L)']['field'] ?? '') === 'unit_ml' && ($hgCols['Glass volume (cl)']['field'] ?? '') === 'measure_ml'
+    && (float)($hgRow('Wine H')['fields']['unit_ml']['value'] ?? 0) === 5000.0 && (float)($hgRow('Wine H')['fields']['measure_ml']['value'] ?? 0) === 175.0
+    && (float)($hgRow('Gin H')['fields']['measures_per_unit']['value'] ?? 0) === 30.0 && import_assert_no_invented_values($hgAn, import_csv_read($csvRows($hgRows, 'hg.csv'), 'hg.csv')) === [],
+    'a sheet with grammar headings: read (tot / bottle), "5" in a litre column = 5,000 ml, "17.5" in a cl column = 175 ml, every value from its own cell ' . json_encode([$hgCols['Casket capacity (L)']['field'] ?? null, $hgRow('Wine H')['fields']['unit_ml'] ?? null]));
+$t(($hgQs['Volume (ml)'] ?? null) === ['use:unit_ml', 'use:measure_ml', 'ignore'] && ($hgQs['Box size'] ?? null) === ['use:unit_ml', 'use:pack_size', 'ignore'] && ($hgQs['Shots'] ?? null) === ['use:measures_per_unit', 'ignore']
+    && ($hgQs['Pours'] ?? null) === ['use:measures_per_unit', 'ignore'],
+    'step 2 question: each meaning the heading can have + "none of these" ("Volume (ml)": bottle size / shot size; "Box size": ml or units in the box; "Shots": how many in one) ' . json_encode($hgQs));
+$hgLab = []; foreach ($hgAn['questions'] as $q0) { if ($q0['type'] === 'mapping-unsure' && strpos($q0['text'], '"Volume (ml)"') !== false) { $hgLab = array_column($q0['options'], 'label'); } }
+$t($hgLab === ['The size of one bottle or container in ml', 'The size of one shot or glass in ml', 'None of these: ignore this column']
+    && import_col_option_label('measures_per_unit', ['measure' => 'tot', 'unit' => 'bottle']) === 'How many tots one bottle holds (Tots per bottle)',
+    'step 2 answer labels in plain words ("The size of one bottle or container in ml", never "one ml") ' . json_encode($hgLab));
+$t(($hgCols['Volume (ml)']['samples'] ?? null) === ['750', '5000', '750'] && ($hgCols['Pours']['samples'] ?? null) === ['x1', 'x2', 'x3'] && !isset($hgCols['Tots in each bottle']['samples']),
+    'the values of a column the rules could not place (asked or unread) are kept (up to 5) for the optional reading; a read column keeps none ' . json_encode([$hgCols['Volume (ml)']['samples'] ?? null, $hgCols['Pours']['state'] ?? null]));
+// learned: "Shots" answered once = read next time with the date; "not this" = never asked again for that field
+$hgL = import_merge_aliases($al, ['fields' => ['measures_per_unit' => ['shots']]]);
+$hgL['learned_heads'] = ['shots' => ['measures_per_unit' => '2026-11-23 10:15:00']];
+$hgL['field_not'] = ['volume ml' => ['unit_ml' => '2026-11-22 09:00:00', 'measure_ml' => '2026-11-22 09:00:00'], 'box size' => ['unit_ml' => '2026-11-22 09:00:00']];
+$hgLAn = import_analyze_file($csvRows($hgRows, 'hg2.csv'), 'hg2.csv', $hgL);
+$hgLc = []; foreach ($hgLAn['sheets'][0]['columns'] as $c0) { $hgLc[$c0['header']] = $c0; }
+$hgLq = []; foreach ($hgLAn['questions'] as $q0) { if ($q0['type'] === 'mapping-unsure') { $hgLq[] = $q0['text']; } }
+$hgPay = []; foreach (import_review_sheets_payload($hgLAn, [])[0]['columns'] as $c0) { $hgPay[$c0['header']] = $c0; }
+$t(($hgLc['Shots']['field'] ?? '') === 'measures_per_unit' && ($hgLc['Shots']['state'] ?? '') === 'mapped' && ($hgPay['Shots']['learned'] ?? null) === ['label' => 'Shots per unit', 'on' => '23 Nov 2026'],
+    'learned: a heading a person answered is read the next time without a question and shown "Read as Shots per unit (you told us on 23 Nov 2026)" ' . json_encode($hgPay['Shots'] ?? null));
+$t(($hgLc['Volume (ml)']['state'] ?? '') === 'unmapped' && ($hgPay['Volume (ml)']['learned_not']['on'] ?? '') === '22 Nov 2026' && ($hgLc['Box size']['state'] ?? '') === 'unmapped'
+    && !array_filter($hgLq, function ($x) { return strpos($x, 'Volume (ml)') !== false || strpos($x, 'Box size') !== false; }),
+    '"not this" learned: "Volume (ml)" and "Box size" are not asked again (and not read), shown as not read with the date ' . json_encode([$hgLc['Volume (ml)']['state'] ?? null, $hgLq]));
+$hgNs = import_match_header('No of shots', array_merge($hgL, ['field_not' => ['no of shots' => ['measures_per_unit' => '2026-11-22']]]));
+$t($hgNs['field'] !== 'measures_per_unit' && !in_array('measures_per_unit', array_column($hgNs['candidates'], 'field'), true)
+    && import_match_header('Shots', ['field_not' => ['shots' => ['measures_per_unit' => 'x']]] + $al)['not_this'] === 'measures_per_unit'
+    && import_match_header('Shots', ['field_not' => ['shots' => ['measures_per_unit' => 'x']]] + $al)['field'] === null,
+    '"not this" also wins over a seed alias ("No of shots"): never asked again for that field (only that field: another field\'s own alias still matches) ' . json_encode($hgNs));
+// QA #10 round 1: a person's answer wins over a seed alias of ANOTHER field with the same words; "not this" takes away that one field only;
+// a heading another field also matches keeps exactly the reading / question it had before the grammar
+$hgSeedV = import_merge_aliases($al, ['fields' => ['measure_ml' => ['volume ml']]]);       // what the loader adds for a field_yes row
+$hgLv = function (array $heads, array $not = []) use ($hgSeedV) { $a = $hgSeedV; $a['learned_heads'] = ['volume ml' => $heads]; if ($not) { $a['field_not'] = ['volume ml' => $not]; } return $a; };
+$hgVm = import_match_header('Volume (ml)', $hgLv(['measure_ml' => '2026-11-23 10:00:00']));
+$hgVu = import_match_header('Volume (ml)', $hgLv(['unit_ml' => '2026-11-23 10:00:00']));
+$hgVl = import_match_header('Volume (ml)', $hgLv(['unit_ml' => '2026-11-22 10:00:00', 'measure_ml' => '2026-11-23 10:00:00']));
+$hgVAn = import_analyze_file($csvRows([['Item Name', 'Unit', 'Volume (ml)'], ['Gin V', 'bottle', '25'], ['Rum V', 'bottle', '25']], 'hgv.csv'), 'hgv.csv', $hgLv(['measure_ml' => '2026-11-23 10:00:00']));
+$hgVq = array_filter($hgVAn['questions'], function ($q0) { return $q0['type'] === 'mapping-unsure'; });
+$hgVc = []; foreach ($hgVAn['sheets'][0]['columns'] as $c0) { if ($c0['header'] === 'Volume (ml)') { $hgVc = $c0; } }
+$t($hgVm['field'] === 'measure_ml' && $hgVm['conf'] === 1.0 && $hgVu['field'] === 'unit_ml' && $hgVu['conf'] === 1.0 && $hgVl['field'] === 'measure_ml'
+    && ($hgVc['field'] ?? '') === 'measure_ml' && ($hgVc['state'] ?? '') === 'mapped' && ($hgVc['learned']['field'] ?? '') === 'measure_ml' && !$hgVq,
+    'learned answer wins: "Volume (ml)" answered shot size is read as the shot size next time (not the bottle size of the seed alias "volume ml"), no question; answered bottle size = bottle size; the latest answer wins '
+    . json_encode([$hgVm['field'], $hgVu['field'], $hgVl['field'], $hgVc['state'] ?? null]));
+$hgOptsOf = function (string $h, array $a) use ($csvRows) {
+    $an = import_analyze_file($csvRows([['Item Name', 'Unit', 'Unit Price', $h], ['Gin Q', 'bottle', '9000', '30'], ['Rum Q', 'bottle', '8000', '25']], 'hgq.csv'), 'hgq.csv', $a, ['drink_measures' => [['name' => 'shot', 'ml' => 25]]]);
+    foreach ($an['questions'] as $q0) { if ($q0['type'] === 'mapping-unsure' && strpos($q0['text'], '"' . $h . '"') !== false) { return array_column($q0['options'], 'key'); } }
+    foreach ($an['sheets'][0]['columns'] as $c0) { if ($c0['header'] === $h) { return $c0['state'] . ':' . ($c0['field'] ?? ''); } }
+    return null;
+};
+$hgN1 = $hgOptsOf('Volume (ml)', ['field_not' => ['volume ml' => ['unit_ml' => 'x']]] + $al);
+$hgN2 = $hgOptsOf('Volume (ml)', ['field_not' => ['volume ml' => ['measure_ml' => 'x']]] + $al);
+$hgN3 = $hgOptsOf('Volume (ml)', $hgLv(['measure_ml' => 'y'], ['measure_ml' => 'x']));
+$t($hgN1 === ['use:measure_ml', 'ignore'] && $hgN2 === ['use:unit_ml', 'ignore'] && $hgN3 === ['use:unit_ml', 'ignore'],
+    '"not this" takes away that one field only: "Volume (ml)" not the bottle size = still asked as the shot size; not the shot size = still asked as the bottle size ' . json_encode([$hgN1, $hgN2, $hgN3]));
+$hgPre = ['Qty of shots' => ['use:qty_single', 'ignore'], 'Glass' => ['use:category', 'ignore'], 'Shot measure' => ['use:unit', 'ignore'], 'Qty of glasses' => ['use:qty_single', 'ignore'],
+    'Tot measure' => ['use:unit', 'ignore'], 'Tots left' => 'unmapped:', 'Shots' => ['use:measures_per_unit', 'ignore'], 'Volume (ml)' => ['use:unit_ml', 'use:measure_ml', 'ignore']];
+$hgPb = [];
+foreach ($hgPre as $hh => $want) { $got = $hgOptsOf($hh, $al); if ($got !== $want) { $hgPb[$hh] = $got; } }
+$t($hgPb === [], 'a heading another field also matches keeps the question it had before the grammar ("Qty of shots" = quantity, "Glass" = category, "Shot measure" = unit); options are only ever added ' . json_encode($hgPb));
+// the optional reading of a column: checked against the hotel's words, the heading and the values
+$hgCol = ['header' => 'Tots ea btl', 'samples' => ['30', '25', '30']];
+$t(import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'], $hgCol, $al) === ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle', 'label' => 'Tots per bottle']
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'tots', 'unit' => 'btl'], $hgCol, $al)['unit'] === 'bottle'
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => '', 'unit' => ''], $hgCol, $al)['label'] === 'Measures per unit',
+    'suggestion check: words of the heading that are the hotel\'s words are kept ("btl" = bottle); blank words = the served-by measure');
+$t(import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'shot', 'unit' => 'bottle'], $hgCol, $al) === null
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'casket'], $hgCol, $al) === null
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'nip', 'unit' => 'bottle'], ['header' => 'Nips ea btl', 'samples' => ['30']], $al) === null
+    && import_col_ai_check(['field' => 'none'], $hgCol, $al) === null && import_col_ai_check(['field' => 'qty_single'], $hgCol, $al) === null
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'], ['header' => 'Tots ea btl', 'samples' => ['30', 'many']], $al) === null
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'], ['header' => 'Tots ea btl', 'samples' => ['0.5']], $al) === null
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'], ['header' => 'Tots ea btl', 'samples' => []], $al) === null
+    && import_col_ai_check(['field' => 'unit_ml', 'measure' => 'tot', 'unit' => ''], ['header' => 'Tots ea btl', 'samples' => ['750']], $al) === null
+    && import_col_ai_check(['field' => 'unit_ml', 'measure' => '', 'unit' => 'bottle'], ['header' => 'Btl capac', 'samples' => ['0.75']], $al) === null
+    && import_col_ai_check(['field' => 'unit_ml', 'measure' => '', 'unit' => 'bottle'], ['header' => 'Btl capac', 'samples' => ['750', '1000']], $al)['label'] === 'Bottle size (ml)'
+    && import_col_ai_check(['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'], $hgCol, ['field_not' => ['tots ea btl' => ['measures_per_unit' => 'x']]] + $al) === null,
+    'suggestion check drops: a word not in the heading, a word not on the hotel\'s lists ("nip"), "none" / another field, values that do not fit (text, 0.5 shots, a 0.75 size with no unit), no values, a measure on a bottle size, a field the person said "not this" to');
+$hgMerge = import_measure_ai_merge([['key' => 'col:S!A1', 'column' => 'Tots ea btl', 'samples' => ['30']], ['key' => 'col:S!B1', 'column' => 'X', 'samples' => ['1']]],
+    ['col:S!A1' => ['column' => true], 'col:S!B1' => ['column' => true]], function () {
+        return [['key' => 'col:S!A1', 'field' => 'column', 'value' => ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'], 'source' => 'Tots ea btl'],
+            ['key' => 'col:S!B1', 'field' => 'column', 'value' => ['field' => 'none'], 'source' => 'X'], ['key' => 'col:S!A1', 'field' => 'served_by', 'value' => 'shot', 'source' => 'x']];
+    });
+$t(($hgMerge['col:S!A1']['column']['v'] ?? null) === ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle'] && !isset($hgMerge['col:S!B1']) && !isset($hgMerge['col:S!A1']['served_by']),
+    'optional reader: a column reading is kept only as one of the three fields ("none", a field not asked for = nothing) ' . json_encode($hgMerge));
+$hgDr = (string)file_get_contents($root . '/includes/import/drinks.php');
+$t(strpos($hgDr, "\$cols = import_cols_ai_ask(\$state, \$colAliases);") !== false && strpos($hgDr, 'if ($colsOnly && !$cols)') !== false && strpos($hgDr, "import_col_ai_check((array)\$s['v']") !== false
+    && strpos($hgDr, "\$a['_cols_ai'][\$ref] = \$s;") !== false,
+    'one call per import: the columns ride in the same call as the step 3 rows (same marker); step 2 makes it only when there is such a column; a reading is checked before it is kept');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
