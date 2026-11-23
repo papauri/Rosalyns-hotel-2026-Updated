@@ -95,8 +95,16 @@ try {
     check(strpos(rh_sca_approver_names($list), 'ZZT mgr2 ' . $run) !== false, 'List: names are shown for the screen');
 
     // --- Counts ----------------------------------------------------------------------------------------
-    $ingIds = array_map('intval', $pdo->query("SELECT id FROM stock_ingredients WHERE is_archived = 0 ORDER BY id LIMIT 3")->fetchAll(PDO::FETCH_COLUMN));
-    if (count($ingIds) < 3) { throw new RuntimeException('Fixture: no ingredient'); }
+    // Own fixture: three test items created inside this test's transaction (rolled back in the finally below), never the
+    // database's real stock (a test database may hold none: "Fixture: no ingredient").
+    $ingIds = [];
+    $mkIng = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, yield_percent, is_archived, reorder_point, par_level)
+                            VALUES (?, ?, 'kg', 10, 0, 5, 100, 0, 0, 0)");
+    foreach (['A', 'B', 'C'] as $ingTag) {
+        $mkIng->execute(['ZZT SCA ' . $run . ' item ' . $ingTag, 'ZZT SCA ' . $run]);
+        $ingIds[] = (int)$pdo->lastInsertId();
+    }
+    if (count(array_filter($ingIds)) < 3) { throw new RuntimeException('Fixture: the three test items could not be created'); }
     $mkCount = function (string $tag, int $opening, string $status, array $lines) use ($pdo, $counter, $run, $ingIds): array {
         $ref = '20991231-' . $tag . substr($run, 0, 2);
         $pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, is_opening) VALUES (?, CURDATE(), 'full', ?, ?, ?)")->execute([$ref, $status, $counter, $opening]);
@@ -369,6 +377,7 @@ check($setRowAfter === $setRowBefore, 'Leak: the stock_count_second_approver set
 // --- Leak check -----------------------------------------------------------------------------------------------------
 check((int)col($pdo, "SELECT COUNT(*) FROM stock_counts WHERE reference LIKE '20991231-%'") === 0, 'Leak: no test stock counts left behind');
 check((int)col($pdo, "SELECT COUNT(*) FROM admin_users WHERE username LIKE 'zzt\_sca\_%'") === 0, 'Leak: no test users left behind');
+check((int)col($pdo, "SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT SCA %'") === 0, 'Leak: no test stock items left behind');
 // The page harness logs on its own committed connection, so those marker rows survive the rollback: delete only ours.
 if ($pdo->inTransaction()) { $pdo->rollBack(); }
 $pdo->exec("DELETE FROM admin_activity_log WHERE details LIKE '%20991231-%' AND action LIKE 'stock\\_count%'");

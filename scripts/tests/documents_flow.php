@@ -100,16 +100,44 @@ function dx_has_pdf(array $emails, string $kind): bool {
     foreach ($emails as $m) { if (dx_kind($m) === $kind) { foreach ((array)$m['attachments'] as $a) { if (preg_match('/\.pdf$/i', $a)) { return true; } } } }
     return false;
 }
+/** Why a harness child must be run once more ('' = its result stands). See dx_run(). */
+function dx_retry_reason(string $out): string {
+    if (strpos($out, '@@RESULT@@') === false) { return 'the child did not finish'; }
+    $pre = substr($out, 0, (int)strpos($out, '@@RESULT@@'));
+    if (preg_match('/SQLSTATE\[[0-9A-Z]+\][^\n]*\b(1205 Lock wait timeout|1213 Deadlock|2006 MySQL server has gone away|2013 Lost connection)/i', $pre, $m)) {
+        return 'transient database error (' . $m[1] . ')';
+    }
+    return '';
+}
 function dx_run(string $page, array $post = [], array $opts = []): array {
     global $harness, $port;
     $cfg = base64_encode(json_encode(['post' => $post, 'get' => $opts['get'] ?? [], 'ajax' => !empty($opts['ajax']), 'verify' => $opts['verify'] ?? [], 'setup' => $opts['setup'] ?? [], 'fake_smtp' => $port]));
     $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1';
-    $out = shell_exec($cmd);
-    // A child that printed nothing never ran (Windows could not start it under memory pressure) and wrote
-    // nothing; run it once more instead of reporting a false FAIL (same as settings_pages.php).
-    if (trim((string)$out) === '') { usleep(500000); $out = shell_exec($cmd); }
-    $res = ['error' => 'no result', 'raw' => substr((string)$out, -500), 'rolled_back' => false];
-    if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { $res = $r; } }
+    $out = (string)shell_exec($cmd);
+    // Retry ONCE, only when the scenario never ran to a verdict for a reason outside the code under test (Liwonde's
+    // database is a shared remote test server that other suites and agents use at the same time):
+    //  - no @@RESULT@@: Windows could not start the child under memory pressure (empty output), it was killed, or
+    //    config/database.php could not reach the database and exit()ed with its error page before the harness began;
+    //  - the child died on a transient database error: lock wait timeout (1205) or deadlock (1213) against another
+    //    process's open transaction, or a dropped connection (2006/2013).
+    // Seen 2026-11-23 (the "97 passed, 6 failed" run): one late_statement child ended with an empty page buffer
+    // (bytes 0) and all six of its checks failed at once; PHP logs uncaught errors to stderr on the CLI and this test
+    // threw that text away, so the error itself was not captured. It is now kept ('stderr') and shown in the FAIL.
+    // The dead attempt's transaction died with its connection (nothing it wrote counts) and any email it sent is dropped
+    // before the second run. Any other error is never retried: it FAILs with its text (see 'stderr' below).
+    $why = dx_retry_reason($out);
+    if ($why !== '') {
+        echo '  (note) ' . $page . ' (' . (string)($post['scenario'] ?? '') . '): ' . $why . ', running it once more: ' . substr(trim((string)preg_replace('/\s+/', ' ', strip_tags($out))), 0, 300) . "\n";
+        usleep(500000);
+        dx_new_emails();
+        $out = (string)shell_exec($cmd);
+    }
+    $res = ['error' => 'no result', 'raw' => substr($out, -500), 'rolled_back' => false];
+    if (preg_match('/@@RESULT@@(.*)$/m', $out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { $res = $r; } }
+    // What the child wrote outside the page buffer (PHP's own error log lines go to stderr on the CLI): kept so a FAIL
+    // names the real error instead of an empty result.
+    $pre = trim(substr($out, 0, (int)(strpos($out, '@@RESULT@@') ?: strlen($out))));
+    if ($pre !== '' && preg_match('/PHP (Fatal error|Warning|Parse error)|Uncaught|SQLSTATE/i', $pre)) { $res['stderr'] = substr((string)preg_replace('/\s+/', ' ', $pre), -1200); }
     $res['emails'] = dx_new_emails();
     return $res;
 }

@@ -237,6 +237,23 @@ try {
     check(!$ci2['ok'] && stripos($ci2['message'], 'No free joined pair') !== false, 'No free pair: check-in refused', json_encode($ci2));
     $normal = mk_booking($pdo, $legacy, $day($D + 50), $day($D + 51), 300000);
     check(rh_checkin_ensure_joined_pair($normal)['ok'], 'Other room types are left alone');
+    // The All Bookings check-in button and the bulk Check in both run bookings_checkin_gates() (moved out of
+    // admin/bookings.php into admin/includes/booking-row-actions.php by 1cd4193): the gates themselves must give a
+    // joined booking with no rooms its pair, and refuse the check-in when no pair is free. Arriving today.
+    require_once $root . '/admin/includes/booking-row-actions.php';
+    $gUser = ['id' => (int)$pdo->query("SELECT id FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetchColumn(), 'role' => 'admin'];
+    $wg = mk_booking($pdo, $joined, $day(0), $day(1), 735000);
+    // An agreed pay-later arrangement, so the payment gate (checked first) lets the check-in reach the pair step.
+    $payLater = $pdo->prepare("UPDATE bookings SET checkin_without_payment = 1, checkin_arrangement_note = '8e test pay later' WHERE id = ?");
+    $payLater->execute([$wg]);
+    $gErr = '';
+    try { bookings_checkin_gates($pdo, $wg, $gUser, []); } catch (Throwable $e) { $gErr = $e->getMessage(); }
+    check($gErr === '' && count(getBookingRoomIds($wg)) === 2, 'All Bookings / bulk check-in gates join the free pair', $gErr);
+    $wg2 = mk_booking($pdo, $joined, $day(0), $day(1), 735000);
+    $payLater->execute([$wg2]);
+    $gErr2 = '';
+    try { bookings_checkin_gates($pdo, $wg2, $gUser, []); } catch (Throwable $e) { $gErr2 = $e->getMessage(); }
+    check(stripos($gErr2, 'No free joined pair') !== false && count(getBookingRoomIds($wg2)) === 0, 'All Bookings / bulk check-in gates refuse when no pair is free (no rooms given)', $gErr2);
 
     echo "\n--- 8. merged / cancelled joined booking frees both rooms, not counted as a cancellation ---\n";
     $cxBefore = rh_cancellations_on_date($pdo, date('Y-m-d'));
@@ -417,8 +434,12 @@ try {
     check(strpos($rm, "'vat_rate'") !== false && strpos($rm, '17.5') === false, 'No hard-coded VAT rate');
     $rx = (string)file_get_contents($root . '/api/reports-export.php');
     check(strpos($rx, 'FROM bookings WHERE deleted_at IS NULL AND created_at >= ?') !== false && strpos($rx, 'WHERE b.deleted_at IS NULL AND b.created_at >= ?') !== false, 'Bookings export leaves deleted/merged bookings out');
-    foreach (['admin/bookings.php', 'admin/process-checkin.php', 'admin/booking-details.php'] as $f) {
+    foreach (['admin/includes/booking-row-actions.php', 'admin/process-checkin.php', 'admin/booking-details.php'] as $f) {
         check(strpos((string)file_get_contents($root . '/' . $f), 'rh_checkin_ensure_joined_pair(') !== false, "$f joins the pair at check-in");
+    }
+    // admin/bookings.php and the bulk bar check in through the shared gates (behaviour asserted in section 12), since 1cd4193.
+    foreach (['admin/bookings.php', 'admin/includes/bookings-bulk.php'] as $f) {
+        check(strpos((string)file_get_contents($root . '/' . $f), 'bookings_checkin_gates($pdo') !== false, "$f checks in through bookings_checkin_gates() (joins the pair)");
     }
 } catch (Throwable $e) {
     bad('Test run crashed', $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());

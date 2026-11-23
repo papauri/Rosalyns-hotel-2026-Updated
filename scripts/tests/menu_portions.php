@@ -512,8 +512,8 @@ $recSetup = array_merge($ingSetup, [
     "INSERT INTO menu_categories (name, slug, business_context, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES ('ZZMP Off $hr', '$inSlug', 'food_service', 'kitchen', 999, 1, 1, 999, 0)",
     "INSERT INTO menu_items (category_id, item_name, price, category, station) SELECT id, 'ZZMP $hr Inactive', 10, 'ZZMP Off $hr', 'kitchen' FROM menu_categories WHERE slug = '$inSlug'",
 ]);
-$recVars = $ingVars + ['mid' => "SELECT id FROM menu_items WHERE item_name = 'ZZMP $hr Inactive'"];
-$r = $page(['action' => 'save_recipe', 'menu_item_id' => '{mid}', 'menu_type' => 'food', 'portions_per_recipe' => '1', 'ingredient_id' => [(string)(int)col($pdo, "SELECT id FROM stock_ingredients WHERE is_archived = 0 ORDER BY id LIMIT 1")], 'quantity_per_portion' => ['1'], 'yield_percent' => ['100']],
+$recVars = $ingVars + ['mid' => "SELECT id FROM menu_items WHERE item_name = 'ZZMP $hr Inactive'"];   // {rice}: the test's own seeded item, never the database's real stock
+$r = $page(['action' => 'save_recipe', 'menu_item_id' => '{mid}', 'menu_type' => 'food', 'portions_per_recipe' => '1', 'ingredient_id' => ['{rice}'], 'quantity_per_portion' => ['1'], 'yield_percent' => ['100']],
     $recSetup, $recVars, [
         "SELECT COUNT(*) AS q FROM stock_recipes sr JOIN menu_items mi ON mi.id = sr.menu_item_id WHERE mi.item_name = 'ZZMP $hr Inactive' AND sr.menu_type = '$inSlug'",
         "SELECT COUNT(*) AS q FROM stock_recipes sr JOIN menu_items mi ON mi.id = sr.menu_item_id WHERE mi.item_name = 'ZZMP $hr Inactive' AND sr.menu_type = 'food'",

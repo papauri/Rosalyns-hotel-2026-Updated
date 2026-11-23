@@ -253,30 +253,34 @@ $clean = function (array $r) { return !empty($r['rolled_back']) && empty($r['lea
 $on = "INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', '1', 'import') ON DUPLICATE KEY UPDATE setting_value = '1'";
 $off = "INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', '0', 'import') ON DUPLICATE KEY UPDATE setting_value = '0'";
 $dump = $tmp . DIRECTORY_SEPARATOR . 'endpoint.xlsx';
+// Own fixture: one stock item seeded inside the harness transaction (rolled back with it), so the download does not depend on the
+// database already holding stock (a fresh/test database has none and the page then rightly says "There is no stock to export yet").
+$seed = "INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, yield_percent, is_archived, reorder_point, par_level)
+         VALUES ('ZZT $run Endpoint item', 'ZZT $run Endpoint', 'kg', 2, 0, 10, 100, 0, 0, 0)";
 @unlink($dump);
-$r = $runPage(['post' => ['action' => 'export', 'scope' => 'all'], 'setup' => [$on]]);
+$r = $runPage(['post' => ['action' => 'export', 'scope' => 'all'], 'setup' => [$on, $seed]]);
 $bin = (string)($r['body'] ?? ''); $p0 = strpos($bin, "PK"); if ($p0 !== false) { $bin = substr($bin, $p0); }
 // NOTE: on Windows a pipe cuts binary output at the first Ctrl-Z byte, so only the start of the file is checked here; the whole file is validated above.
 ok('endpoint: an administrator with CSRF gets a real .xlsx download (zip header, [Content_Types].xml first)', substr($bin, 0, 4) === "PK" && strpos(substr($bin, 0, 80), '[Content_Types].xml') !== false, substr($bin, 0, 80));
 @unlink($dump);
-$r = $runPage(['post' => ['action' => 'export', 'scope' => 'all', 'csrf_token' => 'wrong'], 'setup' => [$on]]);
+$r = $runPage(['post' => ['action' => 'export', 'scope' => 'all', 'csrf_token' => 'wrong'], 'setup' => [$on, $seed]]);
 $bin = (string)($r['body'] ?? ''); $p0 = strpos($bin, "PK"); if ($p0 !== false) { $bin = substr($bin, $p0); }
 ok('endpoint: a wrong CSRF token is refused, no file', substr($bin, 0, 4) !== "PK");
 @unlink($dump);
-$r = $runPage(['post' => ['action' => 'export', 'scope' => 'all'], 'setup' => [$off]]);
+$r = $runPage(['post' => ['action' => 'export', 'scope' => 'all'], 'setup' => [$off, $seed]]);
 $bin = (string)($r['body'] ?? ''); $p0 = strpos($bin, "PK"); if ($p0 !== false) { $bin = substr($bin, $p0); }
 ok('endpoint: switched OFF (kill switch) gives no file', substr($bin, 0, 4) !== "PK");
 @unlink($dump);
 $nonAdmin = (string)$pdo->query("SELECT username FROM admin_users WHERE is_active = 1 AND role = 'receptionist' ORDER BY id LIMIT 1")->fetchColumn();
 if ($nonAdmin !== '') {
-    $r = $runPage(['post' => ['action' => 'export', 'scope' => 'all'], 'as_username' => $nonAdmin, 'setup' => [$on]]);
+    $r = $runPage(['post' => ['action' => 'export', 'scope' => 'all'], 'as_username' => $nonAdmin, 'setup' => [$on, $seed]]);
     $bin = (string)($r['body'] ?? ''); $p0 = strpos($bin, "PK"); if ($p0 !== false) { $bin = substr($bin, $p0); }
     ok('endpoint: a receptionist (no Import permission) gets no file', substr($bin, 0, 4) !== "PK");
     @unlink($dump);
 } else {
     echo "SKIP endpoint non-permitted user check (no receptionist user in this database)\n";
 }
-$r = $runPage(['post' => ['action' => 'export', 'scope' => 'pick', 'tabs' => ['no such tab']], 'setup' => [$on]]);
+$r = $runPage(['post' => ['action' => 'export', 'scope' => 'pick', 'tabs' => ['no such tab']], 'setup' => [$on, $seed]]);
 $bin = (string)($r['body'] ?? ''); $p0 = strpos($bin, "PK"); if ($p0 !== false) { $bin = substr($bin, $p0); }
 ok('endpoint: picking only a tab that does not exist gives a plain message, no file', substr($bin, 0, 4) !== "PK" && $bin !== '');
 @unlink($dump);
@@ -284,6 +288,8 @@ $r = $runPage(['method' => 'GET', 'setup' => [$on], 'grep' => ['Export current s
 ok('Import page header offers "Export current stock" with the scope choice and a plain helper line', !empty($r['found']['Export current stock']) && !empty($r['found']['name="action" value="export"']), json_encode($r['found'] ?? $r));
 $js = (string)file_get_contents($root . '/admin/js/data-import.js');
 ok('Result step offers "Download the updated stock workbook" (posts the export action with the page token)', strpos($js, 'Download the updated stock workbook') !== false && strpos($js, "'export'") !== false);
+
+ok('endpoint fixture rolled back: no ZZT endpoint item left behind', (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE '%ZZT $run %'")->fetchColumn() === 0);
 
 foreach (glob($tmp . DIRECTORY_SEPARATOR . '*') ?: [] as $f) { @unlink($f); }
 @rmdir($tmp);

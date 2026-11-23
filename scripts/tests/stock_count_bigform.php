@@ -37,7 +37,10 @@ $scenario = function (string $name, array $grep = []) use ($harness, $run, $coun
         "SELECT status FROM stock_counts WHERE reference = $ref",
         "SELECT COUNT(*) AS n, SUM($countedExpr) AS counted, SUM(scl.reason_code = 'spillage') AS spill, SUM(scl.reason_notes LIKE 'bf %') AS noted, COALESCE(SUM(scl.actual_quantity),0) AS total FROM stock_count_lines scl INNER JOIN stock_counts sc ON sc.id = scl.count_id WHERE sc.reference = $ref",
     ];
-    $cfg = base64_encode(json_encode(["post" => ["run" => $run, "scenario" => $name], "verify" => $verify, "grep" => $grep]));
+    /* Pin the two-person rule ON (its default) inside the rolled-back harness transaction: with it switched off on this database
+     * (stock_count_second_approver = '0'), Submit also approves in one press (d86f0f6), so "submit goes to submitted" needs the rule on. */
+    $setup = ["INSERT INTO site_settings (setting_key, setting_value) VALUES ('stock_count_second_approver', '1') ON DUPLICATE KEY UPDATE setting_value = '1'"];
+    $cfg = base64_encode(json_encode(["post" => ["run" => $run, "scenario" => $name], "setup" => $setup, "verify" => $verify, "grep" => $grep]));
     $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' scripts/tests/stock_count_bigform_child.php ' . escapeshellarg($cfg) . ' 2>&1');
     $res = ['error' => 'no result', 'raw' => substr((string)$out, -600), 'rolled_back' => false];
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $res = $x; } }
