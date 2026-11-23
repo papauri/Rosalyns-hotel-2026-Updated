@@ -297,6 +297,7 @@ if (!function_exists('rh_bk_valid_date')) {
             'status'    => 'b.status',
             'payment'   => rh_bk_pay_key_sql('b'), // the badge's key from the booking's money (step 13), not one payment record's
             'created'   => 'b.created_at',
+            'balance'   => rh_bk_balance_due_sql('b'), // Balance due (plan Decision 9; deleted rows NULL = first ascending)
         ];
     }
 
@@ -684,5 +685,437 @@ if (!function_exists('rh_bk_kind_filter')) {
             $w .= ', ' . $pw[$pay];
         }
         return $w;
+    }
+}
+
+if (!function_exists('rh_bk_balance_due')) {
+    /*
+     * Balance due (plan BOOKINGS_LIST_PLAN Decision 9 + spec-check S1 item 5): ONE rule, the PHP cell and its SQL twin
+     * (sort key 'balance', CSV column). Never a new money rule: it is rh_booking_pay_state()['left'] with two list rules
+     * on top, in this order:
+     *   deleted row                                   -> null (blank)
+     *   ROUND(GREATEST(0, amount_due), 2) <= tol      -> 0 (as rh_bk_left_to_pay; covers paid and refunded)
+     *   expired                                       -> the rounded due only when the row carries the group no-show
+     *                                                    charge tag (a booking_charges description ending
+     *                                                    "[noshow-fee:<booking id>]", bookings.php's tagged-expired test), else 0
+     *   otherwise                                     -> rh_booking_pay_state()['left'] (0 for paid / refunded, else the
+     *                                                    rounded due: cancelled and no-show rows show what they still owe)
+     * tol = BALANCE_TOLERANCE (rh_pay_state_tol).
+     */
+
+    /** PHP rule. $row: status, payment_status, amount_paid, amount_due, credit_balance, deleted_at. */
+    function rh_bk_balance_due(array $row, bool $taggedExpired): ?float
+    {
+        if (!empty($row['deleted_at'])) {
+            return null;
+        }
+        $due = round(max(0.0, (float)($row['amount_due'] ?? 0)), 2);
+        if ($due <= rh_pay_state_tol()) {
+            return 0.0;
+        }
+        if (strtolower(trim((string)($row['status'] ?? ''))) === 'expired') {
+            return $taggedExpired ? $due : 0.0;
+        }
+        return (float)rh_booking_pay_state($row)['left'];
+    }
+
+    /**
+     * SQL twin (alias $b = bookings; needs $b.id, so a derived table works too). The due expression is rh_bk_pay_key_sql's
+     * own; the tag test is bookings.php's LIKE. Constant text (the tolerance is a number), never user input.
+     */
+    function rh_bk_balance_due_sql(string $b = 'b'): string
+    {
+        $tol = sprintf('%.4F', rh_pay_state_tol());
+        $due = "ROUND(GREATEST(0, COALESCE({$b}.amount_due, 0)), 2)";
+        $tag = "EXISTS (SELECT 1 FROM booking_charges bkbdc WHERE bkbdc.booking_id = {$b}.id"
+            . " AND bkbdc.description LIKE CONCAT('%[noshow-fee:', {$b}.id, ']'))";
+        return "(CASE"
+            . " WHEN {$b}.deleted_at IS NOT NULL THEN NULL"
+            . " WHEN {$due} <= {$tol} THEN 0"
+            . " WHEN LOWER(TRIM(COALESCE({$b}.status, ''))) = 'expired' THEN (CASE WHEN {$tag} THEN {$due} ELSE 0 END)"
+            . " WHEN " . rh_bk_pay_key_sql($b) . " IN ('paid', 'refunded') THEN 0"
+            . " ELSE {$due} END)";
+    }
+}
+
+if (!function_exists('rh_bk_source_sql')) {
+    /*
+     * Source / made by (plan Decision 1, T1b): there is no stored channel, so both are DERIVED with the exact order of
+     * rh_created_by_pick (includes/booking-created-by.php) from the FIRST booking_audit_log 'created' row and the FIRST
+     * booking_timeline_logs 'create' row (lowest id, as rh_created_by_map):
+     *   1. audit row with performed_by > 0                          -> staff (that admin id)
+     *   2. else a timeline row: performed_by_type guest / api       -> online
+     *                           admin / staff with an id or a name  -> staff (its performed_by_id; a name only = no id)
+     *                           anything else                       -> system
+     *   3. else an audit row whose note starts "Booking made online" -> online
+     *   4. else an audit row with a stored name only               -> staff (no id)
+     *   5. nothing recorded                                         -> none
+     * Text is trimmed of spaces (SQL TRIM); PHP's trim also strips tabs / new lines, which the log writers never put there
+     * (scripts/tests/booking_created_by.php proves SQL = pick for every Liwonde booking). Alias b = bookings.
+     */
+
+    /** ?source= choices => label. */
+    function rh_bk_source_options(): array
+    {
+        return [
+            'staff'  => 'Staff (front desk)',
+            'online' => 'Online (website or booking link)',
+            'system' => 'System',
+            'none'   => 'Not recorded',
+        ];
+    }
+
+    /** Whitelisted ?source=; '' when absent or unknown. */
+    function rh_bk_source_filter($raw): string
+    {
+        $s = is_string($raw) ? strtolower(trim($raw)) : '';
+        return isset(rh_bk_source_options()[$s]) ? $s : '';
+    }
+
+    /** A positive whole-number id (rooms, groups, staff); 0 when absent, junk, or not in $knownIds (when given). */
+    function rh_bk_id_filter($raw, ?array $knownIds = null): int
+    {
+        return rh_bk_room_type_filter($raw, $knownIds);
+    }
+
+    /** Whitelisted ?created_by= (an admin_users.id); 0 when none. */
+    function rh_bk_creator_filter($raw, ?array $knownIds = null): int
+    {
+        return rh_bk_id_filter($raw, $knownIds);
+    }
+
+    /** One column of the first audit 'created' row (NULL when there is none). */
+    function rh_bk_first_audit_sql(string $expr): string
+    {
+        return "(SELECT {$expr} FROM booking_audit_log bkau WHERE bkau.booking_id = b.id AND bkau.action = 'created' ORDER BY bkau.id ASC LIMIT 1)";
+    }
+
+    /** One column of the first timeline 'create' row (NULL when there is none). */
+    function rh_bk_first_timeline_sql(string $expr): string
+    {
+        return "(SELECT {$expr} FROM booking_timeline_logs bktl WHERE bktl.booking_id = b.id AND bktl.action_type = 'create' ORDER BY bktl.id ASC LIMIT 1)";
+    }
+
+    /** SQL: 'staff' | 'online' | 'system' | 'none' (rh_created_by_pick's kind). */
+    function rh_bk_source_sql(): string
+    {
+        $tlType = "LOWER(TRIM(COALESCE(bktl.performed_by_type, '')))";
+        return "(CASE"
+            . " WHEN COALESCE(" . rh_bk_first_audit_sql('bkau.performed_by') . ", 0) > 0 THEN 'staff'"
+            . " WHEN " . rh_bk_first_timeline_sql('bktl.id') . " IS NOT NULL THEN (CASE"
+            . " WHEN " . rh_bk_first_timeline_sql($tlType) . " IN ('guest', 'api') THEN 'online'"
+            . " WHEN " . rh_bk_first_timeline_sql("({$tlType} IN ('admin', 'staff') AND (COALESCE(bktl.performed_by_id, 0) > 0 OR TRIM(COALESCE(bktl.performed_by_name, '')) <> ''))") . " = 1 THEN 'staff'"
+            . " ELSE 'system' END)"
+            . " WHEN " . rh_bk_first_audit_sql("(LOWER(TRIM(COALESCE(bkau.note, ''))) LIKE 'booking made online%')") . " = 1 THEN 'online'"
+            . " WHEN " . rh_bk_first_audit_sql("(TRIM(COALESCE(bkau.performed_by_name, '')) <> '')") . " = 1 THEN 'staff'"
+            . " ELSE 'none' END)";
+    }
+
+    /** SQL: the admin id that made the booking (rh_created_by_pick's staff id), 0 when none / a name only. */
+    function rh_bk_creator_sql(): string
+    {
+        $tlType = "LOWER(TRIM(COALESCE(bktl.performed_by_type, '')))";
+        return "(CASE"
+            . " WHEN COALESCE(" . rh_bk_first_audit_sql('bkau.performed_by') . ", 0) > 0 THEN " . rh_bk_first_audit_sql('bkau.performed_by')
+            . " WHEN " . rh_bk_first_timeline_sql('bktl.id') . " IS NOT NULL THEN COALESCE("
+            . rh_bk_first_timeline_sql("(CASE WHEN {$tlType} IN ('admin', 'staff') THEN COALESCE(bktl.performed_by_id, 0) ELSE 0 END)") . ", 0)"
+            . " ELSE 0 END)";
+    }
+}
+
+if (!function_exists('rh_bk_filters_from_get')) {
+    /*
+     * Shared scope + URL helpers (plan T1): ONE place cleans every list param and builds every shared WHERE piece, so the
+     * list, its count, the tab badges, the insight cards and the CSV export cannot disagree. Pure (no database).
+     */
+
+    /**
+     * Every list param cleaned. $known: whitelists of ids ('room_types', 'rooms', 'groups', 'staff'); a missing list
+     * accepts any positive id. ?status= is the alias of ?filter_status= and stays the raw text (an unknown status
+     * matches no booking, as before).
+     */
+    function rh_bk_filters_from_get(array $get, array $known = []): array
+    {
+        $str = static function ($v): string {
+            return is_string($v) ? $v : '';
+        };
+        [$from, $to] = rh_bk_date_range($str($get['date_from'] ?? ''), $str($get['date_to'] ?? ''));
+        $sinceKind = rh_bk_since_kind($get['since_kind'] ?? '');
+        $since = $sinceKind !== '' ? rh_bk_since_filter($get['since'] ?? '') : '';
+        if ($since === '') {
+            $sinceKind = '';
+        }
+        $status = $str(isset($get['filter_status']) ? $get['filter_status'] : ($get['status'] ?? ''));
+        $filter = rh_bk_filter_key($str($get['filter'] ?? ''), $str($get['payment_status'] ?? ''));
+        $page = $get['page'] ?? 1;
+        return [
+            'search'     => trim($str($get['search'] ?? '')),
+            'status'     => $status,
+            'date_from'  => $from,
+            'date_to'    => $to,
+            'date_type'  => rh_bk_date_type($str($get['date_type'] ?? '')),
+            'arrival'    => rh_bk_arrival_filter($str($get['arrival'] ?? '')),
+            'departure'  => rh_bk_departure_filter($str($get['departure'] ?? '')),
+            'balance'    => rh_bk_balance_filter($str($get['balance'] ?? '')),
+            'since'      => $since,
+            'since_kind' => $sinceKind,
+            'kind'       => rh_bk_kind_filter($get['kind'] ?? ''),
+            'room_type'  => rh_bk_room_type_filter($get['room_type'] ?? '', $known['room_types'] ?? null),
+            'pay'        => rh_bk_pay_filter($get['pay'] ?? ''),
+            'room'       => rh_bk_id_filter($get['room'] ?? '', $known['rooms'] ?? null),
+            'group'      => rh_bk_id_filter($get['group'] ?? '', $known['groups'] ?? null),
+            'source'     => rh_bk_source_filter($get['source'] ?? ''),
+            'created_by' => rh_bk_creator_filter($get['created_by'] ?? '', $known['staff'] ?? null),
+            'filter'     => $filter,
+            // The open tab: the ?filter= shortcut, else the status (status tabs are named like the status values).
+            'tab'        => $filter !== '' ? rh_bk_tab_map()[$filter] : $status,
+            'page'       => max(1, is_scalar($page) ? (int)$page : 1),
+            'size'       => rh_bk_page_size($get['size'] ?? '10'),
+        ];
+    }
+
+    /** Any filter set (the tab and page size are not filters). */
+    function rh_bk_filters_active(array $f): bool
+    {
+        foreach (['search', 'status', 'date_from', 'date_to', 'arrival', 'departure', 'balance', 'since', 'kind', 'pay', 'source'] as $k) {
+            if (($f[$k] ?? '') !== '') {
+                return true;
+            }
+        }
+        foreach (['room_type', 'room', 'group', 'created_by'] as $k) {
+            if ((int)($f[$k] ?? 0) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The shared WHERE pieces (no status, deleted or tab piece: the badges count every tab inside this scope), in a fixed
+     * order: search, dates, overdue arrivals, overdue departures, balance, since, More filters (kind, room type, payment),
+     * room, group, source, made by. Params in clause order.
+     * @return array{clauses: string[], params: array}
+     */
+    function rh_bk_scope(array $f, bool $hasCombos = true): array
+    {
+        $clauses = [];
+        $params = [];
+        $s = rh_bk_search_where((string)($f['search'] ?? ''));
+        if ($s['sql'] !== '') {
+            $clauses[] = $s['sql'];
+            $params = array_merge($params, $s['params']);
+        }
+        $d = rh_bk_date_scope((string)($f['date_from'] ?? ''), (string)($f['date_to'] ?? ''), (string)($f['date_type'] ?? ''));
+        $clauses = array_merge($clauses, $d['clauses']);
+        $params = array_merge($params, $d['params']);
+        if (($a = rh_bk_arrival_clause((string)($f['arrival'] ?? ''))) !== null) {
+            $clauses[] = $a;
+        }
+        if (($dp = rh_bk_departure_clause((string)($f['departure'] ?? ''))) !== null) {
+            $clauses[] = $dp;
+        }
+        if (($bl = rh_bk_balance_clause((string)($f['balance'] ?? ''))) !== null) {
+            $clauses[] = $bl['clause'];
+            $params = array_merge($params, $bl['params']);
+        }
+        if (($sn = rh_bk_since_clause((string)($f['since'] ?? ''), (string)($f['since_kind'] ?? ''))) !== null) {
+            $clauses[] = $sn['clause'];
+            $params = array_merge($params, $sn['params']);
+        }
+        $m = rh_bk_more_scope((string)($f['kind'] ?? ''), (int)($f['room_type'] ?? 0), (string)($f['pay'] ?? ''), $hasCombos);
+        $clauses = array_merge($clauses, $m['clauses']);
+        $params = array_merge($params, $m['params']);
+        if (($room = (int)($f['room'] ?? 0)) > 0) {
+            $clauses[] = 'b.individual_room_id = ?';
+            $params[] = $room;
+        }
+        if (($group = (int)($f['group'] ?? 0)) > 0) {
+            // A group = its lead booking + every room pointing at it (rh_bk_group_sql's link).
+            $clauses[] = '(b.id = ? OR b.primary_booking_id = ?)';
+            array_push($params, $group, $group);
+        }
+        if (($src = (string)($f['source'] ?? '')) !== '') {
+            $clauses[] = rh_bk_source_sql() . ' = ?';
+            $params[] = $src;
+        }
+        if (($by = (int)($f['created_by'] ?? 0)) > 0) {
+            $clauses[] = rh_bk_creator_sql() . ' = ?';
+            $params[] = $by;
+        }
+        return ['clauses' => $clauses, 'params' => $params];
+    }
+
+    /**
+     * The list's full WHERE (and the CSV export's, the same call): the shared scope, deleted rows only under the Deleted
+     * status, the status, then the open tab's pieces.
+     * @return array{clauses: string[], params: array}
+     */
+    function rh_bk_list_scope(array $f, bool $hasCombos = true): array
+    {
+        $s = rh_bk_scope($f, $hasCombos);
+        $status = (string)($f['status'] ?? '');
+        $s['clauses'][] = $status === 'deleted' ? 'b.deleted_at IS NOT NULL' : 'b.deleted_at IS NULL';
+        if (!empty($status) && $status !== 'deleted') { // empty(): '0' was never a status piece
+            $s['clauses'][] = 'b.status = ?';
+            $s['params'][] = $status;
+        }
+        $s['clauses'] = array_merge($s['clauses'], rh_bk_tab_clauses((string)($f['tab'] ?? ''))['clauses']);
+        return $s;
+    }
+
+    /**
+     * Query params that reproduce the list (pager links, the search form's kept inputs, insight-card links, chip remove
+     * links), in a fixed order, empty values left out; $drop = keys to leave out. Sort params are added by the caller
+     * (rh_server_sort_params). ?status= is written as filter_status.
+     */
+    function rh_bk_keep_params(array $f, array $drop = []): array
+    {
+        $hasDates = ($f['date_from'] ?? '') !== '' || ($f['date_to'] ?? '') !== '';
+        $id = static function ($v): string {
+            return (int)$v > 0 ? (string)(int)$v : '';
+        };
+        $all = [
+            'search'        => (string)($f['search'] ?? ''),
+            'filter_status' => (string)($f['status'] ?? ''),
+            'date_from'     => (string)($f['date_from'] ?? ''),
+            'date_to'       => (string)($f['date_to'] ?? ''),
+            'date_type'     => $hasDates ? (string)($f['date_type'] ?? '') : '',
+            'filter'        => (string)($f['filter'] ?? ''),
+            'arrival'       => (string)($f['arrival'] ?? ''),
+            'departure'     => (string)($f['departure'] ?? ''),
+            'balance'       => (string)($f['balance'] ?? ''),
+            'since'         => (string)($f['since'] ?? ''),
+            'since_kind'    => (string)($f['since_kind'] ?? ''),
+            'kind'          => (string)($f['kind'] ?? ''),
+            'room_type'     => $id($f['room_type'] ?? 0),
+            'pay'           => (string)($f['pay'] ?? ''),
+            'room'          => $id($f['room'] ?? 0),
+            'group'         => $id($f['group'] ?? 0),
+            'source'        => (string)($f['source'] ?? ''),
+            'created_by'    => $id($f['created_by'] ?? 0),
+            'size'          => ($f['size'] ?? '10') !== '10' ? (string)$f['size'] : '',
+            'page'          => (int)($f['page'] ?? 1) > 1 ? (string)(int)$f['page'] : '',
+        ];
+        $out = [];
+        foreach ($all as $k => $v) {
+            if ($v !== '' && !in_array($k, $drop, true)) {
+                $out[$k] = $v;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * One chip per active filter: ['key', 'label' (plain text, the caller escapes), 'params' (the list without that filter,
+     * page 1)]. $names: id => label lists 'room_types', 'rooms', 'groups', 'staff'; an id missing from them shows as "#id".
+     */
+    function rh_bk_chips(array $f, array $names = []): array
+    {
+        $name = static function (string $list, int $id) use ($names): string {
+            $n = trim((string)($names[$list][$id] ?? ''));
+            return $n !== '' ? $n : '#' . $id;
+        };
+        $defs = [];
+        if (($f['search'] ?? '') !== '') {
+            $defs[] = ['search', "Search: \u{201C}" . $f['search'] . "\u{201D}", ['search']];
+        }
+        if (($f['status'] ?? '') !== '') {
+            $defs[] = ['status', 'Status: ' . ucfirst(str_replace('-', ' ', (string)$f['status'])), ['filter_status']];
+        }
+        if (($f['date_from'] ?? '') !== '' || ($f['date_to'] ?? '') !== '') {
+            $defs[] = ['dates', ucfirst(rh_bk_date_scope_words((string)$f['date_from'], (string)$f['date_to'], (string)($f['date_type'] ?? ''))), ['date_from', 'date_to', 'date_type']];
+        }
+        if (($f['arrival'] ?? '') !== '') {
+            $defs[] = ['arrival', 'Overdue arrivals', ['arrival']];
+        }
+        if (($f['departure'] ?? '') !== '') {
+            $defs[] = ['departure', 'Overdue departures', ['departure']];
+        }
+        if (($f['balance'] ?? '') !== '') {
+            $defs[] = ['balance', 'Balance still to pay', ['balance']];
+        }
+        if (($f['since'] ?? '') !== '') {
+            $defs[] = ['since', rh_bk_since_words((string)$f['since'], (string)$f['since_kind']), ['since', 'since_kind']];
+        }
+        if (($f['kind'] ?? '') !== '') {
+            $defs[] = ['kind', rh_bk_kinds()[$f['kind']] ?? (string)$f['kind'], ['kind']];
+        }
+        if ((int)($f['room_type'] ?? 0) > 0) {
+            $defs[] = ['room_type', 'Room type: ' . $name('room_types', (int)$f['room_type']), ['room_type']];
+        }
+        if (($f['pay'] ?? '') !== '') {
+            $defs[] = ['pay', 'Payment: ' . (rh_bk_pay_options()[$f['pay']] ?? (string)$f['pay']), ['pay']];
+        }
+        if ((int)($f['room'] ?? 0) > 0) {
+            $defs[] = ['room', 'Room: ' . $name('rooms', (int)$f['room']), ['room']];
+        }
+        if ((int)($f['group'] ?? 0) > 0) {
+            $defs[] = ['group', 'Group: ' . $name('groups', (int)$f['group']), ['group']];
+        }
+        if (($f['source'] ?? '') !== '') {
+            $defs[] = ['source', 'Source: ' . (rh_bk_source_options()[$f['source']] ?? (string)$f['source']), ['source']];
+        }
+        if ((int)($f['created_by'] ?? 0) > 0) {
+            $defs[] = ['created_by', 'Made by: ' . $name('staff', (int)$f['created_by']), ['created_by']];
+        }
+        $out = [];
+        foreach ($defs as [$key, $label, $drop]) {
+            $out[] = ['key' => $key, 'label' => $label, 'params' => rh_bk_keep_params($f, array_merge($drop, ['page']))];
+        }
+        return $out;
+    }
+
+    /**
+     * Date presets on the hotel date $today ('Y-m-d', the server's date, never the device clock; Decision 8): Today,
+     * Tomorrow, This week (Monday to Sunday), Next 7 days (today to today + 6), This month (1st to last day).
+     * [] when $today is not a real date.
+     */
+    function rh_bk_date_presets(string $today): array
+    {
+        if (rh_bk_valid_date($today) === '') {
+            return [];
+        }
+        $t = new DateTimeImmutable($today . ' 00:00:00');
+        $mon = $t->modify('-' . ((int)$t->format('N') - 1) . ' days');
+        $day = static function (DateTimeImmutable $d): string {
+            return $d->format('Y-m-d');
+        };
+        return [
+            ['key' => 'today', 'label' => 'Today', 'from' => $today, 'to' => $today],
+            ['key' => 'tomorrow', 'label' => 'Tomorrow', 'from' => $day($t->modify('+1 day')), 'to' => $day($t->modify('+1 day'))],
+            ['key' => 'this_week', 'label' => 'This week', 'from' => $day($mon), 'to' => $day($mon->modify('+6 days'))],
+            ['key' => 'next_7', 'label' => 'Next 7 days', 'from' => $today, 'to' => $day($t->modify('+6 days'))],
+            ['key' => 'this_month', 'label' => 'This month', 'from' => $t->format('Y-m-01'), 'to' => $t->format('Y-m-t')],
+        ];
+    }
+
+    /** 'history' for Checked out, Cancelled, No-show and Deleted (as tab or status), else 'upcoming' (Decision 5). */
+    function rh_bk_view_kind(string $tab, string $status): string
+    {
+        $history = ['checked-out', 'cancelled', 'no-show', 'deleted'];
+        return in_array($tab, $history, true) || in_array($status, $history, true) ? 'history' : 'upcoming';
+    }
+
+    /**
+     * The list's default ORDER BY when no header sort is chosen (Decision 5; the caller adds the tiebreak b.id DESC):
+     *   tabs with their own order (today's check-ins / check-outs, expiring)  -> that order
+     *   history views                                                         -> newest first (created_at DESC)
+     *   upcoming views (All, In house, Pending, Unpaid, Tentative, Groups)    -> arrivals from today on, soonest
+     *                                                                            first, then past arrivals, latest first
+     *   any other view (Paid, booked today / week / month, other statuses)    -> newest first, as before
+     */
+    function rh_bk_default_order(string $tab, string $status): string
+    {
+        $own = rh_bk_tab_clauses($tab)['order'];
+        if ($own !== null) {
+            return $own;
+        }
+        if (rh_bk_view_kind($tab, $status) === 'history') {
+            return 'b.created_at DESC';
+        }
+        if (in_array($tab, ['', 'checked-in', 'pending', 'unpaid', 'tentative', 'group-bookings'], true)) {
+            return '(b.check_in_date < CURDATE()) ASC, (CASE WHEN b.check_in_date >= CURDATE() THEN b.check_in_date END) ASC, b.check_in_date DESC';
+        }
+        return 'b.created_at DESC';
     }
 }

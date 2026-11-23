@@ -3018,34 +3018,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Shared filter inputs (used by on-screen table and CSV export)
-$search_query = trim($_GET['search'] ?? '');
-// Accept ?status= as an alias for ?filter_status= so dashboard insight cards and
-// stat tiles that deep-link with ?status=checked-in land on the matching tab
-// (server-filtered + tab activated + row flash), not just the unfiltered list.
-$filter_status = $_GET['filter_status'] ?? ($_GET['status'] ?? '');
-// From / To on the date chosen in Dates (?date_type= arrival|departure|staying|booked, default arrival), both end days
-// included; invalid dates are ignored, From after To is swapped. Rules: rh_bk_date_scope (bookings-list-filters.php).
-[$filter_date_from, $filter_date_to] = rh_bk_date_range($_GET['date_from'] ?? '', $_GET['date_to'] ?? '');
-$filter_date_type = rh_bk_date_type($_GET['date_type'] ?? '');
-$bk_has_dates = $filter_date_from !== '' || $filter_date_to !== '';
-// ?arrival=overdue (Room Dashboard / Dashboard "overdue arrivals" links): a real filter, shown in the notice with Clear.
-$filter_arrival = rh_bk_arrival_filter($_GET['arrival'] ?? '');
-// ?departure=overdue (Dashboard "Overdue departures" chip): still checked in after the check-out date; same notice + Clear.
-$filter_departure = rh_bk_departure_filter($_GET['departure'] ?? '');
-// ?balance=owing (Dashboard "Departures with a balance" chip, with ?filter=checkout_today): amount due above
-// BALANCE_TOLERANCE, the chip's own rule (rh_bk_balance_clause -> rh_fd_balance_tolerance); same notice + Clear.
-$filter_balance = rh_bk_balance_filter($_GET['balance'] ?? '');
-// ?since=Y-m-d H:i:s&since_kind=booked|cancelled|moved (Dashboard "Since you were last here"): the dashboard's own
-// count rule (rh_bk_since_clause); both must be valid, else no filter. Shared scope + export, same notice + Clear.
-$filter_since_kind = rh_bk_since_kind($_GET['since_kind'] ?? '');
-$filter_since = $filter_since_kind !== '' ? rh_bk_since_filter($_GET['since'] ?? '') : '';
-if ($filter_since === '') {
-    $filter_since_kind = '';
-}
-// "More filters" (step 8g): Booking kind (?kind=), Room type (?room_type= a rooms.id from the list below) and Payment
-// (?pay=). Whitelisted in bookings-list-filters.php; part of the shared scope like ?balance=, so badges, list, count,
-// insight cards and the CSV export all follow them.
+// Shared filter inputs (on-screen table, tab badges, page count, insight cards and CSV export), cleaned in ONE place:
+// rh_bk_filters_from_get (bookings-list-filters.php). ?status= is the alias of ?filter_status= (dashboard cards deep-link
+// with it); From / To on the date chosen in Dates (?date_type=, rh_bk_date_scope); ?arrival= / ?departure= overdue,
+// ?balance=owing, ?since= + ?since_kind= (Dashboard links); More filters ?kind= / ?room_type= (a rooms.id) / ?pay=;
+// ?room= (individual room), ?group= (lead booking id), ?source= and ?created_by= (plan T1). The option lists below
+// (one query each) are also the id whitelists.
 $bk_room_types = [];
 try {
     $bk_room_types = $pdo->query("SELECT id, name, is_active FROM rooms ORDER BY is_active DESC, display_order ASC, name ASC")->fetchAll(PDO::FETCH_ASSOC);
@@ -3056,9 +3034,66 @@ $bk_room_type_names = [];
 foreach ($bk_room_types as $bk_rt_row) {
     $bk_room_type_names[(int)$bk_rt_row['id']] = (string)$bk_rt_row['name'];
 }
-$filter_kind = rh_bk_kind_filter($_GET['kind'] ?? '');
-$filter_room_type = rh_bk_room_type_filter($_GET['room_type'] ?? '', array_keys($bk_room_type_names));
-$filter_pay = rh_bk_pay_filter($_GET['pay'] ?? '');
+// Rooms (?room= an individual_rooms.id), staff (?created_by= an admin_users.id, inactive staff kept: they made old
+// bookings) and groups (Decision 2: one entry per lead booking with a not-deleted room checking out in the last 30 days
+// or later; ?group= also accepts any other existing lead so older links keep working).
+$bk_room_names = [];
+$bk_staff_names = [];
+$bk_group_names = [];
+try {
+    foreach ($pdo->query("SELECT id, room_number, room_name FROM individual_rooms ORDER BY is_active DESC, display_order ASC, room_number ASC")->fetchAll(PDO::FETCH_ASSOC) as $bk_o) {
+        $bk_o_no = trim((string)$bk_o['room_number']);
+        $bk_o_nm = trim((string)$bk_o['room_name']);
+        $bk_room_names[(int)$bk_o['id']] = $bk_o_no !== '' ? 'Room ' . $bk_o_no . ($bk_o_nm !== '' ? ' (' . $bk_o_nm . ')' : '') : $bk_o_nm;
+    }
+    foreach ($pdo->query("SELECT id, COALESCE(NULLIF(full_name, ''), username) AS name FROM admin_users ORDER BY is_active DESC, name ASC")->fetchAll(PDO::FETCH_ASSOC) as $bk_o) {
+        $bk_staff_names[(int)$bk_o['id']] = (string)$bk_o['name'];
+    }
+    foreach ($pdo->query("SELECT l.id, l.booking_reference, l.guest_name, l.check_in_date FROM bookings l
+            WHERE l.primary_booking_id IS NULL
+              AND EXISTS (SELECT 1 FROM bookings gm WHERE gm.primary_booking_id = l.id)
+              AND EXISTS (SELECT 1 FROM bookings gr WHERE (gr.id = l.id OR gr.primary_booking_id = l.id) AND gr.deleted_at IS NULL
+                          AND gr.check_out_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY))
+            ORDER BY l.check_in_date DESC, l.id DESC")->fetchAll(PDO::FETCH_ASSOC) as $bk_o) {
+        $bk_group_names[(int)$bk_o['id']] = (string)$bk_o['booking_reference'] . ' - ' . (string)$bk_o['guest_name']
+            . (!empty($bk_o['check_in_date']) ? ', ' . date('j M Y', strtotime((string)$bk_o['check_in_date'])) : '');
+    }
+} catch (Throwable $e) {
+    error_log('Bookings room / staff / group filter lists: ' . $e->getMessage());
+}
+$bk_group_ids = array_keys($bk_group_names);
+$bk_group_raw = rh_bk_id_filter($_GET['group'] ?? '');
+if ($bk_group_raw > 0 && !isset($bk_group_names[$bk_group_raw])) {
+    try {
+        $bk_g_st = $pdo->prepare("SELECT 1 FROM bookings WHERE primary_booking_id = ? LIMIT 1");
+        $bk_g_st->execute([$bk_group_raw]);
+        if ($bk_g_st->fetchColumn()) {
+            $bk_group_ids[] = $bk_group_raw;
+        }
+    } catch (Throwable $e) {
+        error_log('Bookings group filter check: ' . $e->getMessage());
+    }
+}
+$bk_f = rh_bk_filters_from_get($_GET, [
+    'room_types' => array_keys($bk_room_type_names),
+    'rooms'      => array_keys($bk_room_names),
+    'groups'     => $bk_group_ids,
+    'staff'      => array_keys($bk_staff_names),
+]);
+$search_query = $bk_f['search'];
+$filter_status = $bk_f['status'];
+$filter_date_from = $bk_f['date_from'];
+$filter_date_to = $bk_f['date_to'];
+$filter_date_type = $bk_f['date_type'];
+$bk_has_dates = $filter_date_from !== '' || $filter_date_to !== '';
+$filter_arrival = $bk_f['arrival'];
+$filter_departure = $bk_f['departure'];
+$filter_balance = $bk_f['balance'];
+$filter_since = $bk_f['since'];
+$filter_since_kind = $bk_f['since_kind'];
+$filter_kind = $bk_f['kind'];
+$filter_room_type = $bk_f['room_type'];
+$filter_pay = $bk_f['pay'];
 $bk_has_combos = bookingAvailabilityTableExists('room_combinations');
 $bk_more_active = $filter_kind !== '' || $filter_room_type > 0 || $filter_pay !== '';
 
@@ -3082,8 +3117,9 @@ if ($deep_link_booking_id > 0 && $search_query === '') {
         $deep_link_action = '';
         $deep_link_booking_id = 0;
     }
+    $bk_f['search'] = $search_query; // the deep link's reference is the search everywhere below (list, count, export)
 }
-$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $filter_since !== '' || $bk_more_active;
+$has_active_room_filters = rh_bk_filters_active($bk_f);
 
 // Remember this list view (filters, tab, page) so "Back" on a booking returns to it.
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_link_action === '') {
@@ -3094,25 +3130,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_lin
 
 // Map ?filter= shortcuts (from dashboard badge links) to JS tab names; ?payment_status=paid|unpaid (Accounting
 // Dashboard links) opens the matching tab.
-$bk_filter_key = rh_bk_filter_key($_GET['filter'] ?? '', $_GET['payment_status'] ?? '');
-$active_tab_override = $bk_filter_key !== '' ? rh_bk_tab_map()[$bk_filter_key] : '';
-// Status-based tabs: detect from filter_status (tab names match filter_status values directly)
-if ($active_tab_override === '' && $filter_status !== '') {
-    $active_tab_override = $filter_status;
-}
+// Status-based tabs: the status itself (tab names match filter_status values directly). Both in rh_bk_filters_from_get.
+$bk_filter_key = $bk_f['filter'];
+$active_tab_override = $bk_f['tab'];
 
 // Pagination params
-$current_page = max(1, (int)($_GET['page'] ?? 1));
+$current_page = $bk_f['page'];
 // Rows per page (?size= 10/25/50/100/all, default 10); "all" is settled once the list is counted (below).
-$bk_page_size = rh_bk_page_size($_GET['size'] ?? '10');
+$bk_page_size = $bk_f['size'];
 $per_page     = $bk_page_size === 'all' ? 10 : (int)$bk_page_size;
 
 // Header sort runs on the server (the whole list, then page 1): fixed key -> ORDER BY map.
 require_once __DIR__ . '/includes/server-sort.php';
-// Total sorts by the total the column shows; Room by the room number (else type name), natural order.
+// Total sorts by the total the column shows; Room by the room number (else type name), natural order; Balance due by
+// the Decision 9 rule (rh_bk_balance_due_sql). No header sort = the view's default order (Decision 5,
+// rh_bk_default_order). Resolved here, before the CSV export, so the export follows the screen's order.
 $bk_sort_map = rh_bk_sort_map();
-$bk_sort_key = '';
-$bk_sort_dir = 'desc';
+$list_order_by = rh_bk_default_order($active_tab_override, $filter_status);
+[$bk_sort_order, $bk_sort_key, $bk_sort_dir] = rh_server_sort_resolve($bk_sort_map, $list_order_by);
+if ($bk_sort_key !== '') {
+    $list_order_by = $bk_sort_key === 'room' ? rh_bk_room_sort_order($bk_sort_dir) : $bk_sort_order;
+}
 
 // Pre-initialise stats in case the main query throws
 $total_bookings = $pending = $tentative = $confirmed = $checked_in = 0;
@@ -3129,45 +3167,11 @@ $bookings_stats_insights = [];
 // Handle CSV export (filter-aware)
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     try {
-        $export_where_clauses = [];
-        $export_params = [];
-
-        // Same search rule as the list (rh_bk_search_where: every word matches somewhere, phone numbers by digits).
-        $export_search = rh_bk_search_where($search_query);
-        if ($export_search['sql'] !== '') {
-            $export_where_clauses[] = $export_search['sql'];
-            $export_params = array_merge($export_params, $export_search['params']);
-        }
-
-        $export_where_clauses[] = $filter_status === 'deleted' ? "b.deleted_at IS NOT NULL" : "b.deleted_at IS NULL";
-        if (!empty($filter_status) && $filter_status !== 'deleted') {
-            $export_where_clauses[] = "b.status = ?";
-            $export_params[] = $filter_status;
-        }
-
-        // Same rules as the on-screen list: dates (on the chosen date type), overdue arrivals, the open tab.
-        $export_dates = rh_bk_date_scope($filter_date_from, $filter_date_to, $filter_date_type);
-        $export_where_clauses = array_merge($export_where_clauses, $export_dates['clauses']);
-        $export_params = array_merge($export_params, $export_dates['params']);
-        if (($export_arrival = rh_bk_arrival_clause($filter_arrival)) !== null) {
-            $export_where_clauses[] = $export_arrival;
-        }
-        if (($export_departure = rh_bk_departure_clause($filter_departure)) !== null) {
-            $export_where_clauses[] = $export_departure;
-        }
-        if (($export_balance = rh_bk_balance_clause($filter_balance)) !== null) {
-            $export_where_clauses[] = $export_balance['clause'];
-            $export_params = array_merge($export_params, $export_balance['params']);
-        }
-        if (($export_since = rh_bk_since_clause($filter_since, $filter_since_kind)) !== null) {
-            $export_where_clauses[] = $export_since['clause'];
-            $export_params = array_merge($export_params, $export_since['params']);
-        }
-        // More filters (kind, room type, payment): the same pieces as the list.
-        $export_more = rh_bk_more_scope($filter_kind, $filter_room_type, $filter_pay, $bk_has_combos);
-        $export_where_clauses = array_merge($export_where_clauses, $export_more['clauses']);
-        $export_params = array_merge($export_params, $export_more['params']);
-        $export_where_clauses = array_merge($export_where_clauses, rh_bk_tab_clauses($active_tab_override)['clauses']);
+        // The list's own WHERE (rh_bk_list_scope, the same call as the list below: search, dates, overdue, balance,
+        // since, More filters, room, group, source, made by, deleted / status, the open tab) and its own ORDER BY.
+        $export_scope = rh_bk_list_scope($bk_f, $bk_has_combos);
+        $export_where_clauses = $export_scope['clauses'];
+        $export_params = $export_scope['params'];
 
         // Export selected (bulk bar, G5a): ?ids=1,2,3 exports just the ticked bookings (not deleted), whatever the filters.
         // An ids list with no valid id exports the header only, never the whole filtered list.
@@ -3194,12 +3198,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                          WHERE px.booking_type = 'room' AND px.booking_id = b.id AND px.deleted_at IS NULL
                                          ORDER BY px.created_at DESC
                                          LIMIT 1
-                                     ) as payment_reference
+                                     ) as payment_reference,
+                                     " . rh_bk_balance_due_sql('b') . " as balance_due
             FROM bookings b
             LEFT JOIN rooms r ON b.room_id = r.id
                         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
                         {$export_where_sql}
-            ORDER BY b.created_at DESC
+            ORDER BY {$list_order_by}, b.id DESC
         ");
         $export_stmt->execute($export_params);
         $export_data = $export_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -3224,6 +3229,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             'Total (incl. VAT & levy)',
             'Status',
             'Payment',
+            'Balance due', // plan Decision 9 (rh_bk_balance_due_sql); blank for a deleted booking
             'Payment Ref',
             'Occupancy',
             'Special Requests',
@@ -3248,6 +3254,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 number_format(rh_booking_full_total($row), 2, '.', ''),
                 $row['status'],
                 rh_booking_pay_state($row, ['currency' => (string)getSetting('currency_symbol', 'MWK')])['label'], // step 13: the badge's words
+                $row['balance_due'] === null ? '' : number_format((float)$row['balance_due'], 2, '.', ''),
                 $row['payment_reference'],
                 $row['occupancy_type'],
                 $row['special_requests'],
@@ -3291,52 +3298,13 @@ try {
 
 // Fetch all bookings with room details and payment status from payments table
 try {
-    $where_clauses = [];
-    $params = [];
-
-    // Search box: every word matches somewhere, a phone number matches by its digits (rh_bk_search_where, shared
-    // with the export so both give the same rows).
-    $bk_search = rh_bk_search_where($search_query);
-    if ($bk_search['sql'] !== '') {
-        $where_clauses[] = $bk_search['sql'];
-        $params = array_merge($params, $bk_search['params']);
-    }
-
-    // Date filters belong to the shared scope (search + dates) so the tab counts and insight cards
-    // match the list; they were added after the snapshot, so the counts ignored the dates.
-    // From / To on the chosen date type (rh_bk_date_scope), the same rule in badges, list, count, insights and export.
-    $bk_date_scope = rh_bk_date_scope($filter_date_from, $filter_date_to, $filter_date_type);
-    $where_clauses = array_merge($where_clauses, $bk_date_scope['clauses']);
-    $params        = array_merge($params, $bk_date_scope['params']);
-    // Overdue arrivals (no-show candidates, from the Room Dashboard / Dashboard alert): arrival date passed while
-    // still confirmed/pending. Part of the shared scope so every tab badge counts what the list shows.
-    if (($bk_arrival_clause = rh_bk_arrival_clause($filter_arrival)) !== null) {
-        $where_clauses[] = $bk_arrival_clause;
-    }
-    // Overdue departures (Dashboard chip): checked in, check-out date passed. Shared scope, like overdue arrivals.
-    if (($bk_departure_clause = rh_bk_departure_clause($filter_departure)) !== null) {
-        $where_clauses[] = $bk_departure_clause;
-    }
-    // Balance still to pay (Dashboard "Departures with a balance"): shared scope too, so the badges match the list.
-    if (($bk_balance_clause = rh_bk_balance_clause($filter_balance)) !== null) {
-        $where_clauses[] = $bk_balance_clause['clause'];
-        $params = array_merge($params, $bk_balance_clause['params']);
-    }
-    // Since the last sign-in (Dashboard "Since you were last here"): shared scope, so badges, list and count agree.
-    if (($bk_since_clause = rh_bk_since_clause($filter_since, $filter_since_kind)) !== null) {
-        $where_clauses[] = $bk_since_clause['clause'];
-        $params = array_merge($params, $bk_since_clause['params']);
-    }
-    // More filters (Booking kind, Room type, Payment; rh_bk_more_scope): shared scope too, so every badge counts what the
-    // list shows.
-    $bk_more_scope = rh_bk_more_scope($filter_kind, $filter_room_type, $filter_pay, $bk_has_combos);
-    $where_clauses = array_merge($where_clauses, $bk_more_scope['clauses']);
-    $params        = array_merge($params, $bk_more_scope['params']);
+    // The shared scope (rh_bk_scope: search, dates, overdue arrivals / departures, balance, since, More filters, room,
+    // group, source, made by) so every tab badge, the insight cards, the list, its count and the export agree.
+    $bk_scope = rh_bk_scope($bk_f, $bk_has_combos);
 
     // Deleted bookings are only ever shown under the Deleted filter; every count/insight excludes them.
-    $deleted_scope_clauses = $where_clauses;
-    $deleted_scope_params  = $params;
-    $where_clauses[] = $filter_status === 'deleted' ? "b.deleted_at IS NOT NULL" : "b.deleted_at IS NULL";
+    $deleted_scope_clauses = $bk_scope['clauses'];
+    $deleted_scope_params  = $bk_scope['params'];
 
     // Snapshot where clauses for insights (respects search/date filters but not status filter)
     // so insight cards show filtered data matching the current search/date scope.
@@ -3348,12 +3316,6 @@ try {
     $stats_where_clauses = $insights_where_clauses;
     $stats_params        = $deleted_scope_params;
 
-    if (!empty($filter_status) && $filter_status !== 'deleted') {
-        $where_clauses[] = "b.status = ?";
-        $params[] = $filter_status;
-    }
-
-    $where_sql       = !empty($where_clauses)       ? 'WHERE ' . implode(' AND ', $where_clauses)       : '';
     $stats_where_sql = !empty($stats_where_clauses) ? 'WHERE ' . implode(' AND ', $stats_where_clauses) : '';
 
     // ── Stats: single query for all tab-badge counts (no payments join to avoid row duplication) ──
@@ -3486,42 +3448,8 @@ try {
         return array_map($map_bookings_stats_row, $rows);
     };
 
-    $insight_base_query = [];
-    if ($search_query !== '') {
-        $insight_base_query['search'] = $search_query;
-    }
-    if ($filter_date_from !== '') {
-        $insight_base_query['date_from'] = $filter_date_from;
-    }
-    if ($filter_date_to !== '') {
-        $insight_base_query['date_to'] = $filter_date_to;
-    }
-    if ($bk_has_dates) {
-        $insight_base_query['date_type'] = $filter_date_type; // the cards' links keep which date From / To apply to
-    }
-    if ($filter_arrival !== '') {
-        $insight_base_query['arrival'] = $filter_arrival; // the cards' rows are in the same overdue scope
-    }
-    if ($filter_departure !== '') {
-        $insight_base_query['departure'] = $filter_departure;
-    }
-    if ($filter_balance !== '') {
-        $insight_base_query['balance'] = $filter_balance;
-    }
-    if ($filter_since !== '') {
-        $insight_base_query['since'] = $filter_since;
-        $insight_base_query['since_kind'] = $filter_since_kind;
-    }
-    // More filters: the cards' links keep them (the cards' rows are in the same scope).
-    if ($filter_kind !== '') {
-        $insight_base_query['kind'] = $filter_kind;
-    }
-    if ($filter_room_type > 0) {
-        $insight_base_query['room_type'] = (string)$filter_room_type;
-    }
-    if ($filter_pay !== '') {
-        $insight_base_query['pay'] = $filter_pay;
-    }
+    // The cards' links keep the whole shared scope (their rows are in it); not the status, tab, page size or page.
+    $insight_base_query = rh_bk_keep_params($bk_f, ['filter_status', 'filter', 'size', 'page']);
 
     $bookings_stats_rows = [
         'total_bookings' => $fetch_bookings_stats_rows([], [], 'b.created_at DESC'),
@@ -3594,27 +3522,18 @@ try {
         ],
     ];
 
-    // Build list-specific WHERE and ORDER BY — server-side constraints for all tab shortcuts.
-    // Stats query above stays unfiltered so badge counts remain accurate.
-    // Tab shortcuts: the same WHERE pieces as the badge SUMs above (rh_bk_tab_clauses).
-    $bk_tab_rule = rh_bk_tab_clauses($active_tab_override);
-    $tab_extra_clauses = $bk_tab_rule['clauses'];
-    $list_order_by = $bk_tab_rule['order'] ?? 'b.created_at DESC';
-    // Status-based tabs (pending, tentative, confirmed, checked-in, checked-out, cancelled, no-show)
-    // are already handled by $filter_status → $where_clauses — no extra clauses needed.
-
-    [$bk_sort_order, $bk_sort_key, $bk_sort_dir] = rh_server_sort_resolve($bk_sort_map, $list_order_by);
-    if ($bk_sort_key !== '') {
-        $list_order_by = $bk_sort_key === 'room' ? rh_bk_room_sort_order($bk_sort_dir) : $bk_sort_order;
-    }
-
-    $list_where_clauses = array_merge($where_clauses, $tab_extra_clauses);
+    // The list's WHERE: rh_bk_list_scope, the same call as the CSV export (shared scope, deleted / status, then the
+    // open tab's pieces, which are the badge SUMs' pieces above). ORDER BY: $list_order_by, resolved before the export.
+    $tab_extra_clauses = rh_bk_tab_clauses($active_tab_override)['clauses'];
+    $bk_list_scope = rh_bk_list_scope($bk_f, $bk_has_combos);
+    $list_where_clauses = $bk_list_scope['clauses'];
+    $params = $bk_list_scope['params'];
     $list_where_sql = !empty($list_where_clauses) ? 'WHERE ' . implode(' AND ', $list_where_clauses) : '';
 
-    // Re-count for pagination when the list is filtered by tab override, status filter, search, or date filters.
+    // Re-count for pagination when the list is filtered by a tab or any filter.
     // Use a separate variable so $total_bookings remains the global count for the "All" tab badge.
     $list_count = $total_bookings;
-    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $filter_since !== '' || $bk_more_active) {
+    if (!empty($tab_extra_clauses) || $has_active_room_filters) {
         $cnt_stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM bookings b
@@ -3629,6 +3548,7 @@ try {
     // Rows per page: "All" shows every row while the list has at most RH_BK_ALL_ROWS_MAX, else 100 a page.
     $bk_size_resolved = rh_bk_resolve_page_size($bk_page_size, $list_count);
     $bk_page_size = $bk_size_resolved['size'];
+    $bk_f['size'] = $bk_page_size; // kept links / inputs carry the size in force ("All" above the cap = 100)
     $per_page     = $bk_size_resolved['per_page'];
 
     // Clamp current page to valid range and compute offset
@@ -3869,7 +3789,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             <form method="GET" data-live-search-form="room-bookings" class="bookings-toolbar__form">
                 <?php echo rh_server_sort_hidden($bk_sort_key, $bk_sort_dir); ?>
                 <?php /* Searching or filtering keeps the open tab and the overdue views (the notice + Clear is the way out). */ ?>
-                <?php foreach (['filter' => $bk_filter_key, 'arrival' => $filter_arrival, 'departure' => $filter_departure, 'balance' => $filter_balance, 'since' => $filter_since, 'since_kind' => $filter_since_kind, 'size' => ($bk_page_size !== '10' ? $bk_page_size : '')] as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
+                <?php /* Every kept param the form has no field for (rh_bk_keep_params without the form's own fields and the page). */ ?>
+                <?php foreach (rh_bk_keep_params($bk_f, ['search', 'filter_status', 'date_from', 'date_to', 'date_type', 'kind', 'room_type', 'pay', 'page']) as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
                     <input type="hidden" name="<?php echo $bk_keep_k; ?>" value="<?php echo htmlspecialchars($bk_keep_v, ENT_QUOTES); ?>" data-bk-keep>
                 <?php endif; endforeach; ?>
                 <div class="bookings-toolbar__search">
@@ -4555,23 +4476,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                          rows-per-page choice is always there to switch back from 50 / All. */ ?>
                 <?php if ($total_pages > 1 || $list_count > 10): ?>
                     <?php
-                    $pg_params = array_filter([
-                        'search'        => $search_query,
-                        'filter_status' => $filter_status,
-                        'date_from'     => $filter_date_from,
-                        'date_to'       => $filter_date_to,
-                        'date_type'     => $bk_has_dates ? $filter_date_type : '',
-                        'filter'        => $bk_filter_key,   // keep the open tab (Unpaid, Today's Check-ins...) on page 2+
-                        'arrival'       => $filter_arrival,
-                        'departure'     => $filter_departure,
-                        'balance'       => $filter_balance,
-                        'since'         => $filter_since,
-                        'since_kind'    => $filter_since_kind,
-                        'kind'          => $filter_kind,      // More filters kept on every page link
-                        'room_type'     => $filter_room_type > 0 ? (string)$filter_room_type : '',
-                        'pay'           => $filter_pay,
-                        'size'          => $bk_page_size !== '10' ? $bk_page_size : '',   // rows per page kept on every page link
-                    ], fn($v) => $v !== '');
+                    // Every filter, the open tab (Unpaid, Today's Check-ins...) and the rows per page kept on every page link.
+                    $pg_params = rh_bk_keep_params($bk_f, ['page']);
                     $pg_params = array_merge($pg_params, rh_server_sort_params($bk_sort_key, $bk_sort_dir));
                     $pg_base = 'bookings.php?' . (empty($pg_params) ? '' : http_build_query($pg_params) . '&');
                     ?>
@@ -4709,7 +4615,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 if (!f || !f.matches || !f.matches('[data-live-search-form="room-bookings"]')) return;
                 const cur = new URLSearchParams(window.location.search);
                 f.querySelectorAll('input[data-bk-keep]').forEach(i => i.remove());
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size'].forEach(k => {
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'room', 'group', 'source', 'created_by', 'size'].forEach(k => {
                     const v = cur.get(k);
                     if (!v) return;
                     const i = document.createElement('input');
@@ -4738,7 +4644,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 new FormData(searchForm).forEach(function(v, k) {
                     if (typeof v === 'string' && !searchForm.querySelector('input[data-bk-keep][name="' + k + '"]')) params.append(k, v);
                 });
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size'].forEach(function(k) {
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'room', 'group', 'source', 'created_by', 'size'].forEach(function(k) {
                     const v = keep.get(k);
                     if (v) params.set(k, v);
                 });
