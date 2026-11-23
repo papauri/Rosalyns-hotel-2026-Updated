@@ -427,6 +427,33 @@ a.ck-daychip--warn:hover { text-decoration: underline; }
 .ck-attn__item.is-top .ck-attn__text small { color: rgba(243, 236, 228, .7); }
 .ck-attn__item.is-top .ck-attn__icon { background: rgba(210, 174, 114, .18); color: var(--ck-gold-on-dark); }
 
+/* Handover note (first-login plan C3): first row of Needs attention, not a link, so no hover nudge */
+.ck-attn__item--note:hover { transform: none; }
+.ck-attn__note { font-size: 13px; line-height: 1.45; color: var(--ck-ink); overflow-wrap: anywhere; }
+.ck-handover-form { gap: 10px; }
+.ck-handover-form textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--ck-line-strong);
+    background: var(--ck-softer);
+    color: var(--ck-ink);
+    font: 400 14px/1.45 'Jost', system-ui, sans-serif;
+    resize: vertical;
+}
+.ck-handover-form textarea:focus-visible { outline: 3px solid var(--ck-gold-on-dark); outline-offset: 1px; }
+.ck-handover-form__hint { margin: 0; font-size: 12.5px; color: var(--ck-muted); }
+.ck-handover-form__actions { display: flex; gap: 8px; }
+.ck-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+/* First-login welcome card (first-login plan C4) */
+.ck-welcome { flex-direction: row; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 20px; }
+.ck-welcome__body { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1 1 320px; }
+.ck-welcome__role { margin: 0; font-size: 14px; color: var(--ck-ink-2); }
+.ck-welcome__label { margin: 4px 0 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ck-muted); }
+.ck-welcome__links { display: flex; flex-wrap: wrap; gap: 6px; }
+
 .ck-clear { border-top: 1px dashed var(--ck-line-strong); padding-top: 12px; }
 .ck-clear > summary { cursor: pointer; font-size: 13px; color: var(--ck-good); font-weight: 500; list-style: none; }
 .ck-clear > summary::-webkit-details-marker { display: none; }

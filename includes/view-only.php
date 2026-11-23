@@ -13,7 +13,8 @@
  *     it by default.
  *
  * What still works: reading (pages, and requests whose action only reads), signing out, changing one's own password, the
- * Licence page, search and look-ups, and harmless bookkeeping (online presence, menu favourites, sidebar state).
+ * Licence page, search and look-ups, and harmless bookkeeping (online presence, menu favourites, sidebar state, the
+ * dashboard's "mark read" and "Got it").
  * Everything else that is not a plain read is refused, including check-out, payments and backups (stricter than the
  * licence's read-only step).
  *
@@ -37,7 +38,7 @@ if (!function_exists('rh_view_only_guard')) {
             'admin_api' => [
                 'any' => ['presence.php', 'nav-favorites.php', 'nav-sidebar-state.php', 'global-search.php', 'search-bookings.php',
                     'guest-lookup.php', 'check-unique.php', 'user-check-unique.php', 'system-health.php',
-                    'get-housekeeping-audit.php', 'get-maintenance-audit.php', 'end-of-day-pdf.php'],
+                    'get-housekeeping-audit.php', 'get-maintenance-audit.php', 'end-of-day-pdf.php', 'dashboard-seen.php'],
                 'actions' => [],
             ],
             'station' => ['any' => ['reports-export.php', 'pos-tab-detail.php', 'pos-notifications.php'], 'actions' => []],

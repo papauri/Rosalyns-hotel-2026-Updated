@@ -1,6 +1,6 @@
 <?php
 /**
- * Dashboard first-login readers (plan .claude/DASHBOARD_FIRSTLOGIN_PLAN.md, tasks A2-A4, B2). Read-only, prepared
+ * Dashboard first-login readers (plan .claude/DASHBOARD_FIRSTLOGIN_PLAN.md, tasks A2-A4, B2, C2-C4). Read-only, prepared
  * statements; any fault returns null so the dashboard hides the line instead of showing a wrong one. The wording
  * is in admin/includes/dashboard-firstlogin.php (pure). Tested by scripts/tests/dashboard_firstlogin.php --db.
  */
@@ -143,6 +143,87 @@ if (!function_exists('rh_dash_since_counts')) {
         } catch (Throwable $e) {
             error_log('rh_dash_since_counts: ' . $e->getMessage());
             return null;
+        }
+    }
+}
+
+if (!function_exists('rh_dash_table_missing')) {
+    /**
+     * True when $e is "table does not exist" (SQLSTATE 42S02 / MySQL 1146): migration 091 not run on this database yet.
+     * That is expected (migrations run by hand), so the callers stay silent instead of logging on every page load.
+     */
+    function rh_dash_table_missing(Throwable $e): bool
+    {
+        if (!$e instanceof PDOException) {
+            return false;
+        }
+        $info = $e->errorInfo;
+        return (string)$e->getCode() === '42S02'
+            || (is_array($info) && ((string)($info[0] ?? '') === '42S02' || (int)($info[1] ?? 0) === 1146));
+    }
+}
+
+if (!function_exists('rh_dash_handover_unread')) {
+    /**
+     * Handover notes for the dashboard (plan C2/C3): the newest note $uid has not marked read that has not expired
+     * (expires_at > NOW(), database time on both sides), plus how many other such notes there are. A note's author has a
+     * read row from the moment it is written, so authors never see their own note.
+     * -> ['note' => ['id', 'body', 'from', 'at'] | null, 'more' => int]; null = not available here (tables missing, or
+     * a fault): the dashboard then shows no handover button and no item, exactly as before.
+     */
+    function rh_dash_handover_unread(PDO $pdo, int $uid): ?array
+    {
+        if ($uid <= 0) {
+            return null;
+        }
+        $unread = "FROM shift_handover_notes n
+            LEFT JOIN shift_handover_reads r ON r.note_id = n.id AND r.user_id = ?
+            WHERE n.expires_at > NOW() AND r.note_id IS NULL";
+        try {
+            $c = $pdo->prepare('SELECT COUNT(*) ' . $unread);
+            $c->execute([$uid]);
+            $count = (int)$c->fetchColumn();
+            if ($count === 0) {
+                return ['note' => null, 'more' => 0];
+            }
+            $st = $pdo->prepare('SELECT n.id, n.body, n.created_by_name, n.created_at ' . $unread . ' ORDER BY n.created_at DESC, n.id DESC LIMIT 1');
+            $st->execute([$uid]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return ['note' => null, 'more' => 0];
+            }
+            return [
+                'note' => ['id' => (int)$row['id'], 'body' => (string)$row['body'], 'from' => (string)$row['created_by_name'], 'at' => (string)$row['created_at']],
+                'more' => max(0, $count - 1),
+            ];
+        } catch (Throwable $e) {
+            if (!rh_dash_table_missing($e)) {
+                error_log('rh_dash_handover_unread: ' . $e->getMessage());
+            }
+            return null;
+        }
+    }
+}
+
+if (!function_exists('rh_dash_welcome_show')) {
+    /**
+     * Show the first-login welcome card (plan C4)? True while $uid has no 'dashboard_welcome_dismissed' preference.
+     * False on any fault or a missing admin_user_preferences table (the dashboard then renders as before).
+     */
+    function rh_dash_welcome_show(PDO $pdo, int $uid): bool
+    {
+        if ($uid <= 0) {
+            return false;
+        }
+        try {
+            $st = $pdo->prepare("SELECT 1 FROM admin_user_preferences WHERE user_id = ? AND preference_key = 'dashboard_welcome_dismissed' LIMIT 1");
+            $st->execute([$uid]);
+            return $st->fetchColumn() === false;
+        } catch (Throwable $e) {
+            if (!rh_dash_table_missing($e)) {
+                error_log('rh_dash_welcome_show: ' . $e->getMessage());
+            }
+            return false;
         }
     }
 }

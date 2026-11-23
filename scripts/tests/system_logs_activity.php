@@ -42,6 +42,9 @@ $cd = 'Cola: cost per bottle 1,200.0000 → 50.0000 (crate of 24); value 24,000 
 $cw = rh_sa_named_action_text('stock_cost_correction', $cd);
 check(strpos($cw, 'Corrected a crate price: Cola') === 0 && substr($cw, -110) === 'item #42. ' . str_repeat('x', 100) && rh_sa_action_type('stock_cost_correction') === 'stock', 'crate-price correction: whole details kept, type Stock');
 check(mb_strlen(rh_sa_named_action_text('supplier_deleted', str_repeat('y', 300))) === mb_strlen('Deleted a supplier: ') + 140, 'other named actions still cut at 140 characters');
+// Dashboard handover notes (first-login plan C2): plain labels, the note id only.
+check(rh_sa_named_action_text('handover_note_written', 'Note #12') === 'Wrote a handover note: Note #12', 'handover: "Wrote a handover note: Note #12"', rh_sa_named_action_text('handover_note_written', 'Note #12'));
+check(rh_sa_named_action_text('handover_note_read', 'Note #12') === 'Read a handover note: Note #12', 'handover: "Read a handover note: Note #12"', rh_sa_named_action_text('handover_note_read', 'Note #12'));
 
 // ---- Timeline pager (pure): shared pager, key 'sa', newest 1000 lines reachable ----
 $pg = rh_sa_pager([], 25);
@@ -240,7 +243,7 @@ foreach (['get_rooms', 'search_guest', 'poll', 'preview', 'load_more', 'list_ord
 }
 check($d('/admin/pos.php', 'POST', [], ['action' => 'get_menu', 'ajax' => 'poll']) === null, 'hook: every action key a read means skipped');
 check($d('/admin/pos.php', 'POST', [], ['action' => 'get_menu', 'booking_action' => 'checkin']) !== null, 'hook: a write hiding behind a read name is still recorded');
-foreach (['presence.php', 'nav-favorites.php', 'global-search.php', 'system-health.php', 'ai-chat.php', 'guest-lookup.php', 'decisions.php'] as $bg) {
+foreach (['presence.php', 'nav-favorites.php', 'global-search.php', 'system-health.php', 'ai-chat.php', 'guest-lookup.php', 'decisions.php', 'handover-notes.php', 'dashboard-seen.php'] as $bg) {
     check($d('/admin/api/' . $bg, 'POST', [], ['action' => 'save']) === null, "hook: background endpoint $bg skipped");
 }
 check($d('/admin/pos.php', 'POST', [], ['action' => "x'; DROP TABLE y;--"]) === 'page=pos.php; action=other', 'hook: free text in an action field is stored as "other"');

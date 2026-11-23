@@ -2373,6 +2373,28 @@ $currency_symbol = getSetting('currency_symbol');
             }
         }
 
+        // ---- Handover note + first-login welcome card (first-login plan C3/C4) ----
+        // null = the handover tables are not there yet (migration 091 runs by hand): no button, no item, page as before.
+        $handover = rh_dash_handover_unread($pdo, $uid);
+        $handoverNote = $handover['note'] ?? null;
+        $handoverFrom = $handoverNote ? rh_dash_handover_from_text($handoverNote['from'], $handoverNote['at'], date('Y-m-d'), (int)$handover['more']) : '';
+        // One list for the hero Guides menu and the welcome card (same conditions).
+        $guideLinks = rh_dash_guide_links([
+            'bookings' => $mod_bookings, 'pos' => $mod_pos, 'kds' => $mod_station_kds, 'bds' => $mod_station_bds, 'cds' => $mod_station_cds,
+            'room_service' => $mod_station_room_service, 'housekeeping' => $mod_housekeeping, 'stock' => $mod_stock || $mod_orders,
+            'finance' => $finance_guide, 'reports' => $mod_finance && $dash_perm('reports'),
+        ]);
+        $welcomeCard = null;
+        if (rh_dash_welcome_show($pdo, $uid)) {
+            $welcomeRole = (string)($user['role'] ?? '');
+            $welcomeRoles = getAllRoles();
+            $welcomeCard = [
+                'label' => rh_role_display_label(['role' => $welcomeRole, 'is_super_admin' => rh_is_super_admin($uid) ? 1 : 0]),
+                'desc' => (string)($welcomeRoles[$welcomeRole]['description'] ?? ''),
+                'pages' => rh_dash_welcome_pages($welcomeRole, $can),
+            ];
+        }
+
         // ---- Trend chart scaling ----
         $trendMax = max(1.0, ...array_values($revenueTrend ?: [0]));
         $trendTotal = array_sum($revenueTrend);
@@ -2424,25 +2446,59 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php if ($mod_finance && $can('accounting-dashboard.php')): ?>
                     <a class="ck-btn" href="accounting-dashboard.php"><i class="fas fa-scale-balanced"></i><span>Accounting</span></a>
                 <?php endif; ?>
+                <?php if ($handover !== null): ?>
+                    <button type="button" class="ck-btn ck-btn--ghost" id="ckHandoverOpen" aria-expanded="false" aria-controls="ckHandoverForm"><i class="fas fa-clipboard"></i><span>Handover note</span></button>
+                <?php endif; ?>
                 <details class="ck-menu">
                     <summary class="ck-btn ck-btn--ghost" aria-label="Guides"><i class="fas fa-book-open"></i><span>Guides</span><i class="fas fa-chevron-down ck-menu__caret"></i></summary>
                     <div class="ck-menu__list">
-                        <a href="../docs/guides/index.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> All guides</a>
-                        <a href="../docs/guides/99-admin-dashboard-full-guide.html" target="_blank" rel="noopener"><i class="fas fa-scroll"></i> Admin reference</a>
-                        <?php if ($mod_bookings): ?><a href="../docs/guides/07-reception-bookings.html" target="_blank" rel="noopener"><i class="fas fa-calendar-check"></i> Reception</a><?php endif; ?>
-                        <?php if ($mod_pos): ?><a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i> POS till</a><?php endif; ?>
-                        <?php if ($mod_station_kds): ?><a href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> Kitchen (KDS)</a><?php endif; ?>
-                        <?php if ($mod_station_bds): ?><a href="../docs/guides/03-bds-bar.html" target="_blank" rel="noopener"><i class="fas fa-martini-glass"></i> Bar (BDS)</a><?php endif; ?>
-                        <?php if ($mod_station_cds): ?><a href="../docs/guides/04-cds-coffee.html" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i> Coffee (CDS)</a><?php endif; ?>
-                        <?php if ($mod_station_room_service): ?><a href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room service</a><?php endif; ?>
-                        <?php if ($mod_housekeeping): ?><a href="../docs/guides/06-housekeeping.html" target="_blank" rel="noopener"><i class="fas fa-broom"></i> Housekeeping</a><?php endif; ?>
-                        <?php if ($mod_stock || $mod_orders): ?><a href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes-stacked"></i> Stock</a><?php endif; ?>
-                        <?php if ($finance_guide): ?><a href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance</a><?php endif; ?>
-                        <?php if ($mod_finance && $dash_perm('reports')): ?><a href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-column"></i> Reports &amp; EOD</a><?php endif; ?>
+                        <?php foreach ($guideLinks as $gl): ?>
+                        <a href="<?php echo htmlspecialchars($gl['href']); ?>" target="_blank" rel="noopener"><i class="fas <?php echo htmlspecialchars($gl['icon']); ?>"></i> <?php echo htmlspecialchars($gl['label']); ?></a>
+                        <?php endforeach; ?>
                     </div>
                 </details>
             </nav>
         </header>
+
+        <?php if ($handover !== null): ?>
+        <!-- Handover note form (first-login plan C3): opened by the hero button, posts to api/handover-notes.php. -->
+        <form class="ck-panel ck-handover-form" id="ckHandoverForm" hidden>
+            <label class="ck-field" for="ckHandoverBody"><span>Handover note for the next shift</span></label>
+            <textarea id="ckHandoverBody" name="body" maxlength="500" rows="3" required></textarea>
+            <p class="ck-handover-form__hint">Everyone sees it at the top of Needs attention until they mark it read. It stops showing after 48 hours.</p>
+            <div class="ck-handover-form__actions">
+                <button type="submit" class="ck-btn ck-btn--primary ck-btn--sm" id="ckHandoverSave">Save</button>
+                <button type="button" class="ck-btn ck-btn--sm" id="ckHandoverCancel">Cancel</button>
+            </div>
+        </form>
+        <?php endif; ?>
+
+        <?php if ($welcomeCard): ?>
+        <!-- First-login welcome card (first-login plan C4): shown until "Got it" (api/dashboard-seen.php). -->
+        <section class="ck-panel ck-welcome" id="ckWelcome" aria-labelledby="ckWelcomeTitle">
+            <div class="ck-welcome__body">
+                <h2 class="ck-panel__title" id="ckWelcomeTitle">Welcome to your dashboard</h2>
+                <p class="ck-welcome__role">You are signed in as <strong><?php echo htmlspecialchars($welcomeCard['label']); ?></strong><?php echo $welcomeCard['desc'] !== '' ? '. ' . htmlspecialchars($welcomeCard['desc']) . '.' : '.'; ?></p>
+                <?php if ($welcomeCard['pages']): ?>
+                <p class="ck-welcome__label">Your main pages</p>
+                <div class="ck-welcome__links">
+                    <?php foreach ($welcomeCard['pages'] as $wp): ?>
+                    <a class="ck-chip" href="<?php echo htmlspecialchars($wp['page']); ?>"><i class="fas <?php echo htmlspecialchars($wp['icon']); ?>"></i> <?php echo htmlspecialchars($wp['label']); ?></a>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+                <?php if ($guideLinks): ?>
+                <p class="ck-welcome__label">Guides</p>
+                <div class="ck-welcome__links">
+                    <?php foreach ($guideLinks as $gl): ?>
+                    <a class="ck-chip ck-chip--muted" href="<?php echo htmlspecialchars($gl['href']); ?>" target="_blank" rel="noopener"><i class="fas <?php echo htmlspecialchars($gl['icon']); ?>"></i> <?php echo htmlspecialchars($gl['label']); ?></a>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+            </div>
+            <button type="button" class="ck-btn ck-btn--sm" id="ckWelcomeDismiss">Got it</button>
+        </section>
+        <?php endif; ?>
 
         <?php if (hasPermission($uid, 'system_logs')): ?>
         <!-- System health: silent while all is well; appears only when something needs the owner's attention.
@@ -2749,7 +2805,7 @@ $currency_symbol = getSetting('currency_symbol');
             </section>
             <?php endif; ?>
 
-            <?php if ($attn): ?>
+            <?php if ($attn || $handoverNote): // the handover note is not an attention item: never in $attnTotal (badge, hero) ?>
             <!-- Needs attention -->
             <section class="ck-panel ck-attn<?php echo $todayTabs ? ' ck-rows-2' : ''; ?>">
                 <header class="ck-panel__head">
@@ -2778,8 +2834,21 @@ $currency_symbol = getSetting('currency_symbol');
                         <?php endif; ?>
                     </div>
                 </header>
-                <?php if ($attnOpen): ?>
-                <ul class="ck-attn__list">
+                <?php if ($attnOpen || $handoverNote): ?>
+                <ul class="ck-attn__list" id="ckAttnList">
+                    <?php if ($handoverNote): ?>
+                    <li data-handover-item>
+                        <div class="ck-attn__item ck-attn__item--amber ck-attn__item--note">
+                            <span class="ck-attn__icon"><i class="fas fa-clipboard"></i></span>
+                            <span class="ck-attn__text">
+                                <strong>Handover note</strong>
+                                <span class="ck-attn__note" data-handover-body><?php echo nl2br(htmlspecialchars($handoverNote['body'])); ?></span>
+                                <small data-handover-from><?php echo htmlspecialchars($handoverFrom); ?></small>
+                            </span>
+                            <button type="button" class="ck-btn ck-btn--sm" data-handover-read="<?php echo (int)$handoverNote['id']; ?>">Mark read</button>
+                        </div>
+                    </li>
+                    <?php endif; ?>
                     <?php foreach ($attnOpen as $i => $a): ?>
                     <?php $attnTag = $a['href'] !== '' ? 'a' : 'div'; // no href = plain text (user cannot open that page) ?>
                     <li>
@@ -2796,7 +2865,8 @@ $currency_symbol = getSetting('currency_symbol');
                     </li>
                     <?php endforeach; ?>
                 </ul>
-                <?php else: ?>
+                <?php endif; ?>
+                <?php if (!$attnOpen): ?>
                     <div class="ck-empty ck-empty--good"><i class="fas fa-circle-check"></i><p><strong>All clear.</strong> Nothing is waiting on you.</p></div>
                 <?php endif; ?>
                 <?php if ($attnClear): ?>
@@ -3073,6 +3143,95 @@ $currency_symbol = getSetting('currency_symbol');
     <script src="js/admin-components.js"></script>
     <script>
         const _dashCsrf = <?php echo json_encode($csrf_token); ?>;
+
+        // ---- Handover note + welcome card (first-login plan C3/C4) ----
+        function dashPost(url, fields) {
+            const fd = new FormData();
+            Object.keys(fields).forEach((k) => fd.append(k, fields[k]));
+            fd.append('csrf_token', _dashCsrf);
+            return fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then((r) => r.json().catch(() => ({ success: false, error: 'Unexpected answer from the server.' })));
+        }
+        function dashShowError(msg) {
+            if (window.Alert && typeof window.Alert.show === 'function') { window.Alert.show(msg, 'error'); } else { window.alert(msg); }
+        }
+        (function () {
+            const openBtn = document.getElementById('ckHandoverOpen');
+            const form = document.getElementById('ckHandoverForm');
+            if (openBtn && form) {
+                const body = document.getElementById('ckHandoverBody');
+                const save = document.getElementById('ckHandoverSave');
+                const close = () => { form.hidden = true; openBtn.setAttribute('aria-expanded', 'false'); };
+                openBtn.addEventListener('click', () => {
+                    form.hidden = !form.hidden;
+                    openBtn.setAttribute('aria-expanded', form.hidden ? 'false' : 'true');
+                    if (!form.hidden) { body.focus(); }
+                });
+                document.getElementById('ckHandoverCancel').addEventListener('click', close);
+                form.addEventListener('submit', (ev) => {
+                    ev.preventDefault();
+                    if (save.disabled) { return; } // one save per click: no double note
+                    const text = body.value.trim();
+                    if (text === '' || text.length > 500) { dashShowError('Write a note of 1 to 500 characters.'); return; }
+                    save.disabled = true;
+                    dashPost('api/handover-notes.php', { action: 'write', body: text }).then((d) => {
+                        if (d && d.success) {
+                            body.value = '';
+                            close();
+                            if (window.Alert && typeof window.Alert.show === 'function') { window.Alert.show('Handover note saved. Everyone else sees it on their dashboard.', 'success'); }
+                        } else {
+                            dashShowError((d && d.error) || 'The note could not be saved.');
+                        }
+                    }).catch(() => dashShowError('The note could not be saved. Check the connection and try again.'))
+                      .finally(() => { save.disabled = false; });
+                });
+            }
+
+            // Mark read: show the next unread note in the same row, or remove the row.
+            const fillBody = (el, text) => {
+                el.textContent = '';
+                String(text).split('\n').forEach((line, i) => { if (i) { el.appendChild(document.createElement('br')); } el.appendChild(document.createTextNode(line)); });
+            };
+            document.querySelectorAll('[data-handover-read]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    if (btn.disabled) { return; }
+                    btn.disabled = true;
+                    dashPost('api/dashboard-seen.php', { action: 'handover_read', note_id: btn.getAttribute('data-handover-read') }).then((d) => {
+                        const li = btn.closest('[data-handover-item]');
+                        if (!d || !d.success) {
+                            // A note that expired meanwhile is gone anyway.
+                            if (d && d.error === 'That note is no longer there.' && li) { li.remove(); }
+                            else { dashShowError((d && d.error) || 'Could not mark the note read.'); }
+                            btn.disabled = false;
+                            return;
+                        }
+                        const next = d.data && d.data.next;
+                        if (next && li) {
+                            fillBody(li.querySelector('[data-handover-body]'), next.body);
+                            li.querySelector('[data-handover-from]').textContent = next.from;
+                            btn.setAttribute('data-handover-read', String(next.id));
+                            btn.disabled = false;
+                        } else if (li) {
+                            const list = li.parentElement;
+                            li.remove();
+                            if (list && !list.querySelector('li')) { list.remove(); }
+                        }
+                    }).catch(() => { btn.disabled = false; dashShowError('Could not mark the note read. Check the connection and try again.'); });
+                });
+            });
+
+            const gotIt = document.getElementById('ckWelcomeDismiss');
+            if (gotIt) {
+                gotIt.addEventListener('click', () => {
+                    gotIt.disabled = true;
+                    const card = document.getElementById('ckWelcome');
+                    if (card) { card.hidden = true; } // hidden now; the saved choice keeps it hidden next time
+                    dashPost('api/dashboard-seen.php', { action: 'welcome_dismissed' }).then((d) => {
+                        if (!d || !d.success) { if (card) { card.hidden = false; } gotIt.disabled = false; dashShowError((d && d.error) || 'Could not save that right now.'); }
+                    }).catch(() => { if (card) { card.hidden = false; } gotIt.disabled = false; });
+                });
+            }
+        })();
 
         const _insightModal = document.getElementById('dashboardInsightModal');
         const _insightEyebrow = document.getElementById('dashboardInsightEyebrow');

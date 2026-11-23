@@ -464,6 +464,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             'stock_main_unit_changed' => 'Changed the main unit of a stock item', // Stock Items > Change main unit (admin/includes/stock-unit-change-lib.php)
             'menu_items_bulk_deleted' => 'Deleted selected menu items', 'menu_items_all_deleted' => 'Deleted all menu items', // Menu Management bulk delete (owner 2026-11-21)
             'room_block' => 'Blocked rooms', 'room_unblock' => 'Unblocked rooms', // Blocked Dates screen + API (includes/block-log.php): rooms, nights, bookings
+            'handover_note_written' => 'Wrote a handover note', 'handover_note_read' => 'Read a handover note', // dashboard handover notes (details: note id only, never the text)
         ];
         $text = $names[$action] ?? ucfirst(rh_sa_prettify($action));
         if (!in_array($action, ['login_success', 'logout', 'login_failed', 'login_blocked'], true) && trim($details) !== '') {

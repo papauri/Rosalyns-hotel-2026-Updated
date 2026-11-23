@@ -107,7 +107,7 @@ if (!function_exists('rh_licence_guard_request')) {
             'admin_api' => [
                 'any' => ['presence.php', 'nav-favorites.php', 'nav-sidebar-state.php', 'global-search.php', 'search-bookings.php',
                     'guest-lookup.php', 'check-unique.php', 'user-check-unique.php', 'system-health.php',
-                    'get-housekeeping-audit.php', 'get-maintenance-audit.php', 'end-of-day-pdf.php'],
+                    'get-housekeeping-audit.php', 'get-maintenance-audit.php', 'end-of-day-pdf.php', 'dashboard-seen.php'],
                 'actions' => [],
             ],
             'station' => [

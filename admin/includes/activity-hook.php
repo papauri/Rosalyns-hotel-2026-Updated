@@ -31,7 +31,7 @@ if (!function_exists('rh_sa_hook_register')) {
         $skip = ['ai-chat.php', 'ai-daily.php', 'presence.php', 'nav-favorites.php', 'nav-sidebar-state.php', 'global-search.php',
             'search-bookings.php', 'guest-lookup.php', 'check-unique.php', 'user-check-unique.php', 'system-health.php',
             'get-housekeeping-audit.php', 'get-maintenance-audit.php', 'end-of-day-pdf.php', 'preset-affected-users.php',
-            'decisions.php']; // decisions.php: the dashboard Decisions panel refreshes itself on every load (found by the idle soak)
+            'decisions.php', 'handover-notes.php', 'dashboard-seen.php']; // decisions.php: the dashboard Decisions panel refreshes itself on every load (found by the idle soak); handover-notes.php + dashboard-seen.php log their own one row (logActivity)
         if (function_exists('rh_licence_rules')) {
             $r = rh_licence_rules();
             foreach ((array)($r['admin_api']['any'] ?? []) as $p) {

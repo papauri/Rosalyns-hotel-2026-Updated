@@ -1,6 +1,6 @@
 <?php
 /**
- * Dashboard first-login wording (plan .claude/DASHBOARD_FIRSTLOGIN_PLAN.md, tasks A2-A4, B2). Pure: no database, no
+ * Dashboard first-login wording (plan .claude/DASHBOARD_FIRSTLOGIN_PLAN.md, tasks A2-A4, B2, C2-C4). Pure: no database, no
  * settings, no session. The readers that feed it are in admin/includes/dashboard-since-data.php.
  * Tested by scripts/tests/dashboard_firstlogin.php.
  */
@@ -124,5 +124,129 @@ if (!function_exists('rh_dash_since_line')) {
         }
         $head = $parts ? $e('Since you were last here: ') . implode(' &middot; ', $parts) : $e('Nothing new since you were last here');
         return $head . $e($tail);
+    }
+}
+
+if (!function_exists('rh_dash_handover_clean_body')) {
+    /**
+     * A handover note's text as it is stored (plan C2): line ends made "\n", control characters removed (tabs and line
+     * ends kept), trimmed. null = refused: not valid UTF-8, empty, or over 500 characters after the trim.
+     */
+    function rh_dash_handover_clean_body(string $raw): ?string
+    {
+        if (!mb_check_encoding($raw, 'UTF-8')) {
+            return null;
+        }
+        $body = str_replace(["\r\n", "\r"], "\n", $raw);
+        $body = trim((string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $body));
+        $len = mb_strlen($body, 'UTF-8');
+        return ($len >= 1 && $len <= 500) ? $body : null;
+    }
+}
+
+if (!function_exists('rh_dash_handover_from_text')) {
+    /**
+     * "From Grace Banda, 22:10" (today), "From Grace Banda, yesterday 22:10", "From Grace Banda, Sun 22 Nov 22:10" (older;
+     * notes live 48 hours). $more: other unread notes -> " · and 1 more". Plain text: the caller escapes it.
+     */
+    function rh_dash_handover_from_text(string $name, string $at, string $today, int $more = 0): string
+    {
+        $name = trim($name) !== '' ? trim($name) : 'a colleague';
+        $ts = $at !== '' ? strtotime($at) : false;
+        $todayTs = strtotime($today . ' 00:00:00');
+        $when = '';
+        if ($ts !== false && $todayTs !== false) {
+            $day = date('Y-m-d', $ts);
+            if ($day === $today) {
+                $when = date('H:i', $ts);
+            } elseif ($day === date('Y-m-d', strtotime('-1 day', $todayTs))) {
+                $when = 'yesterday ' . date('H:i', $ts);
+            } else {
+                $when = date('D j M H:i', $ts);
+            }
+        }
+        return 'From ' . $name . ($when !== '' ? ', ' . $when : '') . ($more > 0 ? ' · and ' . $more . ' more' : '');
+    }
+}
+
+if (!function_exists('rh_dash_welcome_pages')) {
+    /**
+     * The welcome card's main pages (plan C4): the role's own ordered list, only pages $can(page) allows, at most 3.
+     * -> [['page' => 'bookings.php', 'label' => 'Bookings', 'icon' => 'fa-calendar-check'], ...]; [] = none to offer.
+     * A role not listed (a custom role) gets the general list, still filtered by $can.
+     */
+    function rh_dash_welcome_pages(string $role, callable $can): array
+    {
+        $pages = [
+            'bookings.php' => ['Bookings', 'fa-calendar-check'],
+            'calendar.php' => ['Calendar', 'fa-calendar-days'],
+            'room-dashboard.php' => ['Rooms', 'fa-bed'],
+            'housekeeping.php' => ['Housekeeping', 'fa-broom'],
+            'payments.php' => ['Payments', 'fa-money-bill-wave'],
+            'accounting-dashboard.php' => ['Accounting', 'fa-scale-balanced'],
+            'end-of-day-report.php' => ['Day report', 'fa-file-invoice-dollar'],
+            'reports.php' => ['Reports', 'fa-chart-column'],
+            'stock-dashboard.php' => ['Stock', 'fa-boxes-stacked'],
+            'conference-management.php' => ['Conferences', 'fa-users'],
+            'gym-checkin.php' => ['Member check-in', 'fa-id-badge'],
+            'user-management.php' => ['Staff accounts', 'fa-user-gear'],
+        ];
+        $byRole = [
+            'admin' => ['bookings.php', 'accounting-dashboard.php', 'user-management.php', 'end-of-day-report.php', 'reports.php'],
+            'manager' => ['bookings.php', 'calendar.php', 'room-dashboard.php', 'reports.php', 'end-of-day-report.php'],
+            'receptionist' => ['bookings.php', 'calendar.php', 'room-dashboard.php', 'housekeeping.php', 'payments.php'],
+            'housekeeping' => ['housekeeping.php', 'room-dashboard.php'],
+            'accountant' => ['payments.php', 'accounting-dashboard.php', 'end-of-day-report.php', 'reports.php'],
+            'viewer' => ['bookings.php', 'calendar.php', 'reports.php'],
+            'gym_staff' => ['gym-checkin.php'],
+            'conference_staff' => ['conference-management.php', 'calendar.php'],
+            // Station roles land on their station (admin/login.php), not here: nothing to point them at.
+            'restaurant_staff' => [], 'chef' => [], 'bar_staff' => [], 'coffee_staff' => [], 'room_service' => [],
+        ];
+        $list = $byRole[$role] ?? ['bookings.php', 'calendar.php', 'room-dashboard.php', 'payments.php', 'reports.php',
+            'stock-dashboard.php', 'conference-management.php', 'gym-checkin.php'];
+        $out = [];
+        foreach ($list as $page) {
+            if (count($out) >= 3) {
+                break;
+            }
+            if (isset($pages[$page]) && $can($page)) {
+                $out[] = ['page' => $page, 'label' => $pages[$page][0], 'icon' => $pages[$page][1]];
+            }
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_dash_guide_links')) {
+    /**
+     * The guide links, one list for the hero "Guides" menu and the welcome card (plan C4), so both use the same
+     * conditions. $on: which modules / permissions are on (bookings, pos, kds, bds, cds, room_service, housekeeping,
+     * stock, finance, reports). -> [['href', 'icon', 'label'], ...] in menu order; labels are plain text.
+     */
+    function rh_dash_guide_links(array $on): array
+    {
+        $g = '../docs/guides/';
+        $all = [
+            [$g . 'index.html', 'fa-book-open', 'All guides', true],
+            [$g . '99-admin-dashboard-full-guide.html', 'fa-scroll', 'Admin reference', true],
+            [$g . '07-reception-bookings.html', 'fa-calendar-check', 'Reception', !empty($on['bookings'])],
+            [$g . '01-pos-till.html', 'fa-cash-register', 'POS till', !empty($on['pos'])],
+            [$g . '02-kds-kitchen.html', 'fa-utensils', 'Kitchen (KDS)', !empty($on['kds'])],
+            [$g . '03-bds-bar.html', 'fa-martini-glass', 'Bar (BDS)', !empty($on['bds'])],
+            [$g . '04-cds-coffee.html', 'fa-mug-hot', 'Coffee (CDS)', !empty($on['cds'])],
+            [$g . '05-room-service.html', 'fa-bell-concierge', 'Room service', !empty($on['room_service'])],
+            [$g . '06-housekeeping.html', 'fa-broom', 'Housekeeping', !empty($on['housekeeping'])],
+            [$g . '08-stock-orders.html', 'fa-boxes-stacked', 'Stock', !empty($on['stock'])],
+            [$g . '13-finance-payments.html', 'fa-money-bill-wave', 'Finance', !empty($on['finance'])],
+            [$g . '14-reports-eod.html', 'fa-chart-column', 'Reports & EOD', !empty($on['reports'])],
+        ];
+        $out = [];
+        foreach ($all as [$href, $icon, $label, $show]) {
+            if ($show) {
+                $out[] = ['href' => $href, 'icon' => $icon, 'label' => $label];
+            }
+        }
+        return $out;
     }
 }

@@ -228,6 +228,15 @@ check(strpos($d, "if (\$attnGate['rooms_out_of_service']) {\n            \$guest
 check(strpos($d, "if (\$mod_roomsvc || \$attnGate['room_service_open']) {") !== false, 'dashboard: room-service open counted for Orders & Tabs users too');
 check(strpos($d, '<?php if ($dash_open_tabs): // the Orders & Tabs list') !== false && strpos($d, '<?php if ($dash_open_tabs && $mod_bookings): ?>') !== false, 'dashboard: open tabs tile + money line follow the popup rule');
 check(strpos($d, "if (\$attnGate['pending_gym']) {") !== false && strpos($d, "if (\$dash_open_tabs) { // the open tabs list") !== false, 'dashboard: popup rows follow item gates (gym enquiries, open tabs)');
+// Handover note (first-login plan C3): first row of the panel, outside the 18 items and outside the badge total.
+$attnLib = (string)file_get_contents($root . '/admin/includes/dashboard-attention.php');
+check(stripos($attnLib, 'handover') === false && count($ALL) === 18, 'handover: not one of the 18 attention items (rh_dash_attention_items untouched)');
+check(strpos($d, '<?php if ($attn || $handoverNote):') !== false, 'handover: the panel shows when there are items or an unread note');
+$hPos = strpos($d, '<li data-handover-item>');
+$fPos = strpos($d, '<?php foreach ($attnOpen as $i => $a): ?>');
+check($hPos !== false && $fPos !== false && $hPos < $fPos && strpos($d, '<?php if ($attnOpen || $handoverNote): ?>') !== false, 'handover: the note is the first row of the list');
+check(strpos($d, '[$attnOpen, $attnClear, $attnTotal] = rh_dash_attention_split($attn);') !== false && strpos($d, '$attnTotal +') === false && strpos($d, '$attnTotal++') === false,
+    'handover: the badge and "N things need you" stay the attention total only');
 
 /* ---- Part 2: counts == the lists their links open (Liwonde only) ---- */
 if (in_array('--db', $argv, true)) {
