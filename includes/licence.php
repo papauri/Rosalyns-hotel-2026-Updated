@@ -739,10 +739,12 @@ if (!function_exists('rh_licence_env')) {
 
     /**
      * What --report records: 'result' (a result file written after the pick-up), 'no_result' (picked up 15+ minutes ago and
-     * no usable file) or 'none'. An empty file just after the pick-up may still be being written: it waits.
+     * no usable file) or 'none'. An empty file, or one without its end (git's `exit=N` line or the uapi JSON's closing
+     * brace: rh_licence_deploy_file_complete), may still be being written by a pull that outlasts one cron run: it waits
+     * (owner 2026-11-24: the cron may run every minute). After 15 minutes whatever is there is read.
      * $fileMtime null = no file.
      */
-    function rh_licence_deploy_report_decide(int $seenId, int $doneId, int $seenAt, ?int $fileMtime, int $fileSize, int $now): string
+    function rh_licence_deploy_report_decide(int $seenId, int $doneId, int $seenAt, ?int $fileMtime, int $fileSize, int $now, bool $fileComplete = true): string
     {
         if ($seenId <= $doneId) {
             return 'none';
@@ -751,10 +753,17 @@ if (!function_exists('rh_licence_env')) {
             return 'no_result'; // no pick-up time: no file can be matched to it
         }
         $late = $now - $seenAt >= RH_LICENCE_DEPLOY_NO_RESULT;
-        if ($fileMtime !== null && $fileMtime >= $seenAt && ($fileSize > 0 || $late)) {
+        if ($fileMtime !== null && $fileMtime >= $seenAt && (($fileSize > 0 && $fileComplete) || $late)) {
             return 'result';
         }
         return $late ? 'no_result' : 'none';
+    }
+
+    /** True when a result file's end is there: a last line `exit=N` (git) or a closing `}` (uapi JSON). Pass its tail. */
+    function rh_licence_deploy_file_complete(string $tail): bool
+    {
+        $tail = rtrim($tail);
+        return $tail !== '' && (preg_match('/(?:^|\n)exit=\d+$/', $tail) === 1 || substr($tail, -1) === '}');
     }
 
     /**

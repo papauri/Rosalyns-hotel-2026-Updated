@@ -88,7 +88,9 @@ try {
         $has = $file !== '' && is_file($file);
         $mtime = $has ? (int)@filemtime($file) : null;
         $size = $has ? (int)@filesize($file) : 0;
-        $d = rh_licence_deploy_report_decide($seen, (int)$s['licence_deploy_done_id'], (int)$s['licence_deploy_seen_at'], $mtime, $size, $now);
+        $complete = $size > 0 && rh_licence_deploy_file_complete((string)@file_get_contents($file, false, null, max(0, $size - 512), 512));
+        $d = rh_licence_deploy_report_decide($seen, (int)$s['licence_deploy_done_id'], (int)$s['licence_deploy_seen_at'], $mtime, $size, $now,
+            $complete); // a pull still running (no end yet) is waited for, not recorded as failed
         $code = 0;
         if ($d !== 'none') {
             $res = $d === 'result'

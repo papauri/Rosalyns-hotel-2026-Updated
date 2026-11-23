@@ -72,6 +72,17 @@ eq('no_result', rh_licence_deploy_report_decide(5, 0, $N - 900, $N - 1000, 300, 
 eq('none', rh_licence_deploy_report_decide(5, 0, $S, $N, 0, $N), 'report: empty file just after the pick-up (still being written) = wait');
 eq('result', rh_licence_deploy_report_decide(5, 0, $N - 900, $N - 800, 0, $N), 'report: empty file at 15 minutes = its (empty) result');
 eq('no_result', rh_licence_deploy_report_decide(5, 0, 0, $N, 300, $N), 'report: picked up with no pick-up time = failure, file not trusted');
+// A pull outlasting one cron run (1-minute cron): no end yet = wait; at 15 minutes it is read (and fails as unfinished).
+eq('none', rh_licence_deploy_report_decide(5, 0, $S, $N, 300, $N, false), 'report: file without its end (pull still running) = wait');
+eq('result', rh_licence_deploy_report_decide(5, 0, $N - 900, $N - 10, 300, $N, false), 'report: file without its end at 15 minutes = read');
+eq('result', rh_licence_deploy_report_decide(5, 0, $S, $N, 300, $N, true), 'report: finished file = result');
+eq(true, rh_licence_deploy_file_complete("Updating a..b\nFast-forward\n 3 files changed\nexit=0\n"), 'complete: git output with exit=0');
+eq(true, rh_licence_deploy_file_complete("fatal: Not possible to fast-forward, aborting.\nexit=128"), 'complete: git failure with exit=128');
+eq(false, rh_licence_deploy_file_complete("From https://github.com/x/y\n * branch main -> FETCH_HEAD\n"), 'complete: git still running (no exit line)');
+eq(false, rh_licence_deploy_file_complete("Updating a..b\nexit=0 left over text"), 'complete: exit= not on the last line');
+eq(true, rh_licence_deploy_file_complete("{\n  \"result\": {\"status\": 1}\n}\n"), 'complete: uapi JSON');
+eq(false, rh_licence_deploy_file_complete("{\n  \"result\": {\"status\": 1"), 'complete: half-written uapi JSON');
+eq(false, rh_licence_deploy_file_complete("   \n"), 'complete: blank');
 
 $okJson = "{\n   \"apiversion\" : 3,\n   \"func\" : \"update\",\n   \"module\" : \"VersionControl\",\n   \"result\" : {\n      \"data\" : {\"branch\" : \"main\"},\n      \"errors\" : null,\n      \"messages\" : null,\n      \"metadata\" : {},\n      \"status\" : 1,\n      \"warnings\" : null\n   }\n}\n";
 $r = rh_licence_deploy_uapi_result($okJson);
