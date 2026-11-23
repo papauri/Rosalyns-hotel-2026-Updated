@@ -176,6 +176,7 @@ $keys = rh_licence_keys('licence_');
 $keys[] = rh_licence_key_setting(); // the portal-saved key row is restored / removed too
 $keys[] = 'licence_backup_requested_at'; // backup request rows (2026-11-09): restored / removed too
 $keys[] = 'licence_backup_seen_at';
+$keys[] = 'licence_deploy_requested'; // Update from Remote record (2026-11-23): restored / removed too
 $saved = [];
 foreach ($keys as $k) {
     $s = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?'); $s->execute([$k]);
@@ -246,7 +247,14 @@ if ($up) {
     $bk = $req['backup'] ?? null;
     // staff_done_id / staff_error: the staff step's own check-in fields (includes/licence-staff.php, tested in licence_staff.php).
     // maintenance_seen (2026-11-23): the id of the panel's maintenance window this site holds (includes/licence-maintenance.php).
-    check(array_diff(array_keys((array)$req), ['tenant', 'domain', 'key', 'version', 'backup', 'staff_done_id', 'staff_error', 'maintenance_seen']) === []
+    // deploy (2026-11-23): Update from Remote {seen_id, done_id, ok, msg, sha} (scripts/deploy-check.php, tested in licence_deploy.php).
+    $dp = $req['deploy'] ?? null;
+    check(array_diff(array_keys((array)$req), ['tenant', 'domain', 'key', 'version', 'backup', 'staff_done_id', 'staff_error', 'maintenance_seen', 'deploy']) === []
+        && ($dp === null || (is_array($dp) && array_diff(array_keys($dp), ['seen_id', 'done_id', 'ok', 'msg', 'sha']) === []
+            && is_int($dp['seen_id'] ?? null) && is_int($dp['done_id'] ?? null) && (!array_key_exists('ok', $dp) || is_bool($dp['ok']))
+            && (!array_key_exists('msg', $dp) || (is_string($dp['msg']) && strlen($dp['msg']) <= 500))
+            && (!array_key_exists('sha', $dp) || preg_match('/^[0-9a-f]{40}$/D', (string)$dp['sha']) === 1)))
+        && strlen((string)($last['body'] ?? '')) <= 4096
         && (!array_key_exists('maintenance_seen', (array)$req) || is_int($req['maintenance_seen']))
         && (!array_key_exists('staff_done_id', (array)$req) || is_int($req['staff_done_id']))
         && (!array_key_exists('staff_error', (array)$req) || (is_string($req['staff_error']) && mb_strlen($req['staff_error']) <= 240))
@@ -297,14 +305,25 @@ if ($up) {
     eq('grace', rh_licence_status(true)['status'], 'status unchanged after a replay attempt');
 
     // 3e. a newer answer replaces it
-    $serve(mk_token(['paid_until' => $day(25), 'issued_at' => $NOW - 10, 'backup_requested_at' => $NOW - 100], $KP['private']));
+    $serve(mk_token(['paid_until' => $day(25), 'issued_at' => $NOW - 10, 'backup_requested_at' => $NOW - 100,
+        'deploy_requested' => ['id' => $NOW - 50, 'at' => $NOW - 50]], $KP['private']));
     $r = rh_licence_check_now();
     check($r['ok'] && $r['status'] === 'active' && $store()['last_issued_at'] === $NOW - 10, 'newer answer accepted (paid again): active');
     eq((string)($NOW - 100), $bkRow(), 'the panel\'s signed backup request is remembered (acted on after the reply)');
+    $dqRow = static function () use ($pdo): ?string {
+        $q = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'licence_deploy_requested'");
+        $q->execute();
+        $v = $q->fetchColumn();
+        return $v === false ? null : (string)$v;
+    };
+    eq(json_encode(['id' => $NOW - 50, 'at' => $NOW - 50]), $dqRow(), 'the panel\'s signed Update from Remote request is recorded');
+    $vst = rh_licence_status(true);
+    eq($NOW - 50, rh_licence_deploy_want($vst['reason'] === 'ok' ? $vst['payload'] : null, 0, 0, time()), 'deploy-check --want would pick it up from the re-verified token');
 
     // 3f. the owner switches the hotel off at the panel: read_only then suspended answers
     $serve(mk_token(['paid_until' => $day(-20), 'issued_at' => $NOW - 5], $KP['private']));
     check(rh_licence_check_now()['status'] === 'read_only', 'panel answer read-only dates: read_only');
+    eq(json_encode(['id' => $NOW - 50, 'at' => $NOW - 50]), $dqRow(), 'an answer without deploy_requested (older panel) leaves the record as it is');
     $serve(mk_token(['status' => 'suspended', 'override' => true, 'issued_at' => $NOW - 2], $KP['private']));
     check(rh_licence_check_now()['status'] === 'suspended', 'panel forced suspended: suspended');
 

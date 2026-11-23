@@ -20,6 +20,7 @@
  *   licence_last_error       plain reason of the last failure, '' after a success (never the key, never the body)
  *   licence_backup_requested_at / licence_backup_seen_at   the panel's latest backup request (signed) / the one acted on
  *   licence_maintenance      JSON of the panel's maintenance window, '' when none (includes/licence-maintenance.php)
+ *   licence_deploy_*         Update from Remote (panel Deployments, 2026-11-23): see "Update from Remote" below
  *
  * Backups (owner 2026-11-09): the panel may ask for a backup (signed backup_requested_at in its answer). The site runs
  * its OWN backup engine (includes/db-backup.php) after the reply has been sent, at most once per 6 hours, and reports
@@ -234,7 +235,8 @@ if (!function_exists('rh_licence_env')) {
     /** One setting write ($name is token|last_issued_at|last_check_at|last_error). Clears any cached copy. */
     function rh_licence_store_write(PDO $pdo, string $name, string $value, string $prefix = 'licence_'): bool
     {
-        if (!in_array($name, ['token', 'last_issued_at', 'last_check_at', 'last_error', 'backup_requested_at', 'backup_seen_at', 'maintenance'], true)) {
+        if (!in_array($name, ['token', 'last_issued_at', 'last_check_at', 'last_error', 'backup_requested_at', 'backup_seen_at', 'maintenance'], true)
+            && !in_array($name, ['deploy_requested', 'deploy_seen_id', 'deploy_seen_at', 'deploy_done_id', 'deploy_ok', 'deploy_msg'], true)) {
             return false;
         }
         $key = $prefix . $name;
@@ -623,7 +625,15 @@ if (!function_exists('rh_licence_env')) {
         // The maintenance window held here (0 = none), so the panel can show it arrived.
         $held = rh_maint_read($GLOBALS['pdo'] ?? null, true);
         $req['maintenance_seen'] = $held !== null ? $held['id'] : 0;
-        $body =json_encode($req, JSON_UNESCAPED_SLASHES);
+        // Update from Remote (scripts/deploy-check.php): the request picked up / finished here, its result and the commit
+        // checked out now (read from .git, no command run).
+        try {
+            $pdoDep = $GLOBALS['pdo'] ?? null;
+            if ($pdoDep instanceof PDO) {
+                $req['deploy'] = rh_licence_deploy_block(rh_licence_settings_fresh($pdoDep, rh_licence_deploy_keys()), rh_licence_git_head(dirname(__DIR__) . '/.git'));
+            }
+        } catch (Throwable $e) { /* it goes with the next check-in */ }
+        $body = rh_licence_request_json($req);
         $http = rh_licence_http_post($cfg['url'], (string)$body, $timeout);
         if ($http['error'] !== '') {
             $out['error'] = 'Could not reach the licence service: ' . $http['error'] . '.';
@@ -663,7 +673,201 @@ if (!function_exists('rh_licence_env')) {
             rh_licence_store_write($pdo, 'maintenance', rh_maint_store_value($payload['maintenance']));
             rh_maint_read($pdo, true);
         }
+        // Update from Remote: a record of the panel's request ('' = none). scripts/deploy-check.php --want decides from the
+        // re-verified token itself (rh_licence_status), never from this row. An answer without the field leaves it as it is.
+        if (array_key_exists('deploy_requested', $payload)) {
+            $dr = rh_licence_deploy_request($payload['deploy_requested']);
+            rh_licence_store_write($pdo, 'deploy_requested', $dr !== null ? (string)json_encode($dr) : '');
+        }
         return true;
+    }
+
+    // ------------------------------------------------------------------ Update from Remote (panel Deployments, 2026-11-23)
+    //
+    // The panel may ask this site to pull its own branch: deploy_requested {id, at} inside the SIGNED answer. No cPanel
+    // credentials anywhere: the account's cron runs scripts/deploy-check.php --want, cPanel's own `uapi VersionControl update`
+    // and scripts/deploy-check.php --report. Settings: licence_deploy_requested (record only), licence_deploy_seen_id /
+    // licence_deploy_seen_at (picked up), licence_deploy_done_id / licence_deploy_ok ('1'|'0') / licence_deploy_msg (result).
+    // Everything below is pure apart from rh_licence_git_head (reads files only).
+
+    if (!defined('RH_LICENCE_DEPLOY_ANSWER_FRESH')) {
+        define('RH_LICENCE_DEPLOY_ANSWER_FRESH', 7200);   // act only on an answer issued in the last 2 hours
+        define('RH_LICENCE_DEPLOY_LAPSE', 86400);         // and on a request made in the last 24 hours (the panel's own lapse)
+        define('RH_LICENCE_DEPLOY_NO_RESULT', 900);       // picked up 15 minutes ago and no result file: recorded as failed
+        define('RH_LICENCE_DEPLOY_MSG_MAX', 500);
+        define('RH_LICENCE_REQUEST_MAX', 4096);           // the panel refuses a larger check-in body
+    }
+
+    /** The settings the deploy step keeps (seen/done ids, pick-up time, result). */
+    function rh_licence_deploy_keys(): array
+    {
+        return ['licence_deploy_seen_id', 'licence_deploy_seen_at', 'licence_deploy_done_id', 'licence_deploy_ok', 'licence_deploy_msg'];
+    }
+
+    /** The panel's request as {id, at} (whole numbers > 0), or null (null, missing or malformed). */
+    function rh_licence_deploy_request($v): ?array
+    {
+        if (!is_array($v) || !is_int($v['id'] ?? null) || !is_int($v['at'] ?? null) || $v['id'] <= 0 || $v['at'] <= 0) {
+            return null;
+        }
+        return ['id' => $v['id'], 'at' => $v['at']];
+    }
+
+    /**
+     * The request id to pick up now from a VERIFIED payload, 0 = nothing to do. Only when the answer is under 2 hours old,
+     * the request under 24 hours old, and its id newer than the one picked up and the one finished here. Never while an
+     * earlier pick-up is still running (picked up, no result yet, under RH_LICENCE_DEPLOY_NO_RESULT): a second pull at
+     * the same time would let the first one's result be recorded against the newer request.
+     */
+    function rh_licence_deploy_want(?array $payload, int $seenId, int $doneId, int $now, int $seenAt = 0): int
+    {
+        if ($payload === null) {
+            return 0;
+        }
+        if ($seenId > $doneId && $now - $seenAt < RH_LICENCE_DEPLOY_NO_RESULT) {
+            return 0; // one in flight: the next cron run after its result (or after it is marked as left no result)
+        }
+        $r = rh_licence_deploy_request($payload['deploy_requested'] ?? null);
+        $issued = $payload['issued_at'] ?? 0;
+        if ($r === null || !is_int($issued) || $issued <= 0 || $now - $issued >= RH_LICENCE_DEPLOY_ANSWER_FRESH
+            || $now - $r['at'] >= RH_LICENCE_DEPLOY_LAPSE || $r['id'] <= $seenId || $r['id'] <= $doneId) {
+            return 0;
+        }
+        return $r['id'];
+    }
+
+    /**
+     * What --report records: 'result' (a result file written after the pick-up), 'no_result' (picked up 15+ minutes ago and
+     * no usable file) or 'none'. An empty file just after the pick-up may still be being written: it waits.
+     * $fileMtime null = no file.
+     */
+    function rh_licence_deploy_report_decide(int $seenId, int $doneId, int $seenAt, ?int $fileMtime, int $fileSize, int $now): string
+    {
+        if ($seenId <= $doneId) {
+            return 'none';
+        }
+        if ($seenAt <= 0) {
+            return 'no_result'; // no pick-up time: no file can be matched to it
+        }
+        $late = $now - $seenAt >= RH_LICENCE_DEPLOY_NO_RESULT;
+        if ($fileMtime !== null && $fileMtime >= $seenAt && ($fileSize > 0 || $late)) {
+            return 'result';
+        }
+        return $late ? 'no_result' : 'none';
+    }
+
+    /** Text for the panel: token-shaped text removed, printable ASCII only (a predictable size in the check-in), at most $max characters. */
+    function rh_licence_deploy_scrub(string $text, int $max = RH_LICENCE_DEPLOY_MSG_MAX): string
+    {
+        $text = (string)preg_replace('/(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]{6,}|cpanel\s+[^\s:]+:\S+|Bearer\s+\S+)/i', '[token]', $text);
+        $text = (string)preg_replace('/[^\x20-\x7E]+/', ' ', $text);
+        return substr(trim((string)preg_replace('/ {2,}/', ' ', $text)), 0, max(0, $max));
+    }
+
+    /**
+     * The result of `uapi --output=jsonpretty VersionControl update` as {ok, msg}: {"result": {"status": 1|0, "errors": [...]}}
+     * (or the same without "result"); text around the JSON (stderr from 2>&1) is ignored. msg scrubbed, at most 500 characters.
+     */
+    function rh_licence_deploy_uapi_result(string $body): array
+    {
+        if (trim($body) === '') {
+            return ['ok' => false, 'msg' => 'The update command wrote nothing (is /usr/local/cpanel/bin/uapi available to the cron job?).'];
+        }
+        $j = json_decode($body, true);
+        if (!is_array($j)) {
+            $a = strpos($body, '{');
+            $b = strrpos($body, '}');
+            $j = ($a !== false && $b !== false && $b > $a) ? json_decode(substr($body, $a, $b - $a + 1), true) : null;
+        }
+        if (is_array($j) && is_array($j['result'] ?? null) && !array_key_exists('status', $j)) {
+            $j = $j['result'];
+        }
+        if (!is_array($j) || !array_key_exists('status', $j)) {
+            return ['ok' => false, 'msg' => rh_licence_deploy_scrub('cPanel did not answer in the expected way: ' . substr($body, 0, 300))];
+        }
+        if ((int)$j['status'] === 1) {
+            return ['ok' => true, 'msg' => 'cPanel accepted Update from Remote.'];
+        }
+        $why = [];
+        foreach ((array)($j['errors'] ?? []) as $x) {
+            if (is_scalar($x)) {
+                $why[] = (string)$x;
+            } elseif (is_array($x)) {
+                $why[] = implode(' ', array_filter($x, 'is_scalar'));
+            }
+        }
+        $why = trim(implode(' ', $why));
+        return ['ok' => false, 'msg' => rh_licence_deploy_scrub('cPanel said no: ' . ($why !== '' ? $why : 'no reason given')
+            . ' (it only pulls when the live copy can fast-forward: local changes on the server stop it).')];
+    }
+
+    /**
+     * The commit checked out in a git folder, read from the files only (HEAD -> ref -> refs/heads/* or packed-refs; a
+     * ".git" file pointing elsewhere is followed once; a ref with ".." is refused). Null when it cannot be read.
+     */
+    function rh_licence_git_head(string $gitDir): ?string
+    {
+        if (is_file($gitDir)) {
+            $line = trim((string)@file_get_contents($gitDir, false, null, 0, 1024));
+            if (strncmp($line, 'gitdir:', 7) !== 0) {
+                return null;
+            }
+            $to = trim(substr($line, 7));
+            $gitDir = ($to !== '' && ($to[0] === '/' || preg_match('#^[A-Za-z]:[\\\\/]#', $to))) ? $to : dirname($gitDir) . '/' . $to;
+        }
+        $head = trim((string)@file_get_contents($gitDir . '/HEAD', false, null, 0, 1024));
+        if (preg_match('/^[0-9a-f]{40}$/D', $head)) {
+            return $head; // detached
+        }
+        if (!preg_match('#^ref: (refs/heads/[A-Za-z0-9_][A-Za-z0-9_./-]*)$#D', $head, $m) || strpos($m[1], '..') !== false) {
+            return null;
+        }
+        $ref = $m[1];
+        $loose = trim((string)@file_get_contents($gitDir . '/' . $ref, false, null, 0, 128));
+        if (preg_match('/^[0-9a-f]{40}$/D', $loose)) {
+            return $loose;
+        }
+        foreach (@file($gitDir . '/packed-refs', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
+            if (preg_match('#^([0-9a-f]{40}) (\S+)$#D', $l, $pm) && $pm[2] === $ref) {
+                return $pm[1];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The check-in's `deploy` object {seen_id, done_id, ok, msg, sha}: ok/msg only once a request has finished here, sha
+     * only when the live commit could be read.
+     */
+    function rh_licence_deploy_block(array $s, ?string $sha): array
+    {
+        $done = max(0, (int)($s['licence_deploy_done_id'] ?? 0));
+        $b = ['seen_id' => max(0, (int)($s['licence_deploy_seen_id'] ?? 0)), 'done_id' => $done];
+        if ($done > 0) {
+            $b['ok'] = (string)($s['licence_deploy_ok'] ?? '') === '1';
+            $b['msg'] = rh_licence_deploy_scrub((string)($s['licence_deploy_msg'] ?? ''));
+        }
+        if ($sha !== null && preg_match('/^[0-9a-f]{40}$/D', $sha)) {
+            $b['sha'] = $sha;
+        }
+        return $b;
+    }
+
+    /** The check-in body as JSON under the panel's 4096-byte limit: an over-long body loses deploy.msg first (cut, then
+     * emptied), then the deploy object. */
+    function rh_licence_request_json(array $req, int $max = RH_LICENCE_REQUEST_MAX): string
+    {
+        $body = (string)json_encode($req, JSON_UNESCAPED_SLASHES);
+        while (strlen($body) > $max && isset($req['deploy']['msg']) && is_string($req['deploy']['msg']) && $req['deploy']['msg'] !== '') {
+            $msg = $req['deploy']['msg'];
+            $req['deploy']['msg'] = substr($msg, 0, max(0, strlen($msg) - (strlen($body) - $max) - 1));
+            $body = (string)json_encode($req, JSON_UNESCAPED_SLASHES);
+        }
+        if (strlen($body) > $max && isset($req['deploy'])) {
+            unset($req['deploy']);
+            $body = (string)json_encode($req, JSON_UNESCAPED_SLASHES);
+        }
+        return $body;
     }
 
     // ------------------------------------------------------------------ backups the panel asks for
