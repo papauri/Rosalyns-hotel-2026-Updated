@@ -2300,6 +2300,17 @@ $currency_symbol = getSetting('currency_symbol');
         // Same live figure as the Needs-attention badge ($attnTotal = sum of the open items' counts), so the two always match.
         $ledeText .= $attnTotal > 0 ? ' — ' . $attnTotal . ' thing' . ($attnTotal === 1 ? '' : 's') . ' need' . ($attnTotal === 1 ? 's' : '') . ' you.' : ' — nothing needs you right now.';
 
+        // ---- Last sign-in line + day status chip (first-login plan A2-A4) ----
+        require_once __DIR__ . '/includes/dashboard-firstlogin.php';
+        require_once __DIR__ . '/includes/dashboard-since-data.php';
+        $heroPrevSignin = rh_dash_prev_signin($pdo, $uid, (int)($_SESSION['admin_login_log_id'] ?? 0));
+        $heroSigninText = $heroPrevSignin === null ? '' : rh_dash_last_signin_text($heroPrevSignin, date('Y-m-d'));
+        $heroEodChip = null;
+        if ($can('end-of-day-report.php')) {
+            $heroEodStatus = rh_dash_eod_status($pdo, new DateTimeImmutable('now'));
+            $heroEodChip = $heroEodStatus === null ? null : rh_dash_eod_chip($heroEodStatus, date('Y-m-d'));
+        }
+
         // ---- Trend chart scaling ----
         $trendMax = max(1.0, ...array_values($revenueTrend ?: [0]));
         $trendTotal = array_sum($revenueTrend);
@@ -2321,9 +2332,12 @@ $currency_symbol = getSetting('currency_symbol');
         <!-- ============ HERO ============ -->
         <header class="ck-hero">
             <div class="ck-hero__intro">
-                <p class="ck-eyebrow"><i class="far fa-calendar"></i> <?php echo date('l, j F Y'); ?> <span class="ck-dot"></span> <span id="ckClock"><?php echo date('H:i'); ?></span></p>
+                <p class="ck-eyebrow"><i class="far fa-calendar"></i> <?php echo date('l, j F Y'); ?> <span class="ck-dot"></span> <span id="ckClock"><?php echo date('H:i'); ?></span><?php if ($heroEodChip): ?> <span class="ck-dot"></span> <?php if ($heroEodChip['href'] !== null): ?><a class="ck-daychip ck-daychip--<?php echo $heroEodChip['state']; ?>" href="<?php echo htmlspecialchars($heroEodChip['href']); ?>"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> <?php echo htmlspecialchars($heroEodChip['text']); ?></a><?php else: ?><span class="ck-daychip ck-daychip--<?php echo $heroEodChip['state']; ?>"><i class="fas fa-check" aria-hidden="true"></i> <?php echo htmlspecialchars($heroEodChip['text']); ?></span><?php endif; ?><?php endif; ?></p>
                 <h1 class="ck-hero__title"><?php echo $greeting; ?><?php echo $firstName !== '' ? ', ' . htmlspecialchars($firstName) : ''; ?></h1>
                 <p class="ck-hero__lede"><?php echo htmlspecialchars($ledeText); ?></p>
+                <?php if ($heroSigninText !== ''): ?>
+                    <p class="ck-hero__signin"><?php echo htmlspecialchars($heroSigninText); ?> Not you? <a href="change-password.php">Change your password</a></p>
+                <?php endif; ?>
             </div>
             <nav class="ck-hero__actions" aria-label="Quick actions">
                 <?php if ($mod_bookings && $can('create-booking.php')): ?>

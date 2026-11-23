@@ -46,13 +46,14 @@ $setup = [
 $cnt = function (string $where) { return "SELECT COUNT(*) AS n FROM admin_activity_log WHERE $where"; };
 $login = function (string $who, string $password) use ($setup, $cnt) {
     return run_page('admin/login.php', [
-        'anon' => true, 'setup' => $setup, 'post' => ['username' => $who, 'password' => $password],
+        'anon' => true, 'setup' => $setup, 'post' => ['username' => $who, 'password' => $password], 'session_keys' => ['admin_login_log_id'],
         'verify' => [
             $cnt("action = 'login_success' AND username LIKE 'zz\\_le\\_%'"),
             $cnt("action = 'login_failed' AND details LIKE 'Wrong password%' AND username LIKE 'zz\\_le\\_%'"),
             $cnt("action = 'login_blocked' AND username LIKE 'zz\\_le\\_%'"),
             $cnt("action = 'login_failed' AND details = 'Unknown username' AND username = " . $GLOBALS['pdo']->quote(trim($who))),
             "SELECT username, failed_login_attempts AS a, last_login IS NOT NULL AS li FROM admin_users WHERE username LIKE 'zz\\_le\\_%' ORDER BY username",
+            "SELECT MAX(id) AS n FROM admin_activity_log WHERE action = 'login_success' AND username LIKE 'zz\\_le\\_%'",
         ],
     ]);
 };
@@ -71,6 +72,11 @@ check($clean($r) && $n($r, 0) === 1 && empty($r['output_flash']), 'sign-in by em
 $rowA = null; foreach (($r['verify'][4] ?? []) as $row) { if ($row['username'] === 'zz_le_a') { $rowA = $row; } }
 check($rowA && (int)$rowA['li'] === 1 && (int)$rowA['a'] === 0, 'last sign-in is recorded for the matched account');
 
+// 2b. the sign-in anchor (dashboard "Last signed in"): the session holds this sign-in's own login_success row id,
+// read before rh_log_event writes to system_event_log on the same connection
+$anchor = $r['session']['admin_login_log_id'] ?? null;
+check(is_int($anchor) && $anchor > 0 && $anchor === $n($r, 5), 'a good sign-in stores its own login_success row id in the session', json_encode([$anchor, $r['verify'][5] ?? null]));
+
 // 3. wrong password by email: same counter, same log, same message as by username
 $re = $login('zz.login.warn@example.invalid', 'wrong-password');
 $ru = $login('zz_le_warn', 'wrong-password');
@@ -78,6 +84,7 @@ check($clean($re) && $att($re, 'zz_le_warn') === 5 && $n($re, 1) === 1, 'wrong p
 check($att($ru, 'zz_le_warn') === 5 && $n($ru, 1) === 1, 'wrong password by username counts the same way');
 check(($re['output_flash'][0] ?? 'x') === ($ru['output_flash'][0] ?? 'y') && strpos((string)($re['output_flash'][0] ?? ''), $generic) === 0, 'both show the same generic message', json_encode($re['output_flash'] ?? []));
 check($n($re, 0) === 0, 'a wrong password never signs in');
+check(array_key_exists('admin_login_log_id', $re['session'] ?? []) && $re['session']['admin_login_log_id'] === null, 'a wrong password sets no sign-in anchor', json_encode($re['session'] ?? null));
 
 // 4. lockout applies through the email too, even with the right password
 $rl = $login('ZZ.login.lock@example.invalid', $PW);

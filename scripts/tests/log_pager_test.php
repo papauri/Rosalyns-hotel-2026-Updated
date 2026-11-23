@@ -165,6 +165,16 @@ check(strpos($src, '<details class="log-file__more">') !== false && strpos($src,
 check(strpos($src, "rh_lp_slice(\$_GET, 'lg', rh_login_bundles(\$recentLogins))") !== false && strpos($src, "rh_lp_slice(\$_GET, 'ev', rh_log_group_events(") !== false,
     'system logs: grouped events and sign-in bundles page from their own _page param');
 check(strpos($src, 'function rh_login_browser_label') === false, 'system logs: the sign-in helpers live in admin/includes/login-bundles.php only');
+// browser label: phones are named by their own OS, not "Linux" (an Android user agent also contains "Linux")
+foreach ([
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36' => 'Chrome / Android',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' => 'Safari / iOS',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0' => 'Edge / Windows',
+    'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0' => 'Firefox / Linux',
+    '' => 'Unknown',
+] as $ua => $want) {
+    check(rh_login_browser_label($ua) === $want, 'browser label: ' . $want, rh_login_browser_label($ua));
+}
 check(strpos($src, "ORDER BY replayed_at DESC, id DESC") !== false, 'system logs: offline sync has a stable order for paging');
 check(strpos($src, "<?php if (\$scP['total'] > 0 || \$shiftCloses):") !== false, 'system logs: Shift Closes still show when the count failed');
 check(preg_match('/action="system-logs\.php#log-events">\s*<\?php[^?]*foreach \(\$_GET as \$lpKeepKey/', $src) === 1

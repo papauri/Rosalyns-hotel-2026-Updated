@@ -261,6 +261,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         // Log successful login
                         $log_stmt = $pdo->prepare("INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, user_agent) VALUES (?, ?, 'login_success', ?, ?, ?)");
                         $log_stmt->execute([$user['id'], $user['username'], 'Role: ' . $user['role'], $ip, $ua]);
+                        // This sign-in's log row: the dashboard shows the one before it as "Last signed in". Read before rh_log_event (same connection).
+                        try { $_SESSION['admin_login_log_id'] = (int)$pdo->lastInsertId(); } catch (Throwable $e) { unset($_SESSION['admin_login_log_id']); }
                         rh_log_event('auth', 'info', 'Admin login successful', ['username' => $user['username'], 'role' => $user['role'], 'ip' => $ip]);
 
                         $postLoginRedirect = admin_sanitize_redirect($_POST['redirect'] ?? ($_SESSION['admin_redirect_after_login'] ?? ''));

@@ -26,12 +26,12 @@ if (!function_exists('rh_login_bundles')) {
             $browserLabel .= ' / Windows';
         } elseif (stripos($ua, 'Macintosh') !== false) {
             $browserLabel .= ' / macOS';
-        } elseif (stripos($ua, 'Linux') !== false) {
-            $browserLabel .= ' / Linux';
-        } elseif (stripos($ua, 'Android') !== false) {
+        } elseif (stripos($ua, 'Android') !== false) { // before Linux: an Android user agent also says "Linux"
             $browserLabel .= ' / Android';
         } elseif (stripos($ua, 'iPhone') !== false || stripos($ua, 'iPad') !== false) {
             $browserLabel .= ' / iOS';
+        } elseif (stripos($ua, 'Linux') !== false) {
+            $browserLabel .= ' / Linux';
         }
 
         return $browserLabel;
