@@ -136,7 +136,7 @@
     <li><strong>Search and Filter boxes.</strong> Type in the search box, pick a status or dates, and click <strong>Filter</strong>. <strong>Clear</strong> removes the filters. Date filters have visible <strong>From</strong> and <strong>To</strong> labels. While you type in a list's search box the results update in place: the box keeps the cursor and the page does not jump down to the list.</li>
     <li><strong>Show more rows.</strong> Every list shows 10 rows to a page. Use the <strong>Show</strong> picker (10, 25, 50, 100, and <strong>All</strong> where it is offered) to see more at once. This works on Bookings, Payments, Credit Notes, Receipts, Reviews, Visitor analytics, the Gym visit log, the Stock reports and the Dashboard lists. Your choice stays when you change page, filter or sort.</li>
     <li><strong>Sort a column.</strong> Click a column heading (for example <strong>Total</strong> or <strong>Guest Name</strong>) to sort the whole list, not just the rows on the page. Click it again to reverse the order. The list goes back to page 1 of the sorted result.</li>
-    <li><strong>Select many rows.</strong> Tick the boxes on the left of the rows, or the box in the table heading to tick all, and a bar appears with the actions you may use on all of them at once. See <a href="#duplicates">Duplicates and required fields</a> for what the system refuses.</li>
+    <li><strong>Select many rows.</strong> Tick the boxes on the left of the rows, or the box in the table heading to tick all, and a bar appears with the actions you may use on all of them at once. Shift+click ticks a range. Right-click any row for that row's own actions, plus <strong>Open</strong>, <strong>Open in new tab</strong> and <strong>Copy reference</strong> where the row has them. See <a href="#duplicates">Duplicates and required fields</a> for what the system refuses.</li>
     <li><strong>Times.</strong> Dates and times on a booking's page, on the till and on an order receipt are shown in your own device's time zone, so a phone set to the wrong zone shows the wrong time. The hotel's own time zone is fixed when the system is installed (it is shown under <strong>Save Hotel Details</strong> in Hotel Settings). If a time looks wrong, fix the clock and time zone on your device first.</li>
   </ul>
 
@@ -153,6 +153,9 @@
   <p>Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Dashboard</strong> (<code>/admin/dashboard.php</code>). Permission: <strong>Dashboard</strong>. What you see depends on which modules are on and what you may open. Click any figure to open a window with the records behind it; the window has an <strong>Open full page</strong> button.</p>
 
   <h3>Greeting and quick actions</h3>
+  <p>Under the greeting a small line shows when you last signed in, for example <em>"Last signed in Mon 23 Nov at 18:40, Chrome on Windows. Not you? Change your password"</em>. The first time on an account it says <em>"First sign-in on this account."</em></p>
+  <p>When something has happened since your last visit, the same area reads <em>"Since you were last here: N new bookings · N cancelled · MWK … received · N room moves — N things need you"</em>. Only what you are allowed to see is counted. Each part opens its list for the time since your last visit, and that list shows a <strong>since</strong> notice with <strong>Clear</strong>.</p>
+  <p>Next to the date, people with End of Day access see a green tag: <em>"Yesterday closed · End of Day sent HH:MM"</em>, or <em>"Yesterday's End of Day not run"</em>, which opens the report. A test send shows <em>"(test)"</em>.</p>
   <p>At the top: today's date and time, then <em>Good morning</em>, <em>Good afternoon</em> or <em>Good evening</em> and your first name, then a sentence such as <em>"3 arrivals, 2 departures today — 4 things need you."</em> or <em>"... — nothing needs you right now."</em> Under it are quick action buttons. Each shows only if you have the permission and the module is on:</p>
   <table>
     <thead><tr><th>Button</th><th>Goes to</th></tr></thead>
@@ -178,7 +181,7 @@
   <p>Administrators and managers get an <strong>Open Backups</strong> button in the box.</p>
 
   <h3>The figures across the top</h3>
-  <p>Figure cards are the same standard card on every admin page: a label, one large value and a short note.</p>
+  <p>Figure cards are the same standard card on every admin page: a label, one large value and a short note. Every figure card and panel title has a <strong>?</strong> tip that says what it counts.</p>
   <table>
     <thead><tr><th>Card</th><th>What it counts</th></tr></thead>
     <tbody>
@@ -203,9 +206,11 @@
   </ul>
   <p>Arrival and departure rows show the stay as <em>"in 14 Nov &rarr; out 17 Nov &middot; 3 nights"</em> and the room as <em>"Room 12 &middot; name"</em>. A joined room lists all of its rooms. Each of these lists shows 10 rows, with a <strong>Show</strong> picker for more.</p>
 
+  <p>Arrival rows (Today's movements and Week ahead) can show small chips: <em>"Returning guest · Nth stay"</em>, <em>"Request: …"</em> with the guest's special request, and <em>"Deposit unpaid"</em>. The deposit chip is not shown for company-billed or group rooms, and only for pending or confirmed bookings.</p>
+
   <h3>Needs attention</h3>
   <p>A list of things waiting for someone, most urgent first (red before amber, then the biggest count). Each line shows a count and a short hint under it saying what it counts. It opens the right page when you are allowed to open that page. You only see lines for work your permissions and the switched-on modules cover, so nobody is shown a queue they cannot open. An optional note from the Assistant can appear in the panel, only while the Assistant is on and two or more items are open.</p>
-  <p>Each line below counts exactly what its page lists.</p> Lines with a zero count are hidden under <em>"N queues clear"</em>. If there is nothing to do it says <em>"All clear. Nothing is waiting on you."</em> The lines that can appear:</p>
+  <p>Each line below counts exactly what its page lists. Lines with a zero count are hidden under <em>"N queues clear"</em>. If there is nothing to do it says <em>"All clear. Nothing is waiting on you."</em> The lines that can appear:</p>
   <ul>
     <li><strong>Overdue arrivals (no-show?)</strong>: arrival date passed, never checked in.</li>
     <li><strong>Bookings awaiting confirmation</strong>.</li>
@@ -222,10 +227,14 @@
     <li><strong>Expired stock batches</strong> and <strong>Items below minimum stock</strong>.</li>
   </ul>
 
+  <h3>Handover notes and the welcome card</h3>
+  <p>The <strong>Handover note</strong> button in the dashboard header lets anyone write a short note of up to 500 characters for the next shift. Everyone else sees the newest unread note at the top of <strong>Needs attention</strong>, as <em>"From &lt;name&gt;, &lt;time&gt;"</em>, with <em>"and N more"</em> when there are more. They press <strong>Mark read</strong> to clear it. Notes disappear after 48 hours, and the writer never sees their own note. A note does not change the Needs attention count. System Logs shows <em>"Wrote a handover note"</em> and <em>"Read a handover note"</em>, with the note number only, never the text.</p>
+  <p>The first time you sign in, a welcome card shows your role, what you can do, up to 3 main pages you can open and the guide links. It stays until you press <strong>Got it</strong>.</p>
+
   <h3>The other panels</h3>
   <ul>
-    <li><strong>Money</strong>: takings for the last 7 days as bars (click a bar to see that day), plus today's split between rooms and till sales, open tabs and <strong>Refunds pending</strong>. <strong>Day report</strong> opens End of Day.</li>
-    <li><strong>Rooms</strong>: a ring chart of room status and a list of counts by status. Under the title it reads <em>"N free tonight &middot; tomorrow B of N booked"</em>. This is the booking system's count of rooms free for tonight and booked for tomorrow; a joined room counts once. The legend says <strong>Available now</strong>: clean and empty right now. Such a room can still be booked for tonight or tomorrow. <strong>Room board</strong> opens the room dashboard. Click a status to see those rooms: the list adds a tonight and tomorrow line, a <strong>Next booking</strong> column (dates, reference, guest, and <em>Paid</em>, <em>Unpaid</em> or <em>"MWK x left to pay"</em>) and a link to tomorrow's arrivals.</li>
+    <li><strong>Money</strong>: the headline is <strong>Taken this week</strong> (today stays in the Takings card). Takings for the last 7 days show as bars (click a bar to see that day), plus today's split between rooms and till sales, open tabs and <strong>Refunds pending</strong>. <strong>Day report</strong> opens End of Day.</li>
+    <li><strong>Rooms</strong>: a ring chart of room status (its centre shows the rooms still free tonight; the occupancy % stays in the Occupancy card) and a list of counts by status. Under the title it reads <em>"N free tonight &middot; tomorrow B of N booked"</em>. This is the booking system's count of rooms free for tonight and booked for tomorrow; a joined room counts once. The legend says <strong>Available now</strong>: clean and empty right now. Such a room can still be booked for tonight or tomorrow. <strong>Room board</strong> opens the room dashboard. Click a status to see those rooms: the list adds a tonight and tomorrow line, a <strong>Next booking</strong> column (dates, reference, guest, and <em>Paid</em>, <em>Unpaid</em> or <em>"MWK x left to pay"</em>) and a link to tomorrow's arrivals.</li>
     <li><strong>Week ahead</strong>: arrivals and conference events for the next 7 days. Click a day to filter the list first; <strong>Show all</strong> clears the filter. The list then shows 10 rows to a page, with a <strong>Show</strong> picker for more. Each arrival reads <em>"in 14 Nov &rarr; out 17 Nov &middot; 3 nights"</em> and <em>"Room 12 &middot; name"</em>.</li>
     <li><strong>Stock</strong>: <strong>Low</strong>, <strong>Expiring 7d</strong> and <strong>Expired</strong> counts, the lowest items and today's wastage. <strong>Manage</strong> opens the orders and stock page.</li>
   </ul>
@@ -542,7 +551,7 @@
   <ul>
     <li>Cards for the last 24 hours: system events, admin activity, booking changes, POS orders, KDS/DS events, API calls, offline replays and errors.</li>
     <li>Filters: <strong>Source</strong>, <strong>Show</strong> (<strong>Warnings and errors</strong> by default, <strong>Everything</strong>, <strong>Errors only</strong>, <strong>Critical only</strong>, <strong>Warnings only</strong>, <strong>Info only</strong>, <strong>Debug only</strong>), <strong>Rows</strong> (20 to 500), <strong>Group repeats</strong> and <strong>Auto-refresh 15s</strong>; click <strong>Apply</strong>, or <strong>Reset</strong> to clear.</li>
-    <li>Sections: <strong>System Event Stream</strong>, <strong>Booking Changes Audit</strong>, <strong>Recent Logins</strong>, <strong>Recent Admin Activity</strong>, <strong>POS Orders</strong>, <strong>Display Screens</strong>, <strong>Recent API Calls</strong>, <strong>Recent Offline Sync</strong> and <strong>File Log Tails</strong>.</li>
+    <li>Sections: <strong>System Event Stream</strong>, <strong>Booking Changes Audit</strong>, <strong>Recent Logins</strong>, <strong>Recent Admin Activity</strong>, <strong>POS Orders</strong>, <strong>Display Screens</strong>, <strong>Recent API Calls</strong>, <strong>Recent Offline Sync</strong> and <strong>File Log Tails</strong>. Recent Logins names the device: Android and iOS phones are named as such, not as Linux.</li>
     <li>Changes to settings, refunds, modules and sign-in attempts are recorded here with the person's name.</li>
   </ul>
 

@@ -3879,6 +3879,20 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         check(($pn['match'] ?? '') === 'none' && in_array('PO-AIT0042', array_column(is_array($pn['open_purchase_orders']) ? $pn['open_purchase_orders'] : [], 'po_ref'), true), 'no such purchase order: says so and lists those waiting for delivery');
         // A miss is never "nothing exists": each one-record miss says how many are on file
         check((int)($gn['members_on_file'] ?? 0) >= 2 && (int)($sn['items_on_file'] ?? 0) >= 1 && (int)($pn['purchase_orders_on_file'] ?? 0) >= 1, 'member / stock item / purchase order misses say how many are on file', json_encode([$gn['members_on_file'] ?? null, $sn['items_on_file'] ?? null, $pn['purchase_orders_on_file'] ?? null]));
+        // Stock on hand in the stock screens' words (sync 2026-11-24, Liwonde dced1a0): bottles + shots, the number kept
+        check(($si['item']['quantity_words'] ?? '') === '2 kg', 'stock item with no count measure: quantity_words is the number + unit ("2 kg")', json_encode($si['item'] ?? null));
+        if (function_exists('rh_stock_measure_ready') && rh_stock_measure_ready($pdo)) {
+            $pdo->prepare("INSERT INTO stock_ingredients (name, unit, current_quantity, min_quantity, reorder_point, measure_big_name, measure_small_name, measure_per_big, measure_stock_side)
+                           VALUES ('AITest Qw Gin', 'bottle', ?, 0, 0, 'bottle', 'shot', 30, 'big')")->execute([67 / 30]);
+            $ginId = (int)$pdo->lastInsertId();
+            $sg = rh_ai_t_inventory_watch($pdo, $admL, ['item' => 'AITest Qw Gin']);
+            check(($sg['match'] ?? '') === 'one' && ($sg['item']['quantity_words'] ?? '') === '2 bottles + 7 shots (67 shots)' && abs((float)$sg['item']['quantity'] - 2.23) < 0.001,
+                'stock item with a count measure: "2 bottles + 7 shots (67 shots)" alongside the number (2.23)', json_encode($sg['item'] ?? null));
+            $att = rh_ai_stock_measure_rows($pdo, [['id' => $ginId, 'name' => 'AITest Qw Gin', 'unit' => 'bottle', 'current_quantity' => -(33 / 30)]]);
+            check(rh_ai_stock_qty_words($att[0]) === 'short by 1 bottle + 3 shots (33 shots)', 'below zero with a count measure: "short by 1 bottle + 3 shots (33 shots)" (measure attached by id)', rh_ai_stock_qty_words($att[0]));
+        } else {
+            echo "  (skip) count-measure words: migration 088 not applied here\n";
+        }
 
         // ── Bookings: "have I had any bookings ever" (owner fault 2026-10-28: search_bookings {"query":"*"} said none) ──
         $refT = 'AITBK-77Zq1';

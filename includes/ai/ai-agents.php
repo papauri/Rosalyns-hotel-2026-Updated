@@ -1609,7 +1609,7 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
         $lines = [];
         foreach (['out_items' => 'out', 'negative_items' => 'below zero', 'low_items' => 'low'] as $k => $label) {
             foreach ((array)($a[$k] ?? []) as $i) {
-                $lines[] = $i['item'] . ' · ' . $label . ' · ' . rtrim(rtrim(number_format((float)$i['quantity'], 2, '.', ''), '0'), '.') . ' ' . $i['unit'] . ($i['reorder_at'] !== null ? ' (reorder at ' . rtrim(rtrim(number_format((float)$i['reorder_at'], 2, '.', ''), '0'), '.') . ')' : '');
+                $lines[] = $i['item'] . ' · ' . $label . ' · ' . ($i['quantity_words'] ?? (rtrim(rtrim(number_format((float)$i['quantity'], 2, '.', ''), '0'), '.') . ' ' . $i['unit'])) . ($i['reorder_at'] !== null ? ' (reorder at ' . rtrim(rtrim(number_format((float)$i['reorder_at'], 2, '.', ''), '0'), '.') . ')' : '');
             }
         }
         if ((int)$a['out'] + (int)$a['low'] + (int)$a['negative'] === 0) {

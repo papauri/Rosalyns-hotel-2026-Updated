@@ -65,6 +65,16 @@
   <p>The buttons in the Actions column are small icons. Point at one to see its name. They are, left to right: <strong>Mark as started</strong> (only on Pending tasks), <strong>Mark done</strong> (Pending and In progress tasks), <strong>Edit</strong> (every task except Verified ones), <strong>View History</strong>, <strong>Verify</strong> (only on Completed tasks) and a red bin to delete.</p>
   <p>Tasks are listed with Pending first, then In progress, Completed, Verified and Blocked. Inside each group, High priority comes before Medium and Low, then the earliest due date.</p>
 
+  <h3>Timeline or List</h3>
+  <p>The Housekeeping and Room Maintenance pages each have a <strong>Timeline</strong> | <strong>List</strong> switch. Phones open on <strong>List</strong>.</p>
+  <ul>
+    <li><strong>Housekeeping</strong> timeline: each task sits on its due day against its room. An overdue task has a red edge. Nights with a guest in the room are shaded.</li>
+    <li><strong>Room Maintenance</strong> timeline: every open job shows from its Start Date to its End Date. A job that blocks the room is hatched.</li>
+    <li>Click a bar to open a side panel with the page's own buttons (for example <strong>Start</strong>, <strong>Mark done</strong>, <strong>Open on calendar</strong> and <strong>More</strong>).</li>
+    <li>Pick several tasks or jobs for the list's bulk actions, or pick days to add tasks or jobs for those rooms in one go. Right-click a row for its actions. In a list, Shift+click ticks a range.</li>
+    <li>Extend... (right-click or the bulk bar) adds days, weeks, months, years or runs to a date. Housekeeping tasks can repeat daily or weekly until a date. Drag the end handle of a maintenance job to stretch or shorten it.</li>
+  </ul>
+
   <h3>Room Maintenance screen</h3>
   <p>The page title is <strong>Room Maintenance Management</strong>. It has the same layout:</p>
   <ul>
@@ -231,7 +241,7 @@
     <li><strong>Start Date</strong> and <strong>End Date</strong>: the window the work covers. The window opens with now and tomorrow filled in. The end must be after the start.</li>
     <li>Optional: <strong>Started At</strong> (leave blank to stamp automatically), <strong>Assigned To</strong>, <strong>Linked Booking</strong> (pick the booking of the guest who reported it, or leave <strong>None</strong>; the list shows the 100 most recent pending, confirmed and checked-in bookings as reference - guest name (room)).</li>
     <li><strong>Estimated Duration (minutes)</strong> starts at 60 (minimum 5). <strong>Actual Duration (minutes)</strong> is for when the work is done.</li>
-    <li><strong>Block room during maintenance</strong> is ticked by default. While it is ticked and the request is not Completed, Verified or Cancelled, the room cannot be booked for any night between the Start Date and the End Date. A planned request only puts the room into Maintenance from its start date, not before. Untick it if guests can still use the room.</li>
+    <li><strong>Block room during maintenance</strong> is ticked by default. While it is ticked and the request is not Completed, Verified or Cancelled, the room cannot be booked for any night between the Start Date and the End Date. A planned request only puts the room into Maintenance from its start date, not before. Untick it if guests can still use the room. If a booking sleeps on a night in that window, the request is refused with the bookings and the free dates: change the dates, untick <strong>Block room during maintenance</strong>, or move the booking.</li>
     <li>Tick <strong>Recurring Task</strong> to record a repeat pattern, then choose <strong>Daily</strong>, <strong>Weekly</strong> or <strong>Monthly</strong> and an optional <strong>Recurring End Date</strong>. The repeat requests are created for you by the automatic scheduler, not by this screen.</li>
     <li>Type any <strong>Notes</strong> and click <strong>Save</strong>. You will see <em>"Maintenance schedule created successfully."</em></li>
   </ol>
@@ -261,7 +271,7 @@
     <li>Choose a staff member (or <strong>Unassigned</strong>), a type (<strong>Inspection</strong>, <strong>Repair</strong>, <strong>Replacement</strong>, <strong>Upgrade</strong>, <strong>Emergency</strong>) and a priority (<strong>Medium Priority</strong>, <strong>High Priority</strong>, <strong>Urgent Priority</strong>, <strong>Low Priority</strong>).</li>
     <li>Click <strong>Assign Selected (n)</strong>. You will see <em>"Bulk assigned 3 rooms for maintenance."</em></li>
   </ol>
-  <p>Each request is titled <em>"Bulk assigned maintenance task"</em>, due today, Pending. Rooms that already have an open request are skipped. Edit the request afterwards to give it a proper title.</p>
+  <p>Each request is titled <em>"Bulk assigned maintenance task"</em>, due today, Pending. Rooms that already have an open request are skipped. Edit the request afterwards to give it a proper title. A job on a night a booking sleeps on is still created, but it does not close the room for that night.</p>
 
   <h2 id="mt-edit">How to edit, cancel or delete a maintenance request</h2>
   <ol class="steps">

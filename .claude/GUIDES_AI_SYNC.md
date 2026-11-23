@@ -25,6 +25,10 @@ when prompted."
 
 ## Pending (oldest first)
 
+(none)
+
+## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
+
 ### Whole-group payment receipts show the group total and every room (2026-11-20, owner fault) - Liwonde 7d5c105 / Rosalyn's 3781b20
 - **Guides (Payments / Receipts, Bookings group payment):** each room still gets its own receipt number, but every room's receipt PDF and email now show "Whole-group payment: <total> split across N rooms" and list each room (booking, room, receipt number, amount); emailing any of them (automatic or Email receipt) sends ONE email with every room's receipt attached, to the lead room's guest plus CC, and all are marked emailed.
 - **Assistant:** when asked about a group payment's receipt, say it is one receipt per room, each showing the group total, all sent together in one email.
@@ -39,6 +43,46 @@ when prompted."
 - **Guides (22-assistant.html, Models rows ~350/377/378, admin only):** each provider now shows up to 10 current models (cheapest, fastest, latest); badges Newest / Cheapest / Fastest; "Replies here in about X s"; Google prices are read from Google's price page in the daily check and on Check for newer models ("Price from Google's page, <date>"), typed prices are never changed; Gemini 4 models are now shown and can be suggested (line 378 still says they are not); big models (Pro/Ultra/Opus or US$15+ per million out) are shown but never suggested; ticking a model makes it Extra, unticking clears its role, picking a role ticks it; Save fixes a missing Primary / second Fast and says what it set.
 - **Assistant:** built by the AI lead; nothing more to sync.
 - **Manager Guides:** none.
+
+### Room Timeline calendar, step A (2026-11-21, owner ask) - Liwonde f011c65 / Rosalyn's cadda61
+- **Guides (Calendar / Front desk, Housekeeping, Maintenance):**
+  - Calendar now opens on the Room Timeline: rooms down the side grouped by type, dates across, bookings as coloured bars.
+  - Each type has an Unassigned line; each day has occupancy / arrivals / departures rows; maintenance and blocked dates show hatched.
+  - Housekeeping state shows as a dot per room. Range is 14 days by default, 30 optional, 7 on tablet and 3 on phone, with an Agenda list on phone.
+  - Clicking a bar opens a side panel (a sheet on phone) that links to the booking.
+  - Dragging across empty days opens New booking with the room and dates filled in.
+  - The old month grid is at Calendar > Month. Housekeeping and Maintenance tabs list rooms and link to the full pages.
+- **Assistant:** the new page view is calendar.php (default timeline, ?view=month); read-only JSON admin/api/calendar-timeline.php; create-booking.php accepts room, room_type, check_in, check_out prefill. No table or permission changes.
+- **Manager Guides:** Bookings - one line that the calendar is now the room timeline; Housekeeping & maintenance - the tabs on the calendar.
+
+### Room Timeline calendar, step B: move room / change nights from the calendar (2026-11-21, owner ask) - Liwonde 1f3658e / Rosalyn's f8a9ec2
+- **Guides (Calendar):**
+  - On desktop, drag a bar to another room to move it, or drag an unassigned bar onto a room. On a confirmed booking, dropping on another room type changes the type at that type's price.
+  - Drag a checked-in stay's right edge to change its check-out. Keys: M = Move room, D = Change dates.
+  - On phone and tablet, use More > Move room / Change dates in the sheet.
+  - Every change shows a confirm (before -> after, price) and saves only on Confirm. No guest email is sent.
+  - Changes that would give money back, checked-out, past, joined-room and group bookings, and a confirmed stay's dates are done from the booking.
+- **Assistant:** the calendar uses the existing bookings.php actions assign_individual_room, upgrade_room_type (pricing=charge, send_email=0), stay_nights_quote and stay_nights_apply. No new tables, settings or permissions.
+- **Manager Guides:** Bookings - "move a guest by dragging on the calendar".
+
+### Menu Management: Delete selected + Delete all (2026-11-21, owner ask) - Liwonde d2aff50 / Rosalyn's 5ac2f4a
+- **Guides (Menu Management):** administrators with the Clear Stock Data permission see tick boxes, a tick per category,
+  "Select all shown" (only rows the search/filters show on the open tab), Delete selected, and Delete all (Food, Drinks
+  or both; type DELETE). Each item follows the one-item rule: never sold = deleted with its till copy and stock list;
+  sold = hidden; on an open order = left. Everyone else keeps the one-item Delete only.
+- **Assistant:** new POST actions menu_bulk_delete / menu_delete_all on admin/menu-management.php; System Logs rows
+  menu_items_bulk_deleted / menu_items_all_deleted (Till & orders) list every item and outcome. No new tables/settings/permissions.
+- **Manager Guides:** Stock - "clear the whole menu before a re-import" (admin with Clear Stock Data only).
+
+### Housekeeping, Maintenance, Room Service look like the calendar (2026-11-21, owner ask) - hashes in TASKS.md
+- **Guides (Housekeeping, Maintenance, Room Service):** each page has a Timeline | List switch (phones open on List).
+  Housekeeping: tasks on their due day per room, overdue red edge, shaded nights with a guest in. Maintenance: every
+  open job from its From to its To date, hatched when it blocks the room. Room Service: today's orders by room and hour,
+  "Show all rooms", late edge after 10 minutes (the KDS rule). Clicking a bar opens a side panel with the page's own
+  buttons (Start / Mark done / next order state, Open on calendar, More). Calendar maintenance blocks open that job.
+- **Assistant:** new read-only JSON admin/api/housekeeping-timeline.php, maintenance-timeline.php, room-service-timeline.php;
+  pages read ?view=timeline|list, ?id=, ?room=, ?date=, ?days=. No table, setting or permission changes.
+- **Manager Guides:** Housekeeping & maintenance - one line on the Timeline view; POS & Kitchen Screens - Room Service timeline.
 
 ### POS drink tiles show the serving and the other servings' prices (2026-11-21, owner FEATURE) - commit "POS drink tiles" in both repos
 - **Guides (POS till):** a bar / coffee-bar tile whose stock link is ONE stock item now says how one sale is served
@@ -60,6 +104,51 @@ when prompted."
   (food_menu/drink_menu.show_room_service + menu_items room service flag), menu_move_category (category change via
   rh_menu_pos_sync_item). Page URL admin/menu-management.php?tab=room-service.
 - **Manager Guides:** Menu/Restaurant guide - one line on the Room service tab and moving drinks into categories.
+
+### Import step 4 "Drinks for the menu": Tick all / Untick all (2026-11-21, owner ask) - Liwonde e4bbc37 / Rosalyn's 3c3b30e
+- **Guides (23-import):** step 4 "Put on the menu" has Tick all and Untick all: they act on every drink the list shows
+  (after Search and Show, all pages). Drinks that cannot go on the menu stay unticked. Nothing is written until Import.
+- **Assistant:** new drinks_set mode tick_all (on, q, show) on admin/data-import.php; no table/setting/permission change.
+- **Manager Guides:** Stock - "Tick all in step 4 to put every priced drink on the menu at once".
+
+### Import step 3: Shot size (ml) in "Optional: add sizes" (2026-11-21, owner ask) - Liwonde 9b776c5 / Rosalyn's 3c3b30e
+- **Guides (23-import):** drinks sold by the shot (or tot) show a Shot size (ml), filled in from the Drink measures list
+  (or the file / the Assistant's reading); change it per group or per row if the bar pours a different shot. Used for the
+  cost of one shot and what each sale takes off stock only; the opening count and the Drink measures list do not change.
+- **Assistant:** sizes_set field 'shot' (group|row); new import alias kind shot_words (seed v9); the single reader call
+  may pre-fill a shot size. No table/setting/permission change.
+- **Manager Guides:** Stock - one line: "Step 3: check the shot size if your bar pours other than the list's shot".
+
+### Import step 3 sizes: tidy table, "Change several drinks at once", per-row "Sold as" (2026-11-21, owner ask) - Liwonde 68e62fe / Rosalyn's 6fb1abe
+- **Guides (23-import):** tick drinks (or "Tick all shown": every drink the search, Show and Group pick, all pages), then
+  fill only what should change: Sold as (shot / glass / whole bottle / a Drink measures list name), shot, glass, bottle
+  size; Apply. Each value is checked per drink; skipped ones say why. Sold as changes the menu only (cost of one, what a
+  sale takes off stock); the opening count still reads the file. Each row's Sold as can be set or cleared back to the file.
+- **Assistant:** new POST action sizes_bulk on admin/data-import.php; row answer _sizes.r.<key>.sold. No table/setting/permission change.
+- **Manager Guides:** Stock - "Step 3: tick many drinks and set their shot or bottle size in one go".
+
+### Import page: step plan, folding sections, pinned buttons (2026-11-21, owner ask, UI only) - Liwonde 79d0a4a / Rosalyn's d14bca5
+- **Guides (23-import):** new screenshots needed. Each step shows "On this step" (numbered actions and what is left),
+  sections fold (Required / Optional / Done; the ones that need you start open; Open all / Fold all), Back / Continue /
+  Confirm and import stay pinned at the bottom. Wording shortened; "More about this" holds the detail.
+- **Assistant:** no action/table/setting change; section names: "Answer what is unclear", "All items", sizes, value check,
+  "The numbers for the whole file", drinks, rows left out, fixed for you.
+- **Manager Guides:** Stock import page picture refresh.
+
+### Stock quantities shown as "bottles + shots" (2026-11-21, owner ask, display only) - Liwonde dced1a0 / Rosalyn's 8686663
+- **Guides (stock pages):** on-hand, batch, wastage, reorder, report and count figures read "2 bottles + 7 shots" for
+  items with a count measure (hover shows the exact figure); below zero reads "short by ..."; items without a measure
+  show at most 2 decimals. Stored stock, exports and what you type are unchanged.
+- **Assistant:** no table/setting change; when quoting stock to staff, prefer the same words (helper rh_stock_qty_words).
+- **Manager Guides:** Stock - one line on reading "bottles + shots".
+
+### Put stock items on the drinks menu (2026-11-22, owner ask) - Liwonde (this commit)
+- **Guides (stock + menu):** Stock Items: tick drinks (or Tick all shown) -> "Put N on the menu" -> type price (VAT
+  included), check Sold as and category -> Add. Menu Management Drinks tab has "Add from stock" (same page). Needs the
+  Menu permission. A drink already on the menu only gets its new price; weight items (kg) cannot go on.
+- **Assistant:** new page admin/stock-to-menu.php (permission menu); log action drink_menu_from_stock; shared writer
+  import_drinks_menu_write(). No table/setting change.
+- **Manager Guides:** Stock + Menu - one line each on "Put on the menu" / "Add from stock".
 
 ### Blocked Dates calendar: block single rooms on a month grid (2026-11-22, owner FEATURE) - commit "Blocked Dates calendar" in both repos
 - **Guides (Blocked Dates):** the page opens on a Calendar: All rooms row, then each room type row and its rooms (a joined
@@ -88,10 +177,103 @@ when prompted."
   Booking History. Assistant: new admin_activity_log actions room_block / room_unblock; new booking_timeline_logs note
   actions (no table/setting change).
 
-### Grid Phase 1: select many, right-click, bulk bar on Calendar / Housekeeping / Maintenance / Blocked Dates (2026-11-23, owner FEATURE) - Liwonde 0bb811a / Rosalyn's port
+### Import step 3 "Put items on the menu": drinks AND food, grouped, editable price (2026-11-22, owner FEATURE) - Liwonde (this commit)
+- **Guides (23-import):** step 3 now holds ONE "Put items on the menu" section: items grouped by the file's category; each group has Menu (Drinks / Food) + menu category; per row Sold as, sizes (drinks), cost of one, selling price (VAT incl., editable, filled from the file), profit, On menu tick; "Put all N on the menu" + "Put all in this group"; nothing ticked by default. Unclear groups say "Choose: Drinks or Food" and cannot be ticked until answered; an item already on a menu stays on it. Step 4 shows one summary line ("N go on the menu: D drinks, F food ...") + "Change in step 3". A typed price changes the menu price only, never stock cost or the opening count.
+- **Assistant:** if set up, it may show "Suggested: Food · Snacks" on an unclear group; nothing changes until "Use this" is pressed; it never ticks.
+- **Manager Guides:** Stock - one line: import can put drinks and food on the menu at a price you can change.
+
+### Admin phone + tablet polish (2026-11-22, owner PATCH) - Liwonde (this commit)
+- **Guides:** layout only. On phones and tablets list pages show compact rows (tick at the left, name + status, short detail lines, action buttons on the right, more in the ... menu). Screenshots of phone views in guides may look different; no steps change.
+- **Assistant:** no change.
+- **Manager Guides:** no change.
+
+### Admin phone + tablet polish round 2 (2026-11-22, owner PATCH) - Liwonde (this commit)
+- **Guides:** layout only. Phone row buttons now show a small name under the icon; Individual Rooms, Invoices, Credit Notes, Stock Clear, Cache, Menu Management and Receipts use compact rows; no big gap above the page buttons. On phones Credit Notes hides Issued (on the PDF), Individual Rooms hides booking dates (in Details), Menu hides barcode/tags (in Edit). No steps change.
+- **Assistant:** no change.
+- **Manager Guides:** no change.
+
+### Grid Phase 1: select many, right-click, bulk bar on Calendar / Housekeeping / Maintenance / Blocked Dates (2026-11-23, owner FEATURE) - Liwonde 0bb811a / Rosalyn's 790990b
 - **Guides (calendar, housekeeping, maintenance, blocked dates):** drag a box across rooms and days, Shift+click a range, Ctrl+click to add, click a room name (its days) or a day head (that night for all rooms); right-click (or long-press, or the Menu key) opens the actions; a bar at the bottom shows what is picked. Calendar right-click: New booking (one room, free nights), Block / Unblock nights (same check as Blocked Dates), New maintenance job. Housekeeping / Maintenance timelines: pick several tasks/jobs for the list's bulk actions; pick days to add tasks/jobs for those rooms in one go. Lists: Shift+click ticks a range; right-click a row for its actions. Clicking a room name or a calendar block now selects it (Enter opens it). Shift+right-click = the browser's own menu.
 - **Assistant:** no change (no tables, settings or statuses changed).
 - **Manager Guides:** Bookings / Rooms guide may mention right-click + drag-select (check at sync).
+
+### Grid Phase 1b / Blocked Dates patch / Phase 2b / Phase 3 (2026-11-23, owner FEATURE + PATCH) - Liwonde 3addb8a, 53c7d34, 77536cd, Phase 3 (this commit)
+- **Guides (all admin lists):** right-click any list row for that row's own actions + Open / Open in new tab / Copy reference (3addb8a).
+- **Guides (blocked dates):** picks stay when changing month; Block Date Range Individual level = tick several rooms (53c7d34).
+- **Guides (bookings):** changing a stay's dates or room is refused with a plain message when a booking, block or maintenance job is in the way (77536cd).
+- **Guides (calendar, blocked dates, maintenance, housekeeping):** Extend... (right-click / bulk bar) by days, weeks, months, years or to a date; drag the end handle of a block or maintenance job to stretch or shrink it (booked nights skipped and listed; no handle on a month's last night in Blocked Dates, use Extend...); housekeeping repeat daily / weekly until a date; dragging a confirmed booking opens its Change dates prefilled, nothing saved on the calendar.
+- **Assistant:** extend_stay now refuses with the same clear clash message.
+- **Manager Guides:** Rooms guide: Extend + drag handles (check at sync).
+
+### Grid Phase 2: blocks and room-closing maintenance never land on a booked night (2026-11-23, owner FEATURE) - Liwonde (this commit)
+- **Guides (blocked dates, calendar, maintenance):** Block (calendar grid, Block Date Range, list forms, Calendar right-click) now SKIPS nights a booking sleeps on and saves the rest; the confirm says which nights will be skipped and lists the bookings; if every night is booked nothing is saved. A room-type or All-rooms block on a night with bookings blocks only that night's free rooms one by one (keeping rooms free for bookings with no room yet); unblocking the type later does not remove those single-room blocks. Maintenance with "Block room" over a booked night is refused with the bookings and the free dates (change the dates, untick Block room, or move the booking). Auto-created, bulk-assigned and repeating jobs on a booked night are created without closing the room. Unblock is never checked.
+- **Assistant:** Block dates card (includes/ai/ai-actions.php rh_ai_pv_block_dates / rh_ai_vf_block_dates): the preview runs the same clash check, warns which nights are skipped, refuses when every night is booked, and the verify checks only the nights the save may block (plus single-room blocks), so a correct partial save is no longer an action_failed incident. Wording in its card help changed.
+- **API:** POST /api/blocked-dates skips booked nights (response `skipped[]`, 409 when nothing free; `warnings` kept empty); PUT onto a booked night = 409, old block kept; an individual block of a joined room now blocks both rooms. POST/PUT /api/maintenance-schedules with block_room=1 over a booked night = 409.
+- **Manager Guides:** Rooms guide: one line "blocks skip booked nights" (check at sync).
+
+### Assistant Settings: model prices automatic, "Monthly cap" (2026-11-21, owner FEATURE)
+- Owner: "no need for us to set AI prices, you do it automatically, we just set max cap" (cap stays information only, never stops chat).
+- Guides (Assistant Settings > Models): no Price in / Price out boxes any more; prices are read automatically each day (Google's own price page; the public model price list for Anthropic, OpenAI, xAI, DeepSeek, and for Google models its page does not show) and on Test connection / Check for newer models. A model with "No price yet" cannot be ticked until a price is found. "New - set price" is gone.
+- Guides (Budgets and limits, Usage): "Monthly aim" is now "Monthly cap (US$)"; still information only.
+- Assistant: settings key unchanged (`ai_monthly_budget_usd`); if it mentions the figure, call it the monthly cap. `rh_ai_save_selection()` takes no prices.
+
+### Assistant Settings: Fit limits to the cap + layout fixes (2026-11-21, owner FEATURE)
+- Owner: "for Budgets and limits be able to auto set to the best capacity to fit budget and fix the UI in assistant settings".
+- Guides (Assistant Settings > Budgets and limits): Monthly cap now comes first. New "Fit limits to the cap" button fills Daily limit per person and Most tokens for one question so that even if every person with access plus the nightly checks used all of it every day (and went one question past the daily limit, which can happen), a month stays within the cap with 10% kept back; it shows the figures and what the current limit could cost. Click Save limits to keep it. When a person's daily limit is used up, quick lookups still work and the rest is back the next day.
+- Guides: on/off pickers now read short ("On - prepares changes", "Off - local answers only"...); the full meaning is in the help text under each. Usage table names the system row "Nightly checks". Prices show as $0.30, not $0.3.
+- Assistant: new helper `rh_ai_fit_limits()` (includes/ai/ai-catalog.php); no tool change.
+
+### Maintenance windows from the panel + hotel backups skip cp_ tables (2026-11-23, ClaudeWorkTwo) - Liwonde 46efbca / Rosalyn's 974003a
+- Line added for ClaudeWorkTwo (board note). Files: includes/licence-maintenance.php, licence.php, licence-guard.php,
+  config/database.php frontend maintenance block, db-backup.php. Details in the commit message. New panel pages
+  Maintenance + Deployments = Showcase SYNC QUEUE item.
+
+### Update from Remote, hotel side (2026-11-23, ClaudeWorkTwo) - Liwonde 3fccfba / Rosalyn's 1bad20c
+- Line added for ClaudeWorkTwo (board note). Files: includes/licence.php, scripts/deploy-check.php. Details in the commit message.
+
+### Calendar side panel opens like the Assistant chat (2026-11-23, owner ask) - commit "Calendar side panel docks" in both repos
+- Owner: "on the calendar views ... should be opening like our chat panel and not hiding page content but minimising the
+  page like how chat does and also not overlapping with our assistant icon and notice icon because it's hiding some buttons".
+- Guides (Calendar, Housekeeping, Maintenance, Room Service grids): on a laptop the booking / task panel now sits beside
+  the page (the page gets narrower, like the Assistant), and the Assistant, notice and "?" buttons move to the left of
+  the panel so Open booking / More are never covered. On a small screen with the menu open the panel still covers the
+  page, but the buttons still move clear. Phones keep the bottom sheet.
+- Assistant: no change.
+
+### Update from Remote pulls with git (2026-11-24, ClaudeWorkTwo) - Liwonde 9f01daa / Rosalyn's 5c9779e
+- Line added for ClaudeWorkTwo (board note). Update from Remote now uses git pull, not cPanel uapi. Details in the commit message.
+
+### Dashboard Phase A: last sign-in line + End of Day day chip (2026-11-24, owner FEATURE) - commit "Dashboard Phase A" in both repos
+- Owner: dashboard "missing some very vital information that can help anyone that first logs in"; mock-up approved 2026-11-24.
+  Plan `.claude/DASHBOARD_FIRSTLOGIN_PLAN.md` (Phases B and C to follow).
+- Guides (Dashboard): under the greeting a small line "Last signed in Mon 23 Nov at 18:40, Chrome on Windows. Not you?
+  Change your password" ("First sign-in on this account." the first time). Next to the date, for people with End of Day
+  access: a green "Yesterday closed · End of Day sent HH:MM" tag, or "Yesterday's End of Day not run" linking to the report
+  ("(test)" when the send was in test mode). System Logs > Recent Logins now name Android / iOS phones instead of "Linux".
+- Assistant: no tool change. New helpers `rh_dash_prev_signin()`, `rh_dash_eod_status()` (admin/includes/dashboard-since-data.php).
+
+### Dashboard Phase B: since you were last here, guest chips, free tonight, week takings, "?" tips (2026-11-24, owner FEATURE) - commit "Dashboard Phase B" in both repos
+- Guides (Dashboard): the line under the greeting now reads "Since you were last here: N new bookings · N cancelled ·
+  MWK … received · N room moves — N things need you" (only what the person may see; each part opens the matching list).
+  Bookings and Payments accept `?since=` (the list shows a "since" notice with Clear). Arrival rows (Today's movements,
+  Week ahead) show chips: "Returning guest · Nth stay", "Request: …", "Deposit unpaid" (not for company-billed or group
+  rooms, only pending/confirmed). Rooms ring centre = rooms still free tonight (occupancy % stays in the top card). Money
+  panel headline = "Taken this week" (today stays in the Takings card). Every figure card and panel title has a "?" tip.
+- Assistant: no tool change. New helpers `rh_guest_history_stays_for()` (includes/guest-history.php),
+  `rh_fd_deposit_unpaid()`, `rh_fd_request_short()` (admin/includes/front-desk-counts.php), since readers in
+  admin/includes/dashboard-since-data.php.
+
+### Dashboard Phase C: handover notes + first-login welcome card (2026-11-24, owner FEATURE) - commit "Dashboard Phase C" in both repos
+- Guides (Dashboard): a "Handover note" button in the dashboard header lets anyone write a short note (up to 500
+  characters) for the next shift. Everyone else sees the newest unread note at the top of Needs attention ("From <name>,
+  <time>", "and N more") until they press Mark read; notes disappear after 48 hours; the writer never sees their own.
+  It does not change the Needs-attention count. System Logs shows "Wrote a handover note" / "Read a handover note" (note
+  number only, never the text). First sign-in: a welcome card shows the person's role, what it can do, up to 3 main pages
+  they can open and the guide links, until they press Got it.
+- Assistant: no tool change. New tables `shift_handover_notes`, `shift_handover_reads` (migration 091; Rosalyn's only
+  after the owner confirms), preference key `dashboard_welcome_dismissed` in `admin_user_preferences`; reader
+  `rh_dash_handover_unread()` (admin/includes/dashboard-since-data.php); endpoints admin/api/handover-notes.php,
+  admin/api/dashboard-seen.php.
 
 ## Synced 2026-11-20 (2) (import entries below: guides 23-import + 08-stock-orders, Manager Guide Stock line, AI import helper ai-import-suggest.php; hashes in TASKS.md) - entries kept for reference
 
@@ -714,27 +896,22 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides: guide 08 already updated in this ship (chips example). Other guides that mention yield (recipes/menu, KB answers) should use the same example: 10 kg potatoes peeled to 8 kg = 80 %; 250 g chips plate takes 313 g raw; sack makes 32 plates, not 40; type the plate amount; rice/pasta dry amount at 100 %.
 - Assistant: if it explains yield, use the same example and rule (raw taken off = plate amount / yield).
 
-### Assistant Settings: model prices automatic, "Monthly cap" (2026-11-21, owner FEATURE)
-- Owner: "no need for us to set AI prices, you do it automatically, we just set max cap" (cap stays information only, never stops chat).
-- Guides (Assistant Settings > Models): no Price in / Price out boxes any more; prices are read automatically each day (Google's own price page; the public model price list for Anthropic, OpenAI, xAI, DeepSeek, and for Google models its page does not show) and on Test connection / Check for newer models. A model with "No price yet" cannot be ticked until a price is found. "New - set price" is gone.
-- Guides (Budgets and limits, Usage): "Monthly aim" is now "Monthly cap (US$)"; still information only.
-- Assistant: settings key unchanged (`ai_monthly_budget_usd`); if it mentions the figure, call it the monthly cap. `rh_ai_save_selection()` takes no prices.
-
-### Assistant Settings: Fit limits to the cap + layout fixes (2026-11-21, owner FEATURE)
-- Owner: "for Budgets and limits be able to auto set to the best capacity to fit budget and fix the UI in assistant settings".
-- Guides (Assistant Settings > Budgets and limits): Monthly cap now comes first. New "Fit limits to the cap" button fills Daily limit per person and Most tokens for one question so that even if every person with access plus the nightly checks used all of it every day (and went one question past the daily limit, which can happen), a month stays within the cap with 10% kept back; it shows the figures and what the current limit could cost. Click Save limits to keep it. When a person's daily limit is used up, quick lookups still work and the rest is back the next day.
-- Guides: on/off pickers now read short ("On - prepares changes", "Off - local answers only"...); the full meaning is in the help text under each. Usage table names the system row "Nightly checks". Prices show as $0.30, not $0.3.
-- Assistant: new helper `rh_ai_fit_limits()` (includes/ai/ai-catalog.php); no tool change.
-
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
 - `ai-decisions` ~1620/1777 dept-takings/VAT still on payment_date (matches Reports); "Open refunds"
   link filters Payments by payment_date.
-- Guide 14 says "AI Assistant" vs "the Assistant"; `rh_ai_t_guest_history` drops no-email bookings
-  when one email is found; `balances_due` per-row fallback (speed).
+- `rh_ai_t_guest_history` drops no-email bookings when one email is found; `balances_due` per-row fallback (speed).
+- (2026-11-24) System Logs has no words for action `drink_menu_from_stock` (admin/includes/staff-activity-lib.php, logs lead).
+- (2026-11-24) Guide 07 note box still names Block Single Date / Block Date Range (now on the List tab only).
+- (2026-11-24) Liwonde guides 01, 02, 14, 23 show "Rosalyns Beach Hotel" in <title>/brand (Liwonde only; old).
+- (2026-11-24) Manager Guide Bookings: Blocked Dates calendar + Extend / drag handles left out (page 2 full);
+  the blocks-skip-booked-nights line is in Housekeeping and Maintenance instead.
+- (2026-11-24) Import guide has no screenshots in docs/guides; none out of date there.
 
 ## Synced
+- 2026-11-24 (owner prompted), DONE: Guides + Assistant, commit "Guides + Assistant sync 2026-11-24" in both repos (entries in the 'Synced 2026-11-24' section).
+  Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed.
 - 2026-11-20 (owner prompted), DONE: Guides Rosalyn's 909510e / Liwonde 8704293; Assistant see TASKS.md SYNC 2026-11-20 (entries in the 'Synced 2026-11-20' section).
   Manager Guides: Stock, Bookings, Money and End of Day, Staff and Permissions refreshed; Daily checklist no change.
 - Through 943ca16: Rosalyn's 55827b0 / Liwonde 717b36e (and earlier 859473d / 8f7301d, 5085f61 / 2c82b0e).

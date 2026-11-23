@@ -2312,9 +2312,16 @@ function rh_dec_f_stock_tied(PDO $db, array $ctx): array
     $expDays = (int)($exp['days'] ?? 0);
     $onOrderStill = $ord ? count(array_filter(array_keys($stillIds), static fn($id) => ($ord[$id] ?? 0) > 0.0001)) : 0;
     $rows = [];
-    foreach (array_slice($still, 0, 6) as $r) {
+    $shown = array_slice($still, 0, 6);
+    if (function_exists('rh_stock_measure_attach')) { // + the count measure: "2 bottles + 7 shots (67 shots)" like the stock screens
+        $shown = rh_stock_measure_attach($db, $shown);
+    }
+    foreach ($shown as $r) {
+        $qtyText = function_exists('rh_stock_measure_get') && function_exists('rh_stock_qty_words') && rh_stock_measure_get($r) !== null
+            ? rh_stock_qty_words((float)$r['current_quantity'], $r, (string)$r['unit'])
+            : rh_dec_qty((float)$r['current_quantity']) . ' ' . (string)$r['unit'];
         $rows[] = ['label' => 'Not used in ' . $days . ' days: ' . (string)$r['name'] . (($ord[(int)$r['id']] ?? 0) > 0.0001 ? ' (more on order)' : ''),
-            'value' => rh_dec_qty((float)$r['current_quantity']) . ' ' . (string)$r['unit'], 'amount' => round((float)$r['stock_value'], 2)];
+            'value' => $qtyText, 'amount' => round((float)$r['stock_value'], 2)];
     }
     foreach (array_slice($expRows, 0, 4) as $x) {
         $rows[] = ['label' => 'Expires ' . $x['expires'] . ': ' . $x['stock_item'], 'reference' => (string)$x['batch'], 'value' => (string)$x['left'], 'amount' => (float)$x['value']];

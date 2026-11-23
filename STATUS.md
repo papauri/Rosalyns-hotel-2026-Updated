@@ -29,6 +29,11 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   `MSP/usage-reports/<date>.md` + a row in `MSP/usage-reports/HISTORY.md`. COST_LOG.md is retired.
   Baseline 10-16 Nov: 22,793 calls, 50 per hotel commit, 95% Opus, 53 agent runs past today's caps.
 
+## Shipped 2026-11-24: Guides + Assistant sync (owner prompted; port of Liwonde 0d6f590)
+- Staff guides 01, 05, 06, 07, 08, 13, 22, 23, 99, faq updated for everything shipped 2026-11-20 to 2026-11-24;
+  the Assistant gives stock quantities also in "bottles + shots" words. No DB change, no migration.
+- `.claude/GUIDES_AI_SYNC.md` is identical in both repos again; Pending is empty. Tests ran at Liwonde only.
+
 ## Clean-up 2026-11-21 (owner-approved, `cleanup` skill)
 - Nothing sensitive exposed in git. Secret-looking values in `scripts/tests` are made-up test data (kept).
 - Removed from git: `images/gym/personal-training.jpg` (8.1 MB, unused: no gym here) `81cf73c`.

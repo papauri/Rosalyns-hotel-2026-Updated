@@ -193,6 +193,7 @@
 
   <h2 id="history">How to see the history of a booking</h2>
   <p>Voiding a charge on a room bill adds a line such as <em>"Charge voided: [item] MWK x"</em> with who did it, when, the type and the reason. A change to the payment status adds a <em>"Payment status now ..."</em> line.</p>
+  <p>A block or unblock that touches a night of this stay adds a line <em>"Room blocked on a night of this stay"</em> or <em>"Block removed from a night of this stay"</em>.</p>
   <p>The History window lists every step for the booking in order: when it happened, who did it (name and role), what happened, and the amounts before and after where money or a price changed. It changes nothing.</p>
   <ol class="steps">
     <li>On the Bookings list, open <strong>More</strong> &rarr; <strong>History</strong>. You can also click <strong>History</strong> on a Payment Details page, or open a booking's history from its payment row.</li>
@@ -205,7 +206,35 @@
   <p>When the AI Assistant is on, the History window starts with a short plain <strong>Summary</strong> copied from the steps below. Staff can also ask the Assistant <em>"What happened to booking [reference]?"</em></p>
 
   <h2 id="calendar">How to use the Calendar</h2>
-  <p>Go to <strong>Front Desk</strong> &rarr; <strong>Calendar</strong>. It shows one month at a time, with one block per room and the bookings and blocks on each day. Use it to see which rooms are free (available or vacant) on any day: a room with no booking bar and no colour is free to sell.</p>
+  <p>Go to <strong>Front Desk</strong> &rarr; <strong>Calendar</strong>. It opens on the <strong>Room Timeline</strong>: rooms down the side, grouped by room type, dates across the top, and each booking as a coloured bar. A room with no bar on a day is free to sell that day. The old month grid is the <strong>Month</strong> view.</p>
+  <ol class="steps">
+    <li>Move along the dates with the arrows at the top. The range is 14 days by default; 30 days is optional. A tablet shows 7 days and a phone 3 days, with an <strong>Agenda</strong> list on the phone.</li>
+    <li>Click a booking bar to open a side panel with a link to that booking. On a laptop the panel sits beside the page and the page gets narrower; on a phone it is a sheet from the bottom.</li>
+    <li>Drag across empty days in a room to open <strong>New booking</strong> with that room and those dates filled in.</li>
+  </ol>
+  <ul>
+    <li>Each room type has an <strong>Unassigned</strong> line for bookings that have no room yet.</li>
+    <li>Each day shows occupancy, arrivals and departures. A dot beside each room shows its housekeeping state.</li>
+    <li>Maintenance and blocked dates show hatched.</li>
+    <li>The <strong>Housekeeping</strong> and <strong>Maintenance</strong> tabs list the rooms and link to their full pages.</li>
+  </ul>
+  <h3>Move a room or change nights from the calendar</h3>
+  <ul>
+    <li>On a computer, drag a bar to another room to move it, or drag an unassigned bar onto a room. On a confirmed booking, dropping it on a room of another type changes the room type at that type's price.</li>
+    <li>Drag a checked-in stay's right edge to change its check-out. Keys: <strong>M</strong> = Move room, <strong>D</strong> = Change dates.</li>
+    <li>On a phone or tablet, use <strong>More</strong> &rarr; <strong>Move room</strong> or <strong>Change dates</strong> in the panel.</li>
+    <li>Every change shows a confirm (before and after, and the price) and saves only when you press <strong>Confirm</strong>. No guest email is sent.</li>
+    <li>Changes that would give money back, and changes to checked-out, past, joined-room and group bookings, are done from the booking. So are a confirmed booking's dates: a clash is refused with a plain message.</li>
+  </ul>
+  <h3>Select several, right-click, or extend</h3>
+  <ul>
+    <li>Drag a box across rooms and days, Shift+click a range, Ctrl+click to add one more, click a room name for its days, or click a day heading for that night in all rooms. A bar at the bottom shows what is picked.</li>
+    <li>Right-click (or long-press, or use the Menu key) for the actions: <strong>New booking</strong> (one room, free nights), <strong>Block nights</strong> / <strong>Unblock nights</strong> (same check as Blocked Dates) and <strong>New maintenance job</strong>. Shift+right-click opens the browser's own menu.</li>
+    <li>Drag the end handle of a block or maintenance job to stretch or shorten it, or use <strong>Extend...</strong> for days, weeks, months, years or a date. Booked nights are skipped and listed.</li>
+    <li>Dragging a confirmed booking opens its <strong>Change dates</strong> screen with the new dates filled in. Nothing is saved on the calendar.</li>
+  </ul>
+  <h3>The Month view</h3>
+  <p>Open <strong>Calendar</strong> &rarr; <strong>Month</strong>. It shows one month at a time, with one block per room and the bookings and blocks on each day. Use it to see which rooms are free (available or vacant) on any day: a room with no booking bar and no colour is free to sell.</p>
   <ol class="steps">
     <li>Click <strong>Previous</strong> or <strong>Next</strong> to change month.</li>
     <li>Use the filters: <strong>Room number or name…</strong> search, <strong>All types</strong>, <strong>All rooms</strong>, <strong>All statuses</strong> (Available, Occupied, Reserved, Cleaning, Maintenance, Out of order, Inspection) and <strong>All floors</strong>. A clear button appears once a filter is set.</li>
@@ -397,6 +426,7 @@
     <li>Type the <strong>Reason for Adjustment</strong> (required).</li>
     <li>Click <strong>Confirm Adjustment</strong>. You will see <em>"Stay dates adjusted successfully."</em> with the extra amount due or the refund or credit. The guest is emailed about the change when an email address is on file.</li>
   </ol>
+  <p>If a booking, a block or a maintenance job is in the way of the new dates or the new room, the change is refused with a plain message that says what is in the way. Nothing is changed.</p>
   <p>If the new dates no longer fit a <strong>length-of-stay</strong>, <strong>weekend</strong> or <strong>seasonal</strong> discount, that discount comes off. The nightly rate goes back up by the discount. <strong>Early-bird</strong>, <strong>last-minute</strong> and <strong>promotion</strong> discounts stay. Early and late check-out keep the booked rate. A surcharge is never removed or added. <strong>History</strong> records who made the change and the old and new rate and total.</p>
   <h3 id="nights">How to add or take off nights on an in-house guest</h3>
   <p>For a guest who is checked in, the Bookings list has the <strong>Add or take off nights</strong> button on their row. It needs <strong>Check-out Guests</strong>. Nights are added or taken off at the end of the stay, at the rate this booking was made at. No amount is typed.</p>
@@ -592,23 +622,25 @@
   <div class="note"><p>On this page only users with the Administrator or Manager role can confirm or cancel a hold. Others see <em>"Your role does not have permission to manage tentative bookings."</em></p></div>
 
   <h2 id="blocked">How to block dates</h2>
-  <p>Block dates (close dates, stop selling) when a room type or one physical room must not be sold, for example for repairs or an event. To block one room, choose <strong>Individual Room Level (Specific room)</strong> below. To take a room out of sale until it is fixed, with no end date, set its status to <strong>Maintenance</strong> or <strong>Out of Order</strong> on Individual Rooms (see <a href="#rooms">Individual rooms</a>). Go to <strong>Front Desk</strong> &rarr; <strong>Blocked Dates</strong> (<code>/admin/blocked-dates.php</code>, needs <strong>Blocked Dates</strong> to open the page and <strong>Block Rooms</strong> to block or unblock). Managers, Receptionists and Housekeeping have <strong>Block Rooms</strong> by default.</p>
+  <p>Block dates (close dates, stop selling) when a room type or one physical room must not be sold, for example for repairs or an event. To block one room, click that room's row on the calendar (or, on the List tab, choose <strong>Individual Room Level (Specific room)</strong>). To take a room out of sale until it is fixed, with no end date, set its status to <strong>Maintenance</strong> or <strong>Out of Order</strong> on Individual Rooms (see <a href="#rooms">Individual rooms</a>). Go to <strong>Front Desk</strong> &rarr; <strong>Blocked Dates</strong> (<code>/admin/blocked-dates.php</code>, needs <strong>Blocked Dates</strong> to open the page and <strong>Block Rooms</strong> to block or unblock). Managers, Receptionists and Housekeeping have <strong>Block Rooms</strong> by default.</p>
   <div class="note"><p>Without <strong>Block Rooms</strong> you can look at the list, but <strong>Block Single Date</strong>, <strong>Block Date Range</strong> and <strong>Unblock</strong> are greyed out. Hover over one to read <em>"Needs the Block Rooms permission"</em>. If the request still reaches the server it is refused with <em>"You need the Block Rooms permission to do this. Ask a manager to do it or to give you the permission."</em> Ask a manager to do it, or to give you the permission in Staff &amp; Access.</p></div>
   <ol class="steps">
-    <li>Click <strong>Block Single Date</strong> or <strong>Block Date Range</strong>.</li>
-    <li>Choose the <strong>Block Level</strong>: <strong>Room Type Level (All rooms of type)</strong> or <strong>Individual Room Level (Specific room)</strong>, then pick the <strong>Room Type</strong> or <strong>Individual Room</strong>.</li>
-    <li>Pick the <strong>Date to Block</strong>, or for a range the <strong>Date Range</strong> (the <strong>Selected Dates</strong> are listed).</li>
+    <li>Click a night, drag across nights and rooms, or shift-click a range. Click a room name to pick its whole month. The picks stay when you change month.</li>
     <li>Choose the <strong>Block Type</strong>: Manual Block, Maintenance, Event or Fully Booked, and type a <strong>Reason (Optional)</strong>.</li>
-    <li>Save. You will see <em>"Room type date blocked successfully."</em>, <em>"Individual room date blocked successfully."</em> or <em>"Successfully blocked N date(s)."</em></li>
+    <li>Press <strong>Block</strong>, or press <strong>Unblock</strong> to free the picked nights. The confirm names each room and its nights and lists the bookings that will NOT be moved.</li>
+    <li>The result names each room and its nights, for example <em>"Blocked 6 night(s): Villa 2 on 3 to 5 Jan 2028"</em>, and says which booked nights were skipped.</li>
   </ol>
-  <p>The list shows Date, Scope, Room, Block Type, Reason, Created By, Created At. Filter by Room Type, Individual Room, Start Date and End Date. Click <strong>Unblock</strong> on a row to free the date: <em>"Date unblocked successfully"</em>.</p>
+  <p>The page opens on a <strong>Calendar</strong>: an <strong>All rooms</strong> row, then each room type and its rooms (a joined room is one row), with one column per night of the month. Use the previous and next arrows, <strong>This month</strong>, the month picker and the <strong>Room type</strong> filter to move around. The letters <strong>B</strong>, <strong>M</strong>, <strong>E</strong> and <strong>F</strong> mean Blocked, Maintenance, Event and Fully booked on that row. A light tint means the room type or the All rooms row blocks that night: unblock it on that row. A blue bar is a booking, and a red ring means booked and blocked. Past nights cannot be changed. The old table is the <strong>List</strong> tab, which lists Date, Scope, Room, Block Type, Reason, Created By and Created At. Needs the <strong>Block Rooms</strong> permission to change anything.</p>
+  <p>Blocks skip booked nights. A block never cancels or moves a booking: a night a booking sleeps on is skipped and the other nights are saved, and if every night is booked nothing is saved. A room-type or All rooms block on a night with bookings blocks only that night's free rooms, one by one; unblocking the type later does not remove those single-room blocks. Unblocking is not checked against bookings.</p>
+  <p>Every block and unblock is recorded in <strong>System Logs</strong> &rarr; <strong>Staff activity</strong> as <em>"Blocked rooms"</em> or <em>"Unblocked rooms"</em>, with who did it, the rooms, the nights, the type, the reason and the bookings on those nights. The booking itself gets a History line (see <a href="#history">How to see the history of a booking</a>).</p>
+  <p>The public booking calendar also greys out a night when every room of a type is off (each one blocked, under maintenance or out of order, or a maintenance window). A check-out on a blocked date is allowed: the night before is what counts.</p>
   <p>In the room lists, individual rooms are grouped under their room type. Room types that are sold as joined pairs are labelled <em>"- joined pairs"</em>, and a room that belongs to a pair is labelled <em>"Room 101 - part of joined room Family Suite (with 102)"</em>. What a block does to joined rooms:</p>
   <ul>
     <li>Blocking a <strong>room type</strong> also stops the joined pairs that use rooms of that type.</li>
     <li>Blocking a <strong>joined-pairs room type</strong> stops only the pairs. The two rooms can still be sold on their own.</li>
     <li>Blocking a <strong>single room</strong> that is part of a pair also takes that pair off sale on those nights. Its row in the list says <em>"Also blocks joined room ..."</em>.</li>
   </ul>
-  <div class="warn"><p>A block does not cancel or move existing bookings. If bookings already sleep on the blocked nights you will see <em>"Note: N existing booking(s) already sleep on these nights (...). Blocks do not cancel or move bookings; reassign or contact those guests."</em> Only today or later dates can be blocked.</p></div>
+  <div class="warn"><p>Before you block, the confirm lists the bookings that will NOT be moved. A block does not cancel or move existing bookings. Only today or later dates can be blocked.</p></div>
 
   <h2 id="rooms">Individual rooms</h2>
   <p>Room types (for example "Executive") are what guests book. Individual rooms are the physical rooms with numbers. Go to <strong>Front Desk</strong> &rarr; <strong>Individual Rooms</strong> (<code>/admin/individual-rooms.php</code>, needs <strong>Individual Rooms</strong>).</p>
@@ -672,6 +704,7 @@
     <li>A group member can check in unpaid when the lead booking is set to pay later (see <a href="#pay-later-group">Check-in with pay later</a>).</li>
     <li>Group invoices and quotations list every room. Cancelled rooms are left out of a quotation. Each room's own cancellation policy text is printed (<em>"For REF1, REF2: ..."</em>).</li>
     <li>Confirmation, reminder, check-in, cancellation and modified emails list each room with its own dates and nights, and its <em>Who's staying</em> name when one is entered.</li>
+    <li>Group payment receipts: each room still gets its own receipt number, but its receipt shows <em>"Whole-group payment: the group total split across N rooms"</em> and lists every room. Emailing any one of them (automatically or with <strong>Email receipt</strong>) sends one email with every room's receipt attached, to the lead room's guest plus CC, and all are marked emailed.</li>
   </ul>
   <p><strong>If something goes wrong.</strong> A group action is refused with the reason shown on the screen. Read the reason, fix the room it names, and try again. For bulk actions, a skipped room says <em>"skipped: reason"</em> in the result list; the other rooms are still done.</p>
   <h2 id="guest">The guest's side: booking form and look-up</h2>

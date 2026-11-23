@@ -104,6 +104,8 @@
   <p><strong>Out of Stock</strong> and <strong>Running Low</strong> only list ingredients that have had stock before. An ingredient is Low when it is at or below its reorder point (or its minimum quantity if no reorder point is set). Ingredients that never had any stock are not alerts. They appear as one blue line, <strong>Opening stock not recorded (N items)</strong>, with a link <strong>record a stock count</strong> that opens the <a href="#opening">Opening stock count</a>. Selling is not affected by that line. The same rule is used on the dashboard, Buying, Ingredients, Stock Reports and the emailed report.</p>
   <p>The buttons in <strong>Needs Attention</strong> (<strong>View</strong>, <strong>Review</strong>, <strong>Dispose</strong>, <strong>Process</strong>) open the matching page. The <strong>Order</strong> button on an out-of-stock or low item opens <strong>Purchase Orders</strong>, where you can create a purchase order to restock. For the full buying steps see <a href="#buying">Buying</a>.</p>
 
+  <p><strong>Reading quantities.</strong> On-hand, batch, wastage, reorder, report and count figures show an item with a count measure as bottles and shots, for example <em>2 bottles + 7 shots</em> (hover shows the exact figure). Below zero it reads <em>short by ...</em>. Items without a measure show at most 2 decimals. Stored stock, exports and what you type are unchanged.</p>
+
   <h2 id="decisions">Decisions on the Stock Overview</h2>
   <p>The <strong>Stock Overview</strong> may show a <strong>Decisions</strong> tab on the right edge of the screen. The number on the tab is how many choices are waiting. It works the same way as the Decisions tab on <a href="13-finance-payments.html#decisions">Accounting</a>. The panel is closed by default, so it does not take up the page. The tab only appears when the Assistant is switched on and there is something worth deciding today. A choice appears only when the money involved is at least a small share of the last 30 days' takings.</p>
   <ol class="steps">
@@ -155,7 +157,7 @@
   </ol>
   <p>Needs the <strong>Change main unit</strong> permission (Restaurant &amp; Stock; administrators and managers have it). A count made before a unit change can no longer be taken back with <strong>Clear Stock Data</strong>. Correct it with a new count instead.</p>
   <p>Stock quantities are kept to <strong>6 decimal places</strong>, so small parts of a packet add up properly: 6 sales of 1 piece from a packet of 6 take exactly 1 packet off. On screen the numbers are shown shorter.</p>
-  <p>Have your stock list in Excel? Use <a href="23-import.html">Import</a> &mdash; it files an opening count that a second manager approves. For drinks, step 4 of Import (Confirm) can also offer <strong>Drinks for the menu</strong> when the file has a selling price; see <a href="23-import.html">Import</a>. A drink sold by the shot or glass needs its glass size and bottle or container size first (typed in step 3 of Import); without them it cannot be ticked for the menu.</p>
+  <p>Have your stock list in Excel? Use <a href="23-import.html">Import</a> &mdash; it files an opening count that a second manager approves. Step 3 of Import, <strong>Put items on the menu</strong>, can put drinks and food on the menu at a price you can change; see <a href="23-import.html">Import</a>. A drink sold by the shot or glass needs its glass size and bottle or container size first (typed in step 3 of Import); without them it cannot be ticked for the menu.</p>
   <p>Names are checked as you type. An ingredient name already used by another ingredient is flagged: <em>"A stock item with this name already exists (archived items count too)."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
   <h3>Other actions on each row</h3>
   <ul>
@@ -215,6 +217,16 @@
     <li>To remove a recipe click <strong>Delete recipe</strong>. <em>"Recipe deleted."</em></li>
   </ol>
   <p>You can also set what an item uses from stock on the Menu page, in the item's own form, under <strong>What it uses from stock</strong>. It is the same recipe as here. There you can enter the amount in the item's own unit (for example 1 <em>each</em> sausage) or in packs when the stock item has a pack size, and you see the stock cost for one sale and what share of the price it is. See <a href="01-pos-till.html#menu-stock">the Menu guide</a>.</p>
+
+  <h2 id="stock-to-menu">How to put stock drinks on the menu</h2>
+  <p>Stock drinks can go on the menu without typing each one again. Permission: <strong>Menu</strong>. A weight item (kg) cannot go on the menu.</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; Stock &rarr; <strong>Stock Items</strong>. Tick the drinks, or click <strong>Tick all shown</strong> (every drink the search and filters show, on all pages).</li>
+    <li>Click <strong>Put N on the menu</strong>.</li>
+    <li>Type the price for each drink (VAT included). Check <strong>Sold as</strong> and the category.</li>
+    <li>Click <strong>Add</strong>.</li>
+  </ol>
+  <p>A drink that is already on the menu only gets its new price. The same page opens from Menu Management &rarr; <strong>Drinks</strong> &rarr; <strong>Add from stock</strong>.</p>
 
   <h2 id="suppliers">How to add a supplier</h2>
   <ol class="steps">

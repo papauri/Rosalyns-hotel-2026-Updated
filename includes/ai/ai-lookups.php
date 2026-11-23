@@ -738,6 +738,23 @@ function rh_ai_stock_level_word(float $qty, float $thr): string
     return $thr > 0 && $qty <= $thr ? 'low' : 'ok';
 }
 
+/** Stock rows (with their ingredient 'id') + the four count-measure fields, so rh_ai_stock_qty_words() can say bottles + shots. */
+function rh_ai_stock_measure_rows(PDO $db, array $rows, string $idKey = 'id'): array
+{
+    return function_exists('rh_stock_measure_attach') ? rh_stock_measure_attach($db, $rows, $idKey) : $rows;
+}
+
+/** A stock row's quantity on hand in words, as the stock screens show it ("2 bottles + 7 shots (67 shots)", "2 kg"). */
+function rh_ai_stock_qty_words(array $i, string $qtyKey = 'current_quantity'): string
+{
+    $qty = (float)($i[$qtyKey] ?? 0);
+    $unit = (string)($i['unit'] ?? '');
+    if (function_exists('rh_stock_qty_words')) {
+        return rh_stock_qty_words($qty, $i, $unit);
+    }
+    return trim(rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.') . ' ' . $unit);
+}
+
 function rh_ai_stock_item_lookup(PDO $db, array $user, string $q, bool $fuzzy = true): array
 {
     $n = rh_ai_num('ai_lookup_matches');
@@ -746,8 +763,10 @@ function rh_ai_stock_item_lookup(PDO $db, array $user, string $q, bool $fuzzy = 
     $st = $db->prepare("SELECT i.id, i.name, i.unit, i.current_quantity, $thr AS threshold, i.par_level FROM stock_ingredients i
                         WHERE i.is_archived = 0 AND i.name LIKE ? ORDER BY (i.name = ?) DESC, i.name LIMIT " . ($n + 1));
     $st->execute(['%' . rh_ai_like($q) . '%', $q]);
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    $rows = rh_ai_stock_measure_rows($db, $st->fetchAll(PDO::FETCH_ASSOC));
+    // quantity_words: the stock screens' "2 bottles + 7 shots (67 shots)" (owner 2026-11-21); quantity stays the number
     $line = static fn($i) => ['item' => rh_ai_plain((string)$i['name'], 80), 'unit' => (string)$i['unit'], 'quantity' => round((float)$i['current_quantity'], 2),
+        'quantity_words' => rh_ai_stock_qty_words($i),
         'level' => rh_ai_stock_level_word((float)$i['current_quantity'], (float)$i['threshold']), 'reorder_at' => (float)$i['threshold'] > 0 ? round((float)$i['threshold'], 2) : null];
     $ask = [];
     if (!$rows && $fuzzy) { // a misspelt item (owner 2026-10-29): the one clearly closest item is used
@@ -764,7 +783,7 @@ function rh_ai_stock_item_lookup(PDO $db, array $user, string $q, bool $fuzzy = 
             $conds = implode(' OR ', array_fill(0, count($words), 'i.name LIKE ?'));
             $st = $db->prepare("SELECT i.id, i.name, i.unit, i.current_quantity, $thr AS threshold FROM stock_ingredients i WHERE i.is_archived = 0 AND ($conds) ORDER BY i.name LIMIT " . $n);
             $st->execute(array_map(static fn($w) => '%' . rh_ai_like($w) . '%', $words));
-            $near = array_map($line, $st->fetchAll(PDO::FETCH_ASSOC));
+            $near = array_map($line, rh_ai_stock_measure_rows($db, $st->fetchAll(PDO::FETCH_ASSOC)));
         }
         $onFile = (int)$db->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn(); // a miss is not "no stock"
         return ['match' => 'none', 'not_found' => 'No stock item is called that.', 'nearest_items' => $near ?: 'none close', 'items_on_file' => $onFile] + $ask;

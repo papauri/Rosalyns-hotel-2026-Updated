@@ -49,7 +49,7 @@
       <li><a href="#switch">How to switch it on or off</a></li>
       <li><a href="#limits">How to set budgets and limits</a></li>
       <li><a href="#access">Who has access</a></li>
-      <li><a href="#usage">The usage dashboard and the monthly aim</a></li>
+      <li><a href="#usage">The usage dashboard and the monthly cap</a></li>
       <li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
     </ol>
@@ -167,7 +167,7 @@
   <p>The model that writes the answers runs at the provider chosen in Assistant Settings. Before anything is sent, guest and staff names, emails, phone numbers and booking references are swapped for codes such as [GUEST_3]; card, passport and ID numbers and addresses are removed. The answer comes back with the codes and the real names are put back on the hotel's own server, so the provider never learns who anyone is. Your chats are kept on the hotel's server.</p>
 
   <h3>Costs</h3>
-  <p>Quick lookups and their follow-ups, small talk, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. The daily briefing is worked out on the server and costs one short reply. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a high daily allowance that only guards against a runaway loop, and the hotel has a monthly aim that is shown, never enforced (see <a href="#limits">budgets and limits</a>).</p>
+  <p>Quick lookups and their follow-ups, small talk, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. The daily briefing is worked out on the server and costs one short reply. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a high daily allowance that only guards against a runaway loop, and the hotel has a monthly cap that is shown, never enforced (see <a href="#limits">budgets and limits</a>).</p>
   <p><strong>Instant answers at no cost.</strong> These questions are answered at once, from the hotel's own data, with no model call: <em>"Who still owes money?"</em>, <em>"Revenue"</em>, <em>"What stock is running low?"</em>, <em>"Blocked dates"</em>, <em>"Rooms to clean"</em> and <em>"Next booking"</em>. You only get the answer if your account can see that area. Otherwise it says: <em>"That's outside what your account can see &mdash; a manager or admin can help with that."</em></p>
 
   <h2 id="actions">Action cards: changes with one Confirm</h2>
@@ -347,10 +347,10 @@
     <tbody>
       <tr><td><strong>On or off</strong></td><td>One line saying whether the Assistant is on, which provider and main model it uses and how many people have access, and the button <strong>Switch on</strong> or <strong>Switch off</strong>.</td></tr>
       <tr><td><strong>Providers</strong></td><td>One card each for Anthropic, OpenAI, Google, xAI and DeepSeek. Each shows the saved key as four dots and its last four characters, the last test result, a box to paste a key, and the buttons <strong>Save and test</strong>, <strong>Test connection</strong> and <strong>Remove key</strong>.</td></tr>
-      <tr><td><strong>Models</strong></td><td>Before any key: the models known when this version was made, with prices. After a key passes the test: that provider's own current list, where you tick up to 5 and give each a role. Buttons <strong>Save models</strong> and <strong>Check for newer models</strong>.</td></tr>
-      <tr><td><strong>Budgets and limits</strong></td><td><strong>Daily limit per person (tokens)</strong>, <strong>Monthly cost limit (US$)</strong>, <strong>Messages per person in 10 minutes</strong>, <strong>Keep chats for (days)</strong>, <strong>Most tokens for one question</strong> and <strong>Save limits</strong>.</td></tr>
+      <tr><td><strong>Models</strong></td><td>Before any key: the models known when this version was made. After a key passes the test: up to 10 current models for that provider (cheapest, fastest and latest), with the badges <strong>Newest</strong>, <strong>Cheapest</strong> and <strong>Fastest</strong> and "Replies here in about X s" once measured. Tick up to 5 and give each a role. <strong>Price in</strong> and <strong>Price out</strong> are read-only: prices are filled in automatically. Buttons <strong>Save models</strong> and <strong>Check for newer models</strong>.</td></tr>
+      <tr><td><strong>Budgets and limits</strong></td><td><strong>Monthly cap (US$)</strong>, <strong>Fit limits to the cap</strong>, <strong>Daily limit per person (tokens)</strong>, <strong>Messages per person in 10 minutes</strong>, <strong>Keep chats for (days)</strong>, <strong>Most tokens for one question</strong> and <strong>Save limits</strong>.</td></tr>
       <tr><td><strong>Who has access</strong></td><td>Read-only list of the staff who may use the Assistant, and whether each may confirm its actions. The button <strong>Change on Staff &amp; Access</strong> opens the staff screen.</td></tr>
-      <tr><td><strong>Usage</strong></td><td>The estimated cost this month next to the monthly aim, and the last 30 days per day, person and model.</td></tr>
+      <tr><td><strong>Usage</strong></td><td>The estimated cost this month next to the monthly cap, and the last 30 days per day, person and model.</td></tr>
     </tbody>
   </table>
   <p>Every column and card has a round <strong>?</strong> that explains what it shows.</p>
@@ -370,12 +370,12 @@
   <ol class="steps">
     <li>After a key passes the test, its models appear under <strong>Models</strong>, most capable first.</li>
     <li>A suggestion is ticked with roles filled in: the three cheapest models that still perform (never a big model such as Opus) as <strong>Primary</strong>, <strong>Fallback</strong> and <strong>Fast</strong>, plus the next best as <strong>Extra</strong>. Change the ticks if you like: up to 5.</li>
-    <li>Give each ticked model a role: <strong>Primary</strong> answers questions and plans (exactly one); <strong>Fast</strong> does short replies and routing; <strong>Fallback</strong> takes over if Primary fails; <strong>Extra</strong> is kept ready.</li>
-    <li>Check the prices. A model marked <strong>New - set price</strong> is not in the built-in list: type its prices from the provider's price page (US dollars per million tokens in and out).</li>
-    <li>Click <strong>Save models</strong>. That provider becomes the one <strong>In use</strong>. Only one provider is used at a time.</li>
+    <li>Give each ticked model a role: <strong>Primary</strong> answers questions and plans (exactly one); <strong>Fast</strong> does short replies and routing; <strong>Fallback</strong> takes over if Primary fails; <strong>Extra</strong> is kept ready. Ticking a model makes it Extra; unticking clears its role; choosing a role ticks it.</li>
+    <li>Check the prices. Prices are read for you each day (you do not type them). A model marked <strong>No price yet</strong> cannot be ticked until a price is found.</li>
+    <li>Click <strong>Save models</strong>. That provider becomes the one <strong>In use</strong>. Only one provider is used at a time. If Primary or a second Fast is missing, Save fills it in and says what it set.</li>
   </ol>
-  <p><strong>Check for newer models</strong> reads the provider's list again. The system also does this once a day while the Assistant is on. Your chosen models and typed prices are never changed by it. <strong>Newest</strong> marks the most recently released model in the list.</p>
-  <p><strong>Cheapest models that still perform:</strong> once a day the Assistant checks each provider for newer models. Of the models that perform close to the best one (within 15 points of its rank), it suggests the three cheapest. Big models (such as Opus, Fable, Gemini Pro or Argon) are never suggested for chat. Gemini 4 models are never listed, suggested, chosen or switched to (owner rule); use a Gemini 3 model such as Gemini 3.8 Flash. Prices come from each provider's own price page. A new model with no price is never used. It waits until someone types its price, and the people who manage Assistant Settings get a notice.</p>
+  <p><strong>Check for newer models</strong> reads the provider's list again and refreshes the pick lists: the current top models show and older ones drop off. The model in use stays selected, marked <em>(older, still in use)</em>, until someone saves another; a retired model shows a warning only. The system also does this once a day while the Assistant is on. Your chosen models are never changed by it. <strong>Newest</strong> marks the most recently released model in the list.</p>
+  <p><strong>Cheapest models that still perform:</strong> once a day the Assistant checks each provider for newer models. Of the models that perform close to the best one (within 15 points of its rank), it suggests the three cheapest. Big models (Pro, Ultra or Opus, or US$15 or more per million tokens out) are shown but never suggested for chat. Gemini 4 models are shown and can be suggested. Prices are read automatically each day: from Google's own price page for Google models, and from the public model price list for the other providers. A model with no price yet cannot be ticked until a price is found.</p>
 
   <h2 id="switch">How to switch it on or off</h2>
   <ol class="steps">
@@ -388,14 +388,15 @@
 
   <h2 id="limits">How to set budgets and limits</h2>
   <ul>
+    <li><strong>Monthly cap (US$)</strong>: the most the Assistant should cost a month. The only cost figure you set: model prices are filled in automatically. Shown next to this month's cost as information only: chat never pauses and nobody is warned. 1 to 100,000. Default 5.</li>
+    <li><strong>Fit limits to the cap</strong>: click it to fill in the daily limit per person and the most tokens for one question, so that even if everyone with access used all of it every day (and went one question past the daily limit, which can happen), a month stays within the cap with 10% kept back. It shows the figures and what the current limit could cost. Click <strong>Save limits</strong> to keep it. When a person's daily limit is used up, quick lookups still work and the rest is back the next day.</li>
     <li><strong>Daily limit per person (tokens)</strong>: words read plus written per person per day, counted in tokens (a token is about three quarters of a word). Only a guard against a runaway loop: normal heavy use never reaches it. If it is reached the person is told plainly; quick lookups still work. 1,000 to 50,000,000. Default 2,000,000.</li>
-    <li><strong>Monthly aim (US$)</strong>: what the Assistant aims to cost a month, whatever the size of the hotel's data. Shown next to this month's cost as information only: chat never pauses and nobody is warned. 1 to 100,000. Default 5.</li>
     <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
     <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
     <li><strong>Most tokens for one question</strong>: all the work for one question together (the Assistant, up to three leads and the merged answer). 5,000 to 1,000,000. Default 60,000. When it is reached the Assistant stops and says so.</li>
     <li><strong>Longest period a question can cover</strong>: 1 to 999. Default 366. This is the biggest number the Assistant accepts in questions such as "last 24 months" or "next 30 days". With 366, "last 24 months" works but "last 400 days" does not. Days, weeks and months are all compared against this same number.</li>
     <li><strong>Nightly learning time limit (seconds)</strong>: 5 to 120. Default 20. How long the night-time step that learns quicker answers may run. When the time is up it stops and carries on the next night. Nothing else is changed.</li>
-    <li><strong>Action cards</strong>: On (it can prepare changes for people to confirm) or Off (answers only, no cards). Default On.</li>
+    <li><strong>Action cards</strong>: On - prepares changes (people confirm each one), or Off - answers only (no cards). Default On.</li>
     <li><strong>Lock the Assistant after (minutes without use)</strong>: 0 never locks; otherwise 5 to 240. Default 15. See <a href="#security">Password, lock and the card record</a>.</li>
     <li><strong>Weekly digest email</strong>: On or Off for everyone. Default On. See <a href="#digest">The weekly digest email</a>.</li>
   </ul>
@@ -410,10 +411,10 @@
   </ol>
   <p><strong>Use the Assistant</strong> and <strong>Confirm Assistant actions</strong> are offered on Staff &amp; Access while the Assistant is switched on; people who already hold them keep them. The Assistant only ever sees and does what that person could already see and do on screen.</p>
 
-  <h2 id="usage">The usage dashboard and the monthly aim</h2>
+  <h2 id="usage">The usage dashboard and the monthly cap</h2>
   <p>Open <strong>Settings</strong> &rarr; <strong>Assistant Usage</strong> (needs the <strong>Assistant Usage</strong> permission), pick <strong>From</strong> and <strong>To</strong> and tap <strong>Show</strong>.</p>
   <ul>
-    <li><strong>This month's estimated cost</strong>: every reply since the 1st, next to the monthly aim, with the percentage of it (information only).</li>
+    <li><strong>This month's estimated cost</strong>: every reply since the 1st, next to the monthly cap, with the percentage of it (information only).</li>
     <li><strong>Answers</strong>: replies in the chosen days, and how many needed a model.</li>
     <li><strong>Cost per answer</strong>: estimated cost divided by all answers.</li>
     <li><strong>Answered without a model</strong>: the share answered straight from the hotel's data (quick lookups, the briefing, repeated questions) at no cost. Higher is cheaper.</li>
@@ -422,8 +423,8 @@
     <li><strong>Saved by repeated instructions</strong>: the money the provider saved this month by reading back the Assistant's standing instructions, which it charges at a tenth of the usual price. Shown from the provider's own usage figures.</li>
     <li><strong>Answered locally this month</strong> (administrators only): the share of answers given with no model call, about how many tokens that saved, and the <strong>learned local answers</strong>, each with how often it was used and, for those allowed to change Assistant Settings, a <strong>Forget this</strong> button.</li>
   </ul>
-  <p><strong>Keeping it cheap and quick:</strong> the monthly aim is <strong>US$5</strong> or less, whatever the size of the hotel's data: every lookup sends a fixed-size summary (counts, totals and the top 10 with "and N more"), never a list that grows with the bookings, guests or stock. Arrivals, departures, in house, room status, your access, the briefing and questions that are not about the hotel are answered straight from the hotel's data at no cost. Other questions go to the <strong>Fast</strong> model with only the lookups for that department; advice questions (such as lifting next month's occupancy) have their figures looked up first and get one <strong>Primary</strong> answer. Answers are never cut short to save tokens: an answer that uses more than 8,000 input tokens is only counted as <em>heavy</em> on the <strong>Answers</strong> card and noted in the system log. The Assistant looks things up at most 4 times for one question, and stops sooner when it would only repeat a lookup it has already made.</p>
-  <p><strong>The monthly aim is not a limit:</strong> passing it never pauses the chat and sends no notice. Assistant Settings also keeps a short usage table for the last 30 days.</p>
+  <p><strong>Keeping it cheap and quick:</strong> the monthly cap is <strong>US$5</strong> or less, whatever the size of the hotel's data: every lookup sends a fixed-size summary (counts, totals and the top 10 with "and N more"), never a list that grows with the bookings, guests or stock. Arrivals, departures, in house, room status, your access, the briefing and questions that are not about the hotel are answered straight from the hotel's data at no cost. Other questions go to the <strong>Fast</strong> model with only the lookups for that department; advice questions (such as lifting next month's occupancy) have their figures looked up first and get one <strong>Primary</strong> answer. Answers are never cut short to save tokens: an answer that uses more than 8,000 input tokens is only counted as <em>heavy</em> on the <strong>Answers</strong> card and noted in the system log. The Assistant looks things up at most 4 times for one question, and stops sooner when it would only repeat a lookup it has already made.</p>
+  <p><strong>The monthly cap is not a limit:</strong> passing it never pauses the chat and sends no notice. Assistant Settings also keeps a short usage table for the last 30 days.</p>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>

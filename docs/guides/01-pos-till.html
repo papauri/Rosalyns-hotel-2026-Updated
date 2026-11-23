@@ -77,6 +77,7 @@
     <li>Two buttons, <strong>Restaurant</strong> and <strong>Room Service</strong>, choose which items are shown. Choosing <strong>Room Service</strong> also sets the order type to <strong>Room</strong>.</li>
     <li>A category list (<strong>All</strong> plus one entry per menu category), a <strong>Search menu&hellip;</strong> box, and a tile for each item.</li>
     <li>Each tile shows the price and a stock line: <strong>N avail</strong>, <strong>N left</strong> (5 or fewer), <strong>Low / none on record</strong> (the recipe ingredients show no stock; you can still sell it), <strong>Untracked</strong> (the item has no recipe, so no stock is counted) or <strong>86'd</strong> (only people with the 86 permission see 86'd items).</li>
+    <li>A bar or coffee-bar drink whose stock link is one stock item shows how one sale is served under its name, for example <em>"Shot · 25 ml"</em>, <em>"Glass of wine · 175 ml"</em>, <em>"Bottle · 750 ml"</em> or <em>"Can · 330 ml"</em>. In small print under the price it lists the menu price of the same drink's other till items, for example <em>"Bottle MWK 40,000"</em> on a shot tile (up to 3; items that are 86'd are left out). In Room Service mode the Room Service items are listed. The cart line starts with the serving too. The wording comes from the stock link (Menu Management) and from Stock (bottle size, bottle or shot measure); nothing shows when neither says.</li>
   </ul>
   <p><strong>Current order side</strong></p>
   <ul>
@@ -555,7 +556,7 @@
   <h2 id="menu">How to add or change a menu item</h2>
   <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>, page title <strong>Menu Management</strong>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS Till</strong> switch is on.</p>
   <p>One list feeds the website menu, the till, room service and the Kitchen, Bar and Coffee Bar screens. An item you save here appears on each of them, depending on the boxes you tick. Stock comes off for every item that has a stock link.</p>
-  <p>The page has two tabs, <strong>Food</strong> and <strong>Drinks</strong>, each showing how many items it holds. Items are grouped by category. Each row shows the item, its price (or <strong>Free</strong>), where it shows (the station, <strong>Till</strong>, <strong>Room service</strong> or <strong>Website only</strong>), <strong>Uses from stock</strong> (or <strong>Not linked to stock</strong>) and its status.</p>
+  <p>The page has three tabs: <strong>Food</strong>, <strong>Drinks</strong> and <strong>Room service</strong>. The Food and Drinks tabs each show how many items they hold. Items are grouped by category. Each row shows the item, its price (or <strong>Free</strong>), where it shows (the station, <strong>Till</strong>, <strong>Room service</strong> or <strong>Website only</strong>), <strong>Uses from stock</strong> (or <strong>Not linked to stock</strong>) and its status.</p>
   <h3>Find an item</h3>
   <ol class="steps">
     <li>Type in <strong>Search by item name, category or barcode</strong>. The list narrows as you type. Click the <strong>&times;</strong> to clear it.</li>
@@ -613,6 +614,22 @@
   </ul>
   <div class="note"><p>An item shows on the till only if it is <strong>Available</strong> and <strong>On the till (POS)</strong> is ticked. It shows in room service only if <strong>In room service</strong> is ticked. The price on the menu is the price the guest pays, tax included. The till always uses the price saved here, not a price sent from the screen.</p></div>
   <p><strong>If something goes wrong:</strong> an item you saved is not on the till? Click <strong>Edit</strong> on it, check <strong>Available</strong> and <strong>On the till (POS)</strong> are ticked, save, then reload the till. If you see <em>"... is picked but not added. Press Add to keep it, or clear the Stock item box."</em> press <strong>Add</strong> for that line, or clear the Stock item box. A stock item has no pack choice in the unit list? It has no pack size yet. Set it in Stock &rarr; Ingredients (<strong>Bought in packs?</strong> and <strong>Units in one pack</strong>), or type a fraction of its own unit instead. If a pack is chosen anyway the page says <em>"This stock item has no pack size, so the quantity cannot be entered in packs."</em> No <strong>pieces</strong> choice? The stock item is not counted in packets, packs, boxes or dozens. The page also says <em>"Type a whole number of pieces for Sausages (1, 2, 3), or use the &frac12; button for half a piece."</em> when you type something like 1.5, and <em>"Type how many pieces are in one packet of Sausages, or choose &quot;packet&quot; as the unit."</em> when the number in a packet is still blank.</p>
+
+  <h3>Room service tab</h3>
+  <ol class="steps">
+    <li>Click the <strong>Room service</strong> tab. It lists every food and drink item by category.</li>
+    <li>Switch <strong>On room service</strong> for an item. It saves at once.</li>
+    <li>Use the filter <strong>On</strong>, <strong>Not on</strong> or <strong>All</strong> to narrow the list.</li>
+  </ol>
+  <h3>Move drinks to a category</h3>
+  <ol class="steps">
+    <li>On the <strong>Drinks</strong> tab, the category buttons (<strong>All</strong>, <strong>Beer</strong>, <strong>Wine</strong> and so on) show one category at a time.</li>
+    <li>Tick the drinks, pick a category or type a new one, and pick it in <strong>Move selected to</strong> and click <strong>Move</strong>. The till copy and the stock link move too.</li>
+  </ol>
+  <p>Anyone with the <strong>Menu</strong> permission can move drinks. Moving food, <strong>Delete selected</strong> and <strong>Delete all menu items</strong> stay with people who have the <strong>Clear Stock Data</strong> permission.</p>
+  <p>On the <strong>Drinks</strong> tab, <strong>Add from stock</strong> opens the page that puts stock drinks on the menu (see the <a href="08-stock-orders.html#stock-to-menu">Stock guide</a>).</p>
+  <h3>Delete several items (Clear Stock Data only)</h3>
+  <p>Administrators with <strong>Clear Stock Data</strong> see a tick box on each row, a tick for each category and <strong>Select all shown</strong>, which ticks only the rows the search and filters show on the open tab. <strong>Delete selected</strong> deletes the ticked items. <strong>Delete all menu items</strong> clears Food, Drinks or both: type <em>DELETE</em> to confirm. Each item follows the one-item rule: an item never sold is deleted with its till copy and stock list; a sold item is hidden; an item on an open order is left. Everyone else keeps the one-item <strong>Delete</strong> only.</p>
 
   <h2 id="tables">How to set up the dine-in tables</h2>
   <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Tables</strong> (<code>/admin/restaurant-tables.php</code>). Permission: <strong>Ingredients &amp; Recipes</strong>. The till only offers tables from this list and stops two open orders on the same table.</p>

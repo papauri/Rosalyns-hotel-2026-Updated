@@ -712,7 +712,11 @@ function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
         return ['error' => $to];
     }
     $al = rh_stock_alert_summary($db, 8);
-    $item = static fn($i) => ['item' => $i['name'], 'unit' => $i['unit'], 'quantity' => round((float)$i['current_quantity'], 2), 'reorder_at' => isset($i['threshold']) ? round((float)$i['threshold'], 2) : null];
+    foreach (['out_items', 'low_items', 'negative_items'] as $k) { // + the count measure, for "2 bottles + 7 shots" (ai-lookups.php)
+        $al[$k] = rh_ai_stock_measure_rows($db, (array)$al[$k]);
+    }
+    $item = static fn($i) => ['item' => $i['name'], 'unit' => $i['unit'], 'quantity' => round((float)$i['current_quantity'], 2), 'quantity_words' => rh_ai_stock_qty_words($i),
+        'reorder_at' => isset($i['threshold']) ? round((float)$i['threshold'], 2) : null];
     $out = ['currency' => rh_ai_currency(), 'from' => $from, 'to' => $to,
         'alerts' => ['out' => $al['out'], 'low' => $al['low'], 'negative' => $al['negative'], 'opening_stock_not_recorded' => $al['never_stocked'],
             'out_items' => array_map($item, $al['out_items']), 'low_items' => array_map($item, $al['low_items']), 'negative_items' => array_map($item, $al['negative_items'])]];
@@ -1121,7 +1125,7 @@ function rh_ai_briefing_findings(PDO $db, array $user, int $max = RH_AI_BRIEF_MA
         if ($al['out'] + $al['low'] > 0) {
             $add(['id' => 'stock_low', 'kind' => 'queue', 'severity' => min(50, $al['out'] * 8 + $al['low'] * 3), 'title' => 'Stock out or running low', 'count' => $al['out'] + $al['low'],
                 'detail' => $al['out'] . ' item(s) out, ' . $al['low'] . ' low.',
-                'items' => array_slice(array_map(static fn($i) => ['text' => $i['item'] . ': ' . $i['quantity'] . ' ' . $i['unit'] . ' left'], array_merge($al['out_items'], $al['low_items'])), 0, 4),
+                'items' => array_slice(array_map(static fn($i) => ['text' => $i['item'] . ': ' . ($i['quantity_words'] ?? ($i['quantity'] . ' ' . $i['unit'])) . ((float)$i['quantity'] < 0 ? '' : ' left')], array_merge($al['out_items'], $al['low_items'])), 0, 4),
                 'link' => ['stock-ingredients.php?filter=low', 'Open low and out of stock']]);
         }
         if (!empty($s['counts_waiting_for_approval'])) {
