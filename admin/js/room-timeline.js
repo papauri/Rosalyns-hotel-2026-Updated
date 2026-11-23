@@ -1590,12 +1590,11 @@
         var check = postBlocks({ action: 'preview_block', items: JSON.stringify(items) }).catch(function () { return null; });
         check.then(function (p) {
             if (p && p.success === false) throw new Error(p.message || 'The selection could not be checked.');
+            // Booked nights are skipped by the save (never blocked over a booking).
+            if (op === 'block' && p && p.can_block === false) throw new Error(p.note || 'Every selected night is booked. Nothing to block.');
             var where = p && p.where ? p.where : local;
             var msg = op === 'block'
-                ? 'Block ' + where + '? Guests will not be able to book them.'
-                  + (p ? (p.booking_count > 0
-                      ? ' Warning: ' + p.booking_count + ' booking(s) already sleep on these nights and will NOT be moved or cancelled: ' + p.bookings + '. Each booking\'s History will get a note.'
-                      : ' No bookings sleep on these nights.') : '')
+                ? 'Block ' + where + '? Guests will not be able to book them.' + (p && p.note ? ' ' + p.note : '')
                 : 'Unblock ' + where + '? Nights blocked by a room type or All rooms stay blocked; unblock those on Blocked Dates.';
             return window.RhGridSel.ask({
                 title: op === 'block' ? 'Block nights' : 'Unblock nights',

@@ -11,6 +11,7 @@
  */
 
 require_once __DIR__ . '/room-management.php';
+require_once __DIR__ . '/room-night-clash.php';
 
 if (!function_exists('rh_maint_next_due_date')) {
 
@@ -54,10 +55,15 @@ if (!function_exists('rh_maint_next_due_date')) {
     /**
      * Create the next occurrence of every due recurring maintenance series.
      *
+     * The new occurrence copies the series' Block room tick, except on nights a booking sleeps in the room: then it is
+     * created with block_room = 0 (a work reminder that never closes the room over a guest; owner 2026-11-23). That
+     * is decided per occurrence under the room locks (rh_room_nights_take_locks) in its own transaction.
+     *
      * @param int|null $performedBy admin user id; null (scheduler) reuses the series' created_by
+     * @param string[] $notes filled with one line per occurrence that could not close its room
      * @return int number of schedules created
      */
-    function rh_create_recurring_maintenance(PDO $pdo, ?int $performedBy = null): int
+    function rh_create_recurring_maintenance(PDO $pdo, ?int $performedBy = null, array &$notes = []): int
     {
         $has = static function (string $c) use ($pdo): bool {
             return rh_maint_schedule_column_exists($pdo, $c);
@@ -131,16 +137,40 @@ if (!function_exists('rh_maint_next_due_date')) {
                 }
             }
 
+            $roomId = (int)$row['individual_room_id'];
+            $own = !$pdo->inTransaction();
             try {
+                $plan = $own ? rh_room_nights_lock_plan($pdo, [['scope' => 'room', 'room_ids' => [$roomId]]]) : null;
+                if ($own) {
+                    $pdo->beginTransaction();
+                    rh_room_nights_take_locks($pdo, $plan);
+                }
+                if ($has('block_room')) {
+                    $block = (int)($row['block_room'] ?? 1) === 1 ? 1 : 0;
+                    if ($block === 1 && !rh_maint_job_can_close_room($pdo, $roomId, $startDate, $endDate)) {
+                        $block = 0;
+                        $notes[] = rh_block_label($pdo, null, [$roomId]) . ' is booked on ' . rh_block_nights_text(rh_maint_job_nights($startDate, $endDate))
+                            . ', so the repeat of "' . (string)$row['title'] . '" does not close the room.';
+                    }
+                    $cols[] = 'block_room';
+                    $vals[] = $block;
+                    $newData['block_room'] = $block;
+                }
                 $ins = $pdo->prepare("INSERT INTO room_maintenance_schedules (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")");
                 $ins->execute($vals);
                 $newId = (int)$pdo->lastInsertId();
-                $created++;
                 if (function_exists('logMaintenanceAction')) {
                     logMaintenanceAction($newId, 'recurring_created', null, $newData, $owner);
                 }
+                if ($own) {
+                    $pdo->commit();
+                }
+                $created++;
             } catch (Throwable $e) {
-                error_log('rh_create_recurring_maintenance (series room ' . (int)$row['individual_room_id'] . '): ' . $e->getMessage());
+                if ($own && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                error_log('rh_create_recurring_maintenance (series room ' . $roomId . '): ' . $e->getMessage());
             }
         }
 

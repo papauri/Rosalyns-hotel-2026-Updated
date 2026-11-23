@@ -170,21 +170,6 @@ function findBlockedDateById(int $id, ?string $scope) {
     return $matches[0] ?? null;
 }
 
-/** Existing bookings that sleep on the blocked nights (blocks never cancel bookings). */
-function blockOverlapWarning(?int $roomTypeId, ?int $individualRoomId, array $dates): array {
-    $rows = getBookingsOverlappingBlockDates($roomTypeId, $individualRoomId, $dates);
-    return [
-        'overlapping_bookings' => array_map(function ($b) {
-            return [
-                'id' => (int)$b['id'],
-                'booking_reference' => $b['booking_reference'],
-                'check_in_date' => $b['check_in_date'],
-                'check_out_date' => $b['check_out_date'],
-                'status' => $b['status']
-            ];
-        }, $rows)
-    ];
-}
 
 // Get request method
 $method = $_SERVER['REQUEST_METHOD'];
@@ -237,9 +222,10 @@ switch ($method) {
         break;
         
     case 'POST':
-        // Create new blocked date(s)
-        
-        $block_scope = $input['block_scope'] ?? 'type'; // 'type' or 'individual'
+        // Create new blocked date(s): includes/block-save.php, the same save engine as the Blocked Dates screen. Booked
+        // nights are SKIPPED (never blocked over a booking) and listed in `skipped`; nothing free at all -> 409. A room
+        // type / All-rooms block on a night with bookings blocks only that night's free rooms, one by one.
+        // `warnings` stays (empty) for existing clients.
 
         // Date range: start_date .. end_date are the first and last blocked NIGHT (inclusive);
         // a guest may still check out on the day after end_date. Expanded into a dates list.
@@ -250,219 +236,48 @@ switch ($method) {
             }
             $input['dates'] = $range_dates;
         }
-
-        // Handle single date creation
         if (isset($input['block_date'])) {
-            // Validate data
             $validation = validateBlockedDateData($input);
             if (!$validation['valid']) {
                 sendError('Validation failed', 422, $validation['errors']);
             }
-            
-            $block_date = $input['block_date'];
-            $block_type = $input['block_type'] ?? 'manual';
-            $reason = $input['reason'] ?? null;
-            $created_by = $admin_user['id'];
-            
-            if ($block_scope === 'individual') {
-                // Individual room blocking
-                $individual_room_id = isset($input['individual_room_id']) ? (int)$input['individual_room_id'] : null;
-                
-                if (empty($individual_room_id)) {
-                    sendError('individual_room_id is required for individual room blocks', 422);
-                }
-                
-                $result = blockIndividualRoomDate($individual_room_id, $block_date, $block_type, $reason, $created_by);
-
-                if ($result) {
-                    $apiBlockLog('block', [rh_block_entry($pdo, 'room', null, [$individual_room_id], [$block_date])], $block_type, $reason);
-                    $blocked_dates = getIndividualRoomBlockedDates($individual_room_id, $block_date, $block_date);
-                    $created_date = !empty($blocked_dates) ? $blocked_dates[0] : null;
-                    
-                    sendResponse([
-                        'success' => true,
-                        'message' => 'Individual room date blocked successfully',
-                        'data' => $created_date,
-                        'warnings' => blockOverlapWarning(null, $individual_room_id, [$block_date])
-                    ], 201);
-                } else {
-                    sendError('Failed to block date', 500);
-                }
-            } else {
-                // Room type blocking
-                $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : null;
-                $result = blockRoomDate($room_id, $block_date, $block_type, $reason, $created_by);
-
-                if ($result) {
-                    $apiBlockLog('block', [rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], [$block_date])], $block_type, $reason);
-                    $blocked_dates = getBlockedDates($room_id, $block_date, $block_date);
-                    $created_date = !empty($blocked_dates) ? $blocked_dates[0] : null;
-                    
-                    sendResponse([
-                        'success' => true,
-                        'message' => 'Room type date blocked successfully',
-                        'data' => $created_date,
-                        'warnings' => blockOverlapWarning($room_id, null, [$block_date])
-                    ], 201);
-                } else {
-                    sendError('Failed to block date', 500);
-                }
-            }
-        }
-        
-        // Handle multiple dates creation
-        elseif (isset($input['dates']) && is_array($input['dates'])) {
-            $block_type = $input['block_type'] ?? 'manual';
-            $reason = $input['reason'] ?? null;
-            $created_by = $admin_user['id'];
-            
-            // Validate dates
-            $valid_dates = [];
-            $errors = [];
-            
-            foreach ($input['dates'] as $date) {
-                try {
-                    $dt = new DateTime($date);
-                    $today = new DateTime();
-                    $today->setTime(0, 0, 0);
-                    
-                    if ($dt >= $today) {
-                        $valid_dates[] = $date;
-                    } else {
-                        $errors[] = "Date {$date} is in the past";
-                    }
-                } catch (Exception $e) {
-                    $errors[] = "Invalid date format: {$date}";
-                }
-            }
-            
-            if (empty($valid_dates)) {
-                sendError('No valid dates provided', 422, $errors);
-            }
-            
-            if ($block_scope === 'individual') {
-                // Individual room blocking
-                $individual_room_id = isset($input['individual_room_id']) ? (int)$input['individual_room_id'] : null;
-                
-                if (empty($individual_room_id)) {
-                    sendError('individual_room_id is required for individual room blocks', 422);
-                }
-                
-                $blocked_count = blockIndividualRoomDates($individual_room_id, $valid_dates, $block_type, $reason, $created_by);
-
-                if ($blocked_count > 0) {
-                    $apiBlockLog('block', [rh_block_entry($pdo, 'room', null, [$individual_room_id], array_filter(array_map(static fn($d) => rh_normalize_block_date((string)$d), $valid_dates)))], $block_type, $reason);
-                    sendResponse([
-                        'success' => true,
-                        'message' => "Successfully blocked {$blocked_count} date(s) for individual room",
-                        'data' => [
-                            'blocked_count' => $blocked_count,
-                            'total_requested' => count($input['dates']),
-                            'errors' => $errors
-                        ],
-                        'warnings' => blockOverlapWarning(null, $individual_room_id, $valid_dates)
-                    ], 201);
-                } else {
-                    sendError('Failed to block dates', 500);
-                }
-            } else {
-                // Room type blocking
-                $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : null;
-                $blocked_count = blockRoomDates($room_id, $valid_dates, $block_type, $reason, $created_by);
-
-                if ($blocked_count > 0) {
-                    $apiBlockLog('block', [rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], array_filter(array_map(static fn($d) => rh_normalize_block_date((string)$d), $valid_dates)))], $block_type, $reason);
-                    sendResponse([
-                        'success' => true,
-                        'message' => "Successfully blocked {$blocked_count} date(s)",
-                        'data' => [
-                            'blocked_count' => $blocked_count,
-                            'total_requested' => count($input['dates']),
-                            'errors' => $errors
-                        ],
-                        'warnings' => blockOverlapWarning($room_id, null, $valid_dates)
-                    ], 201);
-                } else {
-                    sendError('Failed to block dates', 500);
-                }
-            }
-        }
-        
-        else {
+        } elseif (!isset($input['dates']) || !is_array($input['dates'])) {
             sendError('block_date or dates array is required', 422);
         }
+        if (($input['block_scope'] ?? 'type') === 'individual' && empty($input['individual_room_id'])) {
+            sendError('individual_room_id is required for individual room blocks', 422);
+        }
+        require_once __DIR__ . '/../includes/block-save.php';
+        $created = rh_block_api_create($pdo, $input, $client);
+        sendResponse($created['body'], $created['code']);
         break;
-        
+
     case 'PUT':
-        // Update blocked date
+        // Update blocked date (move it to another night / type / reason). The new night must be free: a booked night
+        // answers 409 and the old block is kept (includes/block-save.php rh_block_api_move, under the block locks).
         if (!isset($_GET['id'])) {
             sendError('Blocked date ID is required', 422);
         }
-        
+
         $id = (int)$_GET['id'];
-        
+
         // Validate data
         $validation = validateBlockedDateData($input, true);
         if (!$validation['valid']) {
             sendError('Validation failed', 422, $validation['errors']);
         }
-        
+
         // Get current blocked date (scope=type|individual disambiguates colliding ids)
         $current_date = findBlockedDateById($id, $_GET['scope'] ?? ($input['block_scope'] ?? null));
-        
+
         if (!$current_date) {
             sendError('Blocked date not found', 404);
         }
-        
-        $block_scope = $current_date['block_scope'] ?? 'type';
-        $block_date = $input['block_date'] ?? $current_date['block_date'];
-        $block_type = $input['block_type'] ?? $current_date['block_type'];
-        $reason = $input['reason'] ?? $current_date['reason'];
-        $created_by = $admin_user['id'];
-        
-        // Delete the old block and create the new one in ONE transaction: if the new one cannot be saved, the old
-        // block stays (before, a failed create left the room open for sale with the old block already gone).
-        $oldDate = substr((string)$current_date['block_date'], 0, 10);
-        $pdo->beginTransaction();
-        try {
-            if ($block_scope === 'individual' && !empty($current_date['individual_room_id'])) {
-                $individual_room_id = (int)$current_date['individual_room_id'];
-                $ok = unblockIndividualRoomDate($individual_room_id, $oldDate)
-                    && blockIndividualRoomDate($individual_room_id, $block_date, $block_type, $reason, $created_by);
-                $oldEntry = rh_block_entry($pdo, 'room', null, [$individual_room_id], [$oldDate]);
-                $newEntry = rh_block_entry($pdo, 'room', null, [$individual_room_id], [(string)rh_normalize_block_date((string)$block_date)]);
-            } else {
-                $oldTypeId = ($current_date['room_id'] ?? null) === null || $current_date['room_id'] === '' ? null : (int)$current_date['room_id'];
-                $room_id = isset($input['room_id']) && $input['room_id'] !== '' ? (int)$input['room_id'] : $oldTypeId;
-                $ok = unblockRoomDate($oldTypeId, $oldDate) && blockRoomDate($room_id, $block_date, $block_type, $reason, $created_by);
-                $oldEntry = rh_block_entry($pdo, $oldTypeId === null ? 'all' : 'type', $oldTypeId, [], [$oldDate]);
-                $newEntry = rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], [(string)rh_normalize_block_date((string)$block_date)]);
-            }
-            if (!$ok) {
-                throw new RuntimeException('block update failed');
-            }
-            $apiBlockLog('unblock', [$oldEntry]);
-            $apiBlockLog('block', [$newEntry], $block_type, $reason);
-            $pdo->commit();
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            error_log('api blocked-dates PUT: ' . $e->getMessage());
-            sendError('Failed to update blocked date; the old block was kept', 500);
-        }
-        if ($block_scope === 'individual' && !empty($current_date['individual_room_id'])) {
-            $updated_dates = getIndividualRoomBlockedDates((int)$current_date['individual_room_id'], $block_date, $block_date);
-        } else {
-            $updated_dates = getBlockedDates($room_id, $block_date, $block_date);
-        }
-        sendResponse([
-            'success' => true,
-            'message' => 'Blocked date updated successfully',
-            'data' => !empty($updated_dates) ? $updated_dates[0] : null
-        ]);
+        require_once __DIR__ . '/../includes/block-save.php';
+        $moved = rh_block_api_move($pdo, $current_date, $input, $client);
+        sendResponse($moved['body'], $moved['code']);
         break;
-        
+
     case 'DELETE':
         // Delete blocked date(s)
         

@@ -18,6 +18,7 @@ require_once '../includes/modal.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/../includes/block-log.php'; // wording + Staff activity / Booking History records for blocks
+require_once __DIR__ . '/../includes/block-save.php'; // the one block save engine: locks + booking-clash skip (GRID_UNIFY_PLAN Phase 2)
 
 // Handle form submissions
 $message = '';
@@ -184,33 +185,7 @@ function rh_block_grid_targets(PDO $pdo, $rawJson, int &$pastSkipped = 0)
     return array_values($targets);
 }
 
-/**
- * Nights (from $dates) on which this target already has its OWN block row: night => how many of its
- * rooms hold that row (a joined room has two; a room type / all-rooms row counts as 1).
- */
-function rh_block_grid_direct_nights(PDO $pdo, array $target, array $dates): array
-{
-    if (!$dates) {
-        return [];
-    }
-    $ph = implode(',', array_fill(0, count($dates), '?'));
-    if ($target['scope'] === 'room') {
-        $rph = implode(',', array_fill(0, count($target['room_ids']), '?'));
-        $st = $pdo->prepare("SELECT block_date, COUNT(DISTINCT individual_room_id) FROM individual_room_blocked_dates WHERE individual_room_id IN ($rph) AND block_date IN ($ph) GROUP BY block_date");
-        $st->execute(array_merge($target['room_ids'], $dates));
-    } elseif ($target['scope'] === 'type') {
-        $st = $pdo->prepare("SELECT block_date, 1 FROM blocked_dates WHERE room_id = ? AND block_date IN ($ph) GROUP BY block_date");
-        $st->execute(array_merge([$target['id']], $dates));
-    } else {
-        $st = $pdo->prepare("SELECT block_date, 1 FROM blocked_dates WHERE room_id IS NULL AND block_date IN ($ph) GROUP BY block_date");
-        $st->execute($dates);
-    }
-    $out = [];
-    foreach ($st->fetchAll(PDO::FETCH_NUM) as [$d, $n]) {
-        $out[substr((string)$d, 0, 10)] = (int)$n;
-    }
-    return $out;
-}
+/* rh_block_grid_direct_nights() and rh_block_room_ids() live in includes/block-save.php (shared with the API). */
 
 /** Nights (from $dates) on which a wider block covers this target: its room type's block or an all-rooms block. */
 function rh_block_grid_inherited_nights(PDO $pdo, array $target, array $dates): array
@@ -235,20 +210,24 @@ function rh_block_grid_inherited_nights(PDO $pdo, array $target, array $dates): 
 }
 
 /**
- * Block or unblock the calendar's selection in ONE transaction under the blocked_dates lock: every night
- * is saved, or nothing is. Blocking a night that is already blocked on the same row updates its type and
- * reason. Unblocking only removes a row's OWN block: a night covered by its room type's (or the all-rooms)
- * block stays blocked and is reported, because a room cannot be let out of a wider block on its own.
+ * Block or unblock the calendar's selection in ONE transaction under the blocked_dates lock.
+ * Block: includes/block-save.php rh_block_save() (room locks + booking-clash check): booked nights are skipped and
+ * listed, the free ones saved; a room-type / All-rooms row on a night with bookings blocks only its free rooms.
+ * Blocking a free night that is already blocked on the same row updates its type and reason.
+ * Unblock: only removes a row's OWN block: a night covered by its room type's (or the all-rooms) block stays
+ * blocked and is reported, because a room cannot be let out of a wider block on its own. Unblock is never checked
+ * against bookings (it puts rooms back on sale).
  *
  * @return array{ok:bool,message:string}
  */
 function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $blockType, ?string $reason, ?int $by, int $pastSkipped = 0, string $byName = ''): array
 {
-    $result = rh_block_locked($pdo, function () use ($pdo, $op, $targets, $blockType, $reason, $by, $pastSkipped, $byName) {
-        $noteAffected = [];
-        $addedBy = [];   // row label ("Room 101", "All Deluxe rooms", "All rooms") => nights
-        $updatedBy = [];
-        $removedBy = [];
+    if ($op === 'block') {
+        $res = rh_block_save($pdo, $targets, $blockType, $reason, ['by' => $by, 'user_id' => (int)$by, 'user_name' => $byName]);
+        return ['ok' => $res['ok'], 'message' => rh_block_save_message($res, $pastSkipped)];
+    }
+    $result = rh_block_locked($pdo, function () use ($pdo, $targets, $by, $pastSkipped, $byName) {
+        $removedBy = [];  // row label ("Room 101", "All Deluxe rooms", "All rooms") => nights
         $stillBy = [];
         $notBy = [];
         $count = static function (array $by): int {
@@ -259,70 +238,38 @@ function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $block
             foreach ($targets as $tg) {
                 $label = $tg['label'];
                 $direct = rh_block_grid_direct_nights($pdo, $tg, $tg['dates']);
-                if ($op === 'block') {
-                    foreach ($tg['dates'] as $d) {
+                $inherited = rh_block_grid_inherited_nights($pdo, $tg, $tg['dates']);
+                foreach ($tg['dates'] as $d) {
+                    if (isset($direct[$d])) {
                         if ($tg['scope'] === 'room') {
                             foreach ($tg['room_ids'] as $rid) {
-                                if (!blockIndividualRoomDate($rid, $d, $blockType, $reason, $by)) {
-                                    throw new RuntimeException('Could not block ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
+                                if (!unblockIndividualRoomDate($rid, $d)) {
+                                    throw new RuntimeException('Could not unblock ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
                                 }
                             }
-                        } elseif (!blockRoomDate($tg['scope'] === 'type' ? $tg['id'] : null, $d, $blockType, $reason, $by)) {
-                            throw new RuntimeException('Could not block ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
+                        } elseif (!unblockRoomDate($tg['scope'] === 'type' ? $tg['id'] : null, $d)) {
+                            throw new RuntimeException('Could not unblock ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
                         }
-                        // "Updated" only when every room of the row was already blocked (half a joined room counts as new).
-                        if (($direct[$d] ?? 0) >= max(1, count($tg['room_ids']))) {
-                            $updatedBy[$label][] = $d;
-                        } else {
-                            $addedBy[$label][] = $d;
-                        }
-                    }
-                } else {
-                    $inherited = rh_block_grid_inherited_nights($pdo, $tg, $tg['dates']);
-                    foreach ($tg['dates'] as $d) {
-                        if (isset($direct[$d])) {
-                            if ($tg['scope'] === 'room') {
-                                foreach ($tg['room_ids'] as $rid) {
-                                    if (!unblockIndividualRoomDate($rid, $d)) {
-                                        throw new RuntimeException('Could not unblock ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
-                                    }
-                                }
-                            } elseif (!unblockRoomDate($tg['scope'] === 'type' ? $tg['id'] : null, $d)) {
-                                throw new RuntimeException('Could not unblock ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
-                            }
-                            $removedBy[$label][] = $d;
-                            if (isset($inherited[$d])) {
-                                $stillBy[$label][] = $d;
-                            }
-                        } elseif (isset($inherited[$d])) {
+                        $removedBy[$label][] = $d;
+                        if (isset($inherited[$d])) {
                             $stillBy[$label][] = $d;
-                        } else {
-                            $notBy[$label][] = $d;
                         }
+                    } elseif (isset($inherited[$d])) {
+                        $stillBy[$label][] = $d;
+                    } else {
+                        $notBy[$label][] = $d;
                     }
                 }
             }
             // Record the change (Staff activity + a note on every booking sleeping on those nights) in the same
             // transaction, so a save that rolls back leaves no record of a change that never happened.
-            $entryOf = static function (array $tg, array $dates, array $still = []): array {
-                return ['label' => $tg['label'], 'scope' => $tg['scope'], 'type_id' => $tg['scope'] === 'type' ? $tg['id'] : $tg['type_id'],
-                    'room_ids' => $tg['room_ids'], 'dates' => $dates, 'still' => $still];
-            };
             $logEntries = [];
-            $logUpdated = [];
             foreach ($targets as $tg) {
                 $l = $tg['label'];
-                if ($op === 'block') {
-                    $logEntries[] = $entryOf($tg, $addedBy[$l] ?? []);
-                    $logUpdated[] = $entryOf($tg, $updatedBy[$l] ?? []);
-                } else {
-                    $logEntries[] = $entryOf($tg, $removedBy[$l] ?? [], array_values(array_intersect($stillBy[$l] ?? [], $removedBy[$l] ?? [])));
-                }
+                $logEntries[] = ['label' => $l, 'scope' => $tg['scope'], 'type_id' => $tg['scope'] === 'type' ? $tg['id'] : $tg['type_id'],
+                    'room_ids' => $tg['room_ids'], 'dates' => $removedBy[$l] ?? [], 'still' => array_values(array_intersect($stillBy[$l] ?? [], $removedBy[$l] ?? []))];
             }
-            rh_block_log_change($pdo, $op, $logEntries, ['block_type' => $blockType, 'reason' => $reason, 'user_id' => (int)$by, 'user_name' => $byName], $logUpdated);
-            if ($op === 'block') {
-                $noteAffected = rh_block_affected_bookings(array_merge($logEntries, $logUpdated));
-            }
+            rh_block_log_change($pdo, 'unblock', $logEntries, ['block_type' => null, 'reason' => null, 'user_id' => (int)$by, 'user_name' => $byName]);
             $pdo->commit();
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -333,23 +280,6 @@ function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $block
         }
 
         $pastText = $pastSkipped > 0 ? ' ' . $pastSkipped . ' past night(s) in the selection were skipped (past nights cannot be changed).' : '';
-
-        if ($op === 'block') {
-            $added = $count($addedBy);
-            $updated = $count($updatedBy);
-            $msg = $added > 0 ? 'Blocked ' . $added . ' night(s): ' . rh_block_where_text($addedBy) . '.' : 'No new nights were blocked.';
-            $msg .= $pastText;
-            if ($updated > 0) {
-                $msg .= ' ' . $updated . ' night(s) were already blocked and now show the new block type and reason: ' . rh_block_where_text($updatedBy) . '.';
-            }
-            // Heads-up: bookings that already sleep on the blocked nights (blocks never move them).
-            if ($noteAffected) {
-                $msg .= ' Note: ' . count($noteAffected) . ' booking(s) already sleep on these nights and were not moved: '
-                    . rh_block_bookings_text($noteAffected) . '. Reassign the room or contact the guest; each booking\'s History has a note.';
-            }
-            return ['ok' => true, 'message' => $msg];
-        }
-
         $removed = $count($removedBy);
         $stillBlocked = $count($stillBy);
         $notBlocked = $count($notBy);
@@ -369,29 +299,6 @@ function rh_block_grid_apply(PDO $pdo, string $op, array $targets, string $block
         return ['ok' => $removed > 0, 'message' => $msg];
     });
     return is_array($result) ? $result : ['ok' => false, 'message' => 'Someone else is saving blocks right now. Please try again in a moment. Nothing was changed.'];
-}
-
-/**
- * Individual-room ids a posted picker value stands for. "pair:<combination id>" is a joined-only
- * pair (ONE room to staff) and means BOTH of its rooms; a plain number (or a member of a
- * joined-only pair) is resolved the same way, so a member room is never blocked on its own.
- *
- * @return int[]
- */
-function rh_block_room_ids(string $raw): array
-{
-    $raw = trim($raw);
-    if (strpos($raw, 'pair:') === 0) {
-        $pairs = rh_joined_only_pairs(true);
-        $pair = $pairs[(int)substr($raw, 5)] ?? null;
-        return $pair ? $pair['room_ids'] : [];
-    }
-    $id = (int)$raw;
-    if ($id <= 0) {
-        return [];
-    }
-    $map = rh_joined_only_pair_map();
-    return isset($map[$id]) ? $map[$id]['room_ids'] : [$id];
 }
 
 /** Unblock one night of a room; a member of a joined room is unblocked together with its partner. */
@@ -414,18 +321,24 @@ function rh_block_locked(PDO $pdo, callable $fn)
     }
 }
 
-/** Heads-up appended to a success message when existing bookings sleep on the blocked nights. */
-function rh_block_overlap_note(?int $roomTypeId, ?int $individualRoomId, array $dates): string
+/**
+ * The list forms (block_date / block_multiple): one target through the calendar's save engine, so they skip booked
+ * nights exactly like the calendar. Returns ['ok' => bool, 'message' => string].
+ */
+function rh_block_form_save(PDO $pdo, string $scope, string $rawId, array $dates, ?string $blockType, ?string $reason, ?int $by, string $byName): array
 {
-    $rows = getBookingsOverlappingBlockDates($roomTypeId, $individualRoomId, $dates);
-    if (empty($rows)) {
-        return '';
+    if ($scope === 'individual') {
+        $ids = rh_block_room_ids($rawId);
+        $item = ['t' => 'room', 'id' => $ids[0] ?? 0, 'd' => $dates];
+    } else {
+        $item = trim($rawId) === '' ? ['t' => 'all', 'id' => null, 'd' => $dates] : ['t' => 'type', 'id' => (int)$rawId, 'd' => $dates];
     }
-    $refs = array_map(function ($b) {
-        return $b['booking_reference'];
-    }, array_slice($rows, 0, 5));
-    return ' Note: ' . count($rows) . ' existing booking(s) already sleep on these nights (' . implode(', ', $refs)
-        . (count($rows) > 5 ? ', ...' : '') . '). Blocks do not cancel or move bookings; reassign or contact those guests.';
+    $past = 0;
+    $targets = rh_block_grid_targets($pdo, json_encode([$item]), $past);
+    if (is_string($targets)) {
+        return ['ok' => false, 'message' => $targets];
+    }
+    return rh_block_grid_apply($pdo, 'block', $targets, rh_normalize_block_type($blockType), rh_normalize_block_reason($reason), $by, $past, $byName);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -456,8 +369,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } elseif ($action === 'preview_block') {
-        // Read only (nothing is saved): the bookings that already sleep on the selected nights, shown in the
-        // Block confirm so staff decide BEFORE the rooms go off sale.
+        // Read only (nothing is saved): what the save WOULD do - booked nights skipped, rooms blocked one by one on a
+        // room-type / All-rooms night with bookings - shown in the Block confirm before the rooms go off sale.
         $previewPast = 0;
         $targets = rh_block_grid_targets($pdo, $_POST['items'] ?? '', $previewPast);
         header('Content-Type: application/json; charset=utf-8');
@@ -465,15 +378,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['success' => false, 'message' => $targets]);
             exit;
         }
-        $entries = array_map(static fn($tg) => ['label' => $tg['label'], 'scope' => $tg['scope'], 'type_id' => $tg['scope'] === 'type' ? $tg['id'] : $tg['type_id'],
-            'room_ids' => $tg['room_ids'], 'dates' => $tg['dates'], 'still' => []], $targets);
-        $affected = rh_block_affected_bookings($entries);
         $byLabel = [];
         foreach ($targets as $tg) {
             $byLabel[$tg['label']] = $tg['dates'];
         }
+        $sum = rh_block_preview($pdo, $targets);
+        $pn = rh_block_preview_note($sum);
         echo json_encode(['success' => true, 'where' => rh_block_where_text($byLabel), 'past_skipped' => $previewPast,
-            'booking_count' => count($affected), 'bookings' => $affected ? rh_block_bookings_text($affected, 8) : '']);
+            'booking_count' => count($sum['bookings']), 'bookings' => $sum['bookings'] ? rh_room_nights_clash_text($sum['bookings'], 8) : '',
+            'skip_nights' => $pn['skip_nights'], 'free_nights' => $pn['free_nights'], 'single_nights' => $pn['single_nights'],
+            'can_block' => $pn['can_block'], 'note' => $pn['note']]);
         exit;
     } elseif ($action === 'grid_apply') {
         // Calendar grid: block or unblock any mix of rooms, room types and the all-rooms row in one save.
@@ -513,26 +427,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = $chkErr;
                 $messageType = 'error';
             } else {
-                $result = rh_block_locked($pdo, function () use ($pdo, $block_room_ids, $clean_dates, $block_type, $reason, $created_by) {
-                    // A joined room is blocked on both its rooms or on neither.
-                    $pdo->beginTransaction();
-                    $okAll = true;
-                    foreach ($block_room_ids as $blockRoomId) {
-                        $okAll = blockIndividualRoomDate($blockRoomId, $clean_dates[0], $block_type, $reason, $created_by) && $okAll;
-                    }
-                    $okAll ? $pdo->commit() : $pdo->rollBack();
-                    return $okAll;
-                });
-
-                if ($result) {
-                    rh_block_log_change($pdo, 'block', [rh_block_entry($pdo, 'room', null, $block_room_ids, $clean_dates)], $blockLogMeta($block_type, $reason));
-                    $message = rh_block_label($pdo, null, $block_room_ids) . ' blocked on ' . rh_block_nights_text($clean_dates)
-                        . (count($block_room_ids) > 1 ? ' (both rooms of the joined room).' : '.') . rh_block_overlap_note(null, $individual_room_id, $clean_dates);
-                    $messageType = 'success';
-                } else {
-                    $message = 'Failed to block date';
-                    $messageType = 'error';
-                }
+                // The calendar's save engine: a joined room blocks both rooms; a booked night is skipped and listed.
+                $formRes = rh_block_form_save($pdo, 'individual', (string)$individual_room_id, $clean_dates, $block_type, $reason, $created_by !== null ? (int)$created_by : null, $blockActorName);
+                $message = $formRes['message'];
+                $messageType = $formRes['ok'] ? 'success' : 'error';
                 if ($isAjax) {
                     header('Content-Type: application/json; charset=utf-8');
                     echo json_encode(['success' => $messageType === 'success', 'message' => $message]);
@@ -558,18 +456,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = $chkErr;
                 $messageType = 'error';
             } else {
-                $result = rh_block_locked($pdo, function () use ($room_id, $clean_dates, $block_type, $reason, $created_by) {
-                    return blockRoomDate($room_id, $clean_dates[0], $block_type, $reason, $created_by);
-                });
-
-                if ($result) {
-                    rh_block_log_change($pdo, 'block', [rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], $clean_dates)], $blockLogMeta($block_type, $reason));
-                    $message = rh_block_label($pdo, $room_id) . ' blocked on ' . rh_block_nights_text($clean_dates) . '.' . rh_block_overlap_note($room_id, null, $clean_dates);
-                    $messageType = 'success';
-                } else {
-                    $message = 'Failed to block date';
-                    $messageType = 'error';
-                }
+                // The calendar's save engine (one transaction, locks, booked nights skipped / free rooms blocked singly).
+                $formRes = rh_block_form_save($pdo, 'type', $room_id === null ? '' : (string)$room_id, $clean_dates, $block_type, $reason, $created_by !== null ? (int)$created_by : null, $blockActorName);
+                $message = $formRes['message'];
+                $messageType = $formRes['ok'] ? 'success' : 'error';
                 if ($isAjax) {
                     header('Content-Type: application/json; charset=utf-8');
                     echo json_encode(['success' => $messageType === 'success', 'message' => $message]);
@@ -688,31 +578,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = $chkErr;
                 $messageType = 'error';
             } else {
-                $blocked_count = (int)rh_block_locked($pdo, function () use ($pdo, $block_room_ids, $dates, $block_type, $reason, $created_by) {
-                    // A joined room blocks both rooms; the count is nights blocked on the joined room.
-                    // Both rooms must take the same nights, otherwise nothing is kept.
-                    $pdo->beginTransaction();
-                    $counts = [];
-                    foreach ($block_room_ids as $blockRoomId) {
-                        $counts[] = blockIndividualRoomDates($blockRoomId, $dates, $block_type, $reason, $created_by);
-                    }
-                    if ($counts && min($counts) === max($counts)) {
-                        $pdo->commit();
-                        return min($counts);
-                    }
-                    $pdo->rollBack();
-                    return 0;
-                });
-
-                if ($blocked_count > 0) {
-                    rh_block_log_change($pdo, 'block', [rh_block_entry($pdo, 'room', null, $block_room_ids, $dates)], $blockLogMeta($block_type, $reason));
-                    $message = 'Blocked ' . $blocked_count . ' night(s): ' . rh_block_label($pdo, null, $block_room_ids) . ' on ' . rh_block_nights_text($dates)
-                        . (count($block_room_ids) > 1 ? ' (both rooms of the joined room).' : '.') . rh_block_overlap_note(null, $individual_room_id, $dates);
-                    $messageType = 'success';
-                } else {
-                    $message = 'Failed to block dates';
-                    $messageType = 'error';
-                }
+                // The calendar's save engine: a joined room blocks both rooms; booked nights are skipped and listed.
+                $formRes = rh_block_form_save($pdo, 'individual', (string)$individual_room_id, $dates, $block_type, $reason, $created_by !== null ? (int)$created_by : null, $blockActorName);
+                $message = $formRes['message'];
+                $messageType = $formRes['ok'] ? 'success' : 'error';
                 if ($isAjax) {
                     header('Content-Type: application/json; charset=utf-8');
                     echo json_encode(['success' => $messageType === 'success', 'message' => $message]);
@@ -738,18 +607,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = $chkErr;
                 $messageType = 'error';
             } else {
-                $blocked_count = (int)rh_block_locked($pdo, function () use ($room_id, $dates, $block_type, $reason, $created_by) {
-                    return blockRoomDates($room_id, $dates, $block_type, $reason, $created_by);
-                });
-
-                if ($blocked_count > 0) {
-                    rh_block_log_change($pdo, 'block', [rh_block_entry($pdo, $room_id === null ? 'all' : 'type', $room_id, [], $dates)], $blockLogMeta($block_type, $reason));
-                    $message = 'Blocked ' . $blocked_count . ' night(s): ' . rh_block_label($pdo, $room_id) . ' on ' . rh_block_nights_text($dates) . '.' . rh_block_overlap_note($room_id, null, $dates);
-                    $messageType = 'success';
-                } else {
-                    $message = 'Failed to block dates';
-                    $messageType = 'error';
-                }
+                // The calendar's save engine (one transaction, locks, booked nights skipped / free rooms blocked singly).
+                $formRes = rh_block_form_save($pdo, 'type', $room_id === null ? '' : (string)$room_id, $dates, $block_type, $reason, $created_by !== null ? (int)$created_by : null, $blockActorName);
+                $message = $formRes['message'];
+                $messageType = $formRes['ok'] ? 'success' : 'error';
                 if ($isAjax) {
                     header('Content-Type: application/json; charset=utf-8');
                     echo json_encode(['success' => $messageType === 'success', 'message' => $message]);
@@ -1755,10 +1616,9 @@ $site_name = getSetting('site_name');
                 .catch(function () { return null; })
                 .then(function (p) {
                     if (p && p.success === false) { show(false, p.message || 'The rooms could not be checked.'); return false; }
-                    const msg = 'Block ' + where + '? Guests will not be able to book them.'
-                        + (p ? (p.booking_count > 0
-                            ? ' Warning: ' + p.booking_count + ' booking(s) already sleep on these nights and will NOT be moved or cancelled: ' + p.bookings + '. Each booking\'s History will get a note.'
-                            : ' No bookings sleep on these nights.') : '');
+                    // Booked nights are skipped by the save (never blocked over a booking): say so before saving.
+                    if (p && p.can_block === false) { show(false, p.note || 'Every selected night is booked. Nothing to block.'); return false; }
+                    const msg = 'Block ' + where + '? Guests will not be able to book them.' + (p && p.note ? ' ' + p.note : '');
                     if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
                         return window.AdminConfirm.request({ title: 'Block rooms', message: msg, confirmText: 'Block', icon: 'fa-ban' });
                     }
@@ -1810,7 +1670,7 @@ $site_name = getSetting('site_name');
                     saveBtn.disabled = false;
                     saveBtn.innerHTML = origHtml;
                     fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
-                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
+                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> '; fb.appendChild(document.createTextNode(String(res.message || ''))); // text, never HTML: clash messages carry guest names
                     if (res.success) {
                         refreshBlockedDatesTable();
                         if (res.success && formId === 'blockSingleDateForm') {

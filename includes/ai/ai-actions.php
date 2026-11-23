@@ -1700,32 +1700,55 @@ function rh_ai_pv_block_dates(PDO $db, array $user, array $a): array
     }
     $type = (string)($a['type'] ?? 'manual');
     $reason = trim((string)($a['reason'] ?? ''));
-    $over = function_exists('getBookingsOverlappingBlockDates') ? getBookingsOverlappingBlockDates($t['scope'] === 'type' ? $t['room_id'] : null, $t['scope'] === 'room' ? $t['ir_id'] : null, $dates) : [];
-    if ($t['scope'] === 'all' && function_exists('getBookingsOverlappingBlockDates')) {
-        $over = [];
-        foreach ($db->query("SELECT id FROM rooms WHERE is_active = 1")->fetchAll(PDO::FETCH_COLUMN) as $rid) {
-            foreach (getBookingsOverlappingBlockDates((int)$rid, null, $dates) as $o) {
-                $over[(int)$o['id']] = $o;
+    // The screen's save skips booked nights (and on a room-type / All-rooms night with bookings blocks only the free
+    // rooms, one by one): the same check, read only, so the card says what will happen and the verify checks exactly
+    // what the save is allowed to write (GRID_UNIFY_PLAN Phase 2).
+    require_once __DIR__ . '/../block-save.php';
+    if ($t['scope'] === 'room') {
+        $ids = rh_block_room_ids((string)$t['ir_id']);
+        sort($ids);
+        $tgt = ['scope' => 'room', 'id' => $ids[0] ?? (int)$t['ir_id'], 'room_ids' => $ids ?: [(int)$t['ir_id']],
+            'type_id' => (int)$db->query('SELECT room_type_id FROM individual_rooms WHERE id = ' . (int)$t['ir_id'])->fetchColumn(), 'label' => rh_block_label($db, null, $ids ?: [(int)$t['ir_id']]), 'dates' => $dates];
+    } else {
+        $tgt = ['scope' => $t['scope'], 'id' => $t['scope'] === 'type' ? (int)$t['room_id'] : null, 'room_ids' => [], 'type_id' => $t['scope'] === 'type' ? (int)$t['room_id'] : null,
+            'label' => $t['scope'] === 'type' ? rh_block_label($db, (int)$t['room_id']) : 'All rooms', 'dates' => $dates];
+    }
+    $res = rh_room_nights_clash($db, [rh_block_clash_target($tgt)], ['advisory' => true, 'convert' => true]);
+    $sum = rh_block_clash_summary([$tgt], $res);
+    $pn = rh_block_preview_note($sum);
+    if (!$pn['can_block']) {
+        return ['error' => $pn['note'] . ' Move those bookings first, or block single free rooms.'];
+    }
+    $freeDates = array_values($sum['free'][$tgt['label']] ?? []);
+    $singles = []; // [room id, night] the save blocks one by one (room type / All rooms on a night with bookings)
+    foreach ($res['targets'][0]['singles'] ?? [] as $n => $units) {
+        foreach ($units as $u) {
+            foreach ($u['room_ids'] as $rid) {
+                $singles[] = [(int)$rid, (string)$n];
             }
         }
-        $over = array_values($over);
     }
+    $skipCount = $pn['skip_nights'];
     $labels = ['manual' => 'Manual block', 'maintenance' => 'Maintenance', 'event' => 'Event', 'full' => 'Fully booked'];
     $rows = [['label' => 'Close for sale', 'new' => $t['label'], 'tone' => 'danger'], ['label' => 'Dates', 'new' => rh_ai_block_span_text($dates)], ['label' => 'Type of block', 'new' => $labels[$type] ?? $type]];
     if (count($have) > 0) {
         $rows[] = ['label' => 'Already blocked', 'new' => count($have) . ' of those dates (left as they are)'];
     }
-    $card = rh_ai_card_base('Block dates', 'Closes these dates for sale, the same as Block dates on the Blocked Dates screen. Bookings already made are not moved or cancelled.', $rows, 'Block dates', [
+    if ($skipCount > 0 || $pn['single_nights'] > 0) {
+        $rows[] = ['label' => 'Booked nights', 'new' => ($skipCount > 0 ? $skipCount . ' skipped (stay open)' : '') . ($skipCount > 0 && $pn['single_nights'] > 0 ? '; ' : '')
+            . ($pn['single_nights'] > 0 ? $pn['single_nights'] . ' with only the free rooms blocked' : '')];
+    }
+    $card = rh_ai_card_base('Block dates', 'Closes these dates for sale, the same as Block dates on the Blocked Dates screen. A night a booking sleeps on is never blocked over: it is skipped and listed.', $rows, 'Block dates', [
         'danger' => true, 'fields' => [['name' => 'reason', 'label' => 'Note (optional)', 'type' => 'text', 'value' => $reason, 'required' => false, 'max' => 200]],
     ]);
-    if ($over) {
-        $refs = array_slice(array_map(static fn($o) => (string)$o['booking_reference'], $over), 0, 5);
-        $card['warn'][] = count($over) . ' booking' . (count($over) === 1 ? ' already sleeps' : 's already sleep') . ' on these nights (' . implode(', ', $refs) . (count($over) > 5 ? ', ...' : '') . '). The block does not move them: reassign or contact those guests.';
+    if ($sum['bookings']) {
+        $card['warn'][] = $pn['note'];
     }
     $f = [['action', 'block_multiple'], ['block_scope', $t['scope'] === 'room' ? 'individual' : 'type'], ['dates', json_encode($dates)], ['block_type', $type], ['reason', $reason]];
     $f[] = $t['scope'] === 'room' ? ['individual_room_id', (string)$t['ir_id']] : ['room_id', $t['scope'] === 'type' ? (string)$t['room_id'] : ''];
-    return ['card' => $card, 'steps' => [rh_ai_step('blocked-dates.php', $f)], 'fp' => [implode(',', $dates), count($over)],
-        'facts' => ['what' => $t['label'], 'dates' => $dates, 'bookings_on_those_nights' => count($over)], 'block' => $t + ['dates' => $dates]];
+    return ['card' => $card, 'steps' => [rh_ai_step('blocked-dates.php', $f)], 'fp' => [implode(',', $dates), count($sum['bookings']), $skipCount],
+        'facts' => ['what' => $t['label'], 'dates' => $dates, 'bookings_on_those_nights' => count($sum['bookings']), 'booked_nights_skipped' => $skipCount],
+        'block' => $t + ['dates' => $freeDates, 'singles' => $singles]];
 }
 
 function rh_ai_pv_unblock_dates(PDO $db, array $user, array $a): array
@@ -2330,21 +2353,37 @@ function rh_ai_vf_create_booking(PDO $db, array $row, array $pv): ?bool
     return (int)$st->fetchColumn() > 0;
 }
 
-/** Every date of the card is now blocked for its target (the Blocked Dates list decides). */
+/**
+ * Every night the card said it would block is now blocked: the free nights on the target's own row, plus the rooms
+ * blocked one by one on a room-type / All-rooms night with bookings. Booked nights were skipped by design, so they
+ * are not expected (a correct partial save verifies).
+ */
 function rh_ai_vf_block_dates(PDO $db, array $row, array $pv): ?bool
 {
     $t = (array)($pv['block'] ?? []);
     $dates = (array)($t['dates'] ?? []);
-    if (!$dates) {
+    $singles = (array)($t['singles'] ?? []);
+    if (!$dates && !$singles) {
         return null;
     }
-    $have = [];
-    foreach (rh_ai_block_rows($t, (string)$dates[0], (string)$dates[count($dates) - 1]) as $r) {
-        $have[substr((string)$r['block_date'], 0, 10)] = true;
+    if ($dates) {
+        $have = [];
+        foreach (rh_ai_block_rows($t, (string)$dates[0], (string)$dates[count($dates) - 1]) as $r) {
+            $have[substr((string)$r['block_date'], 0, 10)] = true;
+        }
+        foreach ($dates as $d) {
+            if (!isset($have[$d])) {
+                return false;
+            }
+        }
     }
-    foreach ($dates as $d) {
-        if (!isset($have[$d])) {
-            return false;
+    if ($singles) {
+        $st = $db->prepare('SELECT COUNT(*) FROM individual_room_blocked_dates WHERE individual_room_id = ? AND block_date = ?');
+        foreach ($singles as $s) {
+            $st->execute([(int)($s[0] ?? 0), (string)($s[1] ?? '')]);
+            if ((int)$st->fetchColumn() === 0) {
+                return false;
+            }
         }
     }
     return true;

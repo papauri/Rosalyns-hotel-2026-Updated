@@ -11,6 +11,7 @@ require_once 'includes/admin-modal.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/room-management.php';
 require_once __DIR__ . '/../includes/maintenance-recurring.php';
+require_once __DIR__ . '/../includes/room-night-clash.php'; // a job that closes the room never lands on a booked night (GRID_UNIFY_PLAN Phase 2)
 require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/includes/front-desk-counts.php'; // rh_fd_out_of_service_statuses: the Dashboard chip rule
 /** @var array{id: int, username: string, role: string} $user */
@@ -329,15 +330,21 @@ function getMaintenanceStaffWorkload(PDO $pdo): array
  * Auto-create maintenance tasks for rooms that need them
  * Backward compatible: works with or without migration 005 columns
  */
-function autoCreateMaintenanceTasks(PDO $pdo, int $performedBy): int
+function autoCreateMaintenanceTasks(PDO $pdo, int $performedBy, array &$notes = []): int
 {
     $hasDueDate = maintenanceColumnExists($pdo, 'due_date');
     $hasMaintenanceType = maintenanceColumnExists($pdo, 'maintenance_type');
     $hasPriority = maintenanceColumnExists($pdo, 'priority');
     $hasAutoCreated = maintenanceColumnExists($pdo, 'auto_created');
     $hasLinkedBookingId = maintenanceColumnExists($pdo, 'linked_booking_id');
+    $hasBlockRoom = maintenanceColumnExists($pdo, 'block_room');
 
+    // Owner answer 3 (2026-11-23): the job is created either way (a work reminder), but it closes the room only when
+    // no booking sleeps there - decided under the room locks, which are taken before anything else is read.
     $maintenanceRooms = getMaintenanceNeededRooms($pdo);
+    $plan = rh_room_nights_lock_plan($pdo, [['scope' => 'room', 'room_ids' => array_map(static fn($r) => (int)$r['id'], $maintenanceRooms)]]);
+    $pdo->beginTransaction();
+    rh_room_nights_take_locks($pdo, $plan);
     $created = 0;
 
     foreach ($maintenanceRooms as $room) {
@@ -400,6 +407,15 @@ function autoCreateMaintenanceTasks(PDO $pdo, int $performedBy): int
             $insertValues[] = '?';
             $insertParams[] = $room['booking_id'];
         }
+        $jobBlock = rh_maint_job_can_close_room($pdo, (int)$room['id'], (string)$insertParams[3], (string)$insertParams[4]) ? 1 : 0;
+        if ($hasBlockRoom) {
+            $insertColumns[] = 'block_room';
+            $insertValues[] = '?';
+            $insertParams[] = $jobBlock;
+        }
+        if ($jobBlock === 0) {
+            $notes[] = rh_block_label($pdo, null, [(int)$room['id']]) . ' is booked on those nights, so its job does not close the room.';
+        }
 
         $insertSql = "INSERT INTO room_maintenance_schedules (" . implode(', ', $insertColumns) . ") VALUES (" . implode(', ', $insertValues) . ")";
         $stmt = $pdo->prepare($insertSql);
@@ -422,10 +438,12 @@ function autoCreateMaintenanceTasks(PDO $pdo, int $performedBy): int
         if ($hasPriority) $newData['priority'] = $priority;
         if ($hasAutoCreated) $newData['auto_created'] = 1;
         if ($hasLinkedBookingId && !empty($room['booking_id'])) $newData['linked_booking_id'] = $room['booking_id'];
+        if ($hasBlockRoom) $newData['block_room'] = $jobBlock;
 
         logMaintenanceAction($newMaintenanceId, 'created', null, $newData, $performedBy);
     }
 
+    $pdo->commit();
     return $created;
 }
 
@@ -613,7 +631,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new DomainException('This room already has an open maintenance request called "' . $dupMt['value'] . '" (request #' . $dupMt['id'] . '). Edit that one instead.');
                     }
                 }
+                // An open job that closes the room: room locks first (the booking lock order), then the booking check.
+                // A booked night refuses the save (owner 2026-11-23); the message lists the bookings and the free dates.
+                $mtPlan = $block_room === 1 && rh_maint_status_is_open(rh_maint_status_to_db($status))
+                    ? rh_room_nights_lock_plan($pdo, [['scope' => 'room', 'room_ids' => [$room_id]]]) : null;
                 $pdo->beginTransaction();
+                if ($mtPlan) {
+                    rh_room_nights_take_locks($pdo, $mtPlan);
+                    $mtClash = rh_maint_clash_check($pdo, $room_id, (string)$start_date, (string)$end_date);
+                    if (!$mtClash['ok']) {
+                        throw new DomainException($mtClash['message']);
+                    }
+                }
 
                 $completedAt = in_array($status, ['completed', 'verified'], true) ? date('Y-m-d H:i:s') : null;
                 $verifiedAt = ($hasVerifiedAt && $status === 'verified') ? date('Y-m-d H:i:s') : null;
@@ -803,7 +832,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (($fieldErr = maintenanceValidateFields($title, $description, $estimated_duration, (bool)$is_recurring, $recurring_end_date, $hasDueDate ? (string)$due_date : '')) !== '') {
                 $error = $fieldErr;
             } else {
+                // Saved as an open job that closes the room: lock the room first (no read before the locks), then
+                // read the stored row and check only the nights it newly covers (all nights when the room changes or
+                // a closed job is reopened). A booked night refuses the save.
+                $mtPlan = $block_room === 1 && rh_maint_status_is_open(rh_maint_status_to_db($status))
+                    ? rh_room_nights_lock_plan($pdo, [['scope' => 'room', 'room_ids' => [$room_id]]]) : null;
                 $pdo->beginTransaction();
+                if ($mtPlan) {
+                    rh_room_nights_take_locks($pdo, $mtPlan);
+                }
                 $existsStmt = $pdo->prepare("SELECT id, individual_room_id, title, status, verified_by FROM room_maintenance_schedules WHERE id = ?");
                 $existsStmt->execute([$id]);
                 $existing = $existsStmt->fetch(PDO::FETCH_ASSOC);
@@ -813,6 +850,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $existing['status'] = rh_maint_status_from_db($existing['status'] ?? '', $existing['verified_by'] ?? null);
                 if (($existing['status'] ?? '') === 'verified') {
                     throw new DomainException('Verified maintenance schedules are locked and cannot be edited.');
+                }
+                if ($mtPlan) {
+                    $oldStmt = $pdo->prepare("SELECT * FROM room_maintenance_schedules WHERE id = ?");
+                    $oldStmt->execute([$id]);
+                    $mtOld = $oldStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                    $mtClash = rh_maint_clash_check($pdo, $room_id, (string)$start_date, (string)$end_date, $mtOld);
+                    if (!$mtClash['ok']) {
+                        throw new DomainException($mtClash['message']);
+                    }
                 }
 
                 // Changing room or title onto an existing open request would create a duplicate.
@@ -994,10 +1040,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 [$message, $error] = adminBulkOutcome($bulkVerbs[$bulkOp], $bulkDone, $bulkSkipped);
             }
         } elseif ($action === 'auto_create_tasks') {
-            $pdo->beginTransaction();
-            $created = autoCreateMaintenanceTasks($pdo, $user['id'] ?? null);
-            $pdo->commit();
-            $message = "Created {$created} maintenance tasks.";
+            // The function runs its own transaction (room locks first, then the reads and inserts).
+            $autoNotes = [];
+            $created = autoCreateMaintenanceTasks($pdo, (int)($user['id'] ?? 0), $autoNotes);
+            $message = "Created {$created} maintenance tasks." . ($autoNotes ? ' ' . implode(' ', $autoNotes) : '');
         } elseif ($action === 'bulk_assign_rooms') {
             $room_ids_raw = $_POST['room_ids'] ?? '[]';
             $room_ids = is_array($room_ids_raw) ? $room_ids_raw : (json_decode((string)$room_ids_raw, true) ?: []);
@@ -1018,15 +1064,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($hasMaintenanceType && !in_array($maintenance_type, $validMaintenanceTypes, true)) {
                 $error = 'Invalid maintenance type.';
             } else {
+                // Owner answer 3 (2026-11-23): each job closes its room only when no booking sleeps there, decided under
+                // the room locks (taken first: the valid rooms are worked out before the transaction).
+                $room_ids = array_values(array_filter(array_unique(array_map('intval', $room_ids)), static fn($r) => $r > 0 && maintenanceRoomExists($pdo, $r)));
+                $hasBlockRoom = maintenanceColumnExists($pdo, 'block_room');
+                $bulkPlan = rh_room_nights_lock_plan($pdo, [['scope' => 'room', 'room_ids' => $room_ids]]);
+                $bulkNotes = [];
                 $pdo->beginTransaction();
+                rh_room_nights_take_locks($pdo, $bulkPlan);
                 $created = 0;
                 $today = date('Y-m-d');
 
                 foreach ($room_ids as $room_id) {
                     $room_id = (int)$room_id;
-                    if (!maintenanceRoomExists($pdo, $room_id)) {
-                        continue;
-                    }
 
                     // Check if pending assignment already exists
                     $checkStmt = $pdo->prepare("
@@ -1071,6 +1121,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $insertValues[] = '?';
                         $insertParams[] = 1;
                     }
+                    $jobBlock = rh_maint_job_can_close_room($pdo, $room_id, (string)$insertParams[3], (string)$insertParams[4]) ? 1 : 0;
+                    if ($hasBlockRoom) {
+                        $insertColumns[] = 'block_room';
+                        $insertValues[] = '?';
+                        $insertParams[] = $jobBlock;
+                    }
+                    if ($jobBlock === 0) {
+                        $bulkNotes[] = rh_block_label($pdo, null, [$room_id]) . ' is booked on those nights, so its job does not close the room.';
+                    }
 
                     $insertSql = "INSERT INTO room_maintenance_schedules (" . implode(', ', $insertColumns) . ") VALUES (" . implode(', ', $insertValues) . ")";
                     $stmt = $pdo->prepare($insertSql);
@@ -1092,6 +1151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($hasMaintenanceType) $newData['maintenance_type'] = $maintenance_type;
                     if ($hasPriority) $newData['priority'] = $priority;
                     if ($hasAutoCreated) $newData['auto_created'] = 1;
+                    if ($hasBlockRoom) $newData['block_room'] = $jobBlock;
 
                     logMaintenanceAction($newMaintenanceId, 'created', null, $newData, $user['id'] ?? null, $user['username'] ?? null);
 
@@ -1099,7 +1159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->commit();
-                $message = "Bulk assigned {$created} rooms for maintenance.";
+                $message = "Bulk assigned {$created} rooms for maintenance." . ($bulkNotes ? ' ' . implode(' ', $bulkNotes) : '');
             }
         } elseif ($action === 'verify_schedule') {
             $id = (int)($_POST['id'] ?? 0);
@@ -1204,7 +1264,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($mtLockName) . ')'); } catch (Throwable $e2) {}
             $mtLockName = '';
         }
-        $error = $e instanceof DomainException ? $e->getMessage() : ('Database error: ' . $e->getMessage());
+        $error = $e instanceof DomainException ? $e->getMessage() : (rh_is_lock_conflict($e) ? rh_room_nights_lock_message() : ('Database error: ' . $e->getMessage()));
         if ($isAjax) {
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['success' => false, 'message' => $error]);
@@ -2568,7 +2628,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
                     saveBtn.disabled = false;
                     saveBtn.innerHTML = origHtml;
                     fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
-                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
+                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> '; fb.appendChild(document.createTextNode(String(res.message || ''))); // text, never HTML: clash messages carry guest names
                     if (res.success) refreshMaintenanceTable();
                 })
                 .catch(function() {

@@ -497,10 +497,9 @@
         var ask = op === 'block' ? preview(items).then(function (p) {
             if (!p) return baseMsg;
             if (p.success === false) { feedback(false, p.message || 'The selection could not be checked.'); return null; }
-            return baseMsg + (p.booking_count > 0
-                ? ' Warning: ' + p.booking_count + ' booking(s) already sleep on these nights and will NOT be moved or cancelled: '
-                  + p.bookings + '. Each booking\'s History will get a note.'
-                : ' No bookings sleep on these nights.');
+            // Booked nights are skipped by the save (never blocked over a booking): say so before saving.
+            if (p.can_block === false) { feedback(false, p.note || 'Every selected night is booked. Nothing to block.'); return null; }
+            return baseMsg + (p.note ? ' ' + p.note : '');
         }) : Promise.resolve(baseMsg);
         ask.then(function (msg) {
             if (msg === null) return false;

@@ -362,8 +362,21 @@ function createSchedule() {
         ApiResponse::validationError(['overlap' => 'Overlapping active maintenance block exists for this room']);
     }
 
+    // An open job that closes the room never lands on a booked night (GRID_UNIFY_PLAN Phase 2): room locks first,
+    // then the booking check; a clash answers 409 with the bookings and the free dates, nothing saved.
+    require_once __DIR__ . '/../includes/room-night-clash.php';
+    $plan = $blockRoom === 1 && rh_maint_status_is_open(rh_maint_status_to_db($status))
+        ? rh_room_nights_lock_plan($pdo, [['scope' => 'room', 'room_ids' => [(int)$input['individual_room_id']]]]) : null;
     $pdo->beginTransaction();
     try {
+        if ($plan) {
+            rh_room_nights_take_locks($pdo, $plan);
+            $clash = rh_maint_clash_check($pdo, (int)$input['individual_room_id'], (string)$startDate, (string)$endDate);
+            if (!$clash['ok']) {
+                $pdo->rollBack();
+                ApiResponse::error($clash['message'], 409, ['booked_nights' => $clash['booked'], 'free_nights' => $clash['free']]);
+            }
+        }
         // Build INSERT columns and values based on available columns
         $insertColumns = ['individual_room_id', 'title', 'description', 'status', 'start_date', 'end_date', 'assigned_to', 'created_by'];
         $insertValues = ['?', '?', '?', '?', '?', '?', '?', '?'];
@@ -573,8 +586,23 @@ function updateSchedule($id) {
         }
     }
 
+    // Saved as an open job that closes the room: room locks first, then re-read the stored row and check the nights it
+    // newly covers (all nights when the room changes or a closed job is reopened). A booked night answers 409.
+    require_once __DIR__ . '/../includes/room-night-clash.php';
+    $plan = $blockRoom === 1 && rh_maint_status_is_open(rh_maint_status_to_db($status))
+        ? rh_room_nights_lock_plan($pdo, [['scope' => 'room', 'room_ids' => [$roomId]]]) : null;
     $pdo->beginTransaction();
     try {
+        if ($plan) {
+            rh_room_nights_take_locks($pdo, $plan);
+            $oldStmt = $pdo->prepare("SELECT * FROM room_maintenance_schedules WHERE id = ?");
+            $oldStmt->execute([$id]);
+            $clash = rh_maint_clash_check($pdo, $roomId, $startDate, $endDate, $oldStmt->fetch(PDO::FETCH_ASSOC) ?: null);
+            if (!$clash['ok']) {
+                $pdo->rollBack();
+                ApiResponse::error($clash['message'], 409, ['booked_nights' => $clash['booked'], 'free_nights' => $clash['free']]);
+            }
+        }
         $params[] = $id;
         $sql = "UPDATE room_maintenance_schedules SET " . implode(', ', $fields) . " WHERE id = ?";
         $stmt = $pdo->prepare($sql);
