@@ -25,6 +25,16 @@ if (!function_exists('rh_fin_valid_date')) {
         return $d;
     }
 
+    /** A real 'Y-m-d H:i:s' (Payments ?since=, the Dashboard "Since you were last here" link), else ''. Same rule as rh_bk_since_filter. */
+    function rh_fin_valid_datetime($d): string
+    {
+        if (!is_string($d) || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $d)) {
+            return '';
+        }
+        $dt = DateTime::createFromFormat('!Y-m-d H:i:s', $d);
+        return ($dt !== false && $dt->format('Y-m-d H:i:s') === $d) ? $d : '';
+    }
+
     /**
      * A query-string value as text: trimmed when it is a string or number, $default for anything else (an array
      * such as ?search[]=x is ignored rather than turned into "Array" or a PHP 8 TypeError).
@@ -185,7 +195,7 @@ if (!function_exists('rh_fin_valid_date')) {
      * rh_fin_payments_from()). $f keys: booking_type, scope_types[], booking_id, search, status, refund_status,
      * payment_method, start_date, end_date; optional (step 8g) direction, booking_status, group (+ has_group /
      * has_company column flags), recorded_by (+ recorded_by_names[], has_recorded_by), room_type, amount_from,
-     * amount_to, tolerance (default BALANCE_TOLERANCE).
+     * amount_to, tolerance (default BALANCE_TOLERANCE); since ('Y-m-d H:i:s': recorded on or after it, p.created_at).
      * @return array{sql:string, params:array}
      */
     function rh_fin_payments_where(array $f, string $txnCol, array $conf): array
@@ -294,6 +304,12 @@ if (!function_exists('rh_fin_valid_date')) {
         if ($amtTo !== '') {
             $where[] = 'ABS(p.total_amount) <= ?';
             $params[] = sprintf('%.4f', (float)$amtTo + $tol);
+        }
+        // Since (Dashboard "Since you were last here"): rows recorded on or after that moment; junk adds nothing.
+        $since = rh_fin_valid_datetime($f['since'] ?? '');
+        if ($since !== '') {
+            $where[] = 'p.created_at >= ?';
+            $params[] = $since;
         }
         $where = array_merge($where, rh_fin_date_conditions(function_exists('rh_pay_count_day_sql') ? rh_pay_count_day_sql('p') : 'p.payment_date', $f['start_date'] ?? '', $f['end_date'] ?? '', $params));
         return ['sql' => 'WHERE ' . implode(' AND ', $where), 'params' => $params];

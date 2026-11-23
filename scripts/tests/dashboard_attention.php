@@ -211,7 +211,9 @@ eq([array_column($open, 'key'), array_column($clear, 'key'), $total], [['b', 'd'
 /* ---- 6. admin/dashboard.php uses the one rule everywhere ---- */
 $d = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/dashboard.php')); // CRLF checkouts (Liwonde laptop) match too
 check(strpos($d, '$add($attn') === false, 'dashboard: no inline item list left');
-check(strpos($d, "\$ledeText .= \$attnTotal > 0 ? ' — ' . \$attnTotal . ' thing'") !== false && strpos($d, 'count($attnOpen) . \' thing') === false, 'dashboard: greeting "N things need you" uses the badge total (they always match)');
+check(strpos($d, "\$ledeTail = \$attnTotal > 0 ? ' — ' . \$attnTotal . ' thing'") !== false && strpos($d, "\$ledeText .= \$ledeTail;") !== false
+    && strpos($d, 'rh_dash_since_line($heroSinceCounts, $heroSince, $money, $can, $ledeTail)') !== false && strpos($d, 'count($attnOpen) . \' thing') === false,
+    'dashboard: greeting and the since line end with "N things need you" from the badge total (they always match)');
 check(strpos($d, '$attn = rh_dash_attention_items($attnGate, [') !== false && strpos($d, '], $can, isRestaurantEnabled());') !== false, 'dashboard: items from the helper, links through $can');
 foreach ($ALL as $k) check(strpos($d, "'$k'") !== false, "dashboard: passes a count for $k");
 foreach ([
@@ -297,6 +299,69 @@ if (in_array('--db', $argv, true)) {
             check(strpos($rm, 'rh_room_units_count(rh_fd_out_of_service_statuses())') !== false && $src('rh_room_units_count(rh_fd_out_of_service_statuses())'), 'rooms out of service: dashboard and the page notice share one count');
             $si = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/stock-ingredients.php')); // CRLF checkouts (Liwonde laptop) match too
             check(strpos($si, "exactly the items the low-stock alert counts (rh_stock_alert_summary 'attention')") !== false && $src("\$stock['low_stock']        = \$stockAlerts['attention'];"), 'low stock: dashboard and ?filter=low share the alert rule');
+            // "Since you were last here" (first-login plan B1/B2), since = 7 days ago: each dashboard count (rh_dash_since_counts)
+            // = the row count of the list its link opens, built the page's way (Bookings: shared scope + its list joins;
+            // Payments: the one builder with ?status=received&since= and the default type scope), and = an independent
+            // re-count in PHP (JSON decoded here, statuses filtered here, cents summed here).
+            require_once $root . '/admin/includes/dashboard-since-data.php';
+            $since7 = (string)$pdo->query("SELECT DATE_FORMAT(NOW() - INTERVAL 7 DAY, '%Y-%m-%d %H:%i:%s')")->fetchColumn();
+            $payScope = rh_dash_pay_scope_types(function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : []);
+            $sc = rh_dash_since_counts($pdo, $since7, ['bookings' => true, 'payments' => true, 'scope_types' => $payScope]);
+            if (check(is_array($sc), "since counts read (since $since7)")) {
+                $bkList = static function (string $kind) use ($n, $since7): int {
+                    $c = rh_bk_since_clause($since7, $kind);
+                    return $n('SELECT COUNT(*) FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id WHERE '
+                        . implode(' AND ', [$c['clause'], 'b.deleted_at IS NULL']), $c['params']);
+                };
+                $alive = array_flip(array_map('intval', $pdo->query('SELECT id FROM bookings WHERE deleted_at IS NULL')->fetchAll(PDO::FETCH_COLUMN)));
+                // booked
+                $indBooked = $n('SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND created_at >= ?', [$since7]);
+                check($sc['booked'] === $bkList('booked') && $sc['booked'] === $indBooked, "DB since: new bookings {$sc['booked']} = Bookings ?since_kind=booked = re-count", json_encode([$sc['booked'], $bkList('booked'), $indBooked]));
+                // cancelled (the End of Day rule, one booking once)
+                $indCanc = $n("SELECT COUNT(DISTINCT t.booking_id) FROM booking_timeline_logs t INNER JOIN bookings b ON b.id = t.booking_id AND b.deleted_at IS NULL AND b.status = 'cancelled'
+                    WHERE t.new_value = 'cancelled' AND t.action_type IN ('status_change', 'financial', 'cancellation') AND t.created_at >= ?", [$since7]);
+                check($sc['cancelled'] === $bkList('cancelled') && $sc['cancelled'] === $indCanc, "DB since: cancelled {$sc['cancelled']} = Bookings ?since_kind=cancelled = re-count", json_encode([$sc['cancelled'], $bkList('cancelled'), $indCanc]));
+                // moved: decode the audit JSON in PHP
+                $mv = [];
+                $au = $pdo->prepare("SELECT booking_id, action, old_values, new_values FROM booking_audit_log WHERE performed_at >= ?");
+                $au->execute([$since7]);
+                foreach ($au->fetchAll(PDO::FETCH_ASSOC) as $a) {
+                    $act = (string)$a['action'];
+                    $isMove = in_array($act, ['upgraded', 'downgraded'], true);
+                    if (!$isMove && in_array($act, ['room_assigned', 'modified'], true)) {
+                        $o = json_decode((string)$a['old_values'], true);
+                        $w = json_decode((string)$a['new_values'], true);
+                        $oid = is_array($o) && isset($o['individual_room_id']) ? (int)$o['individual_room_id'] : 0;
+                        $nid = is_array($w) && isset($w['individual_room_id']) ? (int)$w['individual_room_id'] : null;
+                        $isMove = $oid > 0 && $nid !== null && $oid !== $nid;
+                    }
+                    if ($isMove && isset($alive[(int)$a['booking_id']])) { $mv[(int)$a['booking_id']] = true; }
+                }
+                check($sc['moved'] === $bkList('moved') && $sc['moved'] === count($mv), "DB since: room moves {$sc['moved']} = Bookings ?since_kind=moved = re-count", json_encode([$sc['moved'], $bkList('moved'), count($mv)]));
+                // payments received: count + SUM vs the Payments list (same builder the page calls) and a PHP re-count
+                $pw = rh_fin_payments_where(['status' => 'received', 'since' => $since7, 'scope_types' => $payScope, 'tolerance' => (float)BALANCE_TOLERANCE], 'transaction_id', []);
+                $plCount = $n('SELECT COUNT(*) ' . rh_fin_payments_from() . ' ' . $pw['sql'], $pw['params']);
+                $plSumSt = $pdo->prepare('SELECT COALESCE(SUM(total_amount), 0) FROM payments WHERE id IN (SELECT p.id ' . rh_fin_payments_from() . ' ' . $pw['sql'] . ')');
+                $plSumSt->execute($pw['params']);
+                $plSum = (float)$plSumSt->fetchColumn();
+                $pr = $pdo->prepare('SELECT booking_type, payment_status, payment_type, total_amount FROM payments WHERE deleted_at IS NULL AND created_at >= ?');
+                $pr->execute([$since7]);
+                $indN = 0;
+                $indCents = 0;
+                foreach ($pr->fetchAll(PDO::FETCH_ASSOC) as $p) {
+                    if (!in_array((string)$p['payment_status'], ['completed', 'paid', 'refunded', 'partially_refunded'], true) || (string)$p['payment_type'] === 'refund') continue;
+                    if ($payScope !== [] && !in_array((string)$p['booking_type'], $payScope, true)) continue;
+                    $indN++;
+                    $indCents += (int)round((float)$p['total_amount'] * 100);
+                }
+                check($sc['payments'] === $plCount && $sc['payments'] === $indN, "DB since: payments received {$sc['payments']} = Payments ?status=received&since= = re-count", json_encode([$sc['payments'], $plCount, $indN]));
+                check(abs((float)$sc['received'] - $plSum) < BALANCE_TOLERANCE && abs((float)$sc['received'] - $indCents / 100) < BALANCE_TOLERANCE,
+                    "DB since: amount received {$sc['received']} = the Payments card SUM = re-count (within BALANCE_TOLERANCE)", json_encode([$sc['received'], $plSum, $indCents / 100]));
+                check(rh_dash_since_counts($pdo, "x' OR 1", ['bookings' => true, 'payments' => true]) === null, 'DB since: a junk since reads nothing');
+                $gated = rh_dash_since_counts($pdo, $since7, ['bookings' => false, 'payments' => false]);
+                check($gated === ['booked' => null, 'cancelled' => null, 'moved' => null, 'payments' => null, 'received' => null], 'DB since: gated off -> nothing read');
+                echo "since $since7: booked {$sc['booked']}, cancelled {$sc['cancelled']}, moved {$sc['moved']}, payments {$sc['payments']} / {$sc['received']}\n";
+            }
             echo "DB part ran read-only on '$site'.\n";
         }
     }

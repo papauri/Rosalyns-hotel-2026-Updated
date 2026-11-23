@@ -2237,7 +2237,55 @@ $currency_symbol = getSetting('currency_symbol');
             }
         }
 
-        $roomSummary = ($mod_bookings || $mod_roomboard || $mod_housekeeping) ? getRoomDashboardSummary() : [];
+        // Guest flag chips on Today's movements arrivals and Week ahead (B3, owner 2026-11-24): returning guest
+        // (one batch query, the guest-history rule), special request, deposit unpaid (pending/confirmed only; never a
+        // group child room or a company-billed booking). Shown only when true. Display only.
+        $guestFlags = [];
+        if ($mod_bookings && ($checkin_bookings || $upcoming_checkins)) {
+            require_once __DIR__ . '/../includes/guest-history.php';
+            $flagRows = array_merge($checkin_bookings, $upcoming_checkins);
+            $flagStays = rh_guest_history_stays_for($pdo, $flagRows);
+            $flagAccounts = null;
+            foreach ($flagRows as $fb) {
+                $fid = (int)($fb['id'] ?? 0);
+                if ($fid <= 0 || isset($guestFlags[$fid])) { continue; }
+                $onAccount = (int)($fb['billing_account_id'] ?? 0) > 0; // unreadable company billing = no chip (never a false "unpaid")
+                if ($onAccount && rh_fd_deposit_unpaid($fb) && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+                    try {
+                        require_once __DIR__ . '/../includes/billing-accounts.php';
+                        if ($flagAccounts === null) {
+                            $flagAccounts = [];
+                            foreach (rh_billing_accounts($pdo) as $fa) { $flagAccounts[(int)$fa['id']] = $fa; }
+                        }
+                        $onAccount = !empty(rh_booking_billing($pdo, $fb, $flagAccounts)['on_account']);
+                    } catch (Throwable $e) { $onAccount = true; }
+                }
+                $guestFlags[$fid] = [
+                    'returning' => rh_guest_history_return_label((int)($flagStays[$fid] ?? 0)),
+                    'request' => rh_fd_request_short($fb['special_requests'] ?? ''),
+                    'request_full' => trim((string)($fb['special_requests'] ?? '')),
+                    'deposit' => rh_fd_deposit_unpaid($fb, $onAccount),
+                ];
+            }
+        }
+        $flagChips = static function (array $b) use ($guestFlags): string {
+            $f = $guestFlags[(int)($b['id'] ?? 0)] ?? null;
+            if (!$f) { return ''; }
+            $h = '';
+            if ($f['returning'] !== '') {
+                $h .= '<span class="ck-flag ck-flag--return">' . htmlspecialchars($f['returning'], ENT_QUOTES, 'UTF-8') . '</span>';
+            }
+            if ($f['request'] !== '') {
+                $h .= '<span class="ck-flag ck-flag--request" title="' . htmlspecialchars($f['request_full'], ENT_QUOTES, 'UTF-8') . '">Request: '
+                    . htmlspecialchars($f['request'], ENT_QUOTES, 'UTF-8') . '</span>';
+            }
+            if ($f['deposit']) {
+                $h .= '<span class="ck-flag ck-flag--deposit">Deposit unpaid</span>';
+            }
+            return $h !== '' ? '<span class="ck-flags">' . $h . '</span>' : '';
+        };
+
+        $roomSummary =($mod_bookings || $mod_roomboard || $mod_housekeeping) ? getRoomDashboardSummary() : [];
         $roomStatuses = $mod_roomboard ? getRoomStatuses() : [];
         $statusCounts = $roomSummary['status_counts'] ?? [];
         $totalRooms = $mod_roomboard ? array_sum($statusCounts) : 0;
@@ -2298,7 +2346,8 @@ $currency_symbol = getSetting('currency_symbol');
         if ($mod_conference && $today_conferences > 0) { $lede[] = $today_conferences . ' event' . ($today_conferences == 1 ? '' : 's'); }
         $ledeText = $lede ? implode(', ', $lede) . ' today' : 'Here is your day';
         // Same live figure as the Needs-attention badge ($attnTotal = sum of the open items' counts), so the two always match.
-        $ledeText .= $attnTotal > 0 ? ' — ' . $attnTotal . ' thing' . ($attnTotal === 1 ? '' : 's') . ' need' . ($attnTotal === 1 ? 's' : '') . ' you.' : ' — nothing needs you right now.';
+        $ledeTail = $attnTotal > 0 ? ' — ' . $attnTotal . ' thing' . ($attnTotal === 1 ? '' : 's') . ' need' . ($attnTotal === 1 ? 's' : '') . ' you.' : ' — nothing needs you right now.';
+        $ledeText .= $ledeTail;
 
         // ---- Last sign-in line + day status chip (first-login plan A2-A4) ----
         require_once __DIR__ . '/includes/dashboard-firstlogin.php';
@@ -2309,6 +2358,19 @@ $currency_symbol = getSetting('currency_symbol');
         if ($can('end-of-day-report.php')) {
             $heroEodStatus = rh_dash_eod_status($pdo, new DateTimeImmutable('now'));
             $heroEodChip = $heroEodStatus === null ? null : rh_dash_eod_chip($heroEodStatus, date('Y-m-d'));
+        }
+        // ---- Since you were last here (first-login plan B1/B2): replaces the lede when there is an earlier sign-in ----
+        // Window = previous sign-in -> now; each count is the row count of the list its link opens (same since). Bookings
+        // items need the bookings module, the money item needs dashboard_takings ($show_takings); links only via $can.
+        require_once __DIR__ . '/includes/bookings-list-filters.php'; // rh_bk_since_filter / rh_bk_since_clause (pure)
+        $heroSinceHtml = '';
+        $heroSince =is_array($heroPrevSignin) ? rh_bk_since_filter((string)($heroPrevSignin['at'] ?? '')) : '';
+        if ($heroSince !== '') {
+            $heroSinceCounts = rh_dash_since_counts($pdo, $heroSince, ['bookings' => $mod_bookings, 'payments' => $show_takings,
+                'scope_types' => rh_dash_pay_scope_types(function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [])]);
+            if ($heroSinceCounts !== null) {
+                $heroSinceHtml = rh_dash_since_line($heroSinceCounts, $heroSince, $money, $can, $ledeTail); // HTML, each part escaped inside
+            }
         }
 
         // ---- Trend chart scaling ----
@@ -2334,7 +2396,11 @@ $currency_symbol = getSetting('currency_symbol');
             <div class="ck-hero__intro">
                 <p class="ck-eyebrow"><i class="far fa-calendar"></i> <?php echo date('l, j F Y'); ?> <span class="ck-dot"></span> <span id="ckClock"><?php echo date('H:i'); ?></span><?php if ($heroEodChip): ?> <span class="ck-dot"></span> <?php if ($heroEodChip['href'] !== null): ?><a class="ck-daychip ck-daychip--<?php echo $heroEodChip['state']; ?>" href="<?php echo htmlspecialchars($heroEodChip['href']); ?>"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> <?php echo htmlspecialchars($heroEodChip['text']); ?></a><?php else: ?><span class="ck-daychip ck-daychip--<?php echo $heroEodChip['state']; ?>"><i class="fas fa-check" aria-hidden="true"></i> <?php echo htmlspecialchars($heroEodChip['text']); ?></span><?php endif; ?><?php endif; ?></p>
                 <h1 class="ck-hero__title"><?php echo $greeting; ?><?php echo $firstName !== '' ? ', ' . htmlspecialchars($firstName) : ''; ?></h1>
+                <?php if ($heroSinceHtml !== ''): ?>
+                <p class="ck-hero__lede ck-hero__since"><?php echo $heroSinceHtml; ?></p>
+                <?php else: ?>
                 <p class="ck-hero__lede"><?php echo htmlspecialchars($ledeText); ?></p>
+                <?php endif; ?>
                 <?php if ($heroSigninText !== ''): ?>
                     <p class="ck-hero__signin"><?php echo htmlspecialchars($heroSigninText); ?> Not you? <a href="change-password.php">Change your password</a></p>
                 <?php endif; ?>
@@ -2394,42 +2460,49 @@ $currency_symbol = getSetting('currency_symbol');
         </div>
         <?php endif; ?>
 
+        <?php
+        // The small "?" beside a figure (shared dot: admin/css/help-tooltips.css, bubble from admin/includes/help-tooltips.php).
+        // tabindex/role are set here because a dot inside a card link is left out of the tab order by the shared script.
+        $ckHelp = static function (string $name, string $tip): string {
+            return '<i class="help" data-tip="' . htmlspecialchars($tip, ENT_QUOTES, 'UTF-8') . '" aria-label="What ' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ' shows" tabindex="0" role="button">?</i>';
+        };
+        ?>
         <!-- ============ KPI STRIP ============ -->
         <section class="ck-kpis" aria-label="Key figures">
             <?php if ($mod_bookings): ?>
                 <?php if ($mod_roomboard && $totalRooms > 0): ?>
                 <a class="ck-kpi ck-kpi--dark js-dashboard-insight" data-insight-card="room_status_overview" data-insight-label="Room status" href="room-dashboard.php">
                     <span class="ck-kpi__icon"><i class="fas fa-bed"></i></span>
-                    <span class="ck-kpi__label">Occupancy</span>
+                    <span class="ck-kpi__label">Occupancy<?php echo $ckHelp('Occupancy', 'Rooms with a guest checked in right now, over rooms that can be sold (all rooms minus out of order minus maintenance). Bookings for tonight or later are not counted until the guest checks in.'); ?></span>
                     <span class="ck-kpi__value"><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?><small>%</small></span>
                     <span class="ck-meter"><span style="width:<?php echo min(100, $occupancy); ?>%"></span></span>
-                    <span class="ck-kpi__sub" title="Rooms with a guest checked in right now, over rooms that can be sold (all rooms minus out of order minus maintenance). Bookings for tonight or later are not counted until the guest checks in."><?php echo $occupiedRooms; ?> of <?php echo $sellableRooms; ?> sellable rooms occupied now</span>
+                    <span class="ck-kpi__sub"><?php echo $occupiedRooms; ?> of <?php echo $sellableRooms; ?> sellable rooms occupied now</span>
                 </a>
                 <?php endif; ?>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="checkins_today" data-insight-label="Today's check-ins" href="bookings.php?filter=checkin_today">
                     <span class="ck-kpi__icon"><i class="fas fa-plane-arrival"></i></span>
-                    <span class="ck-kpi__label">Arrivals</span>
+                    <span class="ck-kpi__label">Arrivals<?php echo $ckHelp('Arrivals', 'Arrived = arrival date today and checked in, including guests who already checked out today. Still to arrive = confirmed or pending, not yet checked in. The figure is arrived out of everyone due today.'); ?></span>
                     <span class="ck-kpi__value"><?php echo $dayProgress['arrived']; ?><small>/<?php echo $arrivalsTotal; ?></small></span>
                     <span class="ck-meter ck-meter--info"><span style="width:<?php echo $arrivalsTotal ? round($dayProgress['arrived'] / $arrivalsTotal * 100) : 0; ?>%"></span></span>
-                    <span class="ck-kpi__sub" title="Arrived = arrival date today and checked in, including guests who already checked out today. Still to arrive = confirmed or pending, not yet checked in."><?php echo (int)$today_checkins > 0 ? (int)$today_checkins . ' still to arrive' : ($arrivalsTotal ? 'Everyone has arrived' : 'No arrivals today'); ?></span>
+                    <span class="ck-kpi__sub"><?php echo (int)$today_checkins > 0 ? (int)$today_checkins . ' still to arrive' : ($arrivalsTotal ? 'Everyone has arrived' : 'No arrivals today'); ?></span>
                 </a>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="checkouts_today" data-insight-label="Today's check-outs" href="bookings.php?filter=checkout_today">
                     <span class="ck-kpi__icon"><i class="fas fa-plane-departure"></i></span>
-                    <span class="ck-kpi__label">Departures</span>
+                    <span class="ck-kpi__label">Departures<?php echo $ckHelp('Departures', 'Checked out today, out of everyone due out today. The total also includes guests still checked in after their check-out date (overdue), counted in "still to check out".'); ?></span>
                     <span class="ck-kpi__value"><?php echo $dayProgress['departed']; ?><small>/<?php echo $departuresTotal; ?></small></span>
                     <span class="ck-meter ck-meter--gold"><span style="width:<?php echo $departuresTotal ? round($dayProgress['departed'] / $departuresTotal * 100) : 0; ?>%"></span></span>
                     <span class="ck-kpi__sub"><?php echo $departuresStillToGo > 0 ? $departuresStillToGo . ' still to check out' . ($overdueDepartures ? ' (' . $overdueDepartures . ' overdue)' : '') : ($departuresTotal ? 'All checked out' : 'No departures today'); ?></span>
                 </a>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="inhouse_guests" data-insight-label="In-house guests" href="bookings.php?status=checked-in">
                     <span class="ck-kpi__icon"><i class="fas fa-people-roof"></i></span>
-                    <span class="ck-kpi__label">In house</span>
+                    <span class="ck-kpi__label">In house<?php echo $ckHelp('In house', 'Bookings with the status Checked in right now, whatever their check-out date. It counts bookings, not people or rooms.'); ?></span>
                     <span class="ck-kpi__value"><?php echo (int)$current_guests; ?></span>
                     <span class="ck-kpi__sub">Bookings checked in now</span>
                 </a>
             <?php elseif ($mod_pos): ?>
                 <a class="ck-kpi ck-kpi--dark" href="pos.php" target="_blank" rel="noopener">
                     <span class="ck-kpi__icon"><i class="fas fa-receipt"></i></span>
-                    <span class="ck-kpi__label">Orders today</span>
+                    <span class="ck-kpi__label">Orders today<?php echo $ckHelp('Orders today', 'Till orders paid or completed today. Room-service orders charged to a guest bill are left out: they are paid with the booking.'); ?></span>
                     <span class="ck-kpi__value"><?php echo (int)$ops['orders_today']; ?></span>
                     <span class="ck-kpi__sub">Settled through the till</span>
                 </a>
@@ -2437,7 +2510,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php $ckRepTag = $can('reports.php') ? 'a' : 'div'; // no Reports access = plain figure, no link ?>
                 <<?php echo $ckRepTag; ?> class="ck-kpi<?php echo $ckRepTag === 'a' ? ' js-dashboard-insight' : ''; ?>"<?php if ($ckRepTag === 'a'): ?> data-insight-card="restaurant_revenue_today" data-insight-label="<?php echo isRestaurantEnabled() ? 'Restaurant revenue today' : 'POS revenue today'; ?>" href="reports.php?tab=fnb&range=today"<?php endif; ?>>
                     <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
-                    <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Restaurant sales' : 'POS sales'; ?></span>
+                    <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Restaurant sales' : 'POS sales'; ?><?php echo $ckHelp(isRestaurantEnabled() ? 'Restaurant sales' : 'POS sales', 'Total of till orders paid or completed today. Room-service orders charged to a guest bill are left out: they are paid with the booking.'); ?></span>
                     <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($ops['restaurant_rev_today']); ?></span>
                     <span class="ck-kpi__sub">Gross settled today</span>
                 </<?php echo $ckRepTag; ?>>
@@ -2445,7 +2518,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php if ($dash_open_tabs): // the Orders & Tabs list it opens (stock_orders), same rule as its popup ?>
                 <a class="ck-kpi<?php echo $ops['open_tabs'] > 0 ? ' ck-kpi--warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="<?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?>" href="stock-orders.php?status=placed">
                     <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
-                    <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?></span>
+                    <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?><?php echo $ckHelp(isRestaurantEnabled() ? 'Open tabs' : 'Pending orders', 'Till orders placed and not yet paid, with their total value. Counts every open order, not only today\'s.'); ?></span>
                     <span class="ck-kpi__value"><?php echo (int)$ops['open_tabs']; ?></span>
                     <span class="ck-kpi__sub"><?php echo $money($ops['open_tabs_value']); ?> unpaid</span>
                 </a>
@@ -2454,7 +2527,7 @@ $currency_symbol = getSetting('currency_symbol');
             <?php if ($mod_gym && !$mod_bookings): ?>
                 <a class="ck-kpi<?php echo $mod_pos ? '' : ' ck-kpi--dark'; ?>" href="gym-members.php?filter=active">
                     <span class="ck-kpi__icon"><i class="fas fa-id-card"></i></span>
-                    <span class="ck-kpi__label">Active members</span>
+                    <span class="ck-kpi__label">Active members<?php echo $ckHelp('Active members', 'Gym members whose membership is active right now (a lapsed member counts as expired). Renewing = memberships ending within 30 days. Same rules as the Gym Members tabs.'); ?></span>
                     <span class="ck-kpi__value"><?php echo (int)$gymDash['active_members']; ?></span>
                     <span class="ck-kpi__sub"><?php echo (int)$gymDash['expiring_members']; ?> renewing in 30 days</span>
                 </a>
@@ -2462,7 +2535,7 @@ $currency_symbol = getSetting('currency_symbol');
             <?php if ($mod_gym && $mod_bookings): ?>
                 <a class="ck-kpi" href="gym-members.php?filter=active">
                     <span class="ck-kpi__icon"><i class="fas fa-dumbbell"></i></span>
-                    <span class="ck-kpi__label">Gym members</span>
+                    <span class="ck-kpi__label">Gym members<?php echo $ckHelp('Gym members', 'Gym members whose membership is active right now (a lapsed member counts as expired). Renewing = memberships ending within 30 days. Same rules as the Gym Members tabs.'); ?></span>
                     <span class="ck-kpi__value"><?php echo (int)$gymDash['active_members']; ?></span>
                     <span class="ck-kpi__sub"><?php echo (int)$gymDash['expiring_members']; ?> renewing in 30 days</span>
                 </a>
@@ -2470,7 +2543,7 @@ $currency_symbol = getSetting('currency_symbol');
             <?php if ($show_takings): ?>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="total_revenue_today" data-insight-label="Total revenue today" href="payments.php?start_date=<?php echo $today; ?>&end_date=<?php echo $today; ?>">
                     <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
-                    <span class="ck-kpi__label">Takings today</span>
+                    <span class="ck-kpi__label">Takings today<?php echo $ckHelp('Takings today', 'Money collected today (payments paid or completed) less refunds paid out today, plus till sales where the till is in use. The small bars are the last 7 days; the last one is today.'); ?></span>
                     <span class="ck-kpi__value ck-kpi__value--money"><?php echo !empty($finance['failed']) ? 'Unavailable' : $money($finance['revenue_today']); ?></span>
                     <span class="ck-spark" aria-hidden="true">
                         <?php foreach ($revenueTrend as $d => $v): ?><span style="height:<?php echo max(6, round($v / $trendMax * 100)); ?>%"<?php echo $d === $today ? ' class="is-today"' : ''; ?>></span><?php endforeach; ?>
@@ -2482,7 +2555,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php if ($mod_receivables): ?>
                 <a class="ck-kpi<?php echo $finance['outstanding'] > BALANCE_TOLERANCE ? ' ck-kpi--alert' : ''; ?> js-dashboard-insight" data-insight-card="outstanding_balances" data-insight-label="Outstanding balances" href="payments.php?balance=outstanding">
                     <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
-                    <span class="ck-kpi__label">Owed to us</span>
+                    <span class="ck-kpi__label">Owed to us<?php echo $ckHelp('Owed to us', 'Unpaid balances on accounts as they stand now (not only today): rooms, confirmed conference, event and gym accounts, and open unpaid tabs. Shows Unavailable if any source cannot be read.'); ?></span>
                     <span class="ck-kpi__value ck-kpi__value--money"><?php echo (!empty($finance['failed']) || !empty($finance['outstanding_failed'])) ? 'Unavailable' : $money($finance['outstanding']); ?></span>
                     <span class="ck-kpi__sub"><?php echo (int)$finance['outstanding_count']; ?> <?php echo $mod_bookings ? 'item(s)' : 'account(s)'; ?> with a balance (incl. open tabs)</span>
                 </a>
@@ -2543,6 +2616,7 @@ $currency_symbol = getSetting('currency_symbol');
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
                                 <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
                                 <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo htmlspecialchars($stayText($booking)); ?></span>
+                                <?php echo $flagChips($booking); ?>
                             </a>
                             <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                             <span class="ck-row__meta">
@@ -2680,7 +2754,7 @@ $currency_symbol = getSetting('currency_symbol');
             <section class="ck-panel ck-attn<?php echo $todayTabs ? ' ck-rows-2' : ''; ?>">
                 <header class="ck-panel__head">
                     <div>
-                        <h2 class="ck-panel__title">Needs attention <?php if ($attnTotal): ?><span class="ck-badge"><?php echo (int)$attnTotal; ?></span><?php endif; ?></h2>
+                        <h2 class="ck-panel__title">Needs attention <?php if ($attnTotal): ?><span class="ck-badge"><?php echo (int)$attnTotal; ?></span><?php endif; ?><?php echo $ckHelp('Needs attention', 'Work waiting for someone right now, from the pages you can open (bookings, till, rooms, stock, guest enquiries). The number is all open items added together; the most urgent are listed first.'); ?></h2>
                         <p class="ck-panel__sub">Most urgent first.</p>
                         <?php
                         // Optional note (includes/ai/ai-attention-note.php): only while the Assistant is usable for this
@@ -2747,8 +2821,8 @@ $currency_symbol = getSetting('currency_symbol');
             <section class="ck-panel ck-money">
                 <header class="ck-panel__head">
                     <div>
-                        <h2 class="ck-panel__title">Money</h2>
-                        <p class="ck-panel__sub"><?php echo $show_takings ? 'Last 7 days · ' . $moneyShort($trendTotal) . ' taken' : 'Today'; ?></p>
+                        <h2 class="ck-panel__title">Money<?php echo $ckHelp('Money', 'The chart and the weekly figure are takings for the last 7 days ending today: money collected less refunds paid out, plus till sales. The lines below are for today only; open tabs and refunds pending are counted as they stand now.'); ?></h2>
+                        <p class="ck-panel__sub"><?php echo $show_takings ? 'Money in less refunds paid out' : 'Today'; ?></p>
                     </div>
                     <div class="ck-panel__tools">
                         <?php if ($can('end-of-day-report.php')): ?><a class="ck-link" href="end-of-day-report.php">Day report <i class="fas fa-arrow-right"></i></a><?php endif; ?>
@@ -2756,12 +2830,12 @@ $currency_symbol = getSetting('currency_symbol');
                 </header>
                 <?php if ($show_takings): ?>
                 <div class="ck-money__headline">
-                    <span class="ck-money__label" data-ck-trend-label>Today</span>
-                    <span class="ck-money__value" data-ck-trend-value><?php echo $money($revenueTrend[$today] ?? 0); ?></span>
+                    <span class="ck-money__label" data-ck-trend-label>Taken this week</span>
+                    <span class="ck-money__value" data-ck-trend-value><?php echo $money($trendTotal); ?></span>
                 </div>
                 <div class="ck-bars" role="list" aria-label="Takings for the last 7 days">
                     <?php foreach ($revenueTrend as $d => $v): $isToday = $d === $today; ?>
-                        <button type="button" role="listitem" class="ck-bars__col<?php echo $isToday ? ' is-today is-active' : ''; ?>"
+                        <button type="button" role="listitem" class="ck-bars__col<?php echo $isToday ? ' is-today' : ''; ?>"
                             data-ck-trend="<?php echo htmlspecialchars($cur . number_format($v, 2)); ?>"
                             data-ck-trend-day="<?php echo $isToday ? 'Today' : date('l j M', strtotime($d)); ?>"
                             aria-label="<?php echo date('l j M', strtotime($d)) . ': ' . htmlspecialchars($cur . number_format($v, 2)); ?>">
@@ -2799,10 +2873,25 @@ $currency_symbol = getSetting('currency_symbol');
             <?php if ($mod_roomboard && $totalRooms > 0): ?>
             <!-- Rooms -->
             <section class="ck-panel ck-rooms">
+                <?php
+                // One tip for the panel: the ring, the centre figure and the line under the title (their old title= texts).
+                $roomsTipOutlook = !empty($roomOutlook['ok']) && $outlookTonightRow && $outlookTomorrowRow;
+                $roomsTip = 'Ring: rooms in each state right now. Centre: rooms free tonight, from the bookings. If that cannot be read, the centre shows Occupied now = rooms with a guest checked in, over rooms that can be sold (out of order and maintenance left out).';
+                if ($roomsTipOutlook) {
+                    $roomsTip .= ' Free tonight = rooms that can still be sold for tonight: rooms not booked tonight (in-house guests, and pending, tentative or confirmed bookings, with or without a room), not blocked and not out of service. A joined room counts once.'
+                        . ' Tomorrow = rooms booked for tomorrow night out of ' . (int)$roomOutlook['units'] . ' rooms that can be sold (out of order and maintenance left out)'
+                        . ((int)$outlookTomorrowRow['unassigned'] > 0 ? '; ' . (int)$outlookTomorrowRow['unassigned'] . ' of these bookings have no room yet' : '') . '.';
+                } else {
+                    $roomsTip .= ' Available now = rooms that are clean and empty right now; bookings for tonight or later are not counted here.';
+                }
+                if (!empty($roomSummary['cleaning_queue'])) {
+                    $roomsTip .= ' To clean = rooms being cleaned or with an open housekeeping task.';
+                }
+                ?>
                 <header class="ck-panel__head">
                     <div>
-                        <h2 class="ck-panel__title">Rooms</h2>
-                        <p class="ck-panel__sub"><?php if (!empty($roomOutlook['ok']) && $outlookTonightRow && $outlookTomorrowRow): ?><span title="Rooms that can still be sold for tonight: rooms not booked tonight (in-house guests, and pending, tentative or confirmed bookings, with or without a room), not blocked and not out of service. A joined room counts once."><?php echo (int)$outlookTonightRow['free']; ?> free tonight</span> · <span title="Rooms booked for tomorrow night out of <?php echo (int)$roomOutlook['units']; ?> rooms that can be sold (out of order and maintenance left out)<?php echo (int)$outlookTomorrowRow['unassigned'] > 0 ? '; ' . (int)$outlookTomorrowRow['unassigned'] . ' of these bookings have no room yet' : ''; ?>.">tomorrow <?php echo (int)$outlookTomorrowRow['booked']; ?> of <?php echo (int)$roomOutlook['units']; ?> booked</span><?php else: ?><span title="Rooms that are clean and empty right now. Bookings for tonight or later are not counted here."><?php echo (int)($statusCounts['available'] ?? 0); ?> available now</span><?php endif; ?><?php if (!empty($roomSummary['cleaning_queue'])): ?> · <span title="Rooms being cleaned or with an open housekeeping task"><?php echo (int)$roomSummary['cleaning_queue']; ?> to clean</span><?php endif; ?></p>
+                        <h2 class="ck-panel__title">Rooms<?php echo $ckHelp('Rooms', $roomsTip); ?></h2>
+                        <p class="ck-panel__sub"><?php if (!empty($roomOutlook['ok']) && $outlookTonightRow && $outlookTomorrowRow): ?><span><?php echo (int)$outlookTonightRow['free']; ?> free tonight</span> · <span>tomorrow <?php echo (int)$outlookTomorrowRow['booked']; ?> of <?php echo (int)$roomOutlook['units']; ?> booked</span><?php else: ?><span><?php echo (int)($statusCounts['available'] ?? 0); ?> available now</span><?php endif; ?><?php if (!empty($roomSummary['cleaning_queue'])): ?> · <span><?php echo (int)$roomSummary['cleaning_queue']; ?> to clean</span><?php endif; ?></p>
                     </div>
                     <div class="ck-panel__tools">
                         <?php if ($can('room-dashboard.php')): ?><a class="ck-link" href="room-dashboard.php">Room board <i class="fas fa-arrow-right"></i></a><?php endif; ?>
@@ -2819,8 +2908,12 @@ $currency_symbol = getSetting('currency_symbol');
                 ?>
                 <div class="ck-rooms__body">
                     <button type="button" class="ck-donut js-dashboard-insight" data-insight-card="room_status_overview" data-insight-label="Room status"
-                        style="--ck-donut: conic-gradient(<?php echo htmlspecialchars(implode(', ', $stops)); ?>);" aria-label="Room status overview" title="Rooms in each state right now. Occupied now = rooms with a guest checked in, over rooms that can be sold (out of order and maintenance left out).">
+                        style="--ck-donut: conic-gradient(<?php echo htmlspecialchars(implode(', ', $stops)); ?>);" aria-label="Room status overview">
+                        <?php if (!empty($roomOutlook['ok']) && is_array($outlookTonightRow)): ?>
+                        <span class="ck-donut__hole"><strong><?php echo (int)$outlookTonightRow['free']; ?></strong><small>free tonight</small></span>
+                        <?php else: ?>
                         <span class="ck-donut__hole"><strong><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?>%</strong><small>occupied now</small></span>
+                        <?php endif; ?>
                     </button>
                     <ul class="ck-legend">
                         <?php foreach ($roomStatuses as $status => $info): $n = (int)($statusCounts[$status] ?? 0);
@@ -2850,7 +2943,7 @@ $currency_symbol = getSetting('currency_symbol');
             <section class="ck-panel ck-span-2 ck-week" data-ck-week>
                 <header class="ck-panel__head">
                     <div>
-                        <h2 class="ck-panel__title">Week ahead</h2>
+                        <h2 class="ck-panel__title">Week ahead<?php echo $ckHelp('Week ahead', 'Pending and confirmed bookings arriving on each of the next 7 days (tomorrow onward, today is not included). "+ev" = conference or event bookings that day. Tap a day to filter the list.'); ?></h2>
                         <p class="ck-panel__sub"><?php echo count($upcoming_checkins); ?> arrival(s)<?php echo $mod_conference ? ' · ' . count(array_filter($upcoming_conferences, static fn($c) => (string)$c['event_date'] > $today)) . ' event(s)' : ''; ?> in the next 7 days — tap a day to filter.</p>
                     </div>
                     <div class="ck-panel__tools">
@@ -2876,6 +2969,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
                             <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
                             <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo htmlspecialchars($stayText($booking)); ?></span>
+                            <?php echo $flagChips($booking); ?>
                         </a>
                         <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                         <span class="ck-row__meta">
@@ -3428,16 +3522,35 @@ $currency_symbol = getSetting('currency_symbol');
                 const label = box.querySelector('[data-ck-trend-label]');
                 const value = box.querySelector('[data-ck-trend-value]');
                 const cols = box.querySelectorAll('[data-ck-trend]');
+                const bars = box.querySelector('.ck-bars');
+                // The headline shows the 7-day total; a bar shows its day while pointed at, focused or tapped,
+                // and leaving the bars puts the 7-day total back.
+                const totalLabel = label ? label.textContent : '';
+                const totalValue = value ? value.innerHTML : '';
+                function reset() {
+                    cols.forEach(function (c) { c.classList.remove('is-active'); });
+                    if (label) label.textContent = totalLabel;
+                    if (value) value.innerHTML = totalValue;
+                }
+                function showCol(col) {
+                    cols.forEach(function (c) { c.classList.toggle('is-active', c === col); });
+                    if (label) label.textContent = col.dataset.ckTrendDay;
+                    if (value) value.textContent = col.dataset.ckTrend;
+                }
                 cols.forEach(function (col) {
-                    function show() {
-                        cols.forEach(function (c) { c.classList.toggle('is-active', c === col); });
-                        if (label) label.textContent = col.dataset.ckTrendDay;
-                        if (value) value.textContent = col.dataset.ckTrend;
-                    }
+                    function show() { showCol(col); }
                     col.addEventListener('mouseenter', show);
                     col.addEventListener('focus', show);
                     col.addEventListener('click', show);
                 });
+                if (bars) {
+                    // A bar still focused (tapped or keyboard) keeps its day; otherwise back to the 7-day total.
+                    bars.addEventListener('mouseleave', function () {
+                        const f = document.activeElement;
+                        if (f && bars.contains(f) && f.hasAttribute('data-ck-trend')) { showCol(f); } else { reset(); }
+                    });
+                    bars.addEventListener('focusout', function (e) { if (!bars.contains(e.relatedTarget)) reset(); });
+                }
             });
 
             const clock = document.getElementById('ckClock');

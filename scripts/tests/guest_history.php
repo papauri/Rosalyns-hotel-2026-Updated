@@ -32,6 +32,14 @@ check(rh_guest_history_stay_label(0) === 'No completed stays', 'label: 0 stays')
 check(rh_guest_history_stay_label(1) === '1 completed stay', 'label: 1 stay');
 check(rh_guest_history_stay_label(4) === '4 completed stays', 'label: 4 stays');
 
+// Dashboard chip (B3): Nth stay = other completed stays + 1; no chip for a first stay.
+check(rh_guest_history_return_label(0) === '' && rh_guest_history_return_label(-1) === '', 'chip: first stay -> no chip');
+check(rh_guest_history_return_label(1) === 'Returning guest · 2nd stay', 'chip: 1 earlier stay -> 2nd stay');
+check(rh_guest_history_return_label(2) === 'Returning guest · 3rd stay', 'chip: 2 earlier stays -> 3rd stay');
+$ords = [];
+foreach ([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 101, 111, 112] as $n) { $ords[] = rh_guest_history_ordinal($n); }
+check($ords === ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd', '101st', '111th', '112th'], 'chip: ordinals incl. 11th-13th', implode(',', $ords));
+
 $blank = rh_guest_history_blank(false);
 check($blank['ok'] === false && $blank['money'] === null && $blank['is_returning'] === false, 'failed history: ok=false, no money, not returning');
 
@@ -153,6 +161,23 @@ try {
     check($h2['completed_stays'] === 0 && $h2['is_returning'] === false && $h2['other_bookings'] === 1, 'db: two future bookings = first stay, 0 completed stays');
     $hi = rh_guest_history($pdo, $email2, 0, true, 0);
     check($hi['money'] !== null && abs($hi['money']['received']) <= $tol, 'db: nothing paid = checked total 0 (not missing)');
+
+    // Dashboard batch (B3): one query gives every booking the same other_completed_stays as the one-booking rule.
+    $batchRows = [];
+    foreach ([$b1, $b6, $b2, $b3, $b7, $b4, $n1] as $bb) {
+        $batchRows[] = $pdo->query('SELECT * FROM bookings WHERE id = ' . (int)$bb[0])->fetch(PDO::FETCH_ASSOC);
+    }
+    $blankB = $mk('   ', 'confirmed', 5);
+    $batchRows[] = ['id' => $blankB[0], 'guest_email' => '   '];
+    $batch = rh_guest_history_stays_for($pdo, $batchRows);
+    foreach ([$b1, $b6, $b2, $b3, $b7, $n1] as $bb) {
+        $one = rh_guest_history($pdo, (string)$pdo->query('SELECT guest_email FROM bookings WHERE id = ' . (int)$bb[0])->fetchColumn(), $bb[0], false, 0);
+        check(array_key_exists($bb[0], $batch) && $batch[$bb[0]] === $one['other_completed_stays'], 'db batch: ' . $bb[1] . ' = one-booking rule (' . $one['other_completed_stays'] . ')', json_encode($batch[$bb[0]] ?? null));
+    }
+    check($batch[$b2[0]] === 2 && $batch[$b1[0]] === 1 && $batch[$b6[0]] === 1, 'db batch: future booking 2 stays (3rd stay); group rooms see 1 other stay, not their own group');
+    check(($batch[$blankB[0]] ?? null) === 0, 'db batch: blank email -> 0');
+    check(($batch[$n1[0]] ?? null) === 0, 'db batch: first-timer -> 0');
+    check(rh_guest_history_stays_for($pdo, []) === [], 'db batch: no rows -> empty');
 
     $he = rh_guest_history($pdo, '   ', 0, true, 6);
     check($he['ok'] === true && $he['total_bookings'] === 0 && $he['money'] === null, 'db: blank email has no history');

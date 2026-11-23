@@ -211,5 +211,37 @@ eq(rh_fd_rooms_outlook_line(17, 3, 16, 2), 'Tonight: 3 free of 17 · Tomorrow: 1
 eq(rh_fd_rooms_outlook_line(17, 17, 16, 0), 'Tonight: 17 free of 17 · Tomorrow: 16 of 17 booked', 'outlook line, every booking has a room');
 check(strpos($dash, ' ready to sell') === false, 'dashboard: no "ready to sell" (it counted clean rooms now, not free rooms)');
 
+// B3 (2026-11-24): "Deposit unpaid" chip = the ai-decisions deposit rule on the stored amount_paid, still-to-arrive only,
+// never a group child room or a company-billed booking.
+$dep = ['status' => 'confirmed', 'primary_booking_id' => null, 'deposit_required' => 1, 'deposit_paid' => 0, 'deposit_amount' => '1000.00', 'amount_paid' => '0.00'];
+check(rh_fd_deposit_unpaid($dep), 'deposit: asked, nothing paid -> unpaid');
+check(rh_fd_deposit_unpaid(['status' => 'pending'] + $dep), 'deposit: pending booking counts too');
+check(!rh_fd_deposit_unpaid(['deposit_required' => 0] + $dep), 'deposit: not required -> no chip');
+check(!rh_fd_deposit_unpaid(['deposit_paid' => 1] + $dep), 'deposit: marked paid -> no chip');
+check(!rh_fd_deposit_unpaid(['amount_paid' => '999.995'] + $dep), 'deposit: paid within tolerance (short by 0.005) -> no chip');
+check(rh_fd_deposit_unpaid(['amount_paid' => '999.98'] + $dep), 'deposit: short by 0.02 -> unpaid');
+check(!rh_fd_deposit_unpaid(['amount_paid' => '1500.00'] + $dep), 'deposit: more than the deposit paid -> no chip');
+check(!rh_fd_deposit_unpaid(['deposit_amount' => '0.00'] + $dep), 'deposit: amount 0 -> no chip');
+check(!rh_fd_deposit_unpaid(['deposit_amount' => '0.005'] + $dep), 'deposit: amount within tolerance -> no chip');
+check(!rh_fd_deposit_unpaid($dep, true), 'deposit: billed to a company account -> no chip');
+check(!rh_fd_deposit_unpaid(['primary_booking_id' => 77] + $dep), 'deposit: group child room -> no chip');
+foreach (['checked-in', 'checked-out', 'cancelled', 'no-show', 'expired', 'tentative', ''] as $st) {
+    check(!rh_fd_deposit_unpaid(['status' => $st] + $dep), "deposit: $st booking -> no chip");
+}
+check(!rh_fd_deposit_unpaid([]), 'deposit: empty row -> no chip');
+// Request chip text: folded, cut to 40 characters with "…"; escaping happens at output.
+eq(rh_fd_request_short("  airport pick-up\n 13:30 "), 'airport pick-up 13:30', 'request: whitespace folded and trimmed');
+eq(rh_fd_request_short(str_repeat('a', 40)), str_repeat('a', 40), 'request: exactly 40 characters kept whole');
+eq(rh_fd_request_short(str_repeat('a', 41)), str_repeat('a', 40) . '…', 'request: 41 characters cut to 40 + …');
+eq(rh_fd_request_short(str_repeat('é', 45)), str_repeat('é', 40) . '…', 'request: cut by characters, not bytes');
+eq(rh_fd_request_short(null), '', 'request: none -> no chip');
+eq(rh_fd_request_short("   \n "), '', 'request: blank -> no chip');
+// Dashboard wiring (source checks).
+check(strpos($dash, 'rh_guest_history_stays_for($pdo, $flagRows)') !== false, 'dashboard: returning guests read in one batch');
+check(strpos($dash, "rh_booking_billing(\$pdo, \$fb, \$flagAccounts)") !== false && strpos($dash, 'rh_fd_deposit_unpaid($fb, $onAccount)') !== false, 'dashboard: deposit chip skips company-billed bookings');
+check(substr_count($dash, '<?php echo $flagChips($booking); ?>') === 2, 'dashboard: chips on arrivals and Week ahead rows');
+check(strpos($dash, "htmlspecialchars(\$f['request'], ENT_QUOTES, 'UTF-8')") !== false && strpos($dash, "title=\"' . htmlspecialchars(\$f['request_full'], ENT_QUOTES, 'UTF-8')") !== false, 'dashboard: request text escaped (chip and full text)');
+check(stripos($dash, 'ck-flag--vip') === false && stripos($dash, '>VIP') === false, 'dashboard: no VIP chip (owner 2026-11-24)');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

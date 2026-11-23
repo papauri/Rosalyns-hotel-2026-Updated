@@ -171,6 +171,13 @@ button.ck-kpi { font: inherit; text-align: left; width: 100%; }
 /* With a corner badge the label row is as tall as the badge, so a wide figure
    on the next line starts below it instead of running underneath. */
 .ck-kpi__icon ~ .ck-kpi__label { min-height: 26px; }
+/* The small "?" helper (shared .help dot, admin/css/help-tooltips.css) sits after the label text:
+   a little smaller and muted here so it does not compete with the figure. */
+.ck-kpi__label .help { width: 16px; height: 16px; margin: -3px 0 -3px 5px; font-size: 10px; }
+.ck-kpi--dark .ck-kpi__label .help { color: #f3ece4; opacity: .9; background: rgba(243, 236, 228, .2); }
+.ck-kpi--dark .ck-kpi__label .help:hover,
+.ck-kpi--dark .ck-kpi__label .help:focus-visible { opacity: 1; background: rgba(243, 236, 228, .34); }
+.ck-kpi--dark .ck-kpi__label .help:focus-visible { outline-color: var(--ck-gold-on-dark); }
 .ck-kpi__value {
     font-family: 'Jost', system-ui, sans-serif;
     font-weight: 600;

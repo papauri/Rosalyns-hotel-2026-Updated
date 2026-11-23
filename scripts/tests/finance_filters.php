@@ -258,6 +258,22 @@ check(strpos($rep, '$rh_report_preset = rh_fin_reports_preset($_GET, $valid_tabs
     && strpos($rep, '$rh_report_preset = ') < strpos($rep, 'if (!in_array($active_tab, $valid_tabs))'), 'reports: preset applied before the tab whitelist and module gate');
 check(strpos($rep, '<?php if ($rh_report_preset_on): ?>') !== false && strpos($rep, '<a href="?tab=<?php echo htmlspecialchars($active_tab); ?>"') !== false, 'reports: notice with Clear');
 
+
+// ---- Payments ?since= (Dashboard "Since you were last here", plan B1): p.created_at >= ?, junk adds nothing
+$sBase = rh_fin_payments_where(['status' => 'received'], 'transaction_id', $conf);
+$sOn = rh_fin_payments_where(['status' => 'received', 'since' => '2026-11-23 18:40:00'], 'transaction_id', $conf);
+check(strpos($sOn['sql'], 'p.created_at >= ?') !== false && $sOn['params'] === array_merge($sBase['params'], ['2026-11-23 18:40:00'])
+    && substr_count($sOn['sql'], '?') === count($sOn['params']) && strpos($sOn['sql'], '2026') === false, 'since: adds p.created_at >= ? with one bound param', json_encode($sOn));
+foreach (['2026-13-01 10:00:00', '2026-11-23', "x' OR 1", $evil, '', ['2026-11-23 18:40:00'], null] as $junk) {
+    $sJ = rh_fin_payments_where(['status' => 'received', 'since' => $junk], 'transaction_id', $conf);
+    check($sJ === $sBase, 'since: junk adds nothing ' . var_export($junk, true), json_encode($sJ));
+}
+eq(rh_fin_valid_datetime('2026-02-29 10:00:00'), '', 'since: 29 Feb in a non-leap year dropped');
+eq(rh_fin_valid_datetime('2028-02-29 10:00:00'), '2028-02-29 10:00:00', 'since: 29 Feb in a leap year kept');
+$paySrc = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/payments.php'));
+check(strpos($paySrc, "\$paySince = rh_fin_valid_datetime(\$_GET['since'] ?? '');") !== false && strpos($paySrc, "'since'             => \$paySince,") !== false, 'payments: ?since= read and passed to the one builder (cards, list, count, export)');
+check(strpos($paySrc, "if (\$paySince !== '') { \$payChips[] = ['Recorded since '") !== false && strpos($paySrc, "\$searchText !== '' || \$paySince !== ''") !== false, 'payments: the notice names since, with its Clear');
+
 // ---- Accounts owing: unknown sources show their own type name, not the restaurant "Open tab" badge
 $known = ['restaurant' => ['label' => 'Open tab', 'badge' => 'restaurant', 'link' => 'payments.php?booking_type=restaurant&booking_id=']];
 eq(rh_fin_outstanding_src_meta('restaurant', $known)['label'], 'Open tab', 'owing: restaurant keeps Open tab');

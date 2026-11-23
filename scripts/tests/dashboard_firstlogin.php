@@ -54,6 +54,40 @@ check(rh_dash_eod_chip(['day' => '2026-12-31', 'sent_at' => null], '2027-01-01')
 check($c(['day' => 'garbage', 'sent_at' => null])['href'] === 'end-of-day-report.php', 'a bad day never builds a link with it');
 check($c(['day' => '2026-11-23', 'sent_at' => '', 'test' => true])['state'] === 'warn', 'an empty send time is not a send');
 
+/* ---- Part 1: "Since you were last here" line (B2) ---- */
+$sinceT = '2026-11-23 18:40:00';
+$moneyH = static fn($v): string => '<span class="ck-cur">MWK</span>' . number_format((float)$v, 2); // the dashboard's $money shape (HTML)
+$canAll = static fn(string $p): bool => true;
+$canNone = static fn(string $p): bool => false;
+$canBk = static fn(string $p): bool => $p === 'bookings.php';
+$tail4 = ' — 4 things need you.';
+$full = ['booked' => 3, 'cancelled' => 1, 'moved' => 2, 'payments' => 4, 'received' => '420000.00'];
+$L = rh_dash_since_line($full, $sinceT, $moneyH, $canAll, $tail4);
+$enc = htmlspecialchars('since=' . urlencode($sinceT), ENT_QUOTES);
+check($L === 'Since you were last here: '
+    . '<a class="ck-hero__since-link" href="bookings.php?' . $enc . '&amp;since_kind=booked">3 new bookings</a> &middot; '
+    . '<a class="ck-hero__since-link" href="bookings.php?' . $enc . '&amp;since_kind=cancelled">1 cancelled</a> &middot; '
+    . '<a class="ck-hero__since-link" href="payments.php?status=received&amp;' . $enc . '"><span class="ck-cur">MWK</span>420,000.00 received</a> &middot; '
+    . '<a class="ck-hero__since-link" href="bookings.php?' . $enc . '&amp;since_kind=moved">2 room moves</a> — 4 things need you.',
+    'since line: approved order, links carry the same since, money HTML kept as is (never escaped twice)', $L);
+check(strpos($L, '&lt;span') === false && substr_count($L, '<span class="ck-cur">') === 1, 'since line: $money output not passed through htmlspecialchars');
+$one = rh_dash_since_line(['booked' => 1, 'cancelled' => 0, 'moved' => 1, 'payments' => 0, 'received' => '0'], $sinceT, $moneyH, $canAll, ' — nothing needs you right now.');
+check(strpos($one, '>1 new booking</a>') !== false && strpos($one, '>1 room move</a>') !== false && strpos($one, 'cancelled') === false && strpos($one, 'received') === false
+    && substr_count($one, '&middot;') === 1, 'since line: singulars; zero items left out', $one);
+$zero = rh_dash_since_line(['booked' => 0, 'cancelled' => 0, 'moved' => 0, 'payments' => 0, 'received' => '0'], $sinceT, $moneyH, $canAll, $tail4);
+check($zero === 'Nothing new since you were last here — 4 things need you.', 'since line: all zero -> "Nothing new since you were last here" + the tail', $zero);
+$noPay = rh_dash_since_line(['booked' => 2, 'cancelled' => 0, 'moved' => 0, 'payments' => null, 'received' => null], $sinceT, $moneyH, $canAll, $tail4);
+check(strpos($noPay, 'received') === false && strpos($noPay, 'payments.php') === false && strpos($noPay, 'MWK') === false && strpos($noPay, '2 new bookings') !== false, 'since line: no money item when the payments gate is off', $noPay);
+$noBk = rh_dash_since_line(['booked' => null, 'cancelled' => null, 'moved' => null, 'payments' => 1, 'received' => '5000'], $sinceT, $moneyH, $canAll, $tail4);
+check(strpos($noBk, 'bookings.php') === false && strpos($noBk, '5,000.00 received') !== false, 'since line: bookings items off without the bookings gate', $noBk);
+check(rh_dash_since_line(['booked' => null, 'cancelled' => null, 'moved' => null, 'payments' => null, 'received' => null], $sinceT, $moneyH, $canAll, $tail4) === '', 'since line: nothing this user may see -> "" (today\'s lede stays)');
+$noLink = rh_dash_since_line($full, $sinceT, $moneyH, $canNone, $tail4);
+check(strpos($noLink, '<a ') === false && strpos($noLink, '3 new bookings · ') === false && strpos($noLink, '3 new bookings &middot; 1 cancelled') !== false, 'since line: no link when $can is false (plain text)', $noLink);
+$someLink = rh_dash_since_line($full, $sinceT, $moneyH, $canBk, $tail4);
+check(strpos($someLink, 'href="bookings.php?') !== false && strpos($someLink, 'payments.php') === false && strpos($someLink, '420,000.00 received') !== false, 'since line: Payments link only for users who can open it', $someLink);
+$xss = rh_dash_since_line(['booked' => 1, 'cancelled' => 0, 'moved' => 0, 'payments' => 0, 'received' => '0'], '2026-11-23 18:40:00"><script>', $moneyH, $canAll, ' — <b>x</b>');
+check(strpos($xss, '<script>') === false && strpos($xss, '<b>') === false && strpos($xss, '&lt;b&gt;') !== false, 'since line: the since value and the tail are escaped', $xss);
+
 /* ---- Part 2: the dashboard (Liwonde only, rolled back) ---- */
 if (in_array('--db', $argv, true)) {
     $isLiwonde = stripos(str_replace('\\', '/', (string)realpath($root)), '/Liwonde_Sun_Hotel_2026') !== false;
@@ -101,6 +135,35 @@ if (in_array('--db', $argv, true)) {
             $r = $run(['setup' => [$older], 'session' => ['admin_login_log_id' => 1], 'grep' => $grepS]);
             check($clean($r) && $f($r, 'First sign-in on this account.') && !$f($r, $olderText) && $f($r, 'Not you? <a href="change-password.php">Change your password</a>'),
                 'one row only, nothing before the anchor -> "First sign-in on this account." with the link', json_encode($r['found'] ?? $r));
+
+            // B2: "Since you were last here" in the hero. The previous sign-in is 60 s ago (SQL time, so PHP and MySQL zones
+            // never differ); seeded audit rows test the room-move rule (spec-check: JSON null old room = first assignment).
+            $bkIds = $pdo->query("SELECT id FROM bookings WHERE deleted_at IS NULL ORDER BY id LIMIT 4")->fetchAll(PDO::FETCH_COLUMN);
+            if (check(count($bkIds) === 4, 'four bookings to hang seeded audit rows on')) {
+                $signinAgo = "INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, user_agent, created_at) VALUES ($adminId, 'zz_dfl', 'login_success', 'zz seed', '203.0.113.7', " . $q($chromeWin) . ', NOW() - INTERVAL 60 SECOND)';
+                $signinNow = "INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, user_agent, created_at) VALUES ($adminId, 'zz_dfl', 'login_success', 'zz seed', '203.0.113.7', " . $q($chromeWin) . ', NOW())';
+                $audit = fn(int $id, string $action, string $old, string $new) => "INSERT INTO booking_audit_log (booking_id, action, old_values, new_values, note, performed_at) VALUES ($id, " . $q($action) . ', ' . $q($old) . ', ' . $q($new) . ", 'zz seed', NOW())";
+                [$b1, $b2, $b3, $b4] = array_map('intval', $bkIds);
+                $nullOld = $audit($b1, 'room_assigned', '{"individual_room_id": null}', '{"individual_room_id": 15}');
+                $moves = [
+                    $nullOld,                                                                                   // first assignment: not a move
+                    $audit($b2, 'room_assigned', '{"individual_room_id": "12"}', '{"individual_room_id": 15}'), // "12" -> 15: a move
+                    $audit($b3, 'modified', '{"individual_room_id": "12"}', '{"individual_room_id": 12}'),      // "12" = 12: not a move
+                    $audit($b3, 'modified', '{"individual_room_id": 0}', '{"individual_room_id": 7}'),          // old 0: not a move
+                    $audit($b3, 'modified', '{"guest_name": "A"}', '{"guest_name": "B"}'),                      // no room in the edit
+                    $audit($b4, 'upgraded', '{"room_id": 1}', '{"room_id": 2}'),                                // type upgrade: a move
+                ];
+                $grepB = ['class="ck-hero__lede ck-hero__since"', 'Since you were last here: ', 'Nothing new since you were last here', '2 room moves', 'room move', 'since_kind=moved', '&lt;span', 'class="ck-hero__lede"'];
+                $r = $run(['setup' => array_merge([$signinAgo, $signinNow], $moves), 'grep' => $grepB]);
+                check($clean($r) && $f($r, 'class="ck-hero__lede ck-hero__since"') && $f($r, '2 room moves') && $f($r, 'since_kind=moved') && !$f($r, '&lt;span'),
+                    'since line: 2 room moves (reassignment "12" -> 15 and an upgrade; null old room, same room, old 0 and a non-room edit not counted), linked', json_encode($r['found'] ?? $r));
+                $r = $run(['setup' => [$signinAgo, $signinNow, $nullOld], 'grep' => $grepB]);
+                check($clean($r) && !$f($r, 'room move') && $f($r, 'class="ck-hero__lede ck-hero__since"'), 'since line: a first assignment (JSON null old room) alone is not a move', json_encode($r['found'] ?? $r));
+                // No sign-in before this session's row -> today's lede as before, no since line.
+                $r = $run(['setup' => [$signinAgo], 'session' => ['admin_login_log_id' => 1], 'grep' => $grepB]);
+                check($clean($r) && $f($r, 'class="ck-hero__lede"') && !$f($r, 'ck-hero__since') && !$f($r, 'Since you were last here') && !$f($r, 'Nothing new since you were last here'),
+                    'no earlier sign-in -> today\'s lede stays', json_encode($r['found'] ?? $r));
+            }
 
             // A4: End of Day chip. D = the last ended trading day, computed the same way as the dashboard.
             require_once $root . '/admin/includes/pos-shift-totals.php';

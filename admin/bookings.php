@@ -3036,6 +3036,13 @@ $filter_departure = rh_bk_departure_filter($_GET['departure'] ?? '');
 // ?balance=owing (Dashboard "Departures with a balance" chip, with ?filter=checkout_today): amount due above
 // BALANCE_TOLERANCE, the chip's own rule (rh_bk_balance_clause -> rh_fd_balance_tolerance); same notice + Clear.
 $filter_balance = rh_bk_balance_filter($_GET['balance'] ?? '');
+// ?since=Y-m-d H:i:s&since_kind=booked|cancelled|moved (Dashboard "Since you were last here"): the dashboard's own
+// count rule (rh_bk_since_clause); both must be valid, else no filter. Shared scope + export, same notice + Clear.
+$filter_since_kind = rh_bk_since_kind($_GET['since_kind'] ?? '');
+$filter_since = $filter_since_kind !== '' ? rh_bk_since_filter($_GET['since'] ?? '') : '';
+if ($filter_since === '') {
+    $filter_since_kind = '';
+}
 // "More filters" (step 8g): Booking kind (?kind=), Room type (?room_type= a rooms.id from the list below) and Payment
 // (?pay=). Whitelisted in bookings-list-filters.php; part of the shared scope like ?balance=, so badges, list, count,
 // insight cards and the CSV export all follow them.
@@ -3076,7 +3083,7 @@ if ($deep_link_booking_id > 0 && $search_query === '') {
         $deep_link_booking_id = 0;
     }
 }
-$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $bk_more_active;
+$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $filter_since !== '' || $bk_more_active;
 
 // Remember this list view (filters, tab, page) so "Back" on a booking returns to it.
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_link_action === '') {
@@ -3151,6 +3158,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         if (($export_balance = rh_bk_balance_clause($filter_balance)) !== null) {
             $export_where_clauses[] = $export_balance['clause'];
             $export_params = array_merge($export_params, $export_balance['params']);
+        }
+        if (($export_since = rh_bk_since_clause($filter_since, $filter_since_kind)) !== null) {
+            $export_where_clauses[] = $export_since['clause'];
+            $export_params = array_merge($export_params, $export_since['params']);
         }
         // More filters (kind, room type, payment): the same pieces as the list.
         $export_more = rh_bk_more_scope($filter_kind, $filter_room_type, $filter_pay, $bk_has_combos);
@@ -3310,6 +3321,11 @@ try {
     if (($bk_balance_clause = rh_bk_balance_clause($filter_balance)) !== null) {
         $where_clauses[] = $bk_balance_clause['clause'];
         $params = array_merge($params, $bk_balance_clause['params']);
+    }
+    // Since the last sign-in (Dashboard "Since you were last here"): shared scope, so badges, list and count agree.
+    if (($bk_since_clause = rh_bk_since_clause($filter_since, $filter_since_kind)) !== null) {
+        $where_clauses[] = $bk_since_clause['clause'];
+        $params = array_merge($params, $bk_since_clause['params']);
     }
     // More filters (Booking kind, Room type, Payment; rh_bk_more_scope): shared scope too, so every badge counts what the
     // list shows.
@@ -3492,6 +3508,10 @@ try {
     if ($filter_balance !== '') {
         $insight_base_query['balance'] = $filter_balance;
     }
+    if ($filter_since !== '') {
+        $insight_base_query['since'] = $filter_since;
+        $insight_base_query['since_kind'] = $filter_since_kind;
+    }
     // More filters: the cards' links keep them (the cards' rows are in the same scope).
     if ($filter_kind !== '') {
         $insight_base_query['kind'] = $filter_kind;
@@ -3594,7 +3614,7 @@ try {
     // Re-count for pagination when the list is filtered by tab override, status filter, search, or date filters.
     // Use a separate variable so $total_bookings remains the global count for the "All" tab badge.
     $list_count = $total_bookings;
-    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $bk_more_active) {
+    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $filter_since !== '' || $bk_more_active) {
         $cnt_stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM bookings b
@@ -3849,7 +3869,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             <form method="GET" data-live-search-form="room-bookings" class="bookings-toolbar__form">
                 <?php echo rh_server_sort_hidden($bk_sort_key, $bk_sort_dir); ?>
                 <?php /* Searching or filtering keeps the open tab and the overdue views (the notice + Clear is the way out). */ ?>
-                <?php foreach (['filter' => $bk_filter_key, 'arrival' => $filter_arrival, 'departure' => $filter_departure, 'balance' => $filter_balance, 'size' => ($bk_page_size !== '10' ? $bk_page_size : '')] as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
+                <?php foreach (['filter' => $bk_filter_key, 'arrival' => $filter_arrival, 'departure' => $filter_departure, 'balance' => $filter_balance, 'since' => $filter_since, 'since_kind' => $filter_since_kind, 'size' => ($bk_page_size !== '10' ? $bk_page_size : '')] as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
                     <input type="hidden" name="<?php echo $bk_keep_k; ?>" value="<?php echo htmlspecialchars($bk_keep_v, ENT_QUOTES); ?>" data-bk-keep>
                 <?php endif; endforeach; ?>
                 <div class="bookings-toolbar__search">
@@ -3948,7 +3968,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
                         <i class="fas fa-filter"></i>
-                        <strong><?php echo htmlspecialchars(rh_bk_notice_title($filter_arrival, $filter_departure, $filter_balance, $bk_filter_key)); ?></strong>
+                        <strong><?php echo htmlspecialchars($filter_since !== '' ? rh_bk_since_words($filter_since, $filter_since_kind) : rh_bk_notice_title($filter_arrival, $filter_departure, $filter_balance, $bk_filter_key)); ?></strong>
                     </div>
                     <div style="color: #2f3a63; font-size: 13px;">
                         Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to, $filter_date_type); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?><?php if ($filter_balance === 'owing'): ?><?php echo $bk_filter_key === 'checkout_today' ? ' due out today' : ''; ?> with a balance still to pay<?php endif; ?><?php echo htmlspecialchars(rh_bk_more_scope_words($filter_kind, $filter_room_type > 0 ? ($bk_room_type_names[$filter_room_type] ?? '') : '', $filter_pay)); ?>.
@@ -4545,6 +4565,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         'arrival'       => $filter_arrival,
                         'departure'     => $filter_departure,
                         'balance'       => $filter_balance,
+                        'since'         => $filter_since,
+                        'since_kind'    => $filter_since_kind,
                         'kind'          => $filter_kind,      // More filters kept on every page link
                         'room_type'     => $filter_room_type > 0 ? (string)$filter_room_type : '',
                         'pay'           => $filter_pay,
@@ -4687,7 +4709,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 if (!f || !f.matches || !f.matches('[data-live-search-form="room-bookings"]')) return;
                 const cur = new URLSearchParams(window.location.search);
                 f.querySelectorAll('input[data-bk-keep]').forEach(i => i.remove());
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'size'].forEach(k => {
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size'].forEach(k => {
                     const v = cur.get(k);
                     if (!v) return;
                     const i = document.createElement('input');
@@ -4716,7 +4738,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 new FormData(searchForm).forEach(function(v, k) {
                     if (typeof v === 'string' && !searchForm.querySelector('input[data-bk-keep][name="' + k + '"]')) params.append(k, v);
                 });
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'size'].forEach(function(k) {
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size'].forEach(function(k) {
                     const v = keep.get(k);
                     if (v) params.set(k, v);
                 });
@@ -5512,7 +5534,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             const params = new URLSearchParams(window.location.search);
             // A tab replaces every list filter that is not in the search bar: tab shortcut, status (and its
             // ?status= alias), overdue arrivals, Accounting's ?payment_status=, page.
-            ['filter', 'filter_status', 'status', 'arrival', 'departure', 'balance', 'payment_status', 'page'].forEach(k => params.delete(k));
+            ['filter', 'filter_status', 'status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'payment_status', 'page'].forEach(k => params.delete(k));
             const tabFilter = TAB_FILTER_MAP[tabName];
             if (tabFilter) {
                 for (const [k, v] of Object.entries(tabFilter)) {
@@ -5538,7 +5560,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 if (tabBtn && !tabBtn.closest('.tabs-header')) return;
                 if (tabName === 'all') {
                     const params = new URLSearchParams(window.location.search);
-                    ['filter', 'filter_status', 'status', 'arrival', 'departure', 'balance', 'payment_status', 'page'].forEach(k => params.delete(k));
+                    ['filter', 'filter_status', 'status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'payment_status', 'page'].forEach(k => params.delete(k));
                     loadBookingResults('bookings.php' + (params.toString() ? '?' + params.toString() : ''));
                 } else if (tabName) {
                     navigateToTab(tabName);

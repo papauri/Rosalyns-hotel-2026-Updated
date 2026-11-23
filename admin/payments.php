@@ -39,6 +39,8 @@ $refundStatusLabels = ['pending' => 'pending', 'processing' => 'processing', 'co
 // Real Y-m-d dates only (anything else is ignored, so the boxes show what is actually applied).
 $startDate = rh_fin_valid_date($_GET['start_date'] ?? '');
 $endDate = rh_fin_valid_date($_GET['end_date'] ?? '');
+// ?since=Y-m-d H:i:s (Dashboard "Since you were last here"): rows recorded on or after that moment (p.created_at).
+$paySince = rh_fin_valid_datetime($_GET['since'] ?? '');
 $searchText = rh_fin_search_term($_GET); // ?search_text=, or ?q= (older Dashboard links) when that is empty
 // "Outstanding balances" view: shows accounts (bookings/conference/gym/event)
 // that still owe money — i.e. amount_due > 0 — NOT payment-ledger rows. This is
@@ -119,7 +121,7 @@ $payMoreActive = $payDirection !== '' || $payBookingStatus !== '' || $payGroup !
 $payMoreCount = count(array_filter([$payDirection !== '', $payBookingStatus !== '', $payGroup !== '', $payRecordedBy > 0,
     $payRoomType > 0, ($payAmountFrom !== '' || $payAmountTo !== '')]));
 
-$has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $refundStatus !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== ''
+$has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $refundStatus !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '' || $paySince !== ''
     || $payMoreActive;
 
 // Preset scoping: by default the list shows only rows whose module is enabled
@@ -238,6 +240,7 @@ $payFilter = rh_fin_payments_where([
     'room_type'         => $payRoomType,
     'amount_from'       => $payAmountFrom,
     'amount_to'         => $payAmountTo,
+    'since'             => $paySince,
     'tolerance'         => (float)BALANCE_TOLERANCE,
 ], $paymentTransactionColumn, $conferenceFields);
 $payFromSql = rh_fin_payments_from();
@@ -969,6 +972,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             if ($startDate !== '' || $endDate !== '') {
                 $payChips[] = ['Dates: ' . ($startDate !== '' ? date('j M Y', strtotime($startDate)) : 'any') . ' to ' . ($endDate !== '' ? date('j M Y', strtotime($endDate)) : 'any'), ['start_date', 'end_date']];
             }
+            if ($paySince !== '') { $payChips[] = ['Recorded since ' . date(date('Y', strtotime($paySince)) === date('Y') ? 'D j M, H:i' : 'D j M Y, H:i', strtotime($paySince)), ['since']]; }
             if ($payDirection !== '') { $payChips[] = [rh_fin_pay_directions()[$payDirection], ['direction']]; }
             if ($payBookingStatus !== '') { $payChips[] = ['Booking: ' . rh_fin_pay_booking_statuses()[$payBookingStatus], ['booking_status']]; }
             if ($payGroup !== '') { $payChips[] = [$payGroupKinds[$payGroup], ['group']]; }

@@ -1,6 +1,6 @@
 <?php
 /**
- * Dashboard first-login readers (plan .claude/DASHBOARD_FIRSTLOGIN_PLAN.md, tasks A2-A4). Read-only, prepared
+ * Dashboard first-login readers (plan .claude/DASHBOARD_FIRSTLOGIN_PLAN.md, tasks A2-A4, B2). Read-only, prepared
  * statements; any fault returns null so the dashboard hides the line instead of showing a wrong one. The wording
  * is in admin/includes/dashboard-firstlogin.php (pure). Tested by scripts/tests/dashboard_firstlogin.php --db.
  */
@@ -83,6 +83,65 @@ if (!function_exists('rh_dash_eod_status')) {
             return ['day' => $day, 'sent_at' => $first[0] ?? null, 'test' => (bool)($first[1] ?? false)];
         } catch (Throwable $e) {
             error_log('rh_dash_eod_status: ' . $e->getMessage());
+            return null;
+        }
+    }
+}
+
+if (!function_exists('rh_dash_pay_scope_types')) {
+    /**
+     * The booking types the Payments page lists by default (admin/payments.php $scopeActive with no type, no scope and
+     * no refund filter): the enabled types when some are switched off, else [] (every type). $enabled =
+     * rh_enabled_booking_types().
+     */
+    function rh_dash_pay_scope_types(array $enabled): array
+    {
+        $all = ['room', 'conference', 'restaurant', 'gym', 'event'];
+        return (!empty($enabled) && count($enabled) < count($all)) ? $enabled : [];
+    }
+}
+
+if (!function_exists('rh_dash_since_counts')) {
+    /**
+     * "Since you were last here" counts (plan B2), each the row count of the list its link opens, built with that
+     * list's own rule (no second copy of the SQL):
+     *   booked / cancelled / moved  Bookings ?since=&since_kind= (rh_bk_since_clause, not deleted)    needs $show['bookings']
+     *   payments / received          Payments ?status=received&since= (rh_fin_payments_where, the page's  needs $show['payments']
+     *                                default type scope $show['scope_types']): row count and SUM(total_amount), exact
+     * A gated-off item is null. $since must be a real 'Y-m-d H:i:s'. null = could not read (show today's lede instead).
+     */
+    function rh_dash_since_counts(PDO $pdo, string $since, array $show): ?array
+    {
+        require_once __DIR__ . '/bookings-list-filters.php';
+        require_once __DIR__ . '/finance-filters.php';
+        if (rh_bk_since_filter($since) === '') {
+            return null;
+        }
+        $out = ['booked' => null, 'cancelled' => null, 'moved' => null, 'payments' => null, 'received' => null];
+        try {
+            if (!empty($show['bookings'])) {
+                foreach (['booked', 'cancelled', 'moved'] as $kind) {
+                    $c = rh_bk_since_clause($since, $kind);
+                    $st = $pdo->prepare('SELECT COUNT(*) FROM bookings b WHERE b.deleted_at IS NULL AND ' . $c['clause']);
+                    $st->execute($c['params']);
+                    $out[$kind] = (int)$st->fetchColumn();
+                }
+            }
+            if (!empty($show['payments'])) {
+                $w = rh_fin_payments_where([
+                    'status' => 'received',
+                    'since' => $since,
+                    'scope_types' => (array)($show['scope_types'] ?? []),
+                ], 'transaction_id', []);
+                $st = $pdo->prepare('SELECT COUNT(*) AS n, COALESCE(SUM(p.total_amount), 0) AS amt ' . rh_fin_payments_from() . ' ' . $w['sql']);
+                $st->execute($w['params']);
+                $row = $st->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'amt' => '0'];
+                $out['payments'] = (int)$row['n'];
+                $out['received'] = (string)$row['amt'];
+            }
+            return $out;
+        } catch (Throwable $e) {
+            error_log('rh_dash_since_counts: ' . $e->getMessage());
             return null;
         }
     }

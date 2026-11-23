@@ -154,11 +154,43 @@ eq(rh_bk_notice_title('', '', 'owing', 'checkout_today'), 'Departures with a bal
 eq(rh_bk_notice_title('', '', 'owing', ''), 'Balance still to pay', 'notice: balance alone');
 eq(rh_bk_notice_title('', 'overdue', 'owing', ''), 'Overdue departures only', 'notice: overdue wins its own title');
 $bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
-check(substr_count($bkSrc, "'departure', 'balance', 'payment_status', 'page'].forEach(k => params.delete(k));") === 2, 'tabs clear ?balance= like the other filters');
-check(strpos($bkSrc, "'balance' => \$filter_balance, 'size' => (\$bk_page_size !== '10' ? \$bk_page_size : '')] as \$bk_keep_k") !== false && strpos($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance', 'size'].forEach") !== false, 'search keeps ?balance= and ?size= (server + client)');
+check(substr_count($bkSrc, "'departure', 'balance', 'since', 'since_kind', 'payment_status', 'page'].forEach(k => params.delete(k));") === 2, 'tabs clear ?balance= like the other filters');
+check(strpos($bkSrc, "'balance' => \$filter_balance, 'since' => \$filter_since, 'since_kind' => \$filter_since_kind, 'size' => (\$bk_page_size !== '10' ? \$bk_page_size : '')] as \$bk_keep_k") !== false && substr_count($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size'].forEach") === 2, 'search keeps ?balance= and ?size= (server + client)');
 check(strpos($bkSrc, "'size'          => \$bk_page_size !== '10' ? \$bk_page_size : '',") !== false, 'page links keep ?size=');
 check(strpos($bkSrc, "'balance'       => \$filter_balance,") !== false, 'pagination keeps ?balance=');
 check(strpos($bkSrc, '$export_balance[\'params\']') !== false && strpos($bkSrc, '$bk_balance_clause[\'params\']') !== false, 'list, badges and export bind the balance param');
+
+
+// ---- ?since= + ?since_kind= (Dashboard "Since you were last here", plan B1)
+eq(rh_bk_since_filter('2026-11-23 18:40:00'), '2026-11-23 18:40:00', 'since: a real date-time kept');
+foreach (['2026-13-01 10:00:00', '2026-02-30 10:00:00', '2026-11-23 24:00:00', '2026-11-23 18:60:00', '2026-11-23', '2026-11-23T18:40:00',
+          "x' OR 1", "2026-11-23 18:40:00' OR 1=1 --", ' 2026-11-23 18:40:00', '', null, ['2026-11-23 18:40:00'], 20261123] as $junk) {
+    eq(rh_bk_since_filter($junk), '', 'since: junk rejected ' . var_export($junk, true));
+}
+eq(rh_bk_since_kind('booked'), 'booked', 'since kind: booked');
+eq(rh_bk_since_kind(' Moved '), 'moved', 'since kind: trimmed + lower-cased');
+foreach (['', 'deleted', "booked' OR 1", ['booked'], null] as $junk) { eq(rh_bk_since_kind($junk), '', 'since kind: junk rejected ' . var_export($junk, true)); }
+eq(rh_bk_since_clause('', 'booked'), null, 'since clause: no time -> no clause');
+eq(rh_bk_since_clause('2026-11-23 18:40:00', ''), null, 'since clause: no kind -> no clause');
+eq(rh_bk_since_clause("x' OR 1", 'booked'), null, 'since clause: junk time -> no clause');
+foreach (['booked', 'cancelled', 'moved'] as $k) {
+    $sc = rh_bk_since_clause('2026-11-23 18:40:00', $k);
+    check(is_array($sc) && substr_count($sc['clause'], '?') === 1 && $sc['params'] === ['2026-11-23 18:40:00'] && strpos($sc['clause'], '2026') === false,
+        "since clause $k: exactly one bound param, the time never in the SQL", json_encode($sc));
+}
+eq(rh_bk_since_clause('2026-11-23 18:40:00', 'booked')['clause'], 'b.created_at >= ?', 'since booked = created on or after');
+$scC = rh_bk_since_clause('2026-11-23 18:40:00', 'cancelled')['clause'];
+check(strpos($scC, "b.status = 'cancelled'") === 0 && strpos($scC, "t.new_value = 'cancelled' AND t.action_type IN ('status_change', 'financial', 'cancellation') AND t.created_at >= ?") !== false, 'since cancelled = the End of Day rule with a date-time', $scC);
+$scM = rh_bk_since_clause('2026-11-23 18:40:00', 'moved')['clause'];
+$castOld = "CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.old_values, '$.individual_room_id')), 'null') AS UNSIGNED)";
+$castNew = "CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.individual_room_id')), 'null') AS UNSIGNED)";
+check(strpos($scM, "a.action IN ('upgraded', 'downgraded')") !== false && strpos($scM, "$castOld > 0 AND $castOld <> $castNew") !== false && strpos($scM, 'a.performed_at >= ?') !== false,
+    'since moved: type change, or old room cast on both sides, old > 0 and old <> new', $scM);
+eq(rh_bk_since_words('2026-11-23 18:40:00', 'moved'), 'Moved to another room since ' . date(date('Y', strtotime('2026-11-23')) === date('Y') ? 'D j M, H:i' : 'D j M Y, H:i', strtotime('2026-11-23 18:40:00')), 'since notice words');
+eq(rh_bk_since_words('junk', 'booked'), '', 'since notice: junk -> none');
+check(strpos($bkSrc, '$export_since[\'params\']') !== false && strpos($bkSrc, '$bk_since_clause[\'params\']') !== false, 'list, badges and export bind the since param');
+check(strpos($bkSrc, "'since'         => \$filter_since,") !== false && strpos($bkSrc, "\$insight_base_query['since'] = \$filter_since;") !== false, 'pagination and insight links keep ?since=');
+check(substr_count($bkSrc, "\$filter_balance !== '' || \$filter_since !== '' || \$bk_more_active") === 2, 'notice and list count switch on with ?since=');
 
 // ---- ?filter= / ?payment_status=
 eq(rh_bk_filter_key('checkin_today'), 'checkin_today', 'filter key kept');

@@ -239,6 +239,36 @@ if (!function_exists('rh_fd_rooms_booked_by_night')) {
         return (float)$amountPaid > $tol ? 'partial' : 'unpaid';
     }
 
+    /**
+     * Dashboard "Deposit unpaid" chip: a deposit was asked for, is not marked paid, and the booking's stored amount_paid
+     * (kept by recalculateBookingFinancials) is still below it. The deposit rule of includes/ai/ai-decisions.php.
+     * Only on bookings still to arrive (pending / confirmed). Never on a group child room or a booking billed to a
+     * company account ($onAccount, from rh_booking_billing): their stored amount_paid does not hold the whole picture.
+     */
+    function rh_fd_deposit_unpaid(array $b, bool $onAccount = false): bool
+    {
+        if ($onAccount || (int)($b['primary_booking_id'] ?? 0) > 0
+            || !in_array((string)($b['status'] ?? ''), rh_fd_still_to_arrive_statuses(), true)) {
+            return false;
+        }
+        $tol = rh_fd_balance_tolerance();
+        $deposit = (float)($b['deposit_amount'] ?? 0);
+        return (int)($b['deposit_required'] ?? 0) === 1
+            && (int)($b['deposit_paid'] ?? 0) !== 1
+            && $deposit > $tol
+            && (float)($b['amount_paid'] ?? 0) + $tol < $deposit;
+    }
+
+    /** Special request shortened for a chip: whitespace folded, cut to $max characters with "…" ('' when none). Not escaped. */
+    function rh_fd_request_short($text, int $max = 40): string
+    {
+        $t = trim((string)preg_replace('/\s+/u', ' ', (string)$text));
+        if ($t === '' || $max < 1) {
+            return '';
+        }
+        return mb_strlen($t, 'UTF-8') > $max ? rtrim(mb_substr($t, 0, $max, 'UTF-8')) . '…' : $t;
+    }
+
     /** Rooms panel / room insight line: "Tonight: 3 free of 17 · Tomorrow: 16 of 17 booked (2 with no room yet)". */
     function rh_fd_rooms_outlook_line(int $units, int $freeTonight, int $bookedTomorrow, int $noRoomTomorrow): string
     {

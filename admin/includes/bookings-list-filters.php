@@ -13,6 +13,7 @@
  *             not "staying"; use Departure for them)
  *   booked    created_at on a hotel date between From and To: created_at >= From 00:00 AND < (To + 1 day) 00:00
  *             (the app's DB session time_zone is the hotel's, so these are hotel dates)
+ * ?since= + ?since_kind= (Dashboard "Since you were last here"): rh_bk_since_clause.
  */
 
 require_once __DIR__ . '/front-desk-counts.php'; // rh_fd_balance_tolerance: the one "owing" rule
@@ -167,6 +168,77 @@ if (!function_exists('rh_bk_valid_date')) {
     function rh_bk_balance_clause(string $balance): ?array
     {
         return $balance === 'owing' ? ['clause' => 'b.amount_due > ?', 'params' => [rh_fd_balance_tolerance()]] : null;
+    }
+
+    /**
+     * ?since= (Dashboard "Since you were last here", plan DASHBOARD_FIRSTLOGIN B1): a real 'Y-m-d H:i:s' only (the
+     * previous sign-in time), else ''. Also used by rh_fin_payments_where for Payments ?since=.
+     */
+    function rh_bk_since_filter($raw): string
+    {
+        if (!is_string($raw) || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $raw)) {
+            return '';
+        }
+        $dt = DateTime::createFromFormat('!Y-m-d H:i:s', $raw);
+        return ($dt !== false && $dt->format('Y-m-d H:i:s') === $raw) ? $raw : '';
+    }
+
+    /** ?since_kind= whitelist => the notice words. */
+    function rh_bk_since_kinds(): array
+    {
+        return ['booked' => 'Booked', 'cancelled' => 'Cancelled', 'moved' => 'Moved to another room'];
+    }
+
+    /** ?since_kind= cleaned: 'booked' | 'cancelled' | 'moved', anything else ''. */
+    function rh_bk_since_kind($raw): string
+    {
+        $k = is_string($raw) ? strtolower(trim($raw)) : '';
+        return isset(rh_bk_since_kinds()[$k]) ? $k : '';
+    }
+
+    /**
+     * ['clause' => sql, 'params' => [$since]] for ?since= + ?since_kind=, or null when either is not set. The one
+     * rule the Dashboard counts (rh_dash_since_counts) and the list both use:
+     *   booked    created on or after $since
+     *   cancelled cancelled now, with a "-> cancelled" history entry on or after $since (the End of Day rule,
+     *             rh_cancellations_between, with a date-time)
+     *   moved     a room-type upgrade / downgrade, or a room (re)assignment / edit that changed an assigned room
+     *             (old room set and not 0, different from the new one) on or after $since. A first assignment (old
+     *             room JSON null) is not a move; "12" and 12 compare equal (both sides cast).
+     */
+    function rh_bk_since_clause(string $since, string $kind): ?array
+    {
+        $since = rh_bk_since_filter($since);
+        $kind = rh_bk_since_kind($kind);
+        if ($since === '' || $kind === '') {
+            return null;
+        }
+        if ($kind === 'booked') {
+            return ['clause' => 'b.created_at >= ?', 'params' => [$since]];
+        }
+        if ($kind === 'cancelled') {
+            return ['clause' => "b.status = 'cancelled' AND b.id IN (SELECT t.booking_id FROM booking_timeline_logs t"
+                . " WHERE t.new_value = 'cancelled' AND t.action_type IN ('status_change', 'financial', 'cancellation') AND t.created_at >= ?)",
+                'params' => [$since]];
+        }
+        $old = "CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.old_values, '$.individual_room_id')), 'null') AS UNSIGNED)";
+        $new = "CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.new_values, '$.individual_room_id')), 'null') AS UNSIGNED)";
+        return ['clause' => "b.id IN (SELECT a.booking_id FROM booking_audit_log a WHERE a.performed_at >= ?"
+            . " AND (a.action IN ('upgraded', 'downgraded') OR (a.action IN ('room_assigned', 'modified')"
+            . " AND {$old} > 0 AND {$old} <> {$new})))",
+            'params' => [$since]];
+    }
+
+    /** Notice title for ?since=: "Booked since Mon 23 Nov, 18:40" (year added when not this year). '' when not set. */
+    function rh_bk_since_words(string $since, string $kind): string
+    {
+        $since = rh_bk_since_filter($since);
+        $kind = rh_bk_since_kind($kind);
+        if ($since === '' || $kind === '') {
+            return '';
+        }
+        $ts = strtotime($since);
+        return rh_bk_since_kinds()[$kind] . ' since ' . date(date('Y', $ts) === date('Y') ? 'D j M, H:i' : 'D j M Y, H:i', $ts);
     }
 
     /** Title of the filter notice: the overdue / balance views name themselves, everything else is a search. */

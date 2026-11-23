@@ -79,6 +79,8 @@
 a.ck-daychip--warn:hover { text-decoration: underline; }
 .ck-hero__signin { margin: 6px 0 0; color: var(--ck-muted); font-size: 12.5px; max-width: 62ch; }
 .ck-hero__signin a { color: inherit; text-decoration: underline; }
+.ck-hero__since-link { color: inherit; text-decoration: underline; text-decoration-color: var(--ck-gold); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.ck-hero__since-link:hover { color: var(--ck-gold); }
 .ck-hero__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* ---------- Buttons ---------- */
@@ -857,3 +859,23 @@ a.ck-daychip--warn:hover { text-decoration: underline; }
     .ck-legend__item { min-height: 44px !important; }
     .ck-menu__list a { min-height: 44px !important; }
 }
+
+/* Guest flag chips under the booking reference (Today's movements arrivals, Week ahead; B3 2026-11-24).
+   Shown only when true: returning guest (gold), special request (blue), deposit unpaid (red). */
+.ck-row__main .ck-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; overflow: visible; white-space: normal; }
+.ck-row__main .ck-flag {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ck-row__main .ck-flag--return { background: var(--ck-gold-soft); color: var(--ck-gold); }
+.ck-row__main .ck-flag--request { background: var(--ck-info-soft); color: var(--ck-info); }
+.ck-row__main .ck-flag--deposit { background: var(--ck-bad-soft); color: var(--ck-bad); }

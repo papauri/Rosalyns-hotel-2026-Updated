@@ -160,6 +160,70 @@ if (!function_exists('rh_guest_history_email_sql')) {
     }
 
     /**
+     * Returning-guest figure for many bookings at once (Dashboard arrival lists), in ONE query: booking id => the
+     * completed stays of that booking's guest other than the booking's own group. The same rule as
+     * rh_guest_history()['other_completed_stays']: checked-out only, a group counts once, deleted bookings never count,
+     * blank email = 0. Rows need 'id' and 'guest_email'. A failed query gives [] (callers then show nothing).
+     */
+    function rh_guest_history_stays_for(PDO $pdo, array $bookings): array
+    {
+        $out = [];
+        $ids = [];
+        foreach ($bookings as $b) {
+            $id = (int)($b['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            $out[$id] = 0;
+            if (trim((string)($b['guest_email'] ?? '')) !== '') {
+                $ids[$id] = $id;
+            }
+        }
+        if (!$ids) {
+            return $out;
+        }
+        try {
+            foreach (array_chunk(array_values($ids), 500) as $chunk) {
+                $marks = implode(',', array_fill(0, count($chunk), '?'));
+                $st = $pdo->prepare("
+                    SELECT a.id AS booking_id,
+                           COUNT(DISTINCT CASE WHEN COALESCE(h.primary_booking_id, h.id) <> COALESCE(a.primary_booking_id, a.id) THEN COALESCE(h.primary_booking_id, h.id) END) AS stays
+                    FROM bookings a
+                    INNER JOIN bookings h ON LOWER(TRIM(h.guest_email)) = LOWER(TRIM(a.guest_email))
+                        AND h.deleted_at IS NULL AND h.status = 'checked-out'
+                    WHERE a.id IN ($marks)
+                    GROUP BY a.id
+                ");
+                $st->execute($chunk);
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $out[(int)$r['booking_id']] = (int)$r['stays'];
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('Guest history (batch): ' . $e->getMessage());
+            return [];
+        }
+        return $out;
+    }
+
+    /** 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 11 -> "11th", 22 -> "22nd". */
+    function rh_guest_history_ordinal(int $n): string
+    {
+        $mod100 = $n % 100;
+        if ($mod100 >= 11 && $mod100 <= 13) {
+            return $n . 'th';
+        }
+        $suffix = [1 => 'st', 2 => 'nd', 3 => 'rd'][$n % 10] ?? 'th';
+        return $n . $suffix;
+    }
+
+    /** Dashboard chip text for $otherStays completed stays: "Returning guest · 3rd stay", or '' for a first stay. */
+    function rh_guest_history_return_label(int $otherStays): string
+    {
+        return $otherStays >= 1 ? 'Returning guest · ' . rh_guest_history_ordinal($otherStays + 1) . ' stay' : '';
+    }
+
+    /**
      * One guest row for the Create Booking returning-guest lookup (JSON). Money keys are left out entirely when
      * the history has no money (hidden or failed), so the screen never shows a made-up 0.
      */

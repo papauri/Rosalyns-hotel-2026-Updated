@@ -55,6 +55,10 @@ check(strpos($d, "<?php if (\$show_takings): ?>\n                <a class=\"ck-k
 check((bool)preg_match('/<\?php if \(\$show_owed\): \?>\s*<\?php if \(\$mod_receivables\): \?>\s*<a class="ck-kpi[^"]*"[^>]*data-insight-card="outstanding_balances"/', $d), 'Owed to us card follows dashboard_owed');
 check(strpos($d, "\$hasMoney = \$show_takings || \$pos_sales || \$moneyRefundLine;") !== false, 'Money panel: takings, till or refunds queue');
 check(strpos($d, "if (\$show_takings) { // the 7-day chart") !== false, '7-day chart read only with dashboard_takings');
+// "Since you were last here" (first-login plan B2): the payments-received item is read only with dashboard_takings.
+check(strpos($d, "rh_dash_since_counts(\$pdo, \$heroSince, ['bookings' => \$mod_bookings, 'payments' => \$show_takings,") !== false, 'since line: payments received follows dashboard_takings');
+$sinceSrc = (string)file_get_contents($root . '/admin/includes/dashboard-since-data.php');
+check(strpos($sinceSrc, "if (!empty(\$show['payments'])) {") !== false && substr_count($sinceSrc, 'rh_fin_payments_where(') === 1, 'since counts: payments read only behind the payments gate');
 check(strpos($d, "<?php if (\$mod_finance && \$can('accounting-dashboard.php')): ?>") !== false, 'Accounting button unchanged');
 // Refunds to approve (Needs attention, admin/includes/dashboard-attention.php since 2026-11-12): finance module, a finance
 // page permission AND payments / refund_payment, as before; the popup rows only for users who can open Payments.
@@ -64,6 +68,19 @@ check(($refDef['when'] ?? null) === [['modules' => ['finance'], 'perms' => [['ac
 check(!empty($refDef['insight_needs_link']) && strpos($d, "'refunds_pending'        => (int)\$finance['refunds_pending'],") !== false, 'refunds count + popup only with the Payments link');
 check(strpos($d, "'refunds_pending'           => \$attnGate['refunds_pending'] && \$dash_can_open_payments,") !== false, 'refunds insight has the same gate as its line');
 check(substr_count($d, "\$mod_finance && \$mod_receivables") === 0, 'no owed figure left on the old finance gate');
+
+// ---- 4. B4 (2026-11-24): donut centre = rooms free tonight; Money headline = the 7-day total, inside the takings gate
+check(strpos($d, "<strong><?php echo (int)\$outlookTonightRow['free']; ?></strong><small>free tonight</small>") !== false, 'donut centre prints the free-tonight figure');
+check((bool)preg_match("/<\?php if \(!empty\(\\\$roomOutlook\['ok'\]\) && is_array\(\\\$outlookTonightRow\)\): \?>.*?free tonight.*?<\?php else: \?>.*?%<\/strong><small>occupied now<\/small>/s", $d), 'donut falls back to occupancy % when the outlook is unreadable');
+$mh = strpos($d, '<span class="ck-money__label" data-ck-trend-label>Taken this week</span>');
+$mv = strpos($d, '<span class="ck-money__value" data-ck-trend-value><?php echo $money($trendTotal); ?></span>');
+check($mh !== false && $mv !== false && $mv > $mh, 'Money headline: "Taken this week" + $trendTotal');
+$gate = strrpos(substr($d, 0, (int)$mh), '<?php if ($show_takings): ?>');
+$gateEnd = strpos($d, '<?php endif; ?>', (int)$gate);
+check($gate !== false && $gateEnd !== false && $gateEnd > $mv, 'Money headline sits inside if ($show_takings)');
+check(strpos($d, "' is-today is-active'") === false, 'no bar is active at load');
+check(strpos($d, "bars.addEventListener('mouseleave'") !== false && strpos($d, "bars.addEventListener('focusout'") !== false, 'leaving the bars puts the 7-day total back');
+check(strpos($d, "'Last 7 days · ' . \$moneyShort(\$trendTotal)") === false, 'sub line no longer repeats the headline');
 
 echo "dashboard_figure_perms: $pass passed, $fail failed\n";
 exit($fail ? 1 : 0);
