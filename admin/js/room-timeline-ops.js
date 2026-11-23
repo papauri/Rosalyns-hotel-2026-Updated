@@ -613,6 +613,7 @@
             dr.setAttribute('aria-modal', sheet ? 'true' : 'false');
             bd.hidden = !sheet;
             dr.hidden = false;
+            U.syncDock(st, refitGrid(st)); // opens like the Assistant chat on a laptop (room-timeline.js)
             window.requestAnimationFrame(function () { dr.classList.add('is-open'); });
             var close = q(st, '[data-tl-drawer-close]');
             if (close) close.focus();
@@ -627,9 +628,17 @@
             q(st, '[data-tl-backdrop]').hidden = true;
             st.drawerItem = null;
             st.root.querySelectorAll('.tl-bar.is-selected').forEach(function (b) { b.classList.remove('is-selected'); });
+            U.syncDock(st, refitGrid(st));
             if (restore !== false && st.lastFocus && document.contains(st.lastFocus)) {
                 try { st.lastFocus.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
             }
+        }
+        /* The page gave up or got back the panel's width: draw the day columns again to fit. */
+        function refitGrid(st) {
+            return function () {
+                if (cur !== st || st.view !== 'timeline') return;
+                U.redrawKeep(st, 'data-ops-item', function () { render(st); }, st.drawerItem ? st.drawerItem.id : null);
+            };
         }
         function closeMenus(st) {
             if (!st) return;
@@ -1149,6 +1158,7 @@
                 timer = window.setTimeout(function () {
                     var st = live();
                     if (!st) return;
+                    U.syncDock(st); // this handler draws the grid again itself
                     if (!st.A.fixedDays && U.allowedDays().indexOf(st.days) === -1) go(st, st.start, U.defaultDays());
                     else if (st.view === 'timeline') render(st);
                 }, 150);

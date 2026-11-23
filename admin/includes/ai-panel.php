@@ -103,6 +103,8 @@ define('RH_AI_PANEL_RENDERED', true);
             if (b) { b.focus(); }
         });
         window.addEventListener('resize', function () { if (!pill.hidden) { place(); } });
+        // A page side panel opened or closed and moved the Assistant button (room-timeline.js syncDock).
+        window.addEventListener('rh-dock-change', function () { if (!pill.hidden) { place(); } });
     }
     // Escape folds the open card into the pill; Escape on the pill puts the pill away for this page
     document.addEventListener('keydown', function (e) {

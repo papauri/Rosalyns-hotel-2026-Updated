@@ -540,7 +540,7 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
     z-index: 1100;
     display: flex;
     flex-direction: column;
-    width: 400px;
+    width: var(--rh-tl-w);
     max-width: 100vw;
     box-sizing: border-box;
     background: #fff;
@@ -550,6 +550,25 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
     transition: transform 200ms ease-out;
 }
 .tl-drawer.is-open { transform: none; }
+
+/* Owner 2026-11-23: the side panel opens like the Assistant chat (room-timeline.js syncDock). One width shared by the
+   panel and the room the page gives up for it. While it is open the floating Assistant, notice and "?" buttons sit to
+   the left of the panel, so they never cover its buttons (Open booking, More). */
+:root { --rh-tl-w: 400px; }
+@media (max-width: 1024px) { :root { --rh-tl-w: 380px; } }
+html.rh-tl-open .rh-ai-launch { right: calc(14px + var(--rh-tl-w)); }
+html.rh-tl-open :is(.rh-ai-notice-card, .rh-ai-notice-pill) { right: calc(14px + var(--rh-tl-w)); } /* the pill's own inline right wins when it docks beside the Assistant button */
+html.rh-tl-open .rh-help-toggle:not([data-inline="1"]) { right: calc(14px + var(--rh-tl-w)) !important; }
+html.rh-tl-open :is(.alert-container-top, .alert-container-top-right, .alert-container-bottom, .alert-container-bottom-right) { right: calc(24px + var(--rh-tl-w)); }
+html.rh-tl-open .admin-bulk-bar:not([hidden]) { right: calc(16px + var(--rh-tl-w)); }
+@media screen and (min-width: 1025px) {
+    /* Side by side: the page shrinks instead of sliding under the panel (same 220ms as the Assistant's dock). */
+    html.rh-tl-docked:not(.rh-ai-docked) body > #rh-admin-page { padding-right: var(--rh-tl-w); }
+    /* The Assistant docked as well: the panel sits just left of the Assistant drawer (over the page). */
+    html.rh-ai-docked .tl-drawer:not(.tl-drawer--sheet) { right: var(--rh-ai-w); }
+    html.rh-ai-docked.rh-tl-open .rh-help-toggle:not([data-inline="1"]) { right: calc(14px + var(--rh-ai-w) + var(--rh-tl-w)) !important; }
+    html.rh-ai-docked.rh-tl-open :is(.rh-ai-notice-card, .rh-ai-notice-pill) { right: calc(14px + var(--rh-ai-w) + var(--rh-tl-w)); }
+}
 .tl-drawer .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--tl-line); }
 .tl-drawer .modal-header h3 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
 .tl-drawer__close { min-width: 44px; height: 44px; }
@@ -673,7 +692,6 @@ body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
     .tl-field select { height: 44px; }
     .tl-toolbar__filters .tl-icon-btn, .tl-toolbar__filters .cal-filter-clear { min-height: 44px; }
     .tl-density { display: none; }
-    .tl-drawer { width: 380px; }
     .tl-drawer--sheet { width: 100%; }
     .tl-icon-btn, .tl-btn { min-height: 44px; }
     .tl-range .ck-tab, .tl-view .ck-tab { min-height: 40px; }

@@ -126,6 +126,7 @@
             sel: null
         };
         cur = st;
+        syncDock(null); // a panel left open by a timeline that was swapped out no longer holds the page's room
         if (!ini.days_set) st.days = defaultDays();
         if (allowedDays().indexOf(st.days) === -1) st.days = defaultDays();
 
@@ -713,6 +714,7 @@
         dr.setAttribute('aria-modal', sheet ? 'true' : 'false');
         bd.hidden = !sheet;
         dr.hidden = false;
+        syncDock(st, refitGrid(st));
         // next frame: slide in (no motion under prefers-reduced-motion, see CSS)
         window.requestAnimationFrame(function () { dr.classList.add('is-open'); });
         var close = q(st, '[data-tl-drawer-close]');
@@ -729,9 +731,59 @@
         dr.hidden = true;
         q(st, '[data-tl-backdrop]').hidden = true;
         st.root.querySelectorAll('.tl-bar.is-selected').forEach(function (b) { b.classList.remove('is-selected'); });
+        syncDock(st, refitGrid(st));
         if (restore !== false && st.lastFocus && document.contains(st.lastFocus)) {
             try { st.lastFocus.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
         }
+    }
+
+    /* Owner 2026-11-23: on a laptop the side panel opens like the Assistant chat. html.rh-tl-open moves the floating
+       Assistant, notice and "?" buttons to the left of the panel (any width, not the phone sheet); html.rh-tl-docked
+       (screen 1025px+ and the page keeps DOCK_MIN_PAGE beside the sidebar and the panel) makes the page give up the
+       panel's width on its right instead of being covered (room-timeline.css). The grid then re-fits its day columns:
+       refit runs once the page has slid (falsy = the caller draws again itself). Shared with room-timeline-ops.js. */
+    var DOCK_MIN_PAGE = 600;
+    var refitTimer = 0;
+    function syncDock(st, refit) {
+        var root = document.documentElement;
+        var dr = st ? q(st, '[data-tl-drawer]') : null;
+        var open = !!dr && !dr.hidden && document.contains(dr) && !dr.classList.contains('tl-drawer--sheet');
+        var zoom = parseFloat(window.getComputedStyle(root).zoom) || 1;
+        var nav = document.querySelector('.admin-nav');
+        var side = nav ? Math.max(0, nav.getBoundingClientRect().right) / zoom : 0;
+        var w = parseFloat(window.getComputedStyle(root).getPropertyValue('--rh-tl-w')) || 400;
+        var dock = open && window.innerWidth >= 1025 && (window.innerWidth / zoom - side - w) >= DOCK_MIN_PAGE;
+        var was = root.classList.contains('rh-tl-docked');
+        root.classList.toggle('rh-tl-open', open);
+        root.classList.toggle('rh-tl-docked', dock);
+        try { window.dispatchEvent(new Event('rh-dock-change')); } catch (e) { /* old browser: the pill re-places on its next resize */ }
+        if (was === dock || typeof refit !== 'function' || !st) return;
+        window.clearTimeout(refitTimer);
+        refitTimer = window.setTimeout(function () { // after the page's 220ms slide (ai-panel.css)
+            if (document.contains(st.root)) refit();
+        }, 240);
+    }
+    /* Draw the grid again and keep its place: the open item's bar stays marked, the bar focus returns to on close is
+       the new one, and a bar that had focus (the panel just closed) gets it back. attr = the bars' id attribute. */
+    function redrawKeep(st, attr, draw, openId) {
+        var a = document.activeElement;
+        var focusId = a && st.root.contains(a) ? a.getAttribute(attr) : null;
+        var lastId = st.lastFocus && st.lastFocus.getAttribute ? st.lastFocus.getAttribute(attr) : null;
+        draw();
+        var dr = q(st, '[data-tl-drawer]');
+        var open = dr && !dr.hidden;
+        st.root.querySelectorAll('[' + attr + ']').forEach(function (bar) {
+            var id = bar.getAttribute(attr);
+            if (open && openId != null && id === String(openId)) bar.classList.add('is-selected');
+            if (lastId !== null && id === lastId && !document.contains(st.lastFocus)) st.lastFocus = bar;
+            if (focusId !== null && id === focusId) { try { bar.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+        });
+    }
+    function refitGrid(st) {
+        return function () {
+            if (cur !== st || st.mode !== 'grid' || st.busy || st.pending || st.drag) return;
+            redrawKeep(st, 'data-tl-booking', function () { render(st); }, st.drawerBooking ? st.drawerBooking.id : null);
+        };
     }
 
     function dl(body, label, value, node) {
@@ -2130,6 +2182,7 @@
             t = window.setTimeout(function () {
                 var st = live();
                 if (!st) return;
+                syncDock(st); // this handler draws the grid again itself
                 var allowed = allowedDays();
                 if (allowed.indexOf(st.days) === -1) go(st, st.start, defaultDays());
                 else if (st.mode === 'grid') render(st);
@@ -2147,7 +2200,8 @@
             el: el, icon: icon, help: help, dnum: dnum, dstr: dstr, addDays: addDays, fmt: fmt, fmtRange: fmtRange,
             store: store, viewport: viewport, allowedDays: allowedDays, defaultDays: defaultDays,
             mqPhone: mqPhone, mqTablet: mqTablet, mqCoarse: mqCoarse, mqReduce: mqReduce,
-            STORE_COLLAPSE: STORE_COLLAPSE, STORE_DENSITY: STORE_DENSITY
+            STORE_COLLAPSE: STORE_COLLAPSE, STORE_DENSITY: STORE_DENSITY,
+            syncDock: syncDock, redrawKeep: redrawKeep
         }
     };
 })();
