@@ -19,7 +19,7 @@ Every `dept-*-lead` and `ui-lead` reads this file after
 | `dept-logs-lead` | Logs & audit trail (part of 11, owner 2026-11-14) | System Logs page and all its sections, central activity hook, Staff activity, Needs attention, email send log reading, Hotel Settings change log (who/when/old → new, secrets masked). Every lead: a new write path that staff would ask "who changed this?" about gets a log row — tell the logs lead |
 | `dept-backup-lead` | Backups & data safety (part of 11) | nightly backup, Run Backup Now, rotation, download/delete/restore, backup log, health checks, backup failure/stale/off-site alerts |
 | `dept-ai-lead` | In-portal AI Assistant (owner 2026-10-26: handled **only** by this lead) | everything in `.claude/AI_ASSISTANT_PLAN.md`: panel, providers/keys/models, vault, tools, swarm, confirm actions, learning, self-healing, kill switches, evals, completion guardrail, its guide pages. Opus 5.5. Other leads never edit AI files |
-| `dept-import-lead` | Data Import (owner 2026-11-03) | the Import button: reads Excel/CSV/Word/PDF lists (stock, bookings, suppliers; NO staff-list import; `data_import` permission default admin+manager), maps to tables, review-then-confirm, never invents data; works with or without the Assistant. Spec `.claude/IMPORT_PLAN.md`. Sonnet. Assistant-side hook = `dept-ai-lead` |
+| `dept-import-lead` | Data Import (owner 2026-11-03) | the Import button: reads Excel/CSV/Word/PDF lists (stock, bookings, suppliers; NO staff-list import; `data_import` permission default admin+manager), maps to tables, review-then-confirm, never invents data; works with or without the Assistant. Spec `.claude/IMPORT_PLAN.md`. Opus. Assistant-side hook = `dept-ai-lead` |
 | `ui-lead` | Cross-system UI | one visual language across every department; reviews UI requests from the leads |
 | `artifacts-lead` | Sales showcase (owner 2026-11-12) | the anonymised interactive demo of the core features (business-type picker + MSP panel track) in `OneDrive\MSP\Showcase`; same lead in both hotel repos and msp-control-panel. Every lead: when you ship a change to a screen the demo mirrors (`SHOWCASE.md` lists them), add it to the SYNC QUEUE; the artifacts lead works through the whole queue once a week (or when the owner asks), never after each ship (owner 2026-11-17) |
 
@@ -193,6 +193,11 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    Assistant's rails. Sonnet: very small or tedious low-risk work it can surely do (copy/port, mechanical
    edits, label/CSS/markup, docs wording, review of a markup-only diff). haiku: guides/KB, index/mapping,
    lint-only checks, read-only fact listing. If unsure whether logic is touched → Opus.
+   **Per dispatch (owner 2026-11-24):** each agent's frontmatter holds the safe default (Opus for the risk
+   departments, Sonnet for frontend-specialist, ui-designer, ui-lead and qa-quick), identical in both hotel repos;
+   the orchestrator sizes ONE dispatch with `model:`, never by editing the frontmatter. Every build, fix and review
+   goes to a named agent (the owning lead, qa-quick / qa-auditor, or the shared AI-Setup team); general-purpose
+   is denied by the AI-Setup hook.
    **Fable 5.2 (owner 2026-11-14), only these three cases, chosen by the orchestrator (`model: fable`
    on that one dispatch, effort high, never max):** (a) ONE spec/design check before a money,
    cancellation/refund, migration/schema or auth decision is built; (b) ONE final review of a

@@ -24,7 +24,7 @@ inside a brief; cite the domain number and the SYSTEM_MAP.md section instead.
 2. **Build** — dispatch the named specialist (`backend-specialist` / `frontend-specialist`,
    opus; Sonnet only for very small sure tasks per DEPARTMENTS.md cost rule 2) with the brief **verbatim**. Run the two parallel-safe tasks concurrently when
    their file sets are disjoint; never more than 2 specialists at once.
-3. **Polish** — only if the task changed UI files: `ui-designer` (opus, effort medium), scoped to exactly
+3. **Polish** — only if the task changed UI files: `ui-designer` (sonnet, effort medium), scoped to exactly
    the files the specialist reported touching.
 4. **Gate** — with the acceptance criteria + changed-file list: `qa-quick` (sonnet) only when EVERY
    changed hunk is CSS, markup, docs or help text; otherwise, or when qa-quick answers ESCALATE,
@@ -65,8 +65,8 @@ Cost comes from the logs Claude Code already writes, read by a plain script (no 
 - `/compact` after every 3 completed tasks; `/clear` when switching phases.
 - Every brief carries exact file/line scope — no open-ended "explore".
 - Model tiers (owner 2026-11-11; DEPARTMENTS.md cost rule 2 wins on any conflict): Opus for anything
-  touching logic (planner, build, fix, logic QA) · Sonnet for very small sure tasks, port FAIL files and
-  qa-quick · haiku read-only/lint/mapping/guides · Fable only for cost rule 2's three cases.
+  touching logic (planner, build, fix, logic QA) · Sonnet for screens (frontend-specialist, ui-designer, ui-lead),
+  very small sure tasks, port FAIL files and qa-quick · haiku read-only/lint/mapping/guides · Fable only for cost rule 2's three cases.
 - No turn caps (owner 2026-11-18): agents run to the end of their brief; never add `maxTurns` or a
   step limit (DEPARTMENTS.md cost rule 11).
 - Max 2 specialists concurrent.
