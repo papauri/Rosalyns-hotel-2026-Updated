@@ -2464,7 +2464,7 @@ $currency_symbol = getSetting('currency_symbol');
         <!-- Handover note form (first-login plan C3): opened by the hero button, posts to api/handover-notes.php. -->
         <form class="ck-panel ck-handover-form" id="ckHandoverForm" hidden>
             <label class="ck-field" for="ckHandoverBody"><span>Handover note for the next shift</span></label>
-            <textarea id="ckHandoverBody" name="body" maxlength="500" rows="3" required></textarea>
+            <textarea id="ckHandoverBody" name="body" maxlength="1000" rows="3" required></textarea><?php /* 1000: the browser counts emoji as 2; the 500-character limit is checked on Save (JS + server, both per character) */ ?>
             <p class="ck-handover-form__hint">Everyone sees it at the top of Needs attention until they mark it read. It stops showing after 48 hours.</p>
             <div class="ck-handover-form__actions">
                 <button type="submit" class="ck-btn ck-btn--primary ck-btn--sm" id="ckHandoverSave">Save</button>
@@ -2866,8 +2866,8 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php endforeach; ?>
                 </ul>
                 <?php endif; ?>
-                <?php if (!$attnOpen): ?>
-                    <div class="ck-empty ck-empty--good"><i class="fas fa-circle-check"></i><p><strong>All clear.</strong> Nothing is waiting on you.</p></div>
+                <?php if (!$attnOpen): // hidden while a handover note shows; Mark read on the last note brings it back (JS) ?>
+                    <div class="ck-empty ck-empty--good" id="ckAttnAllClear"<?php echo $handoverNote ? ' hidden' : ''; ?>><i class="fas fa-circle-check"></i><p><strong>All clear.</strong> Nothing is waiting on you.</p></div>
                 <?php endif; ?>
                 <?php if ($attnClear): ?>
                 <details class="ck-clear">
@@ -3172,7 +3172,8 @@ $currency_symbol = getSetting('currency_symbol');
                     ev.preventDefault();
                     if (save.disabled) { return; } // one save per click: no double note
                     const text = body.value.trim();
-                    if (text === '' || text.length > 500) { dashShowError('Write a note of 1 to 500 characters.'); return; }
+                    // Array.from counts characters like the server's mb_strlen (an emoji is 1, not 2).
+                    if (text === '' || Array.from(text).length > 500) { dashShowError('Write a note of 1 to 500 characters.'); return; }
                     save.disabled = true;
                     dashPost('api/handover-notes.php', { action: 'write', body: text }).then((d) => {
                         if (d && d.success) {
@@ -3192,6 +3193,16 @@ $currency_symbol = getSetting('currency_symbol');
                 el.textContent = '';
                 String(text).split('\n').forEach((line, i) => { if (i) { el.appendChild(document.createElement('br')); } el.appendChild(document.createTextNode(line)); });
             };
+            // Remove the note row; when the list is then empty, drop it and bring "All clear" back.
+            const removeNoteRow = (li) => {
+                const list = li.parentElement;
+                li.remove();
+                if (list && !list.querySelector('li')) {
+                    list.remove();
+                    const allClear = document.getElementById('ckAttnAllClear');
+                    if (allClear) { allClear.hidden = false; }
+                }
+            };
             document.querySelectorAll('[data-handover-read]').forEach((btn) => {
                 btn.addEventListener('click', () => {
                     if (btn.disabled) { return; }
@@ -3200,7 +3211,7 @@ $currency_symbol = getSetting('currency_symbol');
                         const li = btn.closest('[data-handover-item]');
                         if (!d || !d.success) {
                             // A note that expired meanwhile is gone anyway.
-                            if (d && d.error === 'That note is no longer there.' && li) { li.remove(); }
+                            if (d && d.error === 'That note is no longer there.' && li) { removeNoteRow(li); return; }
                             else { dashShowError((d && d.error) || 'Could not mark the note read.'); }
                             btn.disabled = false;
                             return;
@@ -3212,9 +3223,7 @@ $currency_symbol = getSetting('currency_symbol');
                             btn.setAttribute('data-handover-read', String(next.id));
                             btn.disabled = false;
                         } else if (li) {
-                            const list = li.parentElement;
-                            li.remove();
-                            if (list && !list.querySelector('li')) { list.remove(); }
+                            removeNoteRow(li);
                         }
                     }).catch(() => { btn.disabled = false; dashShowError('Could not mark the note read. Check the connection and try again.'); });
                 });

@@ -53,6 +53,13 @@ check($A('admin', 'bookings.php', 'POST', [], ['action' => 'get_booking']), 'a r
 check($A('admin', 'change-password.php', 'POST', [], ['new_password' => 'x']), 'changing one\'s own password passes');
 check($A('admin_api', 'presence.php', 'POST'), 'online presence passes');
 check($A('admin_api', 'global-search.php', 'POST'), 'search passes');
+// Dashboard handover notes (first-login plan C2): writing is a change, marking read / Got it are personal.
+check(!$A('admin_api', 'handover-notes.php', 'POST', [], ['action' => 'write', 'body' => 'x']), 'writing a handover note refused');
+check($A('admin_api', 'dashboard-seen.php', 'POST', [], ['action' => 'handover_read', 'note_id' => '1']), 'marking a handover note read passes');
+check(!$T('admin_api', 'handover-notes.php', 'POST', [], ['action' => 'write', 'body' => 'x']), 'trial: writing a handover note refused');
+check($T('admin_api', 'dashboard-seen.php', 'POST', [], ['action' => 'welcome_dismissed']), 'trial: Got it on the welcome card passes');
+check(!rh_licence_write_allowed('admin_api', 'handover-notes.php', 'POST', [], ['action' => 'write', 'body' => 'x']), 'licence read-only: writing a handover note refused');
+check(rh_licence_write_allowed('admin_api', 'dashboard-seen.php', 'POST', [], ['action' => 'handover_read', 'note_id' => '1']), 'licence read-only: marking a handover note read passes');
 check(!$A('admin_api', 'ai-action.php', 'POST', [], ['action' => 'confirm']), 'the Assistant\'s confirmed actions refused');
 check(!$A('admin_api', 'user-permissions.php', 'POST', [], ['action' => 'save']), 'changing permissions refused');
 check(!$A('station', 'kds-action.php', 'GET', ['action' => 'bump_ticket']), 'a kitchen bump (sent as GET) refused');

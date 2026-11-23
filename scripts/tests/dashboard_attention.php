@@ -237,6 +237,15 @@ $fPos = strpos($d, '<?php foreach ($attnOpen as $i => $a): ?>');
 check($hPos !== false && $fPos !== false && $hPos < $fPos && strpos($d, '<?php if ($attnOpen || $handoverNote): ?>') !== false, 'handover: the note is the first row of the list');
 check(strpos($d, '[$attnOpen, $attnClear, $attnTotal] = rh_dash_attention_split($attn);') !== false && strpos($d, '$attnTotal +') === false && strpos($d, '$attnTotal++') === false,
     'handover: the badge and "N things need you" stay the attention total only');
+check(strpos($d, 'id="ckAttnAllClear"<?php echo $handoverNote ? \' hidden\' : \'\'; ?>') !== false,
+    'handover: "All clear" is hidden while a note shows');
+check(strpos($d, "getElementById('ckAttnAllClear')") !== false && strpos($d, 'allClear.hidden = false') !== false,
+    'handover: marking the last note read brings "All clear" back');
+check(substr_count($d, 'removeNoteRow(li)') === 2,
+    'handover: a read note and an expired note both leave the list the same way (empty list -> "All clear")');
+check(strpos($d, 'Array.from(text).length > 500') !== false && strpos($d, 'text.length > 500') === false
+    && strpos($d, 'maxlength="500"') === false,
+    'handover: the browser counts the 500 limit per character like the server (emoji = 1)');
 
 /* ---- Part 2: counts == the lists their links open (Liwonde only) ---- */
 if (in_array('--db', $argv, true)) {
