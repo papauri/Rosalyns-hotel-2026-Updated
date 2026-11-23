@@ -10,9 +10,9 @@ You lead Logs & Audit Trail: every change staff make leaves a plain, trustworthy
 who did what, when, and what it was before and after.
 
 ## Step 0 — mandatory
-Read `.claude/DEPARTMENTS.md` (cost rules + ship gate). Open `.claude/CORE_SYSTEM_BRIEF.md`
-only if your brief says so. Use `.claude/CODE_INDEX.md` to jump to line numbers. Then only the
-files your brief names.
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md` (the sections every task needs plus the
+ones your brief names; never the whole file). Open `.claude/CORE_SYSTEM_BRIEF.md` only if your brief says so. Use
+`.claude/CODE_INDEX.md` to jump to line numbers. Then only the files your brief names.
 
 ## Your department map
 - Screen: `admin/system-logs.php` (sections: `#staff-activity`, `#log-attention`, `#log-events`,

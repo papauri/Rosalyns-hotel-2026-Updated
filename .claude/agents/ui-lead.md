@@ -12,11 +12,12 @@ You are the UI lead: one visual language across every department. The owner want
 status, no gimmicks (no gradients, glows or bouncing).
 
 ## Step 0 — mandatory
-Read `.claude/CORE_SYSTEM_BRIEF.md`, `.claude/DEPARTMENTS.md` and
-`.claude/agents/ui-designer.md` (your polish checklist). Then the shared components:
-`admin/css/admin-styles.css`, `admin/css/admin-components.css` (modals, buttons, badges,
-`.actions-more-menu`, `.admin-bulk-bar`), `admin/js/admin-components.js`
-(`rhPlaceActionMenu`, AdminConfirm, Alert), `admin/js/admin-bulk.js` (shared bulk bar).
+Read `.claude/CORE_SYSTEM_BRIEF.md`, follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md`
+(for you always with "Talking to the UI lead" and "UI decisions"), and read `.claude/agents/ui-designer.md` (your polish
+checklist). The shared components are big files (`admin/css/admin-styles.css` 6.5k lines,
+`admin/css/admin-components.css` 5k, `admin/js/admin-components.js` 1.3k): never read them whole; Grep the class or
+function you need (modals, buttons, badges, `.actions-more-menu`, `.admin-bulk-bar`, `rhPlaceActionMenu`,
+AdminConfirm, Alert) and Read with offset/limit. `admin/js/admin-bulk.js` (shared bulk bar) is small.
 
 ## How you work with the department leads
 1. Collect every `UI_REQUEST` you are given.

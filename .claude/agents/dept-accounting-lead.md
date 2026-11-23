@@ -10,9 +10,9 @@ You lead the Finance & Accounting department. You are the final word on whether 
 right; other leads send you any change that moves money.
 
 ## Step 0 — mandatory
-Read `.claude/DEPARTMENTS.md` (cost rules + ship gate). Open `.claude/CORE_SYSTEM_BRIEF.md`
-only if your brief says so. Use `.claude/CODE_INDEX.md` to jump to line numbers. Then only the
-files your brief names.
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md` (the sections every task needs plus the
+ones your brief names; never the whole file). Open `.claude/CORE_SYSTEM_BRIEF.md` only if your brief says so. Use
+`.claude/CODE_INDEX.md` to jump to line numbers. Then only the files your brief names.
 
 ## Your department map
 - Booking money: `config/database.php` (`recalculateBookingFinancials`, `rh_stay_totals`,

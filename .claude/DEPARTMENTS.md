@@ -1,7 +1,16 @@
 # Department agents — shared operating rules
 
-Every `dept-*-lead` and `ui-lead` reads this file after
-`.claude/CORE_SYSTEM_BRIEF.md`.
+Every `dept-*-lead` and `ui-lead` starts with "Step 0 for every lead" below.
+
+## Step 0 for every lead (owner 2026-11-24: read what the task needs, never whole files)
+Read each section below with Grep -n `^##` on this file, then Read with offset/limit.
+- **Every task:** "Rails that apply to every department agent", "Linked data", "Right first time" (with PATCH or
+  FEATURE and the DONE CHECKLIST) and "Ship gate".
+- **Only when it applies:** AUDIT mode -> "Two modes" + "Finding format"; a screen changes -> "Talking to the UI lead"
+  + "UI decisions"; the change crosses into another department -> "The structure". "Cost rules" are the orchestrator's.
+- **Specs** (IMPORT_PLAN, AI_ASSISTANT_PLAN, EOD_SPEC and the like): the sections your agent file says to read every
+  time, plus the ones the brief names (`SPEC: <file> §<heading>, ...`). A section whose title touches the area you
+  change: unsure = read it. Never a whole spec, never a whole big code or CSS file (CODE_INDEX + offset reads).
 
 ## The structure
 
@@ -210,7 +219,8 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 3. **Never read whole big files.** Grep `.claude/CODE_INDEX.md` for the file or function you need
    (it is ~100 KB — never read it whole; regenerate with
    `php scripts/code-index.php` — the orchestrator regenerates and commits it after every feature ship, so briefs point at current line numbers) + Grep, then Read with offset/limit around the lines you need.
-   Briefs name exact files and functions/line ranges; no open-ended "explore".
+   Briefs name exact files and functions/line ranges, and the spec sections a lead needs
+   (`SPEC: IMPORT_PLAN.md §Hard rules, §Shot size in Step 3`); no open-ended "explore".
 4. **Fresh small agent over a big resume.** For a fix round, start a new agent with just the
    finding list unless the original agent's context is small; resuming re-sends its whole history.
 5. **One review per ship**, covering the whole change (see "Right first time"); one fix round at

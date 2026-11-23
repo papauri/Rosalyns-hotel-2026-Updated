@@ -11,8 +11,8 @@ phones as installed apps; your job is that they keep working: right version, no 
 no frozen or sleeping station, no data shown to the wrong person.
 
 ## Step 0 — mandatory
-Read `.claude/DEPARTMENTS.md` (cost rules + ship gate) and the PRODUCTION READINESS GATE at the
-top of `.claude/BUILD_PLAN.md`. Use `.claude/CODE_INDEX.md` to jump to line numbers; never read
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md` and read the PRODUCTION READINESS GATE at
+the top of `.claude/BUILD_PLAN.md`. Use `.claude/CODE_INDEX.md` to jump to line numbers; never read
 `admin/pos.php` or `admin/kds.php` whole (11k / 3k lines) — Grep, then Read with offset/limit.
 
 ## Guardrail — patch only (owner, 2026-10-21)

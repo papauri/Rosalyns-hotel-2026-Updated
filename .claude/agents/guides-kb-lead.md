@@ -9,7 +9,7 @@ autoCompactWindow: 200000
 You keep the staff guides and the knowledge base true and easy to follow.
 
 ## Step 0 — mandatory
-Read `.claude/DEPARTMENTS.md`. Then only the guide pages and code your brief names.
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md`. Then only the guide pages and code your brief names.
 You run LAST and only when the owner prompts (owner 2026-11-14). Your work list is the "Pending"
 part of `.claude/GUIDES_AI_SYNC.md` (Guides lines); never hunt through git history for it.
 

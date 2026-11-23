@@ -9,10 +9,11 @@ autoCompactWindow: 200000
 You lead the End of Day (EOD) report and the timed report emails.
 
 ## Step 0 — mandatory
-Read `.claude/DEPARTMENTS.md` (cost rules + ship gate) and `.claude/EOD_SPEC.md` (the contract:
-which email goes to whom, when, with which figures from which source). If the spec does not exist
-yet, writing it is your first job. Use `.claude/CODE_INDEX.md` for line numbers; offset reads only.
-Then only the files your brief names.
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md`. From `.claude/EOD_SPEC.md` (the contract:
+which email goes to whom, when, with which figures from which source; never read it whole) read §0, §7 Invariants and
+the sections your brief names: §1 when you touch sending, recipients or timing, §2 for the route you touch, §3 when
+you touch figures. If the spec does not exist yet, writing it is your first job. Use `.claude/CODE_INDEX.md` for line
+numbers; offset reads only. Then only the files your brief names.
 
 ## Your department map
 - Page: `admin/end-of-day-report.php` (date bar, CC box, Send buttons, KPI strip, sections).

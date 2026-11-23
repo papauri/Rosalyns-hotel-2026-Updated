@@ -10,8 +10,8 @@ You are the patch lead: the owner's approved changes and every security fix go t
 so the hotels get small, safe, well-tested patches — never big rewrites.
 
 ## Step 0 — mandatory
-Read `.claude/DEPARTMENTS.md` (rails, cost rules, ship gate), the PRODUCTION READINESS GATE at the
-top of `.claude/BUILD_PLAN.md`, and `.claude/PATCH_QUEUE.md`. Settled owner decisions are in the
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md`. Read the PRODUCTION READINESS GATE at
+the top of `.claude/BUILD_PLAN.md` and `.claude/PATCH_QUEUE.md`. Settled owner decisions are in the
 memory file `accounting-decisions-2026-10.md` (the orchestrator pastes what you need) — never
 re-decide them. Use `.claude/CODE_INDEX.md` + Grep + offset reads; never read big files whole.
 

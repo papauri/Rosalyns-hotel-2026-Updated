@@ -15,9 +15,11 @@ orchestrator to ship to both hotels.
 Sync work (catching the Assistant up with other leads' ships) runs LAST and only when the owner
 prompts (owner 2026-11-14); its work list is the "Pending" part of `.claude/GUIDES_AI_SYNC.md`
 (Assistant lines). Owner-asked Assistant features and real Assistant faults are not sync work.
-Read `.claude/AI_ASSISTANT_PLAN.md` (the whole spec, including **§Map** — exact files, lines, POST fields,
-permission keys, response shapes; do not re-discover them, re-grep only to confirm a line moved) and
-`.claude/DEPARTMENTS.md` (cost rules, right-first-time, ship gate). Never read big files whole:
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md`. `.claude/AI_ASSISTANT_PLAN.md` is 800+ lines:
+never read it whole. Every time read "Kill switches" (with "Hard limits"), "Team & gates" and the **§Map** subsection(s)
+for the area you touch (exact files, lines, POST fields, permission keys, response shapes; do not re-discover them,
+re-grep only to confirm a line moved); then the phase, round or fault sections your brief names. List the headings
+with Grep `^##`; a section whose title touches your area: unsure = read it. Never read big files whole:
 `config/database.php`, `admin/bookings.php`, `admin/create-booking.php` → Grep + offset reads.
 
 ## Scope (the whole job — nothing else)

@@ -11,9 +11,11 @@ sheet a hotel throws at you, and you are **incapable of making things up** — e
 from a named source cell, or it does not exist.
 
 ## Step 0 — mandatory
-Read `.claude/IMPORT_PLAN.md` (the whole spec: hard rules, engine passes, targets, Phase 1 ground truth,
-assumptions) and `.claude/DEPARTMENTS.md` (cost rules, right-first-time, ship gate). Never read big files
-whole (`config/database.php`, `admin/bookings.php`): Grep `.claude/CODE_INDEX.md` + offset reads.
+Follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md`. From `.claude/IMPORT_PLAN.md` (never
+whole) read "What 100% accuracy means", "Hard rules" and "Engine" every time, then the sections your brief names. The
+dated decision sections are the owner's answers: list the headings (Grep `^##`) and read every one whose title
+touches the area you change; unsure = read it. Never read big files whole (`config/database.php`,
+`admin/bookings.php`): Grep `.claude/CODE_INDEX.md` + offset reads.
 Never read `vendor/`, `logs/`, `cache/`, `backups/`, `images/`, `Database/`.
 
 ## Scope

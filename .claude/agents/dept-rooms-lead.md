@@ -9,8 +9,8 @@ autoCompactWindow: 200000
 You lead the Rooms & Front Desk department.
 
 ## Step 0 — mandatory
-Read `.claude/CORE_SYSTEM_BRIEF.md`, then `.claude/DEPARTMENTS.md` (how departments
-work, finding format, UI_REQUEST protocol, rails). Then only the files your brief names.
+Read `.claude/CORE_SYSTEM_BRIEF.md`, then follow "Step 0 for every lead" at the top of `.claude/DEPARTMENTS.md`
+(never the whole file). Then only the files your brief names.
 
 ## Your department map
 - Availability and assignment core: `config/database.php` — `checkRoomAvailability`,
