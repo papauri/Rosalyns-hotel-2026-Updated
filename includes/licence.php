@@ -685,7 +685,8 @@ if (!function_exists('rh_licence_env')) {
     // ------------------------------------------------------------------ Update from Remote (panel Deployments, 2026-11-23)
     //
     // The panel may ask this site to pull its own branch: deploy_requested {id, at} inside the SIGNED answer. No cPanel
-    // credentials anywhere: the account's cron runs scripts/deploy-check.php --want, cPanel's own `uapi VersionControl update`
+    // credentials anywhere: the account's cron runs scripts/deploy-check.php --want, `git pull --ff-only origin main` (its
+    // output and an "exit=N" line in storage/deploy-last.json; cPanel's uapi cannot run from cron on this host, CageFS)
     // and scripts/deploy-check.php --report. Settings: licence_deploy_requested (record only), licence_deploy_seen_id /
     // licence_deploy_seen_at (picked up), licence_deploy_done_id / licence_deploy_ok ('1'|'0') / licence_deploy_msg (result).
     // Everything below is pure apart from rh_licence_git_head (reads files only).
@@ -756,22 +757,33 @@ if (!function_exists('rh_licence_env')) {
         return $late ? 'no_result' : 'none';
     }
 
-    /** Text for the panel: token-shaped text removed, printable ASCII only (a predictable size in the check-in), at most $max characters. */
+    /**
+     * Text for the panel: credentials in addresses (scheme://user:pass@ or scheme://token@ -> scheme://***@, as git echoes
+     * remote URLs) and token-shaped text removed, printable ASCII only (a predictable size in the check-in), at most $max characters.
+     */
     function rh_licence_deploy_scrub(string $text, int $max = RH_LICENCE_DEPLOY_MSG_MAX): string
     {
+        $text = (string)preg_replace('~\b([a-z][a-z0-9+.\-]*://)[^\s/]+@~i', '$1***@', $text);
         $text = (string)preg_replace('/(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]{6,}|cpanel\s+[^\s:]+:\S+|Bearer\s+\S+)/i', '[token]', $text);
         $text = (string)preg_replace('/[^\x20-\x7E]+/', ' ', $text);
         return substr(trim((string)preg_replace('/ {2,}/', ' ', $text)), 0, max(0, $max));
     }
 
     /**
-     * The result of `uapi --output=jsonpretty VersionControl update` as {ok, msg}: {"result": {"status": 1|0, "errors": [...]}}
-     * (or the same without "result"); text around the JSON (stderr from 2>&1) is ignored. msg scrubbed, at most 500 characters.
+     * The result file the cron line wrote (storage/deploy-last.json), as {ok, msg} (msg scrubbed, at most 500 characters):
+     *  - the output of `git pull --ff-only origin main` (stdout and stderr) ending in a line "exit=N" (the cron line since
+     *    2026-11-23): see rh_licence_deploy_git_result. Git output without that line = the command did not finish;
+     *  - the older uapi JSON, {"result": {"status": 1|0, "errors": [...]}} (or the same without "result"; text around the
+     *    JSON is stderr), still read so a result written by the old cron line is recorded too.
      */
     function rh_licence_deploy_uapi_result(string $body): array
     {
         if (trim($body) === '') {
-            return ['ok' => false, 'msg' => 'The update command wrote nothing (is /usr/local/cpanel/bin/uapi available to the cron job?).'];
+            return ['ok' => false, 'msg' => 'The update command wrote nothing (check the cron line in scripts/deploy-check.php).'];
+        }
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\R/', $body) ?: []), static fn($l) => $l !== ''));
+        if ($lines && preg_match('/^exit=(\d+)$/D', $lines[count($lines) - 1], $m)) {
+            return rh_licence_deploy_git_result(array_slice($lines, 0, -1), (int)$m[1]); // checked first: git output may hold "{...}"
         }
         $j = json_decode($body, true);
         if (!is_array($j)) {
@@ -783,6 +795,9 @@ if (!function_exists('rh_licence_env')) {
             $j = $j['result'];
         }
         if (!is_array($j) || !array_key_exists('status', $j)) {
+            if (preg_grep('/^(From |Updating |Already up|Fast-forward|error:|fatal:|hint:)/', $lines)) {
+                return ['ok' => false, 'msg' => rh_licence_deploy_scrub('The update command did not finish (no exit code): ' . implode(' ', array_slice($lines, -5)))];
+            }
             return ['ok' => false, 'msg' => rh_licence_deploy_scrub('cPanel did not answer in the expected way: ' . substr($body, 0, 300))];
         }
         if ((int)$j['status'] === 1) {
@@ -799,6 +814,42 @@ if (!function_exists('rh_licence_env')) {
         $why = trim(implode(' ', $why));
         return ['ok' => false, 'msg' => rh_licence_deploy_scrub('cPanel said no: ' . ($why !== '' ? $why : 'no reason given')
             . ' (it only pulls when the live copy can fast-forward: local changes on the server stop it).')];
+    }
+
+    /**
+     * `git pull --ff-only` output lines (the "exit=N" line taken off) as {ok, msg}. Exit 0 = done: "Already up to date."
+     * or the "Updating a..b" line with "Fast-forward" and the "N files changed" line (found anywhere: 2>&1 mixes stdout
+     * and stderr). Any other exit = failed: git's own lines from the first "error:" / "fatal:" on (hint: lines left
+     * out), or the last 5 lines when there is none (e.g. the shell's "No such file" for exit 127).
+     */
+    function rh_licence_deploy_git_result(array $lines, int $exit): array
+    {
+        $text = implode("\n", $lines);
+        if ($exit === 0) {
+            if (preg_match('/^Already up[ -]to[ -]date\b/mi', $text)) {
+                return ['ok' => true, 'msg' => 'git pull: Already up to date.'];
+            }
+            $parts = [];
+            if (preg_match('/^Updating \S+/m', $text, $u)) {
+                $parts[] = $u[0];
+            }
+            if (preg_match('/^Fast-forward\b/m', $text)) {
+                $parts[] = 'Fast-forward';
+            }
+            if (preg_match('/^\d+ files? changed[^\n]*/m', $text, $c)) {
+                $parts[] = $c[0];
+            }
+            return ['ok' => true, 'msg' => rh_licence_deploy_scrub('git pull: ' . ($parts ? implode(', ', $parts) : 'finished') . '.')];
+        }
+        $why = array_slice($lines, -5);
+        foreach ($lines as $i => $l) {
+            if (preg_match('/^(error|fatal):/i', $l)) {
+                $why = array_slice($lines, $i);
+                break;
+            }
+        }
+        $why = array_filter($why, static fn($l) => strncasecmp($l, 'hint:', 5) !== 0);
+        return ['ok' => false, 'msg' => rh_licence_deploy_scrub('git pull failed (exit ' . $exit . '): ' . ($why ? implode(' ', $why) : 'no output'))];
     }
 
     /**

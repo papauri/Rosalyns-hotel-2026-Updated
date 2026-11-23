@@ -5,7 +5,8 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); echo "CLI only.\n"; exit(1); 
  * Pure: no database, no network, no command run (the .git fixtures are made in the temp folder and removed).
  * Usage (from the repo root): php scripts/tests/licence_deploy.php
  *  1. --want decisions: new / seen / done / stale answer / lapsed request, the exact edges, missing vs null vs malformed;
- *  2. --report decisions (file after / before the pick-up, empty, 15 minutes) and the uapi answer (ok, failed, noise, empty);
+ *  2. --report decisions (file after / before the pick-up, empty, 15 minutes), the git pull result (exit=N: up to date,
+ *     fast-forward, local changes, diverged, network, no exit line), the older uapi answer (ok, failed, noise, empty), scrub;
  *  3. .git reading: loose, packed, detached, gitdir file, ".." refused, nothing readable;
  *  4. the `deploy` block shape (as the panel cleans it) and the 4096-byte body limit;
  *  5. the files: the CLI guard exits 1, no command is ever run from PHP, the result is stored only from a verified answer.
@@ -91,10 +92,45 @@ $r = rh_licence_deploy_uapi_result('{"result":{"status":0,"errors":["fatal: Auth
 check($r['ok'] === false && strpos($r['msg'], 'ghp_') === false && strpos($r['msg'], 'github_pat_') === false && strpos($r['msg'], 'abc.def') === false
     && strpos($r['msg'], '[token]') !== false && preg_match('/^[\x20-\x7E]*$/', $r['msg']) === 1 && strlen($r['msg']) <= 500, 'uapi: tokens and control characters scrubbed, at most 500', substr($r['msg'], 0, 120));
 
+// git pull --ff-only output ending in "exit=N" (the cron line since 2026-11-23: cPanel's uapi cannot run from cron, CageFS)
+$from = "From https://github.com/papauri/Liwonde_Sun_Hotel_2026\n * branch            main       -> FETCH_HEAD\n";
+$r = rh_licence_deploy_uapi_result($from . "Already up to date.\nexit=0\n");
+eq(['ok' => true, 'msg' => 'git pull: Already up to date.'], $r, 'git: already up to date');
+$r = rh_licence_deploy_uapi_result($from . "   1a2b3c4..5d6e7f8  main       -> origin/main\nUpdating 1a2b3c4..5d6e7f8\nFast-forward\n"
+    . " includes/licence.php        | 12 +++++++-----\n src/{old => new}/x.php      |  2 +-\n 2 files changed, 8 insertions(+), 6 deletions(-)\nexit=0\n");
+eq(['ok' => true, 'msg' => 'git pull: Updating 1a2b3c4..5d6e7f8, Fast-forward, 2 files changed, 8 insertions(+), 6 deletions(-).'], $r, 'git: fast-forward with the file summary (a "{a => b}" rename line is not read as JSON)');
+$r = rh_licence_deploy_uapi_result("Updating 1a2b3c4..5d6e7f8\r\nFast-forward\r\n 1 file changed, 1 insertion(+)\r\nexit=0\r\n");
+check($r['ok'] === true && $r['msg'] === 'git pull: Updating 1a2b3c4..5d6e7f8, Fast-forward, 1 file changed, 1 insertion(+).', 'git: CRLF line ends, one file', $r['msg']);
+$r = rh_licence_deploy_uapi_result("exit=0\n");
+eq(['ok' => true, 'msg' => 'git pull: finished.'], $r, 'git: exit 0 with no output = done');
+$r = rh_licence_deploy_uapi_result($from . "Updating 1a2b3c4..5d6e7f8\nerror: Your local changes to the following files would be overwritten by merge:\n\tincludes/licence.php\n\tadmin/a.php\n\tadmin/b.php\n\tadmin/c.php\n\tadmin/d.php\nPlease commit your changes or stash them before you merge.\nAborting\nexit=1\n");
+check($r['ok'] === false && strpos($r['msg'], 'git pull failed (exit 1): error: Your local changes to the following files would be overwritten by merge: includes/licence.php') === 0
+    && strpos($r['msg'], 'Aborting') !== false && strpos($r['msg'], 'Updating') === false && strpos($r['msg'], 'exit=') === false, 'git: local changes would be overwritten (exit 1), from the error line on', $r['msg']);
+$r = rh_licence_deploy_uapi_result($from . "hint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nfatal: Not possible to fast-forward, aborting.\nexit=128\n");
+eq(['ok' => false, 'msg' => 'git pull failed (exit 128): fatal: Not possible to fast-forward, aborting.'], $r, 'git: diverged (exit 128), hint lines left out');
+$r = rh_licence_deploy_uapi_result("fatal: unable to access 'https://user:s3cretTok@github.com/papauri/x/': Could not resolve host: github.com\nexit=128\n");
+check($r['ok'] === false && $r['msg'] === "git pull failed (exit 128): fatal: unable to access 'https://***@github.com/papauri/x/': Could not resolve host: github.com"
+    && strpos($r['msg'], 's3cretTok') === false, 'git: network failure (exit 128), credentials in the address scrubbed', $r['msg']);
+$r = rh_licence_deploy_uapi_result("/bin/sh: /usr/bin/git: No such file or directory\nexit=127\n");
+eq(['ok' => false, 'msg' => 'git pull failed (exit 127): /bin/sh: /usr/bin/git: No such file or directory'], $r, 'git: no error/fatal line = the last lines (exit 127)');
+$r = rh_licence_deploy_uapi_result($from . "Updating 1a2b3c4..5d6e7f8\nFast-forward\n");
+check($r['ok'] === false && strpos($r['msg'], 'The update command did not finish (no exit code)') === 0 && strpos($r['msg'], 'Fast-forward') !== false, 'git: output with no exit= line = not finished, failed', $r['msg']);
+$r = rh_licence_deploy_uapi_result("Updating 1a2b3c4..5d6e7f8\nexit=0\nmore after\n");
+check($r['ok'] === false && strpos($r['msg'], 'did not finish (no exit code)') !== false, 'git: exit= not the last line = not finished', $r['msg']);
+$r = rh_licence_deploy_uapi_result("exit=0x\n");
+check($r['ok'] === false && strpos($r['msg'], 'did not answer in the expected way') !== false, 'git: a malformed exit line is not a result', $r['msg']);
+$r = rh_licence_deploy_uapi_result(str_repeat("error: x\n", 200) . "exit=1\n");
+check($r['ok'] === false && strlen($r['msg']) <= 500, 'git: long failure cut to 500');
+
 eq('a b c', rh_licence_deploy_scrub("a\tb\r\n\x00c"), 'scrub: control characters and line breaks become one space');
 eq('caf tea', rh_licence_deploy_scrub("caf\u{00e9} tea"), 'scrub: printable ASCII only');
 eq(500, strlen(rh_licence_deploy_scrub(str_repeat('y', 2000))), 'scrub: cut to 500');
 eq('[token]', rh_licence_deploy_scrub('cpanel user:SECRETTOKEN'), 'scrub: a cPanel token header');
+eq('fatal: https://***@github.com/x', rh_licence_deploy_scrub('fatal: https://user:tok@github.com/x'), 'scrub: user:password in an address');
+eq("'https://***@github.com' x", rh_licence_deploy_scrub("'https://tok@github.com' x"), 'scrub: a token in an address');
+eq('https://***@github.com/x', rh_licence_deploy_scrub('https://user:p@ss@github.com/x'), 'scrub: a password holding "@" is removed whole');
+eq('https://***@github.com/x', rh_licence_deploy_scrub('https://ghp_ABCDEFGH123456@github.com/x'), 'scrub: a GitHub token in an address');
+eq('https://github.com/papauri/x mail a@b.com', rh_licence_deploy_scrub('https://github.com/papauri/x mail a@b.com'), 'scrub: plain addresses and emails left alone');
 
 // ---- 3. .git reading (fixtures in the temp folder)
 $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'rh_deploy_git_' . bin2hex(random_bytes(4));
@@ -189,7 +225,9 @@ foreach (token_get_all($cli) as $t) {
 $first = strtok(substr($cli, strpos($cli, "\n") + 1), "\n");
 check(strpos($first, "if (PHP_SAPI !== 'cli') { http_response_code(403); echo") === 0 && strpos($first, 'exit(1); }') !== false, 'deploy-check.php: first line refuses non-CLI and exits 1', $first);
 check(preg_match('/\bexit\s*\(\s*["\']/', $code) === 0 && preg_match('/\bdie\s*\(/', $code) === 0, 'deploy-check.php: never exit("text") / die() (exit 0 would run the update)');
-check(preg_match('/\b(exec|shell_exec|system|passthru|proc_open|popen|pcntl_exec)\s*\(|`/', $code) === 0, 'deploy-check.php: runs no command (cron runs uapi, never PHP)');
+check(preg_match('/\b(exec|shell_exec|system|passthru|proc_open|popen|pcntl_exec)\s*\(|`/', $code) === 0, 'deploy-check.php: runs no command (cron runs git, never PHP)');
+check(strpos($cli, '&& { GIT_TERMINAL_PROMPT=0 /usr/bin/git pull --ff-only origin main; echo "exit=$?"; } > storage/deploy-last.json 2>&1; /usr/local/bin/php scripts/deploy-check.php --report storage/deploy-last.json') !== false
+    && strpos($cli, '/usr/local/cpanel/bin/uapi --output') === false, 'deploy-check.php: the documented cron line pulls with git (uapi fails under CageFS) and writes the exit code');
 check(strpos($cli, 'register_shutdown_function') !== false && strpos($cli, "rh_licence_status(true)") !== false && strpos($cli, "\$st['reason'] ?? '') === 'ok'") !== false,
     'deploy-check.php: an unexpected end exits 1; --want decides from the re-verified token');
 $lic = (string)file_get_contents($root . '/includes/licence.php');

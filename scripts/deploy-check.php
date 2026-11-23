@@ -1,16 +1,23 @@
 <?php
 if (PHP_SAPI !== 'cli') { http_response_code(403); echo "CLI only.\n"; exit(1); } // never over the web; exit 1 (never exit("text"), which exits 0) so `&&` never runs the update
 // "Update from Remote" asked for on the licence panel's Deployments page (contract: msp-control-panel
-// .claude/DEPLOY_HOTEL_SPEC.md). No cPanel credentials anywhere: the account's own cron runs the pull with cPanel's
-// command-line UAPI. cPanel > Cron Jobs, every 5 minutes, one line (USER, SITE and the branch cPanel has checked out):
+// .claude/DEPLOY_HOTEL_SPEC.md). No cPanel credentials anywhere: the account's own cron runs the pull with git itself.
+// cPanel > Cron Jobs, every 5 minutes, one line (USER, SITE and the branch cPanel has checked out):
 //
-//   */5 * * * * cd /home/USER/SITE && php scripts/deploy-check.php --want && /usr/local/cpanel/bin/uapi --output=jsonpretty VersionControl update repository_root=/home/USER/SITE branch=main > storage/deploy-last.json 2>&1; php scripts/deploy-check.php --report storage/deploy-last.json
+//   */5 * * * * cd /home/USER/SITE && /usr/local/bin/php scripts/deploy-check.php --want && { GIT_TERMINAL_PROMPT=0 /usr/bin/git pull --ff-only origin main; echo "exit=$?"; } > storage/deploy-last.json 2>&1; /usr/local/bin/php scripts/deploy-check.php --report storage/deploy-last.json
+//
+// Why git and not cPanel's uapi: cron runs inside CageFS on this host, where uapi fails ("Failed to execute
+// /usr/local/cpanel/cpanel"). The site runs straight from the repository folder (no .cpanel.yml), so a fast-forward-only
+// pull of the branch already checked out IS cPanel's Update from Remote. The remote is public HTTPS: no credentials, and
+// GIT_TERMINAL_PROMPT=0 makes git fail instead of waiting for a password. Local changes on the server stop the pull.
+// Why /usr/local/bin/php: cron's plain `php` may be php-cgi (not the command line); this script then refuses (exit 1), so
+// nothing is pulled and nothing recorded. Use the command-line PHP path your host gives.
 //
 //   --want         exit 0 when the last VERIFIED licence answer (under 2 hours old) carries a request (under 24 hours old)
 //                  newer than the one picked up and the one finished here; marks it picked up. Otherwise exit 1, so the
-//                  uapi pull runs only when asked (it pulls only because `branch` is given; never another branch).
-//   --report FILE  always runs (after the `;`): when a request was picked up, records the result in FILE (written by the
-//                  uapi command after the pick-up; an older or missing file is ignored, and 15 minutes without one is
+//                  git pull runs only when asked (always name the branch already checked out; never another branch).
+//   --report FILE  always runs (after the `;`): when a request was picked up, records the result in FILE (git's output and
+//                  "exit=N", written after the pick-up; an older or missing file is ignored, and 15 minutes without one is
 //                  recorded as a failure), removes FILE, then checks in with the panel so it hears now. The live commit
 //                  (read from .git) goes with every check-in.
 // storage/ is refused by the web server (.htaccess there and RewriteRule in the root .htaccess) and is not in git.
