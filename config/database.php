@@ -5090,7 +5090,9 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
         foreach ($roomIds as $roomId) {
             $availability = checkIndividualRoomAvailability($roomId, $comboFrom, (string)$booking['check_out_date'], $bookingId, $comboMoveIn && !isset($heldBefore[$roomId]));
             if (empty($availability['available'])) {
-                throw new RuntimeException($availability['error'] ?? 'One of the joined rooms is no longer available');
+                require_once __DIR__ . '/../includes/stay-change-lock.php';
+                throw new RuntimeException(rh_stay_clash_text($pdo, 'Room ' . (string)($availability['individual_room']['room_number'] ?? $roomId),
+                    $availability, $comboFrom, (string)$booking['check_out_date']));
             }
             $lockedConflict = rh_individual_room_locked_conflict($roomId, $comboFrom, (string)$booking['check_out_date'], $bookingId);
             if ($lockedConflict !== null) {
@@ -6504,18 +6506,26 @@ function getAvailableDates(int $room_id, string $start_date, string $end_date)
  *    in-house guest moves into must also be clean)
  * For an in-house guest nights before today are history and are not re-checked.
  *
+ * Phase 2b (GRID_UNIFY_PLAN, owner 2026-11-23): pass $lockPlan (includes/stay-change-lock.php rh_stay_lock_plan(),
+ * locks taken by rh_stay_take_locks() as the transaction's first statements). The gate then only checks, under
+ * locks taken before any plain read, and refuses when a type or room it needs is not in the plan. A clash names
+ * the room, the night(s) and what is in the way ("Not saved: Room 4 is blocked on ..."); 'detail' = the same
+ * without the "Not saved: " lead (previews). Messages carry guest names: show them as text.
+ *
  * @param int|null $newTypeId        New room type (null = unchanged)
  * @param int|null $newIndividualRoomId Explicit different room (null/0 = keep the current one)
- * @return array{ok:bool,error:string,conflicts:array}
+ * @return array{ok:bool,error:string,detail:string,conflicts:array}
  */
-function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, string $newCheckOut, ?int $newTypeId = null, ?int $newIndividualRoomId = null): array
+function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, string $newCheckOut, ?int $newTypeId = null, ?int $newIndividualRoomId = null, ?array $lockPlan = null): array
 {
     global $pdo;
+    require_once __DIR__ . '/../includes/stay-change-lock.php';
 
-    $res = ['ok' => true, 'error' => '', 'conflicts' => []];
+    $res = ['ok' => true, 'error' => '', 'detail' => '', 'conflicts' => []];
     $fail = function (string $msg, array $conflicts = []) use (&$res) {
         $res['ok'] = false;
         $res['error'] = $msg;
+        $res['detail'] = strpos($msg, 'Not saved: ') === 0 ? substr($msg, 11) : $msg;
         $res['conflicts'] = $conflicts;
         return $res;
     };
@@ -6572,14 +6582,12 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
     }
     $typeSegs = $clip($typeSegs);
 
+    // With a lock plan every lock below is already held (a no-op); a type outside the plan would be locked late.
+    if ($lockPlan !== null && !rh_stay_plan_covers($lockPlan, [$typeId], [])) {
+        return $fail(rh_stay_lock_changed_message());
+    }
     $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$typeId]);
     $childArg = ($currentRoomId > 0 || $explicitRoom > 0) ? 0 : (int)($bk['child_guests'] ?? 0);
-    foreach ($typeSegs as [$a, $b]) {
-        $av = checkRoomAvailability($typeId, $a, $b, $bookingId, $childArg, 1);
-        if (empty($av['available'])) {
-            return $fail('Not available for ' . $a . ' to ' . $b . ': ' . ($av['error'] ?? 'no rooms remaining') . (!empty($av['conflict_message']) ? ' (' . $av['conflict_message'] . ')' : '') . '.', $av['conflicts'] ?? []);
-        }
-    }
 
     // Room level
     $roomChecks = []; // [roomId, [[a,b],...], requireClean]
@@ -6614,30 +6622,44 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
     }
 
     usort($roomChecks, function ($x, $y) { return $x[0] <=> $y[0]; });
-    foreach ($roomChecks as [$rid, $segs, $requireClean]) {
+    if ($lockPlan !== null && !rh_stay_plan_covers($lockPlan, [], array_column($roomChecks, 0))) {
+        return $fail(rh_stay_lock_changed_message());
+    }
+    // Every room is locked (ascending) before the first check reads anything.
+    foreach ($roomChecks as [$rid]) {
         $pdo->prepare("SELECT id FROM individual_rooms WHERE id = ? FOR UPDATE")->execute([$rid]);
+    }
+
+    foreach ($roomChecks as [$rid, $segs, $requireClean]) {
         foreach ($segs as [$a, $b]) {
             $c = checkIndividualRoomAvailability($rid, $a, $b, $bookingId, $requireClean);
             $label = 'Room ' . (string)($c['individual_room']['room_number'] ?? $rid);
             if (empty($c['available'])) {
-                return $fail($label . ' is not free for ' . $a . ' to ' . $b . ': ' . ($c['error'] ?? 'unavailable')
-                    . (!empty($c['conflict_message']) ? ' (' . $c['conflict_message'] . ')' : '')
-                    . (!empty($c['blocked_message']) ? ' (' . $c['blocked_message'] . ')' : '')
-                    . '. Move the booking to another room first, or choose different dates.', $c['conflicts'] ?? []);
+                return $fail(rh_stay_clash_text($pdo, $label, $c, $a, $b), $c['conflicts'] ?? []);
             }
             $locked = rh_individual_room_locked_conflict($rid, $a, $b, $bookingId);
             if ($locked !== null) {
-                return $fail($label . ' was just taken by booking ' . $locked . ' for ' . $a . ' to ' . $b . '.');
+                return $fail('Not saved: ' . $label . ' was just booked by ' . $locked . ' on ' . rh_block_nights_text(rh_stay_seg_nights($a, $b))
+                    . '. Choose other dates or another room.');
             }
             // Step 12a (R3): moving to a room (or pair) a joined-room booking still needs is refused, the same
             // rule as assigning a room. Rooms the booking already holds are not re-judged.
             if ($explicitRoom > 0 && !in_array($rid, array_map('intval', getBookingRoomIds($bookingId)), true)) {
                 $neededBy = rh_room_needed_for_joined($rid, $a, $b, $bookingId);
                 if ($neededBy !== null) {
-                    return $fail($label . ' is needed for joined-room booking ' . $neededBy . ' for ' . $a . ' to ' . $b
+                    return $fail('Not saved: ' . $label . ' is needed for joined-room booking ' . $neededBy . ' on ' . rh_block_nights_text(rh_stay_seg_nights($a, $b))
                         . ' (no other free pair is left). Assign that booking its pair first, or pick another room.');
                 }
             }
+        }
+    }
+
+    // Type level after the rooms (their refusal names the exact block / booking), for the new nights:
+    // room-type / All rooms blocks and the type's free units (bookings with no room yet).
+    foreach ($typeSegs as [$a, $b]) {
+        $av = checkRoomAvailability($typeId, $a, $b, $bookingId, $childArg, 1);
+        if (empty($av['available'])) {
+            return $fail(rh_stay_type_clash_text($pdo, $typeId, $av, $a, $b), $av['conflicts'] ?? []);
         }
     }
 
@@ -8891,9 +8913,14 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
     // otherwise own it. A bare beginTransaction() here threw inside a caller's
     // transaction and made every assignment from such a caller silently fail.
     $ownTransaction = !$pdo->inTransaction();
+    $assignPlan = null;
 
     try {
         if ($ownTransaction) {
+            // Phase 2b: booking -> room types -> rooms, the booking-creation lock order. The type + room set is
+            // read BEFORE the transaction (a caller that owns the transaction has taken its own locks).
+            require_once __DIR__ . '/../includes/stay-change-lock.php';
+            $assignPlan = rh_stay_lock_plan($pdo, $bookingId, [], [$individualRoomId]);
             $pdo->beginTransaction();
         }
         $rollback = function () use ($pdo, $ownTransaction) {
@@ -8913,6 +8940,14 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
             $rollback();
             rh_room_assign_last_error('Booking not found');
             return false;
+        }
+        if ($assignPlan !== null) {
+            rh_room_nights_take_locks($pdo, $assignPlan);
+            if (!rh_stay_plan_covers($assignPlan, [(int)$booking['room_id']], [$individualRoomId])) {
+                $rollback();
+                rh_room_assign_last_error(rh_stay_lock_changed_message());
+                return false;
+            }
         }
 
         // A cancelled / expired / no-show / checked-out booking must never take a room.
@@ -8986,9 +9021,10 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
         $assignAvailability = checkIndividualRoomAvailability($individualRoomId, $availFrom, (string)$booking['check_out_date'], $bookingId, $movingInNow);
         if (empty($assignAvailability['available'])) {
             $rollback();
-            rh_room_assign_last_error((string)($assignAvailability['error'] ?? 'Selected room is not available for the booking dates')
-                . (!empty($assignAvailability['conflict_message']) ? ': ' . $assignAvailability['conflict_message'] : '')
-                . (!empty($assignAvailability['blocked_message']) ? ': ' . $assignAvailability['blocked_message'] : ''));
+            // Names the room, the night(s) and what is in the way (block, job or booking): plain text, shown escaped.
+            require_once __DIR__ . '/../includes/stay-change-lock.php';
+            rh_room_assign_last_error(rh_stay_clash_text($pdo, 'Room ' . (string)($assignAvailability['individual_room']['room_number'] ?? $individualRoomId),
+                $assignAvailability, $availFrom, (string)$booking['check_out_date']));
             return false;
         }
 
@@ -9076,7 +9112,7 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
             $pdo->rollBack();
         }
         error_log("Error assigning individual room to booking: " . $e->getMessage());
-        rh_room_assign_last_error('Database error while assigning the room');
+        rh_room_assign_last_error(rh_is_lock_conflict($e) ? rh_lock_conflict_message() : 'Database error while assigning the room');
         return false;
     }
 }
@@ -12036,9 +12072,14 @@ function calculateDateAdjustmentAmount(array $booking, string $newCheckIn, strin
 function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string $newCheckOut, string $reason, int $adjustedBy, string $adjustedByName, array $fee = []): array
 {
     global $pdo;
+    require_once __DIR__ . '/../includes/stay-change-lock.php';
 
     try {
+        // Phase 2b: the booking row, its room types and rooms are locked FIRST, in the booking-creation order
+        // (planned before BEGIN), so a block / job / booking saved meanwhile is seen by the re-check below.
+        $adjPlan = rh_stay_lock_plan($pdo, $bookingId);
         $pdo->beginTransaction();
+        rh_stay_take_locks($pdo, $adjPlan);
 
         // Get current booking with room and individual room info
         $stmt = $pdo->prepare("
@@ -12090,6 +12131,14 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
         $oldNights = (int)$booking['number_of_nights'];
         $oldTotalAmount = (float)($booking['total_with_vat'] ?? 0) > 0 ? (float)$booking['total_with_vat'] : (float)$booking['total_amount'] + (float)($booking['vat_amount'] ?? 0);
         $oldChildSupplement = (float)($booking['child_supplement_total'] ?? 0);
+
+        // Phase 2b re-check under the locks: the NEW nights against bookings, blocks (room, room type, All rooms) and
+        // room-closing maintenance, with a message naming the room, the night(s) and what is in the way.
+        $adjGate = rh_validate_booking_stay_change($bookingId, $newCheckIn, $newCheckOut, null, null, $adjPlan);
+        if (empty($adjGate['ok'])) {
+            $pdo->rollBack();
+            return ['success' => false, 'message' => (string)$adjGate['error']];
+        }
 
         // Check room availability for new dates (excluding current booking)
         $availabilityCheck = isRoomAvailable($booking['room_id'], $newCheckIn, $newCheckOut, $bookingId);
@@ -12268,6 +12317,12 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+        if (rh_is_lock_conflict($e)) {
+            return ['success' => false, 'message' => rh_lock_conflict_message()];
+        }
+        if ($e instanceof RuntimeException && $e->getMessage() === rh_stay_lock_changed_message()) {
+            return ['success' => false, 'message' => $e->getMessage()];
         }
         error_log("processBookingDateAdjustment error: " . $e->getMessage());
         return ['success' => false, 'message' => 'Failed to process date adjustment: ' . $e->getMessage()];

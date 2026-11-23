@@ -310,6 +310,9 @@ if (!function_exists('bookings_convert_tentative_booking')) {
 
         if (!$assigned) {
             $assignWhy = rh_room_assign_last_error();
+            if (strpos($assignWhy, 'Not saved: ') === 0) {
+                return ['success' => false, 'message' => $assignWhy]; // already names the room, night(s) and what is in the way
+            }
             return ['success' => false, 'message' => 'Selected room could not be assigned' . ($assignWhy !== '' ? ': ' . $assignWhy : ' - it is unavailable for the booking dates (it may overlap another reservation, a block, a maintenance window or a housekeeping task).') . ' Check the room timeline and try again.'];
         }
 

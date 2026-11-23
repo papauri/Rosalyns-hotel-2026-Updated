@@ -840,8 +840,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
 
             // Build & run UPDATE (inside a transaction with the booking row locked so the
-            // reprice below reads current figures)
+            // reprice below reads current figures). Phase 2b: booking -> room types -> rooms (a newly chosen room
+            // included) are locked first, planned before BEGIN, as booking creation does.
+            require_once __DIR__ . '/../includes/stay-change-lock.php';
+            $mbPlan = rh_stay_lock_plan($pdo, $booking_id, [], [(int)($updates['individual_room_id'] ?? 0)]);
             $pdo->beginTransaction();
+            rh_stay_take_locks($pdo, $mbPlan);
             $lockMb = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
             $lockMb->execute([$booking_id]);
             $current = $lockMb->fetch(PDO::FETCH_ASSOC) ?: $current;
@@ -859,7 +863,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $mbOut = $updates['check_out_date'] ?? $current['check_out_date'];
                 // Shared stay-change gate: booking / room-type / room locks, then only the NEW
                 // nights are re-checked at type level and for every assigned (or newly chosen) room.
-                $mbGate = rh_validate_booking_stay_change($booking_id, $mbIn, $mbOut, null, $mbIndChanged ? (int)$updates['individual_room_id'] : null);
+                $mbGate = rh_validate_booking_stay_change($booking_id, $mbIn, $mbOut, null, $mbIndChanged ? (int)$updates['individual_room_id'] : null, $mbPlan);
                 if (!$mbGate['ok']) {
                     throw new Exception($mbGate['error']);
                 }
@@ -2729,16 +2733,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Atomicity: lock the room-type row, then run the conflict check + update in
             // one transaction so a concurrent booking or extend can't slip into the newly
             // extended nights between the check and the write (overbooking).
+            // Phase 2b: booking -> room types -> rooms locked first (planned before BEGIN), as booking creation does.
+            require_once __DIR__ . '/../includes/stay-change-lock.php';
+            $extPlan = rh_stay_lock_plan($pdo, $booking_id);
             $pdo->beginTransaction();
+            rh_stay_take_locks($pdo, $extPlan);
 
             // Shared stay-change gate (booking, room-type and room locks; only the extra nights are
             // checked): the old test treated ANY other booking of the room type as a conflict even
             // when plenty of rooms were free, and ignored blocks and maintenance on the guest's room.
-            $extGate = rh_validate_booking_stay_change($booking_id, (string)$bk['check_in_date'], $new_checkout);
+            $extGate = rh_validate_booking_stay_change($booking_id, (string)$bk['check_in_date'], $new_checkout, null, null, $extPlan);
             if (!$extGate['ok']) {
                 $pdo->rollBack();
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Cannot extend: ' . $extGate['error'], 'conflicts' => $extGate['conflicts']]);
+                echo json_encode(['success' => false, 'message' => $extGate['error'], 'conflicts' => $extGate['conflicts']]);
                 exit;
             }
 
@@ -2858,15 +2866,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Reprice at the BOOKED nightly rate; VAT/levy extracted from the gross (never
             // added on top). Booking row locked and re-read inside the transaction.
+            // Phase 2b: booking -> room types -> rooms locked first (planned before BEGIN), as booking creation does.
+            require_once __DIR__ . '/../includes/stay-change-lock.php';
+            $acdPlan = rh_stay_lock_plan($pdo, $booking_id);
             $pdo->beginTransaction();
             try {
+                rh_stay_take_locks($pdo, $acdPlan);
                 $lockAcd = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
                 $lockAcd->execute([$booking_id]);
                 $acd_locked = $lockAcd->fetch(PDO::FETCH_ASSOC);
                 if (!$acd_locked || $acd_locked['status'] !== 'checked-in') {
                     throw new Exception('Booking not found or not checked-in');
                 }
-                $acdGate = rh_validate_booking_stay_change($booking_id, (string)$acd_locked['check_in_date'], $new_checkout);
+                $acdGate = rh_validate_booking_stay_change($booking_id, (string)$acd_locked['check_in_date'], $new_checkout, null, null, $acdPlan);
                 if (!$acdGate['ok']) {
                     throw new Exception($acdGate['error']);
                 }
@@ -2982,10 +2994,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Return 200 OK with success: false so frontend can handle the error message gracefully
             // without browser console errors or fetch rejection
             http_response_code(200);
-            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            echo json_encode(['success' => false, 'message' => rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage()]);
             exit;
         }
-        $error = 'Error: ' . $e->getMessage();
+        $error = 'Error: ' . (rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage());
     }
 
     // An AJAX action that did not answer in JSON itself (some branches only set $message / $error and fall
@@ -8552,7 +8564,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     } else {
                         hideLoadingOverlay();
                         if (submitBtn) setButtonLoading(submitBtn, false);
-                        Alert.show(data.message || 'Failed to assign room.', 'error');
+                        showBookingActionMessage(data.message || 'Failed to assign room.', 'error');
                     }
                 })
                 .catch(() => {
@@ -9654,7 +9666,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         .catch(error => {
                             setModalActionLoading(form, false);
                             if (submitBtn) setButtonLoading(submitBtn, false);
-                            Alert.show(error.message || 'An error occurred. Please try again.', 'error');
+                            showBookingActionMessage(error.message || 'An error occurred. Please try again.', 'error');
                         });
                 });
         });
@@ -10130,7 +10142,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 })
                 .catch(err => {
                     setButtonLoading(submitBtn, false);
-                    Alert.show(err.message || 'Could not change the room type.', 'error');
+                    showBookingActionMessage(err.message || 'Could not change the room type.', 'error');
                 });
         }
 
@@ -10641,7 +10653,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         setTimeout(() => window.location.reload(), 800);
                     } else {
                         if (btn) setButtonLoading(btn, false);
-                        Alert.show(j.message || 'Failed to save', 'error');
+                        showBookingActionMessage(j.message || 'Failed to save', 'error');
                     }
                 })
                 .catch(() => {

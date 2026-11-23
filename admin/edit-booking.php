@@ -435,7 +435,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
         if (empty($error)) {
             $oldRoomIds = [];
             try {
+                // Phase 2b: booking -> room types -> rooms (the chosen room included) locked first, planned before
+                // BEGIN, in the booking-creation order; the stay-change gate below re-checks under these locks.
+                require_once __DIR__ . '/../includes/stay-change-lock.php';
+                $ebPlan = rh_stay_lock_plan($pdo, (int)$booking_id, [], [(int)($individual_room_id ?? 0)]);
                 $pdo->beginTransaction();
+                rh_stay_take_locks($pdo, $ebPlan);
                 $lockSt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
                 $lockSt->execute([$booking_id]);
                 $locked = $lockSt->fetch(PDO::FETCH_ASSOC);
@@ -453,7 +458,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
 
                 if ($datesChanged || $roomPointerChanged) {
                     // Shared stay-change gate: booking / room-type / room locks; only NEW nights are re-checked.
-                    $stayGate = rh_validate_booking_stay_change((int)$booking_id, $check_in, $check_out, null, $individual_room_id ? (int)$individual_room_id : null);
+                    $stayGate = rh_validate_booking_stay_change((int)$booking_id, $check_in, $check_out, null, $individual_room_id ? (int)$individual_room_id : null, $ebPlan);
                     if (!$stayGate['ok']) {
                         throw new Exception($stayGate['error']);
                     }
@@ -563,7 +568,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $error = 'Cannot save: ' . $e->getMessage();
+                $error = strpos($e->getMessage(), 'Not saved: ') === 0 ? $e->getMessage()
+                    : 'Cannot save: ' . (rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage());
             }
 
             if (empty($error)) {
@@ -768,7 +774,7 @@ $back_url = 'booking-details.php?id=' . $booking_id;
         <?php endif; ?>
 
         <?php if ($error): ?>
-            <?php showAlert($error, 'error'); ?>
+            <?php showAlert(htmlspecialchars((string)$error, ENT_QUOTES, 'UTF-8'), 'error'); /* plain text: messages carry guest names */ ?>
         <?php endif; ?>
 
         <?php if ($edit_mode === 'reservation'): ?>

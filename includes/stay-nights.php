@@ -135,11 +135,18 @@ if (!function_exists('rh_stay_nights_quote')) {
         ];
 
         if ($delta > 0 && $checkAvailability && !$pdo->inTransaction()) {
+            require_once __DIR__ . '/stay-change-lock.php';
+            $qPlan = rh_stay_lock_plan($pdo, (int)$b['id']);
             $pdo->beginTransaction();
             try {
-                $gate = rh_validate_booking_stay_change((int)$b['id'], $in, $newOut);
+                rh_stay_take_locks($pdo, $qPlan);
+                $gate = rh_validate_booking_stay_change((int)$b['id'], $in, $newOut, null, null, $qPlan);
                 $out['available'] = !empty($gate['ok']);
-                $out['availability_error'] = (string)($gate['error'] ?? '');
+                // Preview wording: what is in the way, without the save's "Not saved: " lead.
+                $out['availability_error'] = (string)($gate['detail'] ?? ($gate['error'] ?? ''));
+            } catch (RuntimeException $e) {
+                $out['available'] = false;
+                $out['availability_error'] = $e->getMessage();
             } finally {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
@@ -209,11 +216,16 @@ if (!function_exists('rh_stay_nights_quote')) {
             }
         }
 
+        // Phase 2b: booking -> room types -> rooms locked first (planned before BEGIN), as booking creation does, so
+        // the added nights are re-checked against blocks / jobs / bookings saved while this save waited.
+        require_once __DIR__ . '/stay-change-lock.php';
+        $snPlan = rh_stay_lock_plan($pdo, $bookingId);
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) {
             $pdo->beginTransaction();
         }
         try {
+            rh_stay_take_locks($pdo, $snPlan);
             $lock = $pdo->prepare('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL FOR UPDATE');
             $lock->execute([$bookingId]);
             $b = $lock->fetch(PDO::FETCH_ASSOC);
@@ -264,9 +276,9 @@ if (!function_exists('rh_stay_nights_quote')) {
             }
 
             if ($delta > 0) {
-                $gate = rh_validate_booking_stay_change($bookingId, (string)$q['check_in'], (string)$q['new_check_out']);
+                $gate = rh_validate_booking_stay_change($bookingId, (string)$q['check_in'], (string)$q['new_check_out'], null, null, $snPlan);
                 if (empty($gate['ok'])) {
-                    throw new Exception('Cannot add the night(s): ' . (string)$gate['error']);
+                    throw new Exception((string)$gate['error']);
                 }
             }
 
@@ -437,6 +449,9 @@ if (!function_exists('rh_stay_nights_quote')) {
         } catch (Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
+            }
+            if (rh_is_lock_conflict($e)) {
+                throw new Exception(rh_lock_conflict_message());
             }
             throw $e instanceof Exception ? $e : new Exception($e->getMessage());
         }
