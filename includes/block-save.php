@@ -154,6 +154,87 @@ if (!function_exists('rh_block_save')) {
     }
 
     /**
+     * Write what a clash result allows (INSIDE the save transaction, after the locks and rh_room_nights_clash()).
+     * Each target carries its own 'block_type' and 'reason'. $keepExisting (Extend): a room that already has its own
+     * block row on a night keeps that row untouched (never rewritten); otherwise (Block) it gets the new type and reason.
+     *
+     * @return array{added:array,updated:array,singles:array,singles_of:array,log_added:array,log_updated:array}
+     */
+    function rh_block_write_free(PDO $pdo, array $targets, array $res, ?int $by, bool $keepExisting = false): array
+    {
+        $out = ['added' => [], 'updated' => [], 'singles' => [], 'singles_of' => [], 'log_added' => [], 'log_updated' => []];
+        foreach ($targets as $i => $tg) {
+            $label = $tg['label'];
+            $blockType = rh_normalize_block_type($tg['block_type'] ?? 'manual');
+            $reason = rh_normalize_block_reason($tg['reason'] ?? null);
+            $r = $res['targets'][$i] ?? ['free' => [], 'singles' => []];
+            $direct = rh_block_grid_direct_nights($pdo, $tg, $r['free']);
+            $have = []; // room => night => true (Extend: rows that must stay as they are)
+            if ($keepExisting && $tg['scope'] === 'room' && $r['free'] && $tg['room_ids']) {
+                $rph = implode(',', array_fill(0, count($tg['room_ids']), '?'));
+                $dph = implode(',', array_fill(0, count($r['free']), '?'));
+                $st = $pdo->prepare("SELECT individual_room_id, block_date FROM individual_room_blocked_dates WHERE individual_room_id IN ($rph) AND block_date IN ($dph)");
+                $st->execute(array_merge($tg['room_ids'], $r['free']));
+                foreach ($st->fetchAll(PDO::FETCH_NUM) as [$rid, $d]) {
+                    $have[(int)$rid][substr((string)$d, 0, 10)] = true;
+                }
+            }
+            $added = [];
+            $updated = [];
+            foreach ($r['free'] as $d) {
+                $full = ($direct[$d] ?? 0) >= max(1, count($tg['room_ids']));
+                if ($keepExisting && $full) {
+                    continue; // already blocked on this row: left exactly as it is
+                }
+                if ($tg['scope'] === 'room') {
+                    foreach ($tg['room_ids'] as $rid) {
+                        if (!empty($have[$rid][$d])) {
+                            continue;
+                        }
+                        if (!blockIndividualRoomDate($rid, $d, $blockType, $reason, $by)) {
+                            throw new RuntimeException('Could not block ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
+                        }
+                    }
+                } elseif (!blockRoomDate($tg['scope'] === 'type' ? (int)$tg['id'] : null, $d, $blockType, $reason, $by)) {
+                    throw new RuntimeException('Could not block ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
+                }
+                // "Updated" only when every room of the row was already blocked (half a joined room counts as new).
+                if ($full) {
+                    $updated[] = $d;
+                } else {
+                    $added[] = $d;
+                }
+            }
+            rh_block_by_add($out['added'], $label, $added);
+            rh_block_by_add($out['updated'], $label, $updated);
+            $entry = ['label' => $label, 'scope' => $tg['scope'], 'type_id' => $tg['scope'] === 'type' ? (int)$tg['id'] : ($tg['type_id'] ?? null),
+                'room_ids' => $tg['room_ids'], 'still' => []];
+            $out['log_added'][] = $entry + ['dates' => $added];
+            $out['log_updated'][] = $entry + ['dates' => $updated];
+            // Type / All rooms on a night with bookings: the free rooms, one by one (rooms with no own block yet).
+            $singleEntries = [];
+            foreach ($r['singles'] ?? [] as $d => $units) {
+                rh_block_by_add($out['singles_of'], $label, [$d]);
+                foreach ($units as $u) {
+                    foreach ($u['room_ids'] as $rid) {
+                        if (!blockIndividualRoomDate($rid, $d, $blockType, $reason, $by)) {
+                            throw new RuntimeException('Could not block ' . $u['label'] . ' on ' . rh_block_nights_text([$d]) . '.');
+                        }
+                    }
+                    rh_block_by_add($out['singles'], $u['label'], [$d]);
+                    $k = $u['label'];
+                    $singleEntries[$k] = $singleEntries[$k] ?? ['label' => $k, 'scope' => 'room', 'type_id' => $u['type_id'], 'room_ids' => $u['room_ids'], 'still' => [], 'dates' => []];
+                    $singleEntries[$k]['dates'][] = $d;
+                }
+            }
+            foreach ($singleEntries as $e) {
+                $out['log_added'][] = $e;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Block the free nights of $targets (admin-format targets) in ONE transaction under the blocked_dates lock and the
      * room locks. $meta = log meta for rh_block_log_change (user_id, user_name, actor_type, via) + 'by' (created_by).
      * Blocking a night already blocked on the same row updates its type and reason (free nights only).
@@ -178,57 +259,16 @@ if (!function_exists('rh_block_save')) {
                     $out['skipped'] = $sum['skipped'];
                     $out['left_open'] = $sum['left_open'];
                     $out['bookings'] = $sum['bookings'];
-                    $logAdded = [];
-                    $logUpdated = [];
                     foreach ($targets as $i => $tg) {
-                        $label = $tg['label'];
-                        $r = $res['targets'][$i];
-                        $direct = rh_block_grid_direct_nights($pdo, $tg, $r['free']);
-                        $added = [];
-                        $updated = [];
-                        foreach ($r['free'] as $d) {
-                            if ($tg['scope'] === 'room') {
-                                foreach ($tg['room_ids'] as $rid) {
-                                    if (!blockIndividualRoomDate($rid, $d, $blockType, $reason, $by)) {
-                                        throw new RuntimeException('Could not block ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
-                                    }
-                                }
-                            } elseif (!blockRoomDate($tg['scope'] === 'type' ? (int)$tg['id'] : null, $d, $blockType, $reason, $by)) {
-                                throw new RuntimeException('Could not block ' . $label . ' on ' . rh_block_nights_text([$d]) . '.');
-                            }
-                            // "Updated" only when every room of the row was already blocked (half a joined room counts as new).
-                            if (($direct[$d] ?? 0) >= max(1, count($tg['room_ids']))) {
-                                $updated[] = $d;
-                            } else {
-                                $added[] = $d;
-                            }
-                        }
-                        rh_block_by_add($out['added'], $label, $added);
-                        rh_block_by_add($out['updated'], $label, $updated);
-                        $entry = ['label' => $label, 'scope' => $tg['scope'], 'type_id' => $tg['scope'] === 'type' ? (int)$tg['id'] : ($tg['type_id'] ?? null),
-                            'room_ids' => $tg['room_ids'], 'still' => []];
-                        $logAdded[] = $entry + ['dates' => $added];
-                        $logUpdated[] = $entry + ['dates' => $updated];
-                        // Type / All rooms on a night with bookings: the free rooms, one by one (rooms with no own block yet).
-                        $singleEntries = [];
-                        foreach ($r['singles'] as $d => $units) {
-                            rh_block_by_add($out['singles_of'], $label, [$d]);
-                            foreach ($units as $u) {
-                                foreach ($u['room_ids'] as $rid) {
-                                    if (!blockIndividualRoomDate($rid, $d, $blockType, $reason, $by)) {
-                                        throw new RuntimeException('Could not block ' . $u['label'] . ' on ' . rh_block_nights_text([$d]) . '.');
-                                    }
-                                }
-                                rh_block_by_add($out['singles'], $u['label'], [$d]);
-                                $k = $u['label'];
-                                $singleEntries[$k] = $singleEntries[$k] ?? ['label' => $k, 'scope' => 'room', 'type_id' => $u['type_id'], 'room_ids' => $u['room_ids'], 'still' => [], 'dates' => []];
-                                $singleEntries[$k]['dates'][] = $d;
-                            }
-                        }
-                        foreach ($singleEntries as $e) {
-                            $logAdded[] = $e;
-                        }
+                        $targets[$i]['block_type'] = $blockType;
+                        $targets[$i]['reason'] = $reason;
                     }
+                    $w = rh_block_write_free($pdo, $targets, $res, $by, false);
+                    foreach (['added', 'updated', 'singles', 'singles_of'] as $k) {
+                        $out[$k] = $w[$k];
+                    }
+                    $logAdded = $w['log_added'];
+                    $logUpdated = $w['log_updated'];
                     $out['saved'] = rh_block_by_count($out['added']) + rh_block_by_count($out['updated']) + rh_block_by_count($out['singles']);
                     if ($out['saved'] > 0) {
                         // Logged in the same transaction: a save that rolls back leaves no record.
@@ -473,5 +513,332 @@ if (!function_exists('rh_block_save')) {
         } catch (RuntimeException $e) {
             return ['code' => 409, 'body' => ['success' => false, 'message' => 'Someone else is saving blocks right now. Please try again in a moment. The old block was kept.']];
         }
+    }
+    /* ------------------------------------------------------------------ Extend (GRID_UNIFY_PLAN Phase 3) */
+
+    /** Most new nights one row may get in one Extend (ASSUMPTION 2026-11-23: 3 years). */
+    if (!defined('RH_EXTEND_MAX_NIGHTS')) {
+        define('RH_EXTEND_MAX_NIGHTS', 1096);
+    }
+    /** Most new nights one Extend action may save over all rows (ASSUMPTION 2026-11-23). */
+    if (!defined('RH_EXTEND_MAX_ACTION')) {
+        define('RH_EXTEND_MAX_ACTION', 10000);
+    }
+
+    /**
+     * $date (Y-m-d) moved on by $n days / weeks / months / years. Months and years keep the day of the month and
+     * clamp to the month's last day (31 Jan + 1 month = 28 or 29 Feb; 29 Feb + 1 year = 28 Feb). '' for bad input.
+     */
+    function rh_extend_add(string $date, int $n, string $unit): string
+    {
+        if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m) || !checkdate((int)$m[2], (int)$m[3], (int)$m[1]) || $n < 0) {
+            return '';
+        }
+        $y = (int)$m[1];
+        $mo = (int)$m[2];
+        $d = (int)$m[3];
+        if ($unit === 'days' || $unit === 'weeks') {
+            $dt = new DateTimeImmutable(sprintf('%04d-%02d-%02d', $y, $mo, $d), new DateTimeZone('UTC'));
+            return $dt->modify('+' . ($unit === 'weeks' ? 7 * $n : $n) . ' days')->format('Y-m-d');
+        }
+        if ($unit !== 'months' && $unit !== 'years') {
+            return '';
+        }
+        $total = ($y * 12 + ($mo - 1)) + ($unit === 'years' ? 12 * $n : $n);
+        $ny = intdiv($total, 12);
+        $nm = $total % 12 + 1;
+        $last = (int)(new DateTimeImmutable(sprintf('%04d-%02d-01', $ny, $nm), new DateTimeZone('UTC')))->format('t');
+        return sprintf('%04d-%02d-%02d', $ny, $nm, min($d, $last));
+    }
+
+    /**
+     * How far an Extend goes, from the posted fields: mode 'by' (n + unit) or 'until' (a date). Returns the new
+     * last date for a run ending on $last, or a plain error message starting with '!'.
+     */
+    function rh_extend_target_date(string $last, array $how): string
+    {
+        $mode = (string)($how['mode'] ?? 'by');
+        if ($mode === 'until') {
+            $u = rh_normalize_block_date(substr((string)($how['until'] ?? ''), 0, 10));
+            return $u === null ? '!Choose the date to extend until.' : $u;
+        }
+        $n = (int)($how['n'] ?? 0);
+        $unit = (string)($how['unit'] ?? 'days');
+        if ($n < 1 || $n > 1100 || !in_array($unit, ['days', 'weeks', 'months', 'years'], true)) {
+            return '!Enter how many days, weeks, months or years to extend by (1 or more).';
+        }
+        $to = rh_extend_add($last, $n, $unit);
+        return $to === '' ? '!The date could not be read.' : $to;
+    }
+
+    /**
+     * The own block a run ends on: ['block_type', 'reason'] when the row itself (not its room type or All rooms) is
+     * blocked on $night (a joined room: both rooms), else null. Read inside the save transaction (after the locks).
+     */
+    function rh_block_own_source(PDO $pdo, array $tg, string $night): ?array
+    {
+        if ($tg['scope'] === 'room') {
+            if (!$tg['room_ids']) {
+                return null;
+            }
+            $ph = implode(',', array_fill(0, count($tg['room_ids']), '?'));
+            $st = $pdo->prepare("SELECT individual_room_id, block_type, reason FROM individual_room_blocked_dates WHERE individual_room_id IN ($ph) AND block_date = ? ORDER BY individual_room_id");
+            $st->execute(array_merge($tg['room_ids'], [$night]));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            $seen = [];
+            foreach ($rows as $r) {
+                $seen[(int)$r['individual_room_id']] = true;
+            }
+            return $rows && count($seen) >= count($tg['room_ids']) ? ['block_type' => (string)$rows[0]['block_type'], 'reason' => $rows[0]['reason']] : null;
+        }
+        if ($tg['scope'] === 'type') {
+            $st = $pdo->prepare('SELECT block_type, reason FROM blocked_dates WHERE room_id = ? AND block_date = ? ORDER BY id LIMIT 1');
+            $st->execute([(int)$tg['id'], $night]);
+        } else {
+            $st = $pdo->prepare('SELECT block_type, reason FROM blocked_dates WHERE room_id IS NULL AND block_date = ? ORDER BY id LIMIT 1');
+            $st->execute([$night]);
+        }
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        return $r ? ['block_type' => (string)$r['block_type'], 'reason' => $r['reason']] : null;
+    }
+
+    /** Row key of an admin-format target (a joined room is one row). */
+    function rh_block_row_key(array $tg): string
+    {
+        if ($tg['scope'] === 'room') {
+            $ids = $tg['room_ids'];
+            sort($ids, SORT_NUMERIC);
+            return 'room:' . implode('+', $ids);
+        }
+        return $tg['scope'] === 'type' ? 'type:' . (int)$tg['id'] : 'all';
+    }
+
+    /**
+     * The last night of the row's own block run that $night belongs to (walks forward over back-to-back nights the
+     * row itself blocks, at most RH_EXTEND_MAX_NIGHTS). So "extend" always starts after the whole run, even when only
+     * part of it was selected.
+     */
+    function rh_block_own_run_end(PDO $pdo, array $tg, string $night): string
+    {
+        $days = rh_rnc_days(date('Y-m-d', strtotime($night . ' +1 day')), date('Y-m-d', strtotime($night . ' +' . RH_EXTEND_MAX_NIGHTS . ' days')), RH_EXTEND_MAX_NIGHTS);
+        $direct = rh_block_grid_direct_nights($pdo, $tg, $days);
+        $need = max(1, count($tg['room_ids']));
+        $end = $night;
+        foreach ($days as $d) {
+            if (($direct[$d] ?? 0) < $need) {
+                break;
+            }
+            $end = $d;
+        }
+        return $end;
+    }
+
+    /**
+     * Extend block runs (Extend... and the drag handle). $items = [['target' => admin-format target (scope, id,
+     * room_ids, type_id, label), 'last' => a night of the run (normally its last), 'how' => ['mode' => 'by', 'n', 'unit']
+     * or ['mode' => 'until', 'until' => Y-m-d]]].
+     * ONE transaction for the whole action under the blocked_dates lock and the room locks (Fable blocker 3):
+     *  - every item's night must carry the row's OWN block (an inherited room-type / All-rooms block, or no block,
+     *    refuses the whole action); two items for one row with a different type / reason refuse it too;
+     *  - the new nights run from the night after the run's end to the new last night (months / years clamp to the
+     *    month end); past nights are dropped; at most RH_EXTEND_MAX_NIGHTS per row and RH_EXTEND_MAX_ACTION in all;
+     *  - new nights copy that row's block type and reason; a new night the row already blocks keeps its row exactly
+     *    as it is (reported "already blocked", never rewritten);
+     *  - the rest goes through the clash check: booked nights skipped and listed; a type / All-rooms night with
+     *    bookings blocks the free rooms one by one;
+     *  - one Staff activity row; any error rolls everything back.
+     * $opt['preview'] = read only (advisory clash check, no locks, nothing saved).
+     * $opt['before_commit'] = callable($pdo) run just before COMMIT (tests use it to force a failure).
+     *
+     * @return array{ok:bool,message:string,saved:int,added:array,already:array,singles:array,singles_of:array,skipped:array,left_open:array,bookings:array}
+     */
+    function rh_block_extend(PDO $pdo, array $items, array $meta = [], array $opt = []): array
+    {
+        $empty = ['added' => [], 'already' => [], 'singles' => [], 'singles_of' => [], 'skipped' => [], 'left_open' => [], 'bookings' => [], 'saved' => 0, 'new_nights' => 0];
+        if (!$items) {
+            return ['ok' => false, 'message' => 'Select a blocked night to extend.'] + $empty;
+        }
+        $by = isset($meta['by']) && (int)$meta['by'] > 0 ? (int)$meta['by'] : null;
+
+        // The steps that read the rows: inside the save transaction (after the locks), or plain reads (preview).
+        $build = static function () use ($pdo, $items): array {
+            $today = date('Y-m-d');
+            $rows = [];   // row key => merged target
+            $total = 0;
+            foreach ($items as $it) {
+                $tg = $it['target'];
+                $last = (string)$it['last'];
+                $src = rh_block_own_source($pdo, $tg, $last);
+                if ($src === null) {
+                    throw new DomainException($tg['label'] . ' has no block of its own on ' . rh_block_nights_text([$last])
+                        . ' (it is covered by a room-type or All rooms block, or it is not blocked). Extend that line instead. Nothing was changed.');
+                }
+                $k = rh_block_row_key($tg);
+                $type = rh_normalize_block_type($src['block_type']);
+                $reason = rh_normalize_block_reason($src['reason']);
+                $kind = $type . '|' . (string)$reason;
+                if (isset($rows[$k]) && $rows[$k]['kind'] !== $kind) {
+                    throw new DomainException($tg['label'] . ' has two selected blocks with a different type or reason. Extend them one at a time. Nothing was changed.');
+                }
+                $end = rh_block_own_run_end($pdo, $tg, $last);
+                $to = rh_extend_target_date($end, (array)($it['how'] ?? []));
+                if ($to !== '' && $to[0] === '!') {
+                    throw new DomainException(substr($to, 1));
+                }
+                $from = max(date('Y-m-d', strtotime($end . ' +1 day')), $today);
+                $nights = $to >= $from ? rh_rnc_days($from, $to, RH_EXTEND_MAX_NIGHTS + 1) : [];
+                if (count($nights) > RH_EXTEND_MAX_NIGHTS) {
+                    throw new DomainException($tg['label'] . ': at most 3 years (' . RH_EXTEND_MAX_NIGHTS . ' nights) can be added in one go. Nothing was changed.');
+                }
+                if (!isset($rows[$k])) {
+                    $rows[$k] = ['kind' => $kind, 'block_type' => $type, 'reason' => $reason] + $tg;
+                    $rows[$k]['dates'] = [];
+                }
+                $before = count($rows[$k]['dates']);
+                $rows[$k]['dates'] = array_values(array_unique(array_merge($rows[$k]['dates'], $nights)));
+                sort($rows[$k]['dates']);
+                $total += count($rows[$k]['dates']) - $before;
+                if ($total > RH_EXTEND_MAX_ACTION) {
+                    throw new DomainException('Too many nights at once (over ' . RH_EXTEND_MAX_ACTION . '). Extend fewer rows. Nothing was changed.');
+                }
+            }
+            if ($total === 0) {
+                throw new DomainException('There are no new nights to add: the new end must be after the last blocked night, today or later. Nothing was changed.');
+            }
+            // New nights the row already blocks on its own: left exactly as they are.
+            $targets = [];
+            $already = [];
+            foreach ($rows as $tg) {
+                $direct = rh_block_grid_direct_nights($pdo, $tg, $tg['dates']);
+                $need = max(1, count($tg['room_ids']));
+                $keep = [];
+                foreach ($tg['dates'] as $d) {
+                    if (($direct[$d] ?? 0) >= $need) {
+                        rh_block_by_add($already, $tg['label'], [$d]);
+                    } else {
+                        $keep[] = $d;
+                    }
+                }
+                if ($keep) {
+                    $tg['dates'] = $keep;
+                    $targets[] = $tg;
+                }
+            }
+            return [$targets, $already, $total];
+        };
+
+        if (!empty($opt['preview'])) {
+            try {
+                [$targets, $already, $total] = $build();
+            } catch (DomainException $e) {
+                return ['ok' => false, 'message' => $e->getMessage(), 'refused' => true] + $empty;
+            }
+            $out = $empty;
+            $out['already'] = $already;
+            $out['new_nights'] = $total;
+            $out['preview'] = true;
+            if ($targets) {
+                $sum = rh_block_clash_summary($targets, rh_room_nights_clash($pdo, array_map('rh_block_clash_target', $targets), ['advisory' => true, 'convert' => true]));
+                foreach (['skipped', 'left_open', 'bookings', 'singles', 'singles_of'] as $k) {
+                    $out[$k] = $sum[$k];
+                }
+                $out['added'] = $sum['free'];
+                $out['saved'] = rh_block_by_count($sum['free']) + rh_block_by_count($sum['singles']);
+            }
+            $out['ok'] = $out['saved'] > 0;
+            $out['message'] = rh_block_extend_message($out);
+            return $out;
+        }
+
+        try {
+            return rh_with_create_lock($pdo, 'blocked_dates', static function () use ($pdo, $items, $meta, $opt, $by, $empty, $build) {
+                $plan = rh_room_nights_lock_plan($pdo, array_map(static fn($it) => $it['target'], $items)); // plain reads: before BEGIN
+                $out = $empty;
+                $out['new_nights'] = 0;
+                $pdo->beginTransaction();
+                try {
+                    rh_room_nights_take_locks($pdo, $plan);
+                    [$targets, $already, $total] = $build();
+                    $out['new_nights'] = $total;
+                    $out['already'] = $already;
+                    if ($targets) {
+                        $res = rh_room_nights_clash($pdo, array_map('rh_block_clash_target', $targets), ['convert' => true]);
+                        $sum = rh_block_clash_summary($targets, $res);
+                        $out['skipped'] = $sum['skipped'];
+                        $out['left_open'] = $sum['left_open'];
+                        $out['bookings'] = $sum['bookings'];
+                        $w = rh_block_write_free($pdo, $targets, $res, $by, true);
+                        foreach (['added', 'singles', 'singles_of'] as $k) {
+                            $out[$k] = $w[$k];
+                        }
+                        $out['saved'] = rh_block_by_count($out['added']) + rh_block_by_count($out['singles']);
+                        if ($out['saved'] > 0) {
+                            $kinds = [];
+                            foreach ($targets as $tg) {
+                                $kinds[$tg['kind']] = rh_block_type_label($tg['block_type']) . ($tg['reason'] !== null && $tg['reason'] !== '' ? '; reason: ' . $tg['reason'] : '');
+                            }
+                            // ONE Staff activity row for the whole action, written in the same transaction.
+                            rh_block_log_change($pdo, 'block', $w['log_added'], ['block_type' => $targets[0]['block_type'], 'reason' => $targets[0]['reason'],
+                                'note' => 'Extended (type and reason copied from the last blocked night)', 'kinds' => array_values($kinds)] + $meta);
+                        }
+                    }
+                    if (isset($opt['before_commit']) && is_callable($opt['before_commit'])) {
+                        ($opt['before_commit'])($pdo);
+                    }
+                    $pdo->commit();
+                } catch (Throwable $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    if ($e instanceof DomainException) {
+                        return ['ok' => false, 'message' => $e->getMessage(), 'refused' => true] + $empty;
+                    }
+                    if (rh_is_lock_conflict($e)) {
+                        return ['ok' => false, 'message' => rh_room_nights_lock_message(), 'busy' => true] + $empty;
+                    }
+                    error_log('rh_block_extend: ' . $e->getMessage());
+                    return ['ok' => false, 'message' => ($e instanceof RuntimeException ? $e->getMessage() . ' ' : '') . 'Nothing was changed.'] + $empty;
+                }
+                $out['ok'] = $out['saved'] > 0;
+                $out['message'] = rh_block_extend_message($out);
+                return $out;
+            });
+        } catch (RuntimeException $e) {
+            return ['ok' => false, 'message' => 'Someone else is saving blocks right now. Please try again in a moment. Nothing was changed.', 'busy' => true] + $empty;
+        }
+    }
+
+    /** Staff wording of a rh_block_extend() result (a preview says "will"). */
+    function rh_block_extend_message(array $res): string
+    {
+        $pv = !empty($res['preview']);
+        $added = rh_block_by_count($res['added']);
+        $singles = rh_block_by_count($res['singles']);
+        $already = rh_block_by_count($res['already']);
+        $skipped = rh_block_by_count($res['skipped']);
+        $bookings = $res['bookings'] ? rh_room_nights_clash_text($res['bookings']) : '';
+        $parts = [];
+        if ((int)$res['saved'] === 0) {
+            $parts[] = $pv ? 'Nothing new would be blocked.' : 'Nothing was extended.';
+        }
+        if ($added > 0) {
+            $parts[] = ($pv ? 'Will block ' : 'Blocked ') . $added . ' more night(s): ' . rh_block_where_text($res['added']) . '.';
+        }
+        if ($singles > 0) {
+            $rows = implode(' and ', array_keys($res['singles_of']));
+            $parts[] = $rows . ' had bookings on ' . rh_block_nights_text(array_merge(...array_values($res['singles_of']))) . ', so only the free rooms '
+                . ($pv ? 'will be' : 'were') . ' blocked one by one: ' . rh_block_where_text($res['singles'], 12) . '.'
+                . ($res['left_open'] ? ' Left open: ' . rh_block_where_text($res['left_open'], 12) . '.' : '');
+        }
+        if ($already > 0) {
+            $parts[] = $already . ' night(s) were already blocked and ' . ($pv ? 'stay' : 'were left') . ' as they are: ' . rh_block_where_text($res['already']) . '.';
+        }
+        if ($skipped > 0) {
+            $parts[] = ($pv ? 'Will skip ' : 'Skipped ') . $skipped . ' booked night(s): ' . rh_block_where_text($res['skipped']) . '.';
+        }
+        if ($bookings !== '') {
+            $parts[] = 'Booked by: ' . $bookings . '. Move those bookings first, then block those nights.';
+        }
+        return implode(' ', $parts);
     }
 }

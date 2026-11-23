@@ -4848,10 +4848,32 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     <?php if ($bd_open_dates !== ''): ?>
     <script>
     // G2: arrived from "Change dates" in a group table row: open this room's own date dialog (picked on the server).
+    // Calendar drag (GRID_UNIFY_PLAN Phase 3): &ci=&co= prefill the new dates; the dialog shows the price, nothing is saved.
+    <?php
+    $bd_prefill = null;
+    if ($bd_open_dates === 'adjust') {
+        $bd_pci = (string)($_GET['ci'] ?? '');
+        $bd_pco = (string)($_GET['co'] ?? '');
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $bd_pci) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $bd_pco) && $bd_pci < $bd_pco
+            && checkdate((int)substr($bd_pci, 5, 2), (int)substr($bd_pci, 8, 2), (int)substr($bd_pci, 0, 4))
+            && checkdate((int)substr($bd_pco, 5, 2), (int)substr($bd_pco, 8, 2), (int)substr($bd_pco, 0, 4))) {
+            $bd_prefill = ['ci' => $bd_pci, 'co' => $bd_pco];
+        }
+    }
+    ?>
     (function () {
+        var prefill = <?php echo json_encode($bd_prefill); ?>;
         function go() {
             var fn = window[<?php echo json_encode($bd_open_dates === 'correct' ? 'openStayCorrectModal' : 'openDateAdjustModal'); ?>];
             if (typeof fn === 'function') fn();
+            if (prefill && typeof window.previewDateAdjustment === 'function') {
+                var ci = document.getElementById('newCheckIn'), co = document.getElementById('newCheckOut');
+                if (ci && co) {
+                    ci.value = prefill.ci;
+                    co.value = prefill.co;
+                    window.previewDateAdjustment();
+                }
+            }
         }
         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', go); } else { setTimeout(go, 0); }
     })();

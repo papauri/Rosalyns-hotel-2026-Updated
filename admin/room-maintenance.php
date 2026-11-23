@@ -12,6 +12,7 @@ require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/room-management.php';
 require_once __DIR__ . '/../includes/maintenance-recurring.php';
 require_once __DIR__ . '/../includes/room-night-clash.php'; // a job that closes the room never lands on a booked night (GRID_UNIFY_PLAN Phase 2)
+require_once __DIR__ . '/../includes/ops-extend.php'; // Extend... and the end handle (GRID_UNIFY_PLAN Phase 3)
 require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/includes/front-desk-counts.php'; // rh_fd_out_of_service_statuses: the Dashboard chip rule
 /** @var array{id: int, username: string, role: string} $user */
@@ -1003,6 +1004,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
                 $message = 'Maintenance schedule deleted successfully.';
             }
+        } elseif ($action === 'bulk_schedules' && (string)($_POST['bulk_op'] ?? '') === 'extend') {
+            // Extend... / the bar's end handle (GRID_UNIFY_PLAN Phase 3): includes/ops-extend.php, one transaction,
+            // room locks first; a job that closes its room is refused on booked nights. preview=1 saves nothing.
+            $extHow = ['mode' => (string)($_POST['mode'] ?? 'by') === 'until' ? 'until' : 'by', 'n' => (int)($_POST['n'] ?? 0),
+                'unit' => (string)($_POST['unit'] ?? 'days'), 'until' => (string)($_POST['until'] ?? '')];
+            $extRes = rh_maint_extend($pdo, adminBulkIds(), $extHow, ['id' => isset($user['id']) ? (int)$user['id'] : null, 'name' => $user['username'] ?? null], [
+                'preview' => !empty($_POST['preview']),
+                'resize' => !empty($_POST['resize']),
+                'reconcile' => static function (int $rid) use ($pdo, $user): void { reconcileMaintenanceRoomStatus($pdo, $rid, $user['id'] ?? null); },
+            ]);
+            if ($isAjax) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['success' => $extRes['ok'], 'message' => $extRes['message'], 'preview' => !empty($_POST['preview']), 'done' => $extRes['done'],
+                    'refused' => count($extRes['refused'])]);
+                exit;
+            }
+            if ($extRes['ok']) {
+                $message = $extRes['message'];
+            } else {
+                $error = $extRes['message'];
+            }
         } elseif ($action === 'bulk_schedules') {
             // Bulk bar: every selected row goes through the same single-row step as its button.
             $bulkOp = (string)($_POST['bulk_op'] ?? '');
@@ -1839,6 +1861,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
                 <?php adminBulkButton('start', 'Start', 'fa-play', 'Mark {n} selected schedule(s) as started? Only pending ones change.', 'btn-warning'); ?>
                 <?php adminBulkButton('complete', 'Mark done', 'fa-check', 'Mark {n} selected schedule(s) as completed? Rooms stay in Maintenance until verified.', 'btn-success'); ?>
                 <?php adminBulkButton('verify', 'Verify', 'fa-check-double', 'Verify {n} selected schedule(s)? Only completed ones are verified and their rooms released. This cannot be undone.', 'btn-success'); ?>
+                <button type="button" name="bulk_op" value="extend" class="btn btn-secondary btn-sm" data-rh-extend="maint"><i class="fas fa-arrows-left-right" aria-hidden="true"></i> Extend...</button>
                 <?php adminBulkButton('delete', 'Delete', 'fa-trash', 'Delete {n} selected schedule(s)? This cannot be undone.', 'btn-danger', '', 'Delete', 'danger'); ?>
             <?php adminBulkBarEnd(); ?>
         </div>
@@ -2756,6 +2779,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
     </script>
     <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-context-menu.js'); ?>"></script>
     <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-select.js'); ?>"></script>
+    <script src="js/admin-extend.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-extend.js'); ?>"></script>
     <?php if ($opsPayload): ?>
     <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline.js'); ?>"></script>
     <script src="js/room-timeline-ops.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-ops.js'); ?>"></script>

@@ -232,7 +232,8 @@
                 title: b.getAttribute('data-admin-confirm-title') || (b.textContent || '').trim(),
                 ok: b.getAttribute('data-admin-confirm-ok') || (b.textContent || '').trim(),
                 tone: b.getAttribute('data-admin-confirm-tone') || 'warning',
-                requires: (b.getAttribute('data-bulk-requires') || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean)
+                requires: (b.getAttribute('data-bulk-requires') || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean),
+                extend: b.getAttribute('data-rh-extend') || '' // Extend... opens admin-extend.js's dialog instead of a confirm
             });
         });
         var fields = fieldCache ? fieldCache.get(form) : null;
@@ -255,6 +256,10 @@
     }
     /** Ask with the list's own confirm words, then POST the list's own form fields for these ids (page reloads). */
     function runListBulk(spec, opSpec, ids) {
+        if (opSpec.extend) { // Extend... (GRID_UNIFY_PLAN Phase 3): the shared dialog, then the list's own action
+            if (window.RhExtend) window.RhExtend.forBulk(opSpec.extend, spec.action, spec.csrf, ids);
+            return;
+        }
         var missing = opSpec.requires.filter(function (n) { var v = fieldValue(spec, n); return v === null || v === ''; });
         if (missing.length) {
             var f = spec.fields.filter(function (x) { return x.name === missing[0]; })[0];

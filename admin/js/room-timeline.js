@@ -517,6 +517,10 @@
                 pill.appendChild(icon(bl.kind === 'ooo' ? 'fa-ban' : (bl.kind === 'blocked' ? 'fa-lock' : 'fa-screwdriver-wrench')));
                 pill.appendChild(el('span', null, labTxt));
                 blk.appendChild(pill);
+                // Extend / shorten handle (GRID_UNIFY_PLAN Phase 3): only on a run of the room's OWN block that ends in view.
+                if (bl.kind === 'blocked' && bl.scope === 'own' && d.can.block && window.RhExtend && z === dnum(bl.to) - st.first && bl.to >= d.today) {
+                    blockGrip(st, blk, spec.lane, bl, a);
+                }
                 cells[a].appendChild(blk);
             });
         }
@@ -572,8 +576,9 @@
         // What may be changed from here (server rules in b.drag + this user's permissions); drag is desktop only.
         var rules = rulesOf(st, b);
         var desk = canDrag();
-        var dMove = desk && rules.move;
-        var dEnd = desk && rules.end && !it.cutE;
+        var dMove = desk && (rules.move || rules.dates);
+        var dEnd = desk && (rules.end || rules.dates) && !it.cutE;
+        var dStart = desk && rules.dates && !it.cutS;
         bar.setAttribute('draggable', 'false'); // never the browser's own drag and drop
         bar.setAttribute('data-tl-draggable', (dMove || dEnd) ? 'true' : 'false');
         if (dMove || dEnd) bar.classList.remove('tl-bar--locked');
@@ -608,6 +613,12 @@
         else if (b.group) flags.appendChild(flag('group', 'fa-users'));
         if (flags.childNodes.length) bar.appendChild(flags);
         if (it.cutE) bar.appendChild(icon('fa-angle-right tl-bar__cut'));
+        if (dStart) {
+            var gs = el('span', 'tl-bar__grip tl-bar__grip--start');
+            gs.setAttribute('aria-hidden', 'true');
+            gs.title = 'Drag to change the check-in date';
+            bar.appendChild(gs);
+        }
         if (dEnd) {
             var grip = el('span', 'tl-bar__grip tl-bar__grip--end');
             grip.setAttribute('aria-hidden', 'true');
@@ -845,13 +856,14 @@
     function canDrag() { return mqFine.matches && !mqCoarse.matches && window.innerWidth > 1024; }
     function rulesOf(st, b) {
         var dr = b.drag || {}, can = st.data.can || {};
-        return { move: !!dr.move && !!can.move, end: !!dr.end && !!can.nights, why: dr.why || '' };
+        return { move: !!dr.move && !!can.move, end: !!dr.end && !!can.nights, dates: !!dr.dates && !!can.edit_dates && !!can.open_booking, why: dr.why || '' };
     }
     function changeNotes(st, b) {
         var dr = b.drag || {}, r = rulesOf(st, b), out = [];
-        if (!dr.move && !dr.end) return [dr.why || 'This booking cannot be changed here. Open the booking.'];
-        if (!r.move && !r.end) return ['Your role cannot change this booking from the timeline.'];
+        if (!dr.move && !dr.end && !dr.dates) return [dr.why || 'This booking cannot be changed here. Open the booking.'];
+        if (!r.move && !r.end && !r.dates) return ['Your role cannot change this booking from the timeline.'];
         var drag = canDrag();
+        if (r.dates && drag) out.push('To change the dates, drag the bar sideways or drag either end. The booking\'s Change dates screen then opens with the new dates and price; nothing is saved here.');
         if (r.move) out.push(drag ? 'To move this stay, drag the bar to another room, or use More, Move room.' : 'To move this stay, use More, Move room.');
         if (r.end) out.push(drag ? 'To change the check-out, drag the right edge of the bar, or use More, Change dates.' : 'To change the check-out, use More, Change dates.');
         if (dr.why) out.push(dr.why);
@@ -974,9 +986,10 @@
         var b = st.byId[bar.getAttribute('data-tl-booking')];
         if (!b) return;
         var r = rulesOf(st, b);
-        var kind = e.target.closest('.tl-bar__grip--end') ? (r.end ? 'end' : null) : (r.move ? 'move' : null);
+        var kind = e.target.closest('.tl-bar__grip--end') ? (r.end ? 'end' : (r.dates ? 'co' : null))
+            : (e.target.closest('.tl-bar__grip--start') ? (r.dates ? 'ci' : null) : ((r.move || r.dates) ? 'move' : null));
         if (!kind) return;
-        st.drag = { kind: kind, bar: bar, b: b, row: bar.closest('.tl-lane'), x: e.clientX, y: e.clientY, id: e.pointerId, started: false };
+        st.drag = { kind: kind, rules: r, bar: bar, b: b, row: bar.closest('.tl-lane'), x: e.clientX, y: e.clientY, id: e.pointerId, started: false };
     }
     function dragMove(st, e) {
         var d = st.drag;
@@ -990,10 +1003,27 @@
         }
         e.preventDefault();
         var left = parseFloat(d.bar.style.left) || 0, width = parseFloat(d.bar.style.width) || 0;
+        if (d.kind === 'ci' || d.kind === 'co') { datesEdgeMove(st, d, e, left, width); return; }
         if (d.kind === 'move') {
             var hit = document.elementFromPoint(e.clientX, e.clientY);
             var row = hit && hit.closest('.tl-lane');
             if (row && !q(st, '[data-tl-grid]').contains(row)) row = null;
+            // Sideways on a confirmed stay = the same nights on other dates (Change dates). Another row = Move room.
+            d.shift = d.rules.dates ? Math.round((e.clientX - d.x) / st.dayW) : 0;
+            if (d.shift !== 0) {
+                var sameRow = !row || row === d.row || (row.hasAttribute('data-tl-lane') && d.b.lanes.indexOf(row.getAttribute('data-tl-lane')) !== -1);
+                d.target = null;
+                var nci = dnum(d.b.ci) + d.shift, nco = dnum(d.b.co) + d.shift;
+                d.datesBad = !sameRow ? 'Change the dates and the room one at a time: drop the bar on its own row to change the dates, or on another row at the same dates to move it.'
+                    : (nci < dnum(st.data.today) ? 'The new check-in would be in the past.' : '');
+                d.newCi = nci;
+                d.newCo = nco;
+                placeGhost(st, d, d.row, left + d.shift * st.dayW, width);
+                d.ghost.classList.toggle('tl-bar--ghost-bad', !!d.datesBad);
+                markDrop(st, d.row, nci, nco - 1, !d.datesBad);
+                return;
+            }
+            if (!d.rules.move) { d.target = null; clearDrop(st); if (d.ghost) d.ghost.remove(); d.ghost = null; return; }
             d.target = moveVerdict(st, d.b, row);
             if (!row) { clearDrop(st); return; }
             placeGhost(st, d, row, left, width);
@@ -1024,6 +1054,13 @@
         if (!d || !d.started) return;
         st.suppressClick = true;
         window.setTimeout(function () { st.suppressClick = false; }, 0);
+        if (d.kind === 'ci' || d.kind === 'co' || (d.kind === 'move' && d.shift)) {
+            if (d.datesBad) { endDrag(st); toast(st, d.datesBad, 'warning'); return; }
+            var nci2 = d.kind === 'co' ? dnum(d.b.ci) : d.newCi, nco2 = d.kind === 'ci' ? dnum(d.b.co) : d.newCo;
+            if (nci2 === undefined || nco2 === undefined || (nci2 === dnum(d.b.ci) && nco2 === dnum(d.b.co))) { endDrag(st); return; }
+            handOffDates(st, d.b, nci2, nco2);
+            return;
+        }
         if (d.kind === 'move') {
             var v = d.target;
             if (!v) { endDrag(st); return; }
@@ -1518,6 +1555,12 @@
             var anyBlocked = keys.some(function (k) { var p = L.parts(k); return !!blockAt(st, p.lane, p.d, 'blocked'); });
             if (anyBlocked) out.push({ label: 'Unblock nights', icon: 'fa-unlock', run: function () { blockPicks(st, 'unblock'); } });
         }
+        if (can.block && window.RhExtend) {
+            var ext = extendItems(st, keys);
+            out.push(ext.length
+                ? { label: 'Extend...', icon: 'fa-arrows-left-right', run: function () { extendBlocks(st, ext); } }
+                : { label: 'Extend...', icon: 'fa-arrows-left-right', disabled: true, hint: 'Select a night of a room\'s own block (a room-type or All rooms block is extended on Blocked Dates).' });
+        }
         if (can.maint_page) out.push({ label: 'New maintenance job', icon: 'fa-screwdriver-wrench', href: maintHref(st, keys) });
         return out;
     }
@@ -1621,6 +1664,144 @@
         }).catch(function (err) {
             st.blockBusy = false;
             toast(st, (err && err.message) || 'That did not work. Try again.', 'error');
+        });
+    }
+
+    /* ---------------------------------------------------------------- Extend (GRID_UNIFY_PLAN Phase 3)
+       Block runs: Extend... (admin-extend.js dialog -> blocked-dates.php extend_blocks: one transaction, booked nights
+       skipped and listed) and the end handle: drag right = extend (same action, a confirm with the check first), drag
+       left = unblock the trimmed nights (grid_apply unblock: only the room's own block). Bookings: a drag on a confirmed
+       stay opens its own Change dates screen prefilled; nothing is saved on the timeline. */
+    function extendItems(st, keys) {
+        var L = window.RhGridSel.logic, seen = {}, out = [];
+        keys.forEach(function (k) {
+            var p = L.parts(k), bl = blockAt(st, p.lane, p.d, 'blocked');
+            if (!bl || bl.scope !== 'own') return;
+            var id = p.lane + '|' + bl.to;
+            if (seen[id]) return;
+            seen[id] = true;
+            out.push({ t: 'room', id: Number(p.lane), last: bl.to });
+        });
+        return out;
+    }
+    function blockSaved(st, res, revert) {
+        var msg = dot((res && res.message) || (res && res.success ? 'Saved.' : 'Nothing was changed.'));
+        if (!res || !res.success) { if (revert) revert(); toast(st, msg, 'error'); return; }
+        if (st.picks) st.picks.clear();
+        toast(st, msg, 'success');
+        st.flash = msg;
+        var sc = q(st, '[data-tl-scroller]');
+        st.keepScroll = sc ? { top: sc.scrollTop, left: sc.scrollLeft, win: window.scrollY } : null;
+        go(st, st.start, st.days, true);
+    }
+    function extendBlocks(st, items, opener) {
+        window.RhExtend.forBlocks(items, { opener: opener, done: function (res) { blockSaved(st, res); } });
+    }
+    function blockGrip(st, blk, lane, bl, a) {
+        var g = window.RhExtend.grip('tl-grip', 'block on room ' + lane.number + ', ' + fmtRange(bl.from, bl.to));
+        blk.appendChild(g);
+        var item = { t: 'room', id: Number(lane.id), last: bl.to };
+        var open = function () { if (!st.blockBusy) extendBlocks(st, [item], g); };
+        g.addEventListener('pointerdown', function (e) {
+            if (st.busy || st.blockBusy || st.drag) { e.stopPropagation(); return; }
+            var w0 = blk.style.width, track = blk.closest('.tl-track');
+            var lastVis = st.first + st.dates.length - 1;
+            var floor = Math.max(dnum(bl.from), dnum(st.data.today) - 1); // trimming never touches past nights
+            var started = window.RhExtend.gripDrag(e, {
+                dayAt: function (x) {
+                    if (!track) return null;
+                    var n = st.first + Math.floor((x - track.getBoundingClientRect().left) / st.dayW);
+                    return Math.min(lastVis, Math.max(floor, n));
+                },
+                onMove: function (n) {
+                    blk.classList.add('is-resizing');
+                    blk.style.width = (Math.max(0.3, n - st.first - a + 1) * st.dayW) + 'px';
+                },
+                onDone: function (n) {
+                    blk.classList.remove('is-resizing');
+                    var revert = function () { blk.style.width = w0; };
+                    if (n === null || n === dnum(bl.to)) { revert(); return; }
+                    resizeBlock(st, lane, bl, n, revert);
+                }
+            });
+            if (!started) e.stopPropagation(); // touch: no drag (the page scrolls); the tap opens Extend...
+        });
+        g.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!window.RhExtend.justDragged()) open();
+        });
+        g.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); open(); }
+        });
+    }
+    /** Handle released on night n (day number): extend to n, or unblock the nights after n. Confirm first. */
+    function resizeBlock(st, lane, bl, n, revert) {
+        var L = window.RhGridSel ? window.RhGridSel.logic : null;
+        var room = 'Room ' + lane.number;
+        var item = { t: 'room', id: Number(lane.id), last: bl.to };
+        st.blockBusy = true;
+        var done = function () { st.blockBusy = false; };
+        var fail = function (err) { done(); revert(); toast(st, (err && err.message) || 'That did not work. Try again.', 'error'); };
+        if (n > dnum(bl.to)) {
+            var base = { action: 'extend_blocks', items: JSON.stringify([item]), mode: 'until', until: dstr(n) };
+            postBlocks(Object.assign({ preview: '1' }, base)).then(function (p) {
+                if (!p || !p.success) throw new Error((p && p.message) || 'Nothing new would be blocked.');
+                return window.RhGridSel.ask({ title: 'Extend block', message: room + ': extend the block to the night of ' + fmt(dstr(n)) + '? ' + dot(p.message),
+                    confirmText: 'Extend', icon: 'fa-arrows-left-right' });
+            }).then(function (ans) {
+                if (!ans || !ans.confirmed) { done(); revert(); return null; }
+                return postBlocks(base).then(function (res) { done(); blockSaved(st, res, revert); });
+            }).catch(fail);
+            return;
+        }
+        var nights = [];
+        for (var k = n + 1; k <= dnum(bl.to); k++) { if (dstr(k) >= st.data.today) nights.push(dstr(k)); }
+        if (!nights.length) { done(); revert(); return; }
+        var words = L ? L.nightsText(nights) : (fmt(nights[0]) + ' to ' + fmt(nights[nights.length - 1]));
+        window.RhGridSel.ask({ title: 'Shorten block', message: room + ': unblock ' + nightsWord(nights.length) + ' (' + words + ')? Those nights go back on sale. A room-type or All rooms block on them stays.',
+            confirmText: 'Unblock', icon: 'fa-unlock' }).then(function (ans) {
+            if (!ans || !ans.confirmed) { done(); revert(); return null; }
+            return postBlocks({ action: 'grid_apply', op: 'unblock', items: JSON.stringify([{ t: 'room', id: Number(lane.id), d: nights }]) })
+                .then(function (res) { done(); blockSaved(st, res, revert); });
+        }).catch(fail);
+    }
+
+    /* Bookings: the start / end edge of a confirmed stay (day under the pointer). */
+    function datesEdgeMove(st, d, e, left, width) {
+        var track = d.row && d.row.querySelector('.tl-track');
+        if (!track) return;
+        var tr = track.getBoundingClientRect();
+        var lastVis = st.first + st.dates.length - 1;
+        var day = st.first + Math.floor((e.clientX - tr.left) / st.dayW);
+        var ci = dnum(d.b.ci), co = dnum(d.b.co), today = dnum(st.data.today);
+        if (d.kind === 'ci') {
+            d.newCi = Math.max(today, Math.min(day, co - 1));
+            var x1 = (d.newCi - st.first + 0.5) * st.dayW + 2;
+            placeGhost(st, d, d.row, x1, left + width - x1);
+            d.datesBad = '';
+            markDrop(st, d.row, Math.min(d.newCi, ci), Math.max(d.newCi, ci) - 1, true);
+            if (d.newCi === ci) clearDrop(st);
+        } else {
+            d.newCo = Math.min(lastVis, Math.max(day, ci + 1, today + 1));
+            placeGhost(st, d, d.row, left, (d.newCo - st.first + 0.5) * st.dayW - 2 - left);
+            d.datesBad = '';
+            markDrop(st, d.row, Math.min(d.newCo, co), Math.max(d.newCo, co) - 1, true);
+            if (d.newCo === co) clearDrop(st);
+        }
+        if (d.ghost) d.ghost.classList.remove('tl-bar--ghost-bad');
+    }
+    /** Owner answer 4: open the booking's own Change dates (prefilled, reprice shown there). Nothing saved here. */
+    function handOffDates(st, b, ciN, coN) {
+        var ci = dstr(ciN), co = dstr(coN);
+        var href = 'booking-details.php?id=' + encodeURIComponent(b.id) + '&open=dates&ci=' + ci + '&co=' + co;
+        var msg = b.guest + ': ' + fmtRange(b.ci, b.co) + ' (' + nightsWord(b.nights) + ') to ' + fmtRange(ci, co) + ' (' + nightsWord(coN - ciN) + ')? '
+            + 'The booking\'s Change dates screen opens with these dates and shows the new price. Nothing is saved until you confirm there.';
+        var ask = window.RhGridSel ? window.RhGridSel.ask({ title: 'Change dates', message: msg, confirmText: 'Open Change dates', icon: 'fa-calendar-pen' })
+            : Promise.resolve({ confirmed: true });
+        ask.then(function (ans) {
+            endDrag(st);
+            if (ans && ans.confirmed) window.location.href = href;
         });
     }
 

@@ -446,7 +446,73 @@
                 bar.appendChild(flags);
             }
             if (sp.cutE) bar.appendChild(icon('fa-angle-right tl-bar__cut'));
+            if (st.page === 'maintenance' && !sp.cutE) jobGrip(st, bar, sp, it);
             return bar;
+        }
+
+        /* Maintenance: the end handle (GRID_UNIFY_PLAN Phase 3, "like an excel"). Drag right / left moves the job's end
+           (the list's bulk_schedules extend with resize: the update rules, a job that closes its room is refused on
+           booked nights); a confirm shows the server's check first. Touch / keyboard: Extend... (admin-extend.js). */
+        function jobGrip(st, bar, sp, it) {
+            var X = window.RhExtend;
+            var spec = X && st.cfg.bulk && window.RhGridSel ? window.RhGridSel.listBulk(document.querySelector(st.cfg.bulk)) : null;
+            var end = it.edit && it.edit.end_date ? String(it.edit.end_date) : '';
+            if (!spec || !end || it.open_end || it.draw_to !== it.to || ['completed', 'verified', 'cancelled'].indexOf(it.status) !== -1) return;
+            var g = X.grip('tl-grip', (it.title || 'maintenance job') + ', room ' + it.room);
+            bar.appendChild(g);
+            var openDlg = function () { X.forBulk('maint', spec.action, spec.csrf, [String(it.id)], null, g); };
+            var time = end.length >= 19 ? end.slice(11, 19) : '00:00:00';
+            var endFor = function (n) { // last night n (day number) -> the new end, keeping the time of day
+                var day = addDays(it.to, n - dnum(it.to));
+                return time === '00:00:00' ? addDays(day, 1) + ' 00:00:00' : day + ' ' + time;
+            };
+            g.addEventListener('pointerdown', function (e) {
+                var w0 = bar.style.width, track = bar.closest('.tl-track');
+                var lastVis = st.first + st.cols.length - 1, floor = dnum(it.from);
+                var started = X.gripDrag(e, {
+                    dayAt: function (x) {
+                        if (!track) return null;
+                        var n = st.first + Math.floor((x - track.getBoundingClientRect().left) / st.dayW);
+                        return Math.min(lastVis, Math.max(floor, n));
+                    },
+                    onMove: function (n) {
+                        bar.classList.add('is-resizing');
+                        bar.style.width = (Math.max(1, n - st.first - sp.a + 1) * st.dayW - 4) + 'px';
+                    },
+                    onDone: function (n) {
+                        bar.classList.remove('is-resizing');
+                        var revert = function () { bar.style.width = w0; };
+                        if (n === null || n === dnum(it.to)) { revert(); return; }
+                        var base = { action: spec.action, csrf_token: spec.csrf, bulk_op: 'extend', bulk_ids: [String(it.id)], mode: 'until', until: endFor(n), resize: '1' };
+                        X.post(window.location.pathname, Object.assign({ preview: '1' }, base)).then(function (p) {
+                            if (!p || !p.success) throw new Error((p && p.message) || 'This job cannot end then.');
+                            return window.RhGridSel.ask({ title: n > dnum(it.to) ? 'Extend job' : 'Shorten job', message: String(p.message || ''),
+                                confirmText: 'Save', icon: 'fa-arrows-left-right' });
+                        }).then(function (ans) {
+                            if (!ans || !ans.confirmed) { revert(); return null; }
+                            return X.post(window.location.pathname, base).then(function (res) {
+                                if (!res || !res.success) throw new Error((res && res.message) || 'Nothing was changed.');
+                                X.flash(res.message, 'success');
+                                window.location.reload();
+                            });
+                        }).catch(function (err) {
+                            revert();
+                            var m = (err && err.message) || 'That did not work. Try again.';
+                            announce(st, m);
+                            if (window.Alert && typeof window.Alert.show === 'function') window.Alert.show(m.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'), 'error');
+                        });
+                    }
+                });
+                if (!started) e.stopPropagation(); // touch: no drag; the tap opens Extend...
+            });
+            g.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!X.justDragged()) openDlg();
+            });
+            g.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openDlg(); }
+            });
         }
 
         function chipEl(st, lane, sp) {

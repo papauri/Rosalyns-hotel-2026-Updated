@@ -117,8 +117,14 @@ ok('(e) can.nights uses the stay_nights_apply permission', (bool)preg_match("/'n
 ok('(b) JS: every bar is draggable="false" (no native drag) and data-tl-draggable comes from the rules and the device',
     strpos($js, "bar.setAttribute('draggable', 'false')") !== false
     && strpos($js, "bar.setAttribute('data-tl-draggable', (dMove || dEnd) ? 'true' : 'false')") !== false
-    && (bool)preg_match('/dMove\s*=\s*desk\s*&&\s*rules\.move/', $js)
-    && (bool)preg_match('/dEnd\s*=\s*desk\s*&&\s*rules\.end/', $js));
+    // GRID_UNIFY_PLAN Phase 3: a confirmed stay's date drag (rules.dates) also makes the bar and its edges draggable.
+    && (bool)preg_match('/dMove\s*=\s*desk\s*&&\s*\(rules\.move\s*\|\|\s*rules\.dates\)/', $js)
+    && (bool)preg_match('/dEnd\s*=\s*desk\s*&&\s*\(rules\.end\s*\|\|\s*rules\.dates\)/', $js)
+    && (bool)preg_match('/dStart\s*=\s*desk\s*&&\s*rules\.dates/', $js));
+ok('(b) JS: a date drag on a confirmed stay only opens the booking\'s own Change dates (prefilled), nothing is saved on the timeline',
+    (bool)preg_match("/dates: !!dr\\.dates && !!can\\.edit_dates/", $js)
+    && strpos($js, "'booking-details.php?id=' + encodeURIComponent(b.id) + '&open=dates&ci=' + ci + '&co=' + co") !== false
+    && !preg_match('/function handOffDates[\s\S]{0,1200}postAction\(/', $js));
 ok('(b) JS: a drag starts only on a bar marked data-tl-draggable="true", mouse only, desktop only',
     strpos($js, "if (bar.getAttribute('data-tl-draggable') !== 'true') return;") !== false
     && strpos($js, "if (e.pointerType !== 'mouse' || !canDrag() || st.busy || st.pending) return;") !== false);

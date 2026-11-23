@@ -220,6 +220,8 @@
         var clearBtn = document.getElementById('bdgClearBtn');
         if (blockBtn) blockBtn.disabled = busy || n === 0;
         if (unblockBtn) unblockBtn.disabled = busy || direct === 0;
+        var extendBtn = document.getElementById('bdgExtendBtn');
+        if (extendBtn) extendBtn.disabled = busy || direct === 0 || !window.RhExtend;
         if (clearBtn) clearBtn.disabled = busy || n === 0;
     }
 
@@ -267,6 +269,7 @@
     // ── Mouse / pen: press, drag a rectangle, release. Touch: tap toggles (dragging scrolls). ──
     document.addEventListener('pointerdown', function (e) {
         lastPointer = e.pointerType || 'mouse';
+        if (e.target.closest && e.target.closest('.rh-grip')) return; // the end handle has its own gesture
         var td = e.target.closest && e.target.closest('#bdgTable td[data-sel="1"]');
         if (!td || busy || e.button !== 0 || e.pointerType === 'touch') return;
         e.preventDefault();
@@ -344,6 +347,7 @@
             items: [
                 { label: 'Block', icon: 'fa-ban', run: function () { save('block'); } },
                 { label: 'Unblock', icon: 'fa-unlock', disabled: !direct, hint: direct ? '' : 'None of these nights has its own block.', run: function () { save('unblock'); } },
+                { label: 'Extend...', icon: 'fa-arrows-left-right', disabled: !direct || !window.RhExtend, hint: direct ? '' : 'Select a night of a line\'s own block.', run: function () { extendSel(); } },
                 { label: 'Clear selection', icon: 'fa-xmark', run: function () { selected.clear(); paint(); } }
             ]
         };
@@ -544,10 +548,138 @@
         });
     }
 
+    /* ── Extend (GRID_UNIFY_PLAN Phase 3): Extend... on the selected own-block nights (each extends from the end of
+       its run: admin/blocked-dates.php extend_blocks, one transaction, booked nights skipped and listed), and the end
+       handle on each run of a line's own block: drag right = extend, drag left = unblock the trimmed nights. ── */
+    function dnumG(s) { var p = String(s).split('-'); return Math.round(Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000); }
+    function dstrG(n) {
+        var d = new Date(n * 86400000);
+        return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+    }
+    function itemOf(t, id, last) { return { t: t, id: id === '' || id === null || id === undefined ? null : Number(id), last: last }; }
+    function afterExtend(res) {
+        feedback(!!(res && res.success), (res && res.message) || 'Nothing was changed.');
+        if (res && res.success) {
+            selected.clear();
+            if (typeof window.refreshBlockedDatesTable === 'function') window.refreshBlockedDatesTable();
+        }
+        summary();
+    }
+    function extendSel(opener) {
+        if (!window.RhExtend || busy || asking) return;
+        var byRow = {};
+        selectedCells().forEach(function (c) {
+            if (c.state !== 'direct') return;
+            var k = c.t + '|' + c.id;
+            (byRow[k] = byRow[k] || { t: c.t, id: c.id, d: [] }).d.push(c.d);
+        });
+        var items = [];
+        Object.keys(byRow).forEach(function (k) {
+            var r = byRow[k], ds = r.d.slice().sort();
+            ds.forEach(function (d, i) {
+                var n = dnumG(d);
+                var next = ds[i + 1] ? dnumG(ds[i + 1]) : null;
+                if (next !== n + 1) items.push(itemOf(r.t, r.id, d)); // the last night of each picked run
+            });
+        });
+        if (!items.length) return;
+        window.RhExtend.forBlocks(items, { opener: opener, url: window.location.pathname, done: afterExtend });
+    }
+    function addGrips() {
+        var t = table();
+        if (!t || !window.RhExtend) return;
+        t.querySelectorAll('.rh-grip').forEach(function (g) { g.remove(); });
+        t.querySelectorAll('tr.bdg-row').forEach(function (tr) {
+            var cells = Array.prototype.filter.call(tr.querySelectorAll('td[data-d]'), function () { return true; });
+            cells.forEach(function (td, i) {
+                if (td.dataset.state !== 'direct' || td.getAttribute('data-sel') !== '1') return;
+                var nx = cells[i + 1];
+                if (nx && nx.dataset.state === 'direct' && dnumG(nx.dataset.d) === dnumG(td.dataset.d) + 1) return; // not the run's end
+                // The month's last night: the run may go on into next month, which this grid cannot see, and a handle
+                // here would shorten from the middle of the run (leaving a gap). Extend... in the menu / bar still works.
+                if (!nx) return;
+                var from = td;
+                for (var j = i - 1; j >= 0 && cells[j].dataset.state === 'direct' && dnumG(cells[j].dataset.d) === dnumG(cells[j + 1].dataset.d) - 1; j--) from = cells[j];
+                gripOn(tr, td, from, cells);
+            });
+        });
+    }
+    function gripOn(tr, td, fromTd, cells) {
+        var label = (tr.getAttribute('data-row-label') || 'Room') + ', block ending ' + td.dataset.d;
+        var g = window.RhExtend.grip('bdg-grip', label);
+        td.appendChild(g);
+        var item = itemOf(td.dataset.t, td.dataset.id || '', td.dataset.d);
+        var last = dnumG(td.dataset.d);
+        var openDlg = function () { if (!busy && !asking) window.RhExtend.forBlocks([item], { opener: g, url: window.location.pathname, done: afterExtend }); };
+        var mark = function (n) {
+            cells.forEach(function (c) {
+                var x = dnumG(c.dataset.d);
+                c.classList.toggle('bdg-cell--grow', n > last && x > last && x <= n);
+                c.classList.toggle('bdg-cell--trim', n < last && x > n && x <= last);
+            });
+        };
+        g.addEventListener('pointerdown', function (e) {
+            if (busy || asking) { e.stopPropagation(); return; }
+            var lo = Math.max(dnumG(fromTd.dataset.d), dnumG(cells.filter(function (c) { return c.getAttribute('data-sel') === '1'; })[0].dataset.d) - 1);
+            var hi = dnumG(cells[cells.length - 1].dataset.d);
+            var started = window.RhExtend.gripDrag(e, {
+                dayAt: function (x, y) {
+                    var hit = document.elementFromPoint(x, tr.getBoundingClientRect().top + 4);
+                    var c = hit && hit.closest ? hit.closest('td[data-d]') : null;
+                    if (!c || c.parentElement !== tr) return null;
+                    return Math.min(hi, Math.max(lo, dnumG(c.dataset.d)));
+                },
+                onMove: mark,
+                onDone: function (n) {
+                    mark(last);
+                    if (n === null || n === last) return;
+                    resizeRun(item, td.dataset.t, td.dataset.id || '', last, n, tr.getAttribute('data-row-label') || 'This line');
+                }
+            });
+            if (!started) e.stopPropagation(); // touch: the tap opens Extend...
+        });
+        g.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!window.RhExtend.justDragged()) openDlg();
+        });
+        g.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openDlg(); }
+        });
+    }
+    function resizeRun(item, t, id, last, n, label) {
+        var X = window.RhExtend, url = window.location.pathname;
+        asking = true;
+        var finish = function () { asking = false; summary(); };
+        var fail = function (err) { finish(); feedback(false, (err && err.message) || 'That did not work. Try again.'); };
+        if (n > last) {
+            var base = { action: 'extend_blocks', items: JSON.stringify([item]), mode: 'until', until: dstrG(n) };
+            X.post(url, Object.assign({ preview: '1' }, base)).then(function (p) {
+                if (!p || !p.success) throw new Error((p && p.message) || 'Nothing new would be blocked.');
+                return confirmAsk({ title: 'Extend block', message: label + ': extend the block to the night of ' + dstrG(n) + '? ' + p.message, confirmText: 'Extend', icon: 'fa-arrows-left-right' });
+            }).then(function (ok) {
+                if (!ok) { finish(); return null; }
+                busy = true;
+                return X.post(url, base).then(function (res) { busy = false; finish(); afterExtend(res); });
+            }).catch(function (err) { busy = false; fail(err); });
+            return;
+        }
+        var nights = [];
+        for (var k = n + 1; k <= last; k++) nights.push(dstrG(k));
+        confirmAsk({ title: 'Shorten block', message: label + ': unblock ' + nights.length + ' night(s) (' + nightsText(nights) + ')? Those nights go back on sale. A room-type or All rooms block on them stays.',
+            confirmText: 'Unblock', icon: 'fa-unlock' }).then(function (ok) {
+            if (!ok) { finish(); return null; }
+            busy = true;
+            return X.post(url, { action: 'grid_apply', op: 'unblock', items: JSON.stringify([{ t: t, id: id === '' ? null : Number(id), d: nights }]) })
+                .then(function (res) { busy = false; finish(); afterExtend(res); });
+        }).catch(function (err) { busy = false; fail(err); });
+    }
+
     document.addEventListener('click', function (e) {
-        var b = e.target.closest && e.target.closest('#bdgBlockBtn, #bdgUnblockBtn, #bdgClearBtn');
+        var b = e.target.closest && e.target.closest('#bdgBlockBtn, #bdgUnblockBtn, #bdgClearBtn, #bdgExtendBtn');
         if (!b) return;
         if (b.id === 'bdgClearBtn') { selected.clear(); paint(); return; }
+        if (b.id === 'bdgExtendBtn') { extendSel(b); return; }
         save(b.id === 'bdgBlockBtn' ? 'block' : 'unblock');
     });
 
@@ -559,6 +691,7 @@
         anchor = null;
         initFocus();
         paint();
+        addGrips();
     };
 
     // Picks from other months survive the month arrows / month picker in this tab. Those links are admin SPA swaps
@@ -570,6 +703,7 @@
         anchor = null;
         initFocus();
         paint();
+        addGrips();
     }
     document.addEventListener('rh:content-updated', boot);
     boot();

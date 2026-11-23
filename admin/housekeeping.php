@@ -10,6 +10,7 @@ require_once 'includes/admin-modal.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/includes/front-desk-counts.php'; // rh_fd_housekeeping_due_sql: the Dashboard "tasks due" rule
+require_once __DIR__ . '/../includes/ops-extend.php'; // Repeat until... (GRID_UNIFY_PLAN Phase 3)
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -1300,6 +1301,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $message = 'Room ' . $glRoomLabel . ': guest has left. A high-priority departure clean is on the list. The room stays occupied (not for sale) until the desk checks the guest out.';
                 }
             }
+        } elseif ($action === 'bulk_assignments' && (string)($_POST['bulk_op'] ?? '') === 'extend') {
+            // Extend... = repeat every day / week until a date (GRID_UNIFY_PLAN Phase 3): includes/ops-extend.php, one
+            // transaction under the add form's lock, no duplicate for the same room + type + day. preview=1 saves nothing.
+            $extRes = rh_hk_extend($pdo, adminBulkIds(), ['every' => (string)($_POST['every'] ?? 'daily'), 'until' => (string)($_POST['until'] ?? '')],
+                ['id' => isset($user['id']) ? (int)$user['id'] : null, 'name' => $user['username'] ?? null], [
+                    'preview' => !empty($_POST['preview']),
+                    'reconcile' => static function (int $rid) use ($pdo, $user): void { reconcileIndividualRoomHousekeeping($pdo, $rid, $user['id'] ?? null); },
+                ]);
+            if ($isAjax) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['success' => $extRes['ok'], 'message' => $extRes['message'], 'preview' => !empty($_POST['preview']), 'added' => $extRes['added'],
+                    'dupes' => $extRes['dupes']]);
+                exit;
+            }
+            if ($extRes['ok']) {
+                $message = $extRes['message'];
+            } else {
+                $error = $extRes['message'];
+            }
         } elseif ($action === 'bulk_assignments') {
             // Bulk bar over the assignments table: every row goes through the same helpers/rules as the
             // single-row buttons, in one transaction; rows a rule rejects are skipped and reported.
@@ -1952,6 +1972,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                     <?php adminBulkButton('start', 'Start', 'fa-play', 'Mark {n} selected task(s) as started? Only pending tasks are changed.', 'btn-warning'); ?>
                     <?php adminBulkButton('complete', 'Mark done', 'fa-check', 'Mark {n} selected task(s) as completed? Only pending or in-progress tasks are changed.', 'btn-success'); ?>
                     <?php adminBulkButton('verify', 'Verify', 'fa-check-double', 'Verify {n} selected task(s)? Only completed tasks are verified. This cannot be undone.', 'btn-success'); ?>
+                    <button type="button" name="bulk_op" value="extend" class="btn btn-secondary btn-sm" data-rh-extend="hk"><i class="fas fa-repeat" aria-hidden="true"></i> Repeat until...</button>
                     <?php adminBulkButton('delete', 'Delete', 'fa-trash', 'Delete {n} selected assignment(s)? This cannot be undone. Verified tasks are kept.', 'btn-danger', '', 'Delete', 'danger'); ?>
                 <?php adminBulkBarEnd(); ?>
             <?php endif; ?>
@@ -2782,6 +2803,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
     </script>
     <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-context-menu.js'); ?>"></script>
     <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-select.js'); ?>"></script>
+    <script src="js/admin-extend.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-extend.js'); ?>"></script>
     <?php if ($opsPayload): ?>
     <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline.js'); ?>"></script>
     <script src="js/room-timeline-ops.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-ops.js'); ?>"></script>

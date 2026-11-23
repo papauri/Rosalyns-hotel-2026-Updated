@@ -30,8 +30,9 @@ $canBlockRooms = rhCanBlockRooms((int)($user['id'] ?? 0));
 /**
  * Keep only valid, not-in-the-past blocked nights. A block is one NIGHT: blocking the 5th
  * stops a stay that sleeps on the night of the 5th; a guest checking out on the 5th is fine.
+ * $cap: most nights kept (366; Extend passes a higher cap, GRID_UNIFY_PLAN Phase 3).
  */
-function rh_clean_block_dates($dates): array
+function rh_clean_block_dates($dates, int $cap = 366): array
 {
     $today = date('Y-m-d');
     $out = [];
@@ -42,7 +43,7 @@ function rh_clean_block_dates($dates): array
         }
     }
     ksort($out);
-    return array_values(array_slice($out, 0, 366));
+    return array_values(array_slice($out, 0, $cap));
 }
 
 /** Error text if the posted room type id (null = all rooms) does not exist, else null. */
@@ -359,15 +360,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'user_id' => (int)($user['id'] ?? 0), 'user_name' => $blockActorName];
     };
 
-    if (!$canBlockRooms && in_array($action, ['block_date', 'block_multiple', 'unblock_date', 'bulk_unblock', 'grid_apply', 'preview_block'], true)) {
+    if (!$canBlockRooms && in_array($action, ['block_date', 'block_multiple', 'unblock_date', 'bulk_unblock', 'grid_apply', 'preview_block', 'extend_blocks'], true)) {
         // Server-side refusal: the buttons are disabled for this user, but never trust the page.
         $message = rhBlockRoomsDeniedMessage();
         $messageType = 'error';
-        if ($action === 'grid_apply' || $action === 'preview_block') {
+        if ($action === 'grid_apply' || $action === 'preview_block' || $action === 'extend_blocks') {
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['success' => false, 'message' => $message]);
             exit;
         }
+    } elseif ($action === 'extend_blocks') {
+        // Extend... / the drag handle (GRID_UNIFY_PLAN Phase 3): items [{t, id, last}] + By N days|weeks|months|years
+        // or Until a date. preview=1 is read only (the confirm text); otherwise ONE transaction (includes/block-save.php).
+        header('Content-Type: application/json; charset=utf-8');
+        $extItems = json_decode((string)($_POST['items'] ?? ''), true);
+        $extHow = ['mode' => (string)($_POST['mode'] ?? 'by') === 'until' ? 'until' : 'by', 'n' => (int)($_POST['n'] ?? 0),
+            'unit' => (string)($_POST['unit'] ?? 'days'), 'until' => (string)($_POST['until'] ?? '')];
+        $extList = [];
+        $extErr = '';
+        if (!is_array($extItems) || !$extItems) {
+            $extErr = 'Select a blocked night to extend.';
+        } elseif (count($extItems) > 300) {
+            $extErr = 'Too many rows at once. Select fewer and try again.';
+        } else {
+            foreach ($extItems as $it) {
+                $last = is_array($it) ? rh_normalize_block_date((string)($it['last'] ?? '')) : null;
+                if ($last === null) {
+                    $extErr = 'The selection could not be read. Reload the page and try again.';
+                    break;
+                }
+                $extPast = 0;
+                $tgs = rh_block_grid_targets($pdo, json_encode([['t' => (string)($it['t'] ?? ''), 'id' => $it['id'] ?? null, 'd' => [$last]]]), $extPast);
+                if (is_string($tgs)) {
+                    $extErr = $extPast > 0 ? 'A block that ended before today cannot be extended. Block the new nights instead.' : $tgs;
+                    break;
+                }
+                $extList[] = ['target' => $tgs[0], 'last' => $last, 'how' => $extHow];
+            }
+        }
+        if ($extErr !== '') {
+            echo json_encode(['success' => false, 'message' => $extErr]);
+            exit;
+        }
+        $extRes = rh_block_extend($pdo, $extList, ['by' => isset($user['id']) ? (int)$user['id'] : null, 'user_id' => (int)($user['id'] ?? 0), 'user_name' => $blockActorName],
+            ['preview' => !empty($_POST['preview'])]);
+        echo json_encode(['success' => $extRes['ok'], 'message' => $extRes['message'], 'preview' => !empty($_POST['preview']),
+            'add_nights' => rh_block_by_count($extRes['added']) + rh_block_by_count($extRes['singles']), 'skip_nights' => rh_block_by_count($extRes['skipped']),
+            'already_nights' => rh_block_by_count($extRes['already']), 'refused' => !empty($extRes['refused'])]);
+        exit;
     } elseif ($action === 'preview_block') {
         // Read only (nothing is saved): what the save WOULD do - booked nights skipped, rooms blocked one by one on a
         // room-type / All-rooms night with bookings - shown in the Block confirm before the rooms go off sale.
@@ -1067,6 +1107,7 @@ $site_name = getSetting('site_name');
                         <input type="text" id="bdgReason" maxlength="255" placeholder="Reason (optional)">
                         <button type="button" class="btn btn-primary btn-sm" id="bdgBlockBtn" disabled><i class="fas fa-ban"></i> Block</button>
                         <button type="button" class="btn btn-secondary btn-sm" id="bdgUnblockBtn" disabled><i class="fas fa-unlock"></i> Unblock</button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="bdgExtendBtn" disabled title="Extend the selected blocks by days, weeks, months or years, or to a date"><i class="fas fa-arrows-left-right" aria-hidden="true"></i> Extend...</button>
                     </div>
                     <button type="button" class="btn btn-secondary btn-sm admin-bulk-bar__clear" id="bdgClearBtn" disabled>Clear</button>
                 </div>
@@ -1162,7 +1203,12 @@ $site_name = getSetting('site_name');
                             <tbody>
                                 <?php foreach ($blocked_dates as $bd): ?>
                                     <tr>
-                                        <?php if ($canBlockRooms): ?><td class="admin-bulk-col"><input type="checkbox" class="admin-bulk-check" data-bulk-row value="<?php echo (($bd['block_scope'] ?? 'type') === 'individual' ? 'individual' : 'type') . '-' . (int)$bd['id']; ?>" aria-label="Select blocked date <?php echo htmlspecialchars((string)$bd['block_date'], ENT_QUOTES); ?>"></td><?php endif; ?>
+                                        <?php if ($canBlockRooms): ?><td class="admin-bulk-col"><input type="checkbox" class="admin-bulk-check" data-bulk-row value="<?php echo (($bd['block_scope'] ?? 'type') === 'individual' ? 'individual' : 'type') . '-' . (int)$bd['id']; ?>" <?php
+                                            // Extend... (admin-extend.js): the row this night belongs to and the night itself.
+                                            $extT = ($bd['block_scope'] ?? 'type') === 'individual' ? 'room' : (($bd['room_id'] ?? null) === null || $bd['room_id'] === '' ? 'all' : 'type');
+                                            $extId = $extT === 'room' ? (int)($bd['individual_room_id'] ?? 0) : ($extT === 'type' ? (int)$bd['room_id'] : 0);
+                                            echo 'data-ext-t="' . $extT . '" data-ext-id="' . $extId . '" data-ext-last="' . htmlspecialchars(substr((string)$bd['block_date'], 0, 10), ENT_QUOTES) . '"';
+                                        ?> aria-label="Select blocked date <?php echo htmlspecialchars((string)$bd['block_date'], ENT_QUOTES); ?>"></td><?php endif; ?>
                                         <td data-label="Date">
                                             <i class="fas fa-calendar-day blocked-dates-date-icon"></i>
                                             <?php echo date('M j, Y', strtotime($bd['block_date'])); ?>
@@ -1241,6 +1287,7 @@ $site_name = getSetting('site_name');
                         <?php if ($canBlockRooms): ?>
                         <?php adminBulkBarStart('bulk_unblock', '#blockedDatesContainer', $csrf_token); ?>
                             <?php adminBulkButton('unblock', 'Unblock', 'fa-unlock', 'Unblock {n} selected date(s) and make them available for booking again?', 'btn-primary', '', 'Unblock'); ?>
+                            <button type="button" name="bulk_op" value="extend" class="btn btn-secondary btn-sm" data-rh-extend="blocks"><i class="fas fa-arrows-left-right" aria-hidden="true"></i> Extend...</button>
                         <?php adminBulkBarEnd(); ?>
                         <?php endif; ?>
                     </div>
@@ -1723,6 +1770,7 @@ $site_name = getSetting('site_name');
     <script src="js/admin-components.js"></script>
     <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-context-menu.js'); ?>"></script>
     <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/js/room-timeline-select.js'); ?>"></script>
+    <script src="js/admin-extend.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-extend.js'); ?>"></script>
     <?php if ($bdView === 'calendar' && $canBlockRooms): ?>
     <script src="js/blocked-dates-grid.js?v=<?php echo @filemtime(__DIR__ . '/js/blocked-dates-grid.js'); ?>"></script>
     <?php endif; ?>

@@ -40,6 +40,7 @@ $suites = [
     'Maintenance never closes a booked room' => 'scripts/tests/maintenance_clash_test.php',
     'Block vs booking race'  => 'scripts/tests/block_booking_race.php',
     'Stay date changes lock + clash refusal' => 'scripts/tests/stay_change_clash_test.php',
+    'Extend blocks, jobs, tasks' => 'scripts/tests/extend_test.php',
     'API payment delete'    => 'scripts/tests/api_payment_delete.php',
     'Stock budget'          => 'scripts/tests/stock_budget.php',
     'Stock packs'           => 'scripts/tests/stock_packs.php',

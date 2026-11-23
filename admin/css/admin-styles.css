@@ -6488,3 +6488,65 @@ body.rh-pwa-bar-on .admin-bulk-bar {
 #rh-admin-page:has(.admin-bulk-bar:not([hidden])) {
     padding-bottom: 104px;
 }
+
+/* Extend... dialog (admin/js/admin-extend.js, GRID_UNIFY_PLAN Phase 3): solid surface, one accent. */
+.rh-extend {
+    width: min(480px, calc(100vw - 24px));
+    max-height: calc(100vh - 32px);
+    padding: 0;
+    border: 1px solid var(--admin-surface-border);
+    border-radius: var(--admin-radius);
+    background: var(--admin-surface);
+    color: var(--admin-text);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+}
+.rh-extend::backdrop { background: rgba(17, 24, 39, .45); }
+.rh-extend__head { padding: 16px 18px 8px; border-bottom: 1px solid var(--admin-surface-border); }
+.rh-extend__title { margin: 0; font-size: 1.1rem; }
+.rh-extend__sub { margin: 4px 0 6px; color: var(--admin-muted); font-size: .9rem; }
+.rh-extend__body { padding: 14px 18px; display: grid; gap: 10px; overflow: auto; }
+.rh-extend__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rh-extend__choice, .rh-extend__label { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 600; }
+.rh-extend__input { min-height: 44px; padding: 6px 10px; border: 1px solid var(--admin-surface-border); border-radius: 8px; background: #fff; font: inherit; }
+.rh-extend__n { width: 90px; }
+.rh-extend__note { margin: 0; color: var(--admin-muted); font-size: .85rem; }
+.rh-extend__result { padding: 10px 12px; border: 1px solid var(--admin-surface-border); border-radius: 8px; background: var(--admin-table-head); }
+.rh-extend__result-head { margin: 0 0 4px; font-weight: 700; }
+.rh-extend__result-text { margin: 0; white-space: pre-line; }
+.rh-extend__help {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 1px solid var(--admin-muted); color: var(--admin-muted);
+    font-size: .75rem; font-weight: 700; cursor: help;
+}
+.rh-extend__error { margin: 0; color: #9b1c1c; font-weight: 600; }
+.rh-extend__foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--admin-surface-border); }
+.rh-extend__foot .btn { min-height: 44px; }
+
+/* Extend / shorten handle on block runs and maintenance bars (admin-extend.js grip()). Desktop: drag; touch: tap. */
+.rh-grip {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 10px;
+    z-index: 3;
+    cursor: ew-resize;
+    background: rgba(31, 42, 55, .14);
+    border-left: 2px solid rgba(31, 42, 55, .55);
+    touch-action: none;
+}
+.rh-grip:hover { background: rgba(31, 42, 55, .28); }
+.rh-grip:focus-visible { outline: 2px solid var(--admin-accent); outline-offset: 1px; }
+.rh-grip::before { /* a 44px target on touch screens */
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: -12px;
+    width: 44px;
+    height: 44px;
+    transform: translateY(-50%);
+}
+@media (pointer: fine) { .rh-grip::before { width: 16px; right: -4px; } }
+.is-resizing { outline: 2px dashed #1f2a37; outline-offset: -2px; z-index: 4; }
+@media (pointer: coarse) { .rh-grip { width: min(44px, 60%); } } /* inside a clipped bar / block the target itself grows */

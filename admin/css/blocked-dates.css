@@ -807,3 +807,8 @@
 @media (pointer: coarse) {
     .bd-roompick__room, .bd-roompick__type label { min-height: 44px; }
 }
+
+/* Extend / shorten handle on the last night of a line's own block (admin-extend.js grip, GRID_UNIFY_PLAN Phase 3). */
+@media (pointer: fine) { .bdg-cell .rh-grip { width: 8px; } }
+.bdg-cell.bdg-cell--grow { box-shadow: inset 0 0 0 2px #1f2a37; }
+.bdg-cell.bdg-cell--trim { box-shadow: inset 0 0 0 2px #b91c1c; }

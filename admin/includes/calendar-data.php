@@ -539,7 +539,9 @@ if (!function_exists('rh_cal_timeline_payload')) {
         $cells = [];
         $put = static function (int $lane, string $d, array $cell) use (&$cells, $rank) {
             $cur = $cells[$lane][$d] ?? null;
-            if ($cur === null || $rank[$cell['kind']] > $rank[$cur['kind']]) {
+            // Same kind on one night: the room's OWN block wins over its room type's / All rooms (the Extend grip needs it).
+            if ($cur === null || $rank[$cell['kind']] > $rank[$cur['kind']]
+                || ($cell['kind'] === $cur['kind'] && ($cell['scope'] ?? '') === 'own' && ($cur['scope'] ?? '') !== 'own')) {
                 $cells[$lane][$d] = $cell;
             }
         };
@@ -554,7 +556,8 @@ if (!function_exists('rh_cal_timeline_payload')) {
                 continue;
             }
             $reason = trim((string)($b['reason'] ?? ''));
-            $cell = ['kind' => 'blocked', 'label' => 'Blocked', 'reason' => $reason, 'href' => 'blocked-dates.php'];
+            $cell = ['kind' => 'blocked', 'label' => 'Blocked', 'reason' => $reason, 'href' => 'blocked-dates.php',
+                'scope' => ($b['block_scope'] ?? 'type') === 'individual' ? 'own' : (($b['room_id'] === null || $b['room_id'] === '') ? 'all' : 'type')];
             if (($b['block_scope'] ?? 'type') === 'individual') {
                 $rid = (int)($b['individual_room_id'] ?? 0);
                 $put($laneOfRoom[$rid] ?? $rid, $d, $cell);
@@ -569,7 +572,7 @@ if (!function_exists('rh_cal_timeline_payload')) {
             $rid = (int)$m['individual_room_id'];
             $lane = $laneOfRoom[$rid] ?? $rid;
             $cell = ['kind' => 'maintenance', 'label' => 'Maintenance', 'reason' => trim((string)($m['title'] ?? '')),
-                'href' => 'room-maintenance.php?id=' . (int)($m['id'] ?? 0) . '&view=timeline'];
+                'href' => 'room-maintenance.php?id=' . (int)($m['id'] ?? 0) . '&view=timeline', 'scope' => 'job', 'job' => (int)($m['id'] ?? 0)];
             foreach ($dates as $d) {
                 if ($d >= (string)$m['s'] && $d <= (string)$m['e']) {
                     $put($lane, $d, $cell);
@@ -598,7 +601,7 @@ if (!function_exists('rh_cal_timeline_payload')) {
             $open = null;
             foreach ($dates as $d) {
                 $c = $byDate[$d] ?? null;
-                if ($open && $c && $c['kind'] === $open['kind'] && $c['reason'] === $open['reason']) {
+                if ($open && $c && $c['kind'] === $open['kind'] && $c['reason'] === $open['reason'] && ($c['scope'] ?? '') === $open['scope'] && ($c['job'] ?? 0) === $open['job']) {
                     $open['to'] = $d;
                     continue;
                 }
@@ -608,7 +611,9 @@ if (!function_exists('rh_cal_timeline_payload')) {
                 }
                 if ($c) {
                     $open = ['lane' => (int)$laneId, 'kind' => $c['kind'], 'label' => $c['label'], 'reason' => $c['reason'],
-                        'href' => $c['href'], 'from' => $d, 'to' => $d];
+                        'href' => $c['href'], 'from' => $d, 'to' => $d,
+                        // scope: own (the room's own block), type / all (inherited), job (maintenance), '' (room status)
+                        'scope' => (string)($c['scope'] ?? ''), 'job' => (int)($c['job'] ?? 0)];
                 }
             }
             if ($open) {
@@ -812,7 +817,8 @@ if (!function_exists('rh_cal_timeline_payload')) {
             return ['move' => false, 'end' => false, 'why' => $why];
         }
         if ($status === 'confirmed') {
-            return ['move' => true, 'end' => false, 'why' => 'To change the dates of a stay that has not started, open the booking.'];
+            // dates: start / end / whole-stay drag opens the booking's own Change dates prefilled; nothing saved here.
+            return ['move' => true, 'end' => false, 'dates' => true, 'why' => 'To change the dates of a stay that has not started, open the booking.'];
         }
         if ($status === 'checked-in') {
             return ['move' => false, 'end' => true, 'why' => 'The guest is in house: move rooms from the booking (the new room must be clean).'];

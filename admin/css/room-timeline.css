@@ -718,3 +718,13 @@ body:has(.tl-drawer--sheet.is-open) .rh-ai-launch { display: none; }
     .tl { --tl-hatch: repeating-linear-gradient(135deg, #6b7280 0 6px, #fff 6px 12px); }
     .tl-bar { border: 2px solid #1f2a37 !important; }
 }
+
+/* Confirmed stays: the check-in edge too (the drop opens the booking's own Change dates; GRID_UNIFY_PLAN Phase 3). */
+.tl-bar__grip--start {
+    left: 0;
+    right: auto;
+    border-left: 0;
+    border-right: 2px solid rgba(255, 255, 255, .55);
+}
+/* The block / job end handle sits on the block's right edge (admin-styles.css .rh-grip). */
+.tl-block .rh-grip { pointer-events: auto; }

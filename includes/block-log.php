@@ -204,13 +204,18 @@ if (!function_exists('rh_block_nights_text')) {
 
         // 1. Staff activity (System Logs).
         $details = [];
+        if (trim((string)($meta['note'] ?? '')) !== '') {
+            $details[] = trim((string)$meta['note']); // e.g. Extend: "Extended (type and reason copied ...)"
+        }
         if ($entries) {
             $details[] = ($isBlock ? 'Blocked ' : 'Unblocked ') . rh_block_where_text($byLabel($entries), 40);
         }
         if ($updated) {
             $details[] = 'Already blocked, type and reason updated: ' . rh_block_where_text($byLabel($updated), 40);
         }
-        if ($isBlock) {
+        if ($isBlock && !empty($meta['kinds']) && is_array($meta['kinds']) && count($meta['kinds']) > 1) {
+            $details[] = 'Types: ' . implode(' | ', array_map('strval', $meta['kinds'])); // one action copying several blocks
+        } elseif ($isBlock) {
             $details[] = 'Type: ' . $type . ($reason !== '' ? '; reason: ' . $reason : '');
         }
         $still = [];

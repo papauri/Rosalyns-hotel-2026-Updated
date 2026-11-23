@@ -171,6 +171,7 @@ $tlDate = static function ($v, string $fmt = 'j M Y'): string {
     </section>
     <script src="js/admin-context-menu.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-context-menu.js'); ?>"></script>
     <script src="js/room-timeline-select.js?v=<?php echo @filemtime(__DIR__ . '/../js/room-timeline-select.js'); ?>"></script>
+    <script src="js/admin-extend.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-extend.js'); ?>"></script>
     <script src="js/room-timeline.js?v=<?php echo @filemtime(__DIR__ . '/../js/room-timeline.js'); ?>"></script>
     <script>
         (function () {
