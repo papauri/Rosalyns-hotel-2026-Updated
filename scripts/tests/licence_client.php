@@ -245,7 +245,9 @@ if ($up) {
     // backup report (2026-11-09): only dates, size and an error code - never a path, a file name, an error text or hotel data
     $bk = $req['backup'] ?? null;
     // staff_done_id / staff_error: the staff step's own check-in fields (includes/licence-staff.php, tested in licence_staff.php).
-    check(array_diff(array_keys((array)$req), ['tenant', 'domain', 'key', 'version', 'backup', 'staff_done_id', 'staff_error']) === []
+    // maintenance_seen (2026-11-23): the id of the panel's maintenance window this site holds (includes/licence-maintenance.php).
+    check(array_diff(array_keys((array)$req), ['tenant', 'domain', 'key', 'version', 'backup', 'staff_done_id', 'staff_error', 'maintenance_seen']) === []
+        && (!array_key_exists('maintenance_seen', (array)$req) || is_int($req['maintenance_seen']))
         && (!array_key_exists('staff_done_id', (array)$req) || is_int($req['staff_done_id']))
         && (!array_key_exists('staff_error', (array)$req) || (is_string($req['staff_error']) && mb_strlen($req['staff_error']) <= 240))
         && ($bk === null || (array_keys($bk) === ['last_at', 'size', 'error_at', 'error_code', 'offsite_at', 'requested_seen']

@@ -50,6 +50,23 @@ if (!function_exists('rh_db_backup_can')) {
     }
 
     /**
+     * The MSP control panel's own tables (cp_*) may share this database (they do at Liwonde). A hotel backup never
+     * holds them and a hotel restore never touches them (owner 2026-11-23): a restore would roll the panel's
+     * businesses, payments and admins back, and a downloaded backup would hand panel password hashes to hotel staff.
+     */
+    function rh_db_backup_skip_table(string $table): bool
+    {
+        return strncasecmp($table, 'cp_', 3) === 0;
+    }
+
+    /** True when one restore statement writes to a cp_ table (backups made before 2026-11-23 still contain them). */
+    function rh_db_backup_is_panel_stmt(string $sql): bool
+    {
+        return (bool)preg_match('/^\s*(?:\/\*!\d*\s*)?(?:DROP\s+TABLE(?:\s+IF\s+EXISTS)?|CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?'
+            . '|INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO|LOCK\s+TABLES|ALTER\s+TABLE|TRUNCATE(?:\s+TABLE)?)\s+`?cp_/i', $sql);
+    }
+
+    /**
      * Every backup file on disk, newest first (by the time in the name).
      *
      * @return array<int,array{path:string,rel:string,id:string,date:string,time:string,size:int,ts:int}>
@@ -216,6 +233,9 @@ if (!function_exists('rh_db_backup_can')) {
         $views  = $pdo->query("SHOW FULL TABLES WHERE Table_type = 'VIEW'")->fetchAll(PDO::FETCH_NUM);
 
         foreach ($tables as [$tbl]) {
+            if (rh_db_backup_skip_table((string)$tbl)) {
+                continue; // the MSP panel's own tables: never in a hotel backup
+            }
             $tblQ = '`' . str_replace('`', '``', $tbl) . '`';
             $w("-- ----------------------------\n-- Table: " . preg_replace('/[\r\n]+/', ' ', (string)$tbl) . "\n-- ----------------------------\n");
             $w("DROP TABLE IF EXISTS $tblQ;\n");
@@ -506,6 +526,20 @@ if (!function_exists('rh_db_backup_can')) {
 
             // 1. mysqldump, only if every shell function is usable
             $mysqldump = rh_db_backup_find_mysqldump();
+            // The MSP panel's own tables never go into a hotel backup (rh_db_backup_skip_table). If they cannot be
+            // listed, mysqldump is not used and the PHP dumper below (which skips them itself) takes over.
+            $ignore = '';
+            if ($mysqldump !== '') {
+                try {
+                    foreach ($pdo->query("SHOW TABLES LIKE 'cp\\_%'")->fetchAll(PDO::FETCH_COLUMN) as $pt) {
+                        if (rh_db_backup_skip_table((string)$pt)) {
+                            $ignore .= ' --ignore-table=' . escapeshellarg(DB_NAME . '.' . $pt);
+                        }
+                    }
+                } catch (Throwable $e) {
+                    $mysqldump = '';
+                }
+            }
             if ($mysqldump !== '' && defined('DB_HOST') && defined('DB_NAME') && defined('DB_USER')) {
                 $cnf = @tempnam(sys_get_temp_dir(), 'rh_my_');
                 $errFile = @tempnam(sys_get_temp_dir(), 'rh_my_err_');
@@ -519,6 +553,7 @@ if (!function_exists('rh_db_backup_can')) {
                             . ' --defaults-extra-file=' . escapeshellarg($cnf)
                             . ' --single-transaction --quick --routines --triggers --events'
                             . ' --default-character-set=utf8mb4 --no-tablespaces --skip-lock-tables'
+                            . $ignore
                             . ' ' . escapeshellarg(DB_NAME);
                         // stderr goes to a file, so a chatty mysqldump can never fill a pipe and deadlock.
                         $proc = @proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $errFile, 'w']], $pipes);
@@ -910,6 +945,9 @@ if (!function_exists('rh_db_backup_can')) {
             $st = rh_db_sql_splitter_new();
             $lastSql = '';
             $emit = static function (string $sql) use ($pdo, &$count, &$lastSql): void {
+                if (rh_db_backup_is_panel_stmt($sql)) {
+                    return; // an older backup's copy of the MSP panel's tables: never restored over the live panel
+                }
                 $lastSql = $sql;
                 $r = $pdo->exec($sql);
                 if ($r === false) {

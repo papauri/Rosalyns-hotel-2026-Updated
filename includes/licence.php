@@ -19,6 +19,7 @@
  *   licence_last_check_at    unix time of the last attempt (success or failure)
  *   licence_last_error       plain reason of the last failure, '' after a success (never the key, never the body)
  *   licence_backup_requested_at / licence_backup_seen_at   the panel's latest backup request (signed) / the one acted on
+ *   licence_maintenance      JSON of the panel's maintenance window, '' when none (includes/licence-maintenance.php)
  *
  * Backups (owner 2026-11-09): the panel may ask for a backup (signed backup_requested_at in its answer). The site runs
  * its OWN backup engine (includes/db-backup.php) after the reply has been sent, at most once per 6 hours, and reports
@@ -50,6 +51,7 @@
 require_once __DIR__ . '/licence-verify.php';
 require_once __DIR__ . '/licence-public-key.php';
 require_once __DIR__ . '/secret-salt.php';
+require_once __DIR__ . '/licence-maintenance.php'; // maintenance windows from the panel (2026-11-23)
 
 if (!function_exists('rh_licence_env')) {
 
@@ -232,7 +234,7 @@ if (!function_exists('rh_licence_env')) {
     /** One setting write ($name is token|last_issued_at|last_check_at|last_error). Clears any cached copy. */
     function rh_licence_store_write(PDO $pdo, string $name, string $value, string $prefix = 'licence_'): bool
     {
-        if (!in_array($name, ['token', 'last_issued_at', 'last_check_at', 'last_error', 'backup_requested_at', 'backup_seen_at'], true)) {
+        if (!in_array($name, ['token', 'last_issued_at', 'last_check_at', 'last_error', 'backup_requested_at', 'backup_seen_at', 'maintenance'], true)) {
             return false;
         }
         $key = $prefix . $name;
@@ -517,7 +519,7 @@ if (!function_exists('rh_licence_env')) {
      * @param bool $onlyIfDue re-check the schedule under the lock (used by the lazy daily check)
      * @return array{ok:bool,status:string,error:string,ran:bool}
      */
-    function rh_licence_check_now(bool $onlyIfDue = false, int $timeout = 6): array
+    function rh_licence_check_now(bool $onlyIfDue = false, int $timeout = 6, int $minGap = 0): array
     {
         $res = ['ok' => false, 'status' => 'unconfigured', 'error' => '', 'ran' => false];
         $pdo = $GLOBALS['pdo'] ?? null;
@@ -545,6 +547,12 @@ if (!function_exists('rh_licence_env')) {
             $now = time();
             $stored = rh_licence_store_read($pdo);
             if ($onlyIfDue && !rh_licence_check_due($stored, $now)) {
+                $res['status'] = rh_licence_status()['status'];
+                return $res;
+            }
+            // $minGap (maintenance-window checks): re-checked under the lock, so requests that all saw "due" at once
+            // make one call to the panel, not one each (the panel limits answers per hour).
+            if ($minGap > 0 && $now - (int)($stored['last_check_at'] ?? 0) < $minGap) {
                 $res['status'] = rh_licence_status()['status'];
                 return $res;
             }
@@ -612,7 +620,10 @@ if (!function_exists('rh_licence_env')) {
                 $req['staff_error'] = mb_substr($sf['licence_staff_error'], 0, 240); // why the staff step last stopped ('' = fine)
             }
         } catch (Throwable $e) { /* the panel then sends what it has not seen confirmed */ }
-        $body = json_encode($req, JSON_UNESCAPED_SLASHES);
+        // The maintenance window held here (0 = none), so the panel can show it arrived.
+        $held = rh_maint_read($GLOBALS['pdo'] ?? null, true);
+        $req['maintenance_seen'] = $held !== null ? $held['id'] : 0;
+        $body =json_encode($req, JSON_UNESCAPED_SLASHES);
         $http = rh_licence_http_post($cfg['url'], (string)$body, $timeout);
         if ($http['error'] !== '') {
             $out['error'] = 'Could not reach the licence service: ' . $http['error'] . '.';
@@ -645,6 +656,12 @@ if (!function_exists('rh_licence_env')) {
         $ask = $payload['backup_requested_at'] ?? 0;
         if (is_int($ask) && $ask > 0) {
             rh_licence_store_write($pdo, 'backup_requested_at', (string)$ask); // acted on after the reply (rh_licence_backup_if_requested)
+        }
+        // Maintenance window (includes/licence-maintenance.php): null or anything unusable clears it. An answer without the
+        // field (an older panel, or a fault there) leaves what is held: it ends on this site's own clock anyway.
+        if (array_key_exists('maintenance', $payload)) {
+            rh_licence_store_write($pdo, 'maintenance', rh_maint_store_value($payload['maintenance']));
+            rh_maint_read($pdo, true);
         }
         return true;
     }
@@ -838,8 +855,10 @@ if (!function_exists('rh_licence_env')) {
     /**
      * Lazy daily check: from an admin page load, AFTER the response has been sent (the page never waits on the panel).
      * Registers one shutdown hook per request; does nothing when licensing is off.
+     * $everySeconds > 0 checks sooner than the usual schedule: during a maintenance window (every 5 minutes), so End now on
+     * the panel lands even when its nudge came within a minute of the last check and was ignored.
      */
-    function rh_licence_maybe_check_after_response(): void
+    function rh_licence_maybe_check_after_response(int $everySeconds = 0): void
     {
         static $registered = false;
         if ($registered || PHP_SAPI === 'cli' || !rh_licence_enabled()) {
@@ -847,11 +866,13 @@ if (!function_exists('rh_licence_env')) {
         }
         try {
             $pdo = $GLOBALS['pdo'] ?? null;
-            if (!rh_licence_check_due(rh_licence_store_read($pdo instanceof PDO ? $pdo : null), time())) {
+            $stored = rh_licence_store_read($pdo instanceof PDO ? $pdo : null);
+            $soon = $everySeconds > 0 && time() - (int)$stored['last_check_at'] >= $everySeconds;
+            if (!$soon && !rh_licence_check_due($stored, time())) {
                 return;
             }
             $registered = true;
-            register_shutdown_function(static function (): void {
+            register_shutdown_function(static function () use ($soon, $everySeconds): void {
                 try {
                     @ignore_user_abort(true);
                     if (session_status() === PHP_SESSION_ACTIVE) {
@@ -871,7 +892,7 @@ if (!function_exists('rh_licence_env')) {
                         @flush();
                     }
                     // Not truly detached (some hosts): keep the wait short so the visitor is not held for long.
-                    $chk = rh_licence_check_now(true, $detached ? 6 : 3);
+                    $chk = rh_licence_check_now(!$soon, $detached ? 6 : 3, $soon ? $everySeconds : 0); // $soon: a maintenance window, checked off the usual schedule
                     if ($detached && !empty($chk['ok'])) {
                         rh_licence_staff_after_check(); // staff changes from the panel, then the staff report
                     }

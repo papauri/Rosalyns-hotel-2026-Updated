@@ -1437,15 +1437,33 @@ if (!function_exists('rh_enforce_frontend_maintenance_mode')) {
             return;
         }
 
+        // The hotel's own switch, ORed with a guest-website window from the licence panel (includes/licence-maintenance.php:
+        // read fresh, fails open, ends by this site's clock). The own switch and its message win; it is never changed here.
+        $panelWindow = null;
         if (!rh_setting_enabled('site_maintenance_enabled', false)) {
-            return;
+            try {
+                $maintFile = __DIR__ . '/../includes/licence-maintenance.php';
+                if (is_file($maintFile)) { // a missing file (half-copied deploy) must never take the guest site down
+                    require_once $maintFile;
+                    $panelWindow = rh_maint_site_offline_block();
+                }
+            } catch (Throwable $e) {
+                $panelWindow = null;
+            }
+            if ($panelWindow === null) {
+                return;
+            }
         }
 
         $siteName = (string)getSetting('site_name', 'Hotel');
-        $maintenanceMessage = trim((string)getSetting(
-            'site_maintenance_message',
-            'Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly.'
-        ));
+        if ($panelWindow !== null) {
+            $maintenanceMessage = rh_maint_site_message($panelWindow);
+        } else {
+            $maintenanceMessage = trim((string)getSetting(
+                'site_maintenance_message',
+                'Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly.'
+            ));
+        }
         if ($maintenanceMessage === '') {
             $maintenanceMessage = 'Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly.';
         }
@@ -1471,7 +1489,7 @@ if (!function_exists('rh_enforce_frontend_maintenance_mode')) {
 
         if (!headers_sent()) {
             http_response_code(503);
-            header('Retry-After: 1800');
+            header('Retry-After: ' . ($panelWindow !== null ? max(60, (int)$panelWindow['ends_at'] - time()) : 1800));
             header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
             header('Pragma: no-cache');
             header('Content-Type: ' . ($wantsJson ? 'application/json' : 'text/html') . '; charset=UTF-8');

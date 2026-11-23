@@ -17,6 +17,10 @@
  *
  * The decision is a pure function (rh_licence_decide) so it can be tested without a web server.
  *
+ * Maintenance windows from the panel (2026-11-23, includes/licence-maintenance.php): a notice in the banner ahead of time;
+ * during an admin/both window every staff request gets a 503 (administrators included; sign-out stays open), whatever the
+ * licence status. It ends at ends_at by this site's own clock.
+ *
  * READ-ONLY ALLOWLIST (a change request passes only if it is one of these):
  *   - sign-in / sign-out / password reset (they never reach the guard) and "change my password"
  *   - checking a guest OUT (Bookings: checkout, checkout_settle, update_status to checked-out; Booking details: checkout)
@@ -365,6 +369,16 @@ if (!function_exists('rh_licence_guard_request')) {
         if (!rh_licence_enabled()) {
             return;
         }
+        // A maintenance window from the panel: the notice ahead of time (includes/licence-maintenance.php). Never breaks the page.
+        try {
+            $maint = rh_maint_banner_text(rh_maint_read($GLOBALS['pdo'] ?? null), time());
+            if ($maint !== '') {
+                echo '<div class="content" style="padding-bottom:0"><div class="alert alert-warning" role="status" id="rhMaintenanceBanner">'
+                    . '<i class="fas fa-tools" aria-hidden="true"></i><span>' . nl2br(htmlspecialchars($maint, ENT_QUOTES, 'UTF-8')) . '</span></div></div>';
+            }
+        } catch (Throwable $e) {
+            error_log('maintenance banner: ' . $e->getMessage());
+        }
         $st = rh_licence_status();
         $text = rh_licence_banner_text($st);
         if ($text === '') {
@@ -589,6 +603,13 @@ if (!function_exists('rh_licence_guard_request')) {
             // First, so even a locked site checks again and can recover once the hotel has paid.
             if ($area === 'admin' && $method === 'GET' && function_exists('rh_admin_request_is_activity') && rh_admin_request_is_activity()) {
                 rh_licence_maybe_check_after_response();
+            }
+            // A maintenance window from the panel (includes/licence-maintenance.php): during an admin/both window every staff
+            // page, admin API and station screen gets a 503, administrators included. The due check-in still runs after the
+            // reply, so End now / Cancel on the panel lands (the panel's nudge, api/licence-ping.php, is never blocked).
+            if (rh_maint_decide(time(), rh_maint_read($GLOBALS['pdo'] ?? null), 'admin') === 'offline') {
+                rh_licence_maybe_check_after_response(300);
+                rh_maint_admin_enforce($area, $script);
             }
             $st = rh_licence_status();
             if (!in_array($st['status'], ['read_only', 'suspended'], true)) {
