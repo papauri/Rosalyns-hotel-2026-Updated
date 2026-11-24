@@ -30,7 +30,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'hotel_address'            => ['label' => 'Full postal address (documents)', 'type' => 'textarea', 'max' => 255, 'default' => ''],
                 'address_region'           => ['label' => 'Region / district (contact page)', 'type' => 'text', 'max' => 100, 'default' => ''],
                 'phone_secondary'          => ['label' => 'Second phone number', 'type' => 'phone', 'max' => 30, 'default' => ''],
-                'admin_notification_email' => ['label' => 'Staff notification email', 'type' => 'email', 'default' => '', 'help' => 'Gets new website booking alerts only when "New website booking alerts go to" (Booking Settings, Booking Notification Email) is blank. Also gets alerts when an unconfirmed or unpaid booking expires.'],
+                'admin_notification_email' => ['label' => 'Staff notification email', 'type' => 'email', 'default' => '', 'help' => 'Gets new website booking alerts only when "New website booking alerts go to" (Hotel Settings, Booking alerts and guest reminders) is blank. Also gets alerts when an unconfirmed or unpaid booking expires.'],
                 'google_maps_embed'        => ['label' => 'Google Maps embed (link or iframe code from Google Maps > Share > Embed)', 'type' => 'maps', 'default' => ''],
             ],
             'Stay policies' => [
@@ -57,7 +57,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'quotation_footer_text'     => ['label' => 'Quotation footer', 'type' => 'text', 'max' => 255, 'default' => '', 'finance' => true],
                 'credit_note_expiry_months' => ['label' => 'Credit notes expire after (months, 0 = never)', 'type' => 'int', 'min' => 0, 'max' => 120, 'default' => '12', 'finance' => true],
                 // Who receives the End of Day report (the Email button and the timed daily report email; owner 2026-11-13).
-                'eod_report_recipients'     => ['label' => 'End-of-day report recipients (comma-separated emails)', 'type' => 'emails', 'default' => '', 'finance' => true, 'help' => 'Who gets the End of Day email (the Email button) and the daily report email the timer sends after each trading day. Empty = the staff copy email in Email Settings.'],
+                'eod_report_recipients'     => ['label' => 'End-of-day report recipients (comma-separated emails)', 'type' => 'emails', 'default' => '', 'finance' => true, 'help' => 'Who gets the End of Day email (the Email button) and the daily report email the timer sends after each trading day. Empty = the staff copy email in Email server and sender.'],
                 'eod_report_cc_emails'      => ['label' => 'End-of-day report CC (comma-separated emails)', 'type' => 'emails', 'default' => '', 'finance' => true, 'help' => 'What adding an address here does: it gets a copy (CC) of every End of Day email (the Email button) and of the daily report email the timer sends after each trading day. Staff only: these reports never go to guests. Kitchen, bar and coffee bar reports have their own copy list on Automated Emails.'],
                 'eod_whatsapp_number'       => ['label' => 'End of Day WhatsApp number', 'type' => 'phone', 'max' => 30, 'default' => '', 'finance' => true, 'help' => 'Where the End of Day WhatsApp button sends the summary. Empty = the hotel WhatsApp number, else the main phone number.'],
             ],
@@ -71,7 +71,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'stock_variance_min_cost'       => ['label' => 'Stock count: ignore variances worth less than', 'type' => 'decimal', 'min' => 0, 'max' => 100000000, 'default' => '5000', 'help' => 'Small shortages below this value are never shaded or flagged.'],
                 // Administrator-only (role 'admin'): hidden from everyone else and ignored if anyone else posts it.
                 'stock_count_second_approver'   => ['label' => 'Stock count: a second person must approve', 'type' => 'select', 'options' => ['1', '0'], 'labels' => ['1' => 'On (recommended)', '0' => 'Off - whoever counts can approve'], 'default' => '1', 'admin_only' => true, 'activity' => 'stock_count_second_approver_changed', 'help' => 'On: an opening count, or a count with big shortages, must be approved by someone other than the person who counted it. Off: whoever counted can approve or reject their own count, so one person can count and approve and losses can be hidden. Only administrators see this setting.'],
-                'stock_count_reminder_days'    => ['label' => 'Remind to count stock after (days, 0 = off)', 'type' => 'int', 'min' => 0, 'max' => 365, 'default' => '7', 'help' => 'Shows a notice on the Stock Dashboard and Stock Count pages when no count has been approved for this many days.'],
+                'stock_count_reminder_days'    => ['label' => 'Remind to count stock after (days, 0 = off)', 'type' => 'int', 'min' => 0, 'max' => 365, 'default' => '7', 'help' => 'Shows a notice on the Stock dashboard and Stock count pages when no count has been approved for this many days.'],
             ],
         ];
     }
@@ -339,6 +339,6 @@ if (!function_exists('rh_hotel_details_fields')) {
             echo '</div></section>';
         }
         echo '<p class="help-text">Time zone: <strong>' . $e(date_default_timezone_get()) . '</strong> (set per installation with HOTEL_TIMEZONE in .env).</p>';
-        echo '<button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Hotel Details</button></form></div>';
+        echo '<button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save hotel details</button></form></div>';
     }
 }

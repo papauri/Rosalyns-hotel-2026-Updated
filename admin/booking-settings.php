@@ -1619,7 +1619,7 @@ $rh_route_line = static function (array $route, string $saved, string $verb = 'C
     }
     $note = '';
     if (rh_ei_valid_email($saved) === '') {
-        $note = ' (box blank, using ' . htmlspecialchars((string)($route['source'] ?? '')) . ')';
+        $note = '. Box is blank, so it uses ' . htmlspecialchars((string)($route['source'] ?? ''));
     }
     return '<p class="help-text"><i class="fas fa-envelope"></i> ' . htmlspecialchars($verb) . ': <strong>' . htmlspecialchars($email) . '</strong>' . $note . '</p>';
 };
@@ -1781,13 +1781,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <p class="bs-group__intro">Website on or off, online booking on or off, and the hotel details and policies guests and documents show.</p>
 
         <div class="rh-panel settings-card" id="maintenance"<?php echo $bsAttr('maintenance'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Frontend Maintenance Mode</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Website maintenance mode</h2></div>
 
             <div class="current-value">
-                <i class="fas fa-<?php echo $site_maintenance_enabled ? 'triangle-exclamation' : 'check-circle'; ?>" style="color: <?php echo $site_maintenance_enabled ? '#dc3545' : '#28a745'; ?>;"></i>
+                <i class="fas fa-<?php echo $site_maintenance_enabled ? 'triangle-exclamation' : 'check-circle'; ?> <?php echo $site_maintenance_enabled ? 'is-off' : 'is-on'; ?>" aria-hidden="true"></i>
                 <div class="current-value-info">
-                    <h3>Frontend is <?php echo $site_maintenance_enabled ? 'In Maintenance' : 'Live'; ?></h3>
-                    <div class="value"><?php echo $site_maintenance_enabled ? 'Public pages blocked (admin stays online)' : 'Public pages available'; ?></div>
+                    <h3>Website is <?php echo $site_maintenance_enabled ? 'in maintenance' : 'live'; ?></h3>
+                    <div class="value"><?php echo $site_maintenance_enabled ? 'Public pages are blocked (admin stays online)' : 'Public pages are available'; ?></div>
                 </div>
             </div>
 
@@ -1795,18 +1795,16 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <form method="POST" action="booking-settings.php" id="site-maintenance-toggle-form">
                 <input type="hidden" name="toggle_site_maintenance" value="1">
                 <div class="form-group">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <label class="bs-check">
                         <input type="checkbox"
                             id="site_maintenance_enabled"
                             name="site_maintenance_enabled"
                             value="1"
                             <?php echo $site_maintenance_enabled ? 'checked' : ''; ?><?php echo $rhSwDis; ?>
                             onchange="toggleSiteMaintenance()">
-                        <span style="font-weight: 600; color: #1A1A1A;">Enable Full Frontend Maintenance Mode</span>
+                        <span class="bs-option__title">Put the website in maintenance mode</span>
                     </label>
-                    <p class="help-text">
-                        <i class="fas fa-info-circle"></i>
-                        One click immediately switches all public frontend pages into maintenance mode and keeps admin and API routes accessible.
+                    <p class="help-text">One click immediately switches all public frontend pages into maintenance mode and keeps admin and API routes accessible.
                     </p>
                 </div>
             </form>
@@ -1814,21 +1812,19 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <form method="POST" action="booking-settings.php">
                 <input type="hidden" name="save_site_maintenance_message" value="1">
                 <div class="form-group">
-                    <label for="site_maintenance_message"><strong>Maintenance Message</strong></label>
+                    <label for="site_maintenance_message">Maintenance message</label>
                     <textarea id="site_maintenance_message"
                         name="site_maintenance_message"
                         class="form-control"
                         rows="4"<?php echo $rhSwDis; ?>
                         placeholder="This message appears for all visitors while maintenance mode is active."><?php echo htmlspecialchars($site_maintenance_message); ?></textarea>
-                    <p class="help-text">
-                        <i class="fas fa-info-circle"></i>
-                        This message is shown on every blocked public page while maintenance mode is enabled.
+                    <p class="help-text">This message is shown on every blocked public page while maintenance mode is enabled.
                     </p>
                 </div>
 
                 <?php if ($canSiteSwitches): ?>
                 <button type="submit" class="btn-submit">
-                    <i class="fas fa-save"></i> Save Maintenance Message
+                    <i class="fas fa-save"></i> Save maintenance message
                 </button>
                 <?php endif; ?>
             </form>
@@ -1836,13 +1832,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
         <?php if ($mod_bookings): ?>
         <div class="rh-panel settings-card" id="booking-status"<?php echo $bsAttr('booking-status'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Booking System Status</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Online booking</h2></div>
 
             <div class="current-value">
-                <i class="fas fa-<?php echo $booking_enabled ? 'check-circle' : 'times-circle'; ?>" style="color: <?php echo $booking_enabled ? '#28a745' : '#dc3545'; ?>;"></i>
+                <i class="fas fa-<?php echo $booking_enabled ? 'check-circle' : 'times-circle'; ?> <?php echo $booking_enabled ? 'is-on' : 'is-off'; ?>" aria-hidden="true"></i>
                 <div class="current-value-info">
-                    <h3>Booking System is <?php echo $booking_enabled ? 'Enabled' : 'Disabled'; ?></h3>
-                    <div class="value"><?php echo $booking_enabled ? 'Active' : 'Inactive'; ?></div>
+                    <h3>Online booking is <?php echo $booking_enabled ? 'on' : 'off'; ?></h3>
+                    <div class="value"><?php echo $booking_enabled ? 'Guests can book online' : 'Guests cannot book online'; ?></div>
                 </div>
             </div>
 
@@ -1850,18 +1846,16 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <form method="POST" action="booking-settings.php" id="booking-system-toggle-form">
                 <input type="hidden" name="toggle_booking_system" value="1">
                 <div class="form-group">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <label class="bs-check">
                         <input type="checkbox"
                             id="booking_system_enabled"
                             name="booking_system_enabled"
                             value="1"
                             <?php echo $booking_enabled ? 'checked' : ''; ?><?php echo $rhSwDis; ?>
                             onchange="toggleBookingSettings()">
-                        <span style="font-weight: 600; color: #1A1A1A;">Enable Online Booking System</span>
+                        <span class="bs-option__title">Allow online booking</span>
                     </label>
-                    <p class="help-text">
-                        <i class="fas fa-info-circle"></i>
-                        When disabled, all booking forms, buttons, and widgets will be hidden.
+                    <p class="help-text">When disabled, all booking forms, buttons, and widgets will be hidden.
                         Guests will see a message instead of booking options.
                     </p>
                 </div>
@@ -1869,68 +1863,62 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
             <?php if (!$booking_enabled): ?>
                 <div class="bs-notice">
-                    <h4><i class="fas fa-exclamation-triangle"></i> Booking System Disabled</h4>
+                    <h4><i class="fas fa-exclamation-triangle"></i> Online booking is off</h4>
                     <p>
-                        The booking system is currently turned off. Enable it above to allow guests to make online reservations.
+                        Online booking is switched off. Turn it on above to let guests book online.
                     </p>
                     <div>
                         <a href="#disabled-settings">
-                            <i class="fas fa-cog"></i> Configure Disabled Message
+                            <i class="fas fa-cog"></i> Set the message guests see
                         </a>
 
                     </div>
                 </div>
 
-                <div id="disabled-settings" style="margin-top: 25px;">
-                    <h3 style="color: #7E684B; margin-bottom: 20px;"><i class="fas fa-sliders-h"></i> Disabled Mode Settings</h3>
+                <div id="disabled-settings">
+                    <h3><i class="fas fa-sliders-h"></i> When booking is off</h3>
 
                     <?php echo $rh_site_switch_note; ?>
                     <form method="POST" action="booking-settings.php">
-                        <fieldset<?php echo $rhSwDis; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <fieldset<?php echo $rhSwDis; ?> class="bs-fieldset">
                         <div class="form-group">
-                            <label for="booking_disabled_action"><strong>Action When Disabled</strong></label>
+                            <label for="booking_disabled_action">When online booking is off</label>
                             <select id="booking_disabled_action" name="booking_disabled_action" class="form-control" onchange="toggleDisabledAction()">
-                                <option value="message" <?php echo $disabled_action === 'message' ? 'selected' : ''; ?>>Show Custom Message</option>
-                                <option value="contact" <?php echo $disabled_action === 'contact' ? 'selected' : ''; ?>>Show Contact Information</option>
-                                <option value="redirect" <?php echo $disabled_action === 'redirect' ? 'selected' : ''; ?>>Redirect to URL</option>
+                                <option value="message" <?php echo $disabled_action === 'message' ? 'selected' : ''; ?>>Show a custom message</option>
+                                <option value="contact" <?php echo $disabled_action === 'contact' ? 'selected' : ''; ?>>Show contact details</option>
+                                <option value="redirect" <?php echo $disabled_action === 'redirect' ? 'selected' : ''; ?>>Redirect to a URL</option>
                             </select>
-                            <p class="help-text">
-                                <i class="fas fa-info-circle"></i>
-                                Choose what happens when guests try to access booking features
+                            <p class="help-text">Choose what happens when guests try to access booking features
                             </p>
                         </div>
 
                         <div class="form-group" id="redirect-url-group" style="display: <?php echo $disabled_action === 'redirect' ? 'block' : 'none'; ?>;">
-                            <label for="booking_disabled_redirect_url"><strong>Redirect URL</strong></label>
+                            <label for="booking_disabled_redirect_url">Redirect URL</label>
                             <input type="text"
                                 id="booking_disabled_redirect_url"
                                 name="booking_disabled_redirect_url"
                                 class="form-control"
                                 value="<?php echo htmlspecialchars($disabled_redirect_url ?? '/'); ?>"
                                 placeholder="/">
-                            <p class="help-text">
-                                <i class="fas fa-info-circle"></i>
-                                URL to redirect to (e.g., /contact or https://external-booking.com)
+                            <p class="help-text">URL to redirect to (e.g., /contact or https://external-booking.com)
                             </p>
                         </div>
 
                         <div class="form-group" id="message-group" style="display: <?php echo ($disabled_action === 'message' || $disabled_action === 'contact') ? 'block' : 'none'; ?>;">
-                            <label for="booking_disabled_message"><strong>Custom Message</strong></label>
+                            <label for="booking_disabled_message">Custom message</label>
                             <textarea id="booking_disabled_message"
                                 name="booking_disabled_message"
                                 class="form-control"
                                 rows="4"
                                 placeholder="For booking inquiries, please contact us at [phone] or [email]"><?php echo htmlspecialchars($disabled_message); ?></textarea>
-                            <p class="help-text">
-                                <i class="fas fa-info-circle"></i>
-                                Use [phone], [email], or [contact info] placeholders to insert your contact info automatically
+                            <p class="help-text">Use [phone], [email], or [contact info] placeholders to insert your contact info automatically
                             </p>
                         </div>
                         </fieldset>
 
                         <?php if ($canSiteSwitches): ?>
                         <button type="submit" class="btn-submit">
-                            <i class="fas fa-save"></i> Save Settings
+                            <i class="fas fa-save"></i> Save settings
                         </button>
                         <?php endif; ?>
                     </form>
@@ -2003,11 +1991,11 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <p class="bs-group__intro">How far ahead guests can book, tentative holds and booking reference numbers.</p>
 
             <div class="rh-panel settings-card" id="advance-booking"<?php echo $bsAttr('advance-booking'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Advance Booking Configuration</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Advance booking window</h2></div>
 
                 <form method="POST" action="booking-settings.php">
                     <div class="form-group">
-                        <label for="max_advance_booking_days">Maximum Advance Booking Days</label>
+                        <label for="max_advance_booking_days">Maximum days ahead a guest can book</label>
                         <input type="number"
                             id="max_advance_booking_days"
                             name="max_advance_booking_days"
@@ -2016,15 +2004,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             min="1"
                             max="365"
                             required>
-                        <p class="help-text">
-                            <i class="fas fa-info-circle"></i>
-                            Guests can only make bookings up to this many days in advance.
+                        <p class="help-text">Guests can only make bookings up to this many days in advance.
                             Default is 30 days (one month). Minimum is 1 day, maximum is 365 days.
                         </p>
                     </div>
 
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save Changes
+                        <i class="fas fa-save"></i> Save changes
                     </button>
                 </form>
 
@@ -2041,41 +2027,39 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <div class="rh-panel settings-card" id="tentative"<?php echo $bsAttr('tentative'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Tentative Bookings</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Tentative bookings</h2></div>
 
                 <?php $tentativeCurrentlyEnabled = getSetting('tentative_bookings_enabled', '1') !== '0'; ?>
                 <div class="current-value">
-                    <i class="fas fa-<?php echo $tentativeCurrentlyEnabled ? 'check-circle' : 'times-circle'; ?>" style="color: <?php echo $tentativeCurrentlyEnabled ? '#28a745' : '#dc3545'; ?>;"></i>
+                    <i class="fas fa-<?php echo $tentativeCurrentlyEnabled ? 'check-circle' : 'times-circle'; ?> <?php echo $tentativeCurrentlyEnabled ? 'is-on' : 'is-off'; ?>" aria-hidden="true"></i>
                     <div class="current-value-info">
-                        <h3>Tentative Bookings are <?php echo $tentativeCurrentlyEnabled ? 'Enabled' : 'Disabled'; ?></h3>
-                        <div class="value"><?php echo $tentativeCurrentlyEnabled ? 'Active' : 'Inactive'; ?></div>
+                        <h3>Tentative bookings are <?php echo $tentativeCurrentlyEnabled ? 'on' : 'off'; ?></h3>
+                        <div class="value"><?php echo $tentativeCurrentlyEnabled ? 'Guests can hold a room' : 'Holds are switched off'; ?></div>
                     </div>
                 </div>
 
                 <form method="POST" action="booking-settings.php#tentative" id="tentative-toggle-form">
                     <input type="hidden" name="toggle_tentative_bookings" value="1">
                     <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <label class="bs-check">
                             <input type="checkbox"
                                 id="tentative_bookings_enabled"
                                 name="tentative_bookings_enabled"
                                 value="1"
                                 <?php echo $tentativeCurrentlyEnabled ? 'checked' : ''; ?>
                                 onchange="onTentativeToggleChange()">
-                            <span style="font-weight: 600; color: #1A1A1A;">Allow Tentative (Hold) Bookings</span>
+                            <span class="bs-option__title">Allow tentative (hold) bookings</span>
                         </label>
-                        <p class="help-text">
-                            <i class="fas fa-info-circle"></i>
-                            When enabled, guests can hold a room for
+                        <p class="help-text">When enabled, guests can hold a room for
                             <?php echo (int)getSetting('tentative_duration_hours', 48); ?> hours without immediate payment.
                             When disabled, the tentative option is hidden on both the public booking page and admin booking forms.
                         </p>
-                        <div id="tentative-disable-warning" style="display:<?php echo $tentativeCurrentlyEnabled ? 'none' : 'block'; ?>;margin-top:10px;padding:10px 14px;background:#fff7ed;border:1px solid #fb923c;border-radius:8px;font-size:13px;color:#9a3412;">
+                        <div id="tentative-disable-warning" class="bs-warning" style="display:<?php echo $tentativeCurrentlyEnabled ? 'none' : 'block'; ?>;">
                             <i class="fas fa-triangle-exclamation"></i>
-                            <strong>Disabled:</strong> Guests cannot create new tentative holds. Existing holds in the system are unaffected.
+                            <strong>Off:</strong> guests cannot create new tentative holds. Existing holds are not affected.
                         </div>
-                        <button type="submit" id="tentative-save-btn" class="btn-submit" style="margin-top: 14px;">
-                            <i class="fas fa-save"></i> <span id="tentative-save-label"><?php echo $tentativeCurrentlyEnabled ? 'Save — Keep Enabled' : 'Save — Keep Disabled'; ?></span>
+                        <button type="submit" id="tentative-save-btn" class="btn-submit">
+                            <i class="fas fa-save"></i> <span id="tentative-save-label"><?php echo $tentativeCurrentlyEnabled ? 'Save: keep on' : 'Save: keep off'; ?></span>
                         </button>
                     </div>
                 </form>
@@ -2088,11 +2072,11 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         var btn = document.getElementById('tentative-save-btn');
                         if (cb.checked) {
                             warning.style.display = 'none';
-                            label.textContent = 'Save — Enable Tentative Bookings';
+                            label.textContent = 'Save: turn on';
                             btn.style.background = '';
                         } else {
                             warning.style.display = 'block';
-                            label.textContent = 'Save — Disable Tentative Bookings';
+                            label.textContent = 'Save: turn off';
                             btn.style.background = '#c0392b';
                         }
                     }
@@ -2129,11 +2113,11 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <div class="form-group">
                         <label for="booking_reference_prefix">Reference prefix (2-6 letters or digits)</label>
                         <input type="text" id="booking_reference_prefix" name="booking_reference_prefix" maxlength="6" pattern="[A-Za-z0-9]{2,6}" required<?php echo $rhSwDis; ?>
-                               value="<?php echo htmlspecialchars($refPrefixNow, ENT_QUOTES); ?>" style="text-transform:uppercase;max-width:160px;">
+                               value="<?php echo htmlspecialchars($refPrefixNow, ENT_QUOTES); ?>" class="form-control bs-narrow bs-upper">
                         <p class="help-text">New bookings get references like <strong><?php echo htmlspecialchars($refPrefixNow . date('Y'), ENT_QUOTES); ?>012345</strong>. Used by the website, Create Booking and the API. Existing bookings keep their reference.</p>
                     </div>
                     <?php if ($canSiteSwitches): ?>
-                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Prefix</button>
+                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save prefix</button>
                     <?php endif; ?>
                 </form>
             </div>
@@ -2150,9 +2134,9 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 $canEditRefundRules = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
                 ?>
                 <div class="current-value">
-                    <i class="fas fa-coins" style="color: #7E684B;"></i>
+                    <i class="fas fa-coins" aria-hidden="true"></i>
                     <div class="current-value-info">
-                        <h3>Current handling</h3>
+                        <h3>Current rule</h3>
                         <div class="value"><?php echo htmlspecialchars(getCancellationRefundModeLabel($cancelModeNow)); ?></div>
                     </div>
                 </div>
@@ -2182,8 +2166,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     return $p === null ? '' : rh_cancel_policy_text($p, $kind);
                 };
                 ?>
-                <div class="form-group" id="cancellation-policy" style="border:1px solid #e8e0d4;border-radius:10px;padding:14px 16px;margin:0 0 18px;">
-                    <h3 style="margin:0 0 6px;">Cancellation &amp; no-show policy</h3>
+                <div class="form-group bs-subcard" id="cancellation-policy">
+                    <h3>Cancellation &amp; no-show policy</h3>
                     <p class="help-text">Charge a % of the whole stay when a confirmed booking is cancelled close to arrival, and set what a no-show pays. Applies to bookings made after you save. Each booking keeps the policy it was made under.</p>
                     <?php if (!$cpReady): ?>
                         <p class="help-text"><i class="fas fa-lock"></i> Cancellation policies need the database update (085). Until it has run, every cancellation follows the rule below and nothing here can be changed.</p>
@@ -2194,26 +2178,26 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <form method="POST" action="booking-settings.php#cancellation-policy" id="cp-form">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="save_cancellation_policy" value="1">
-                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
-                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:6px 0 4px;">
-                                <input type="checkbox" name="cp_enabled" value="1" <?php echo $cpOn ? 'checked' : ''; ?> style="margin-top:4px;">
-                                <span><span style="font-weight:600;color:#1A1A1A;">Use cancellation policies for new bookings</span><br>
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> class="bs-fieldset">
+                            <label class="bs-option">
+                                <input type="checkbox" name="cp_enabled" value="1" <?php echo $cpOn ? 'checked' : ''; ?>>
+                                <span><span class="bs-option__title">Use cancellation policies for new bookings</span><br>
                                 <span class="help-text">On: every booking made from now on is locked to the policy below (shown to the guest before booking, printed on their documents). Off: new bookings follow the rule under "When a room booking is cancelled". Bookings already made never change.</span></span>
                             </label>
                             <?php foreach ([['cp_ind', 'Individual bookings', $cpS['individual'], 'For a booking of fewer rooms than the group size below (or every booking when there is no group policy).'], ['cp_grp', 'Group bookings', $cpS['group'], 'For a booking of the group size or more rooms made together. A family in joined rooms is one booking (individual).']] as [$cpPfx, $cpTitle, $cpPol, $cpHelp]): ?>
-                                <div class="cp-block" data-cp-block="<?php echo $cpPfx; ?>" style="margin-top:14px;">
+                                <div class="cp-block bs-subhead-row" data-cp-block="<?php echo $cpPfx; ?>">
                                     <?php if ($cpPfx === 'cp_grp'): ?>
-                                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:6px;">
-                                            <input type="checkbox" name="cp_grp_on" value="1" id="cp_grp_on" <?php echo $cpGrpOn ? 'checked' : ''; ?> style="margin-top:4px;">
-                                            <span><span style="font-weight:600;color:#1A1A1A;">Use a different policy for groups of
+                                        <label class="bs-option">
+                                            <input type="checkbox" name="cp_grp_on" value="1" id="cp_grp_on" <?php echo $cpGrpOn ? 'checked' : ''; ?>>
+                                            <span><span class="bs-option__title">Use a different policy for groups of
                                                 <input type="number" name="cp_group_min" min="2" max="50" step="1" value="<?php echo htmlspecialchars($cpVal('cp_group_min', (string)$cpS['group_min_rooms']), ENT_QUOTES); ?>" style="width:70px;display:inline-block;" aria-label="Group size in rooms"> rooms or more</span><br>
                                             <span class="help-text">Unticked: groups use the individual policy. The group size also decides which bookings count as a group.</span></span>
                                         </label>
                                     <?php else: ?>
-                                        <h4 style="margin:0 0 4px;"><?php echo htmlspecialchars($cpTitle); ?></h4>
+                                        <h4><?php echo htmlspecialchars($cpTitle); ?></h4>
                                     <?php endif; ?>
                                     <div class="cp-rows" data-cp-rows="<?php echo $cpPfx; ?>"<?php echo $cpPfx === 'cp_grp' && !$cpGrpOn ? ' hidden' : ''; ?>>
-                                        <p class="help-text" style="margin:0 0 6px;"><?php echo htmlspecialchars($cpHelp); ?> Each row: cancelled FEWER than this many days before arrival (arrival day = 0) charges this % of the whole stay. Cancelling exactly that many days before is still free. Up to 5 rows; blank rows are ignored.</p>
+                                        <p class="help-text"><?php echo htmlspecialchars($cpHelp); ?> Each row: cancelled FEWER than this many days before arrival (arrival day = 0) charges this % of the whole stay. Cancelling exactly that many days before is still free. Up to 5 rows; blank rows are ignored.</p>
                                         <?php foreach ($cpRows($cpPol, $cpPfx) as $cpRi => $cpR): ?>
                                             <div class="cp-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px;"<?php echo $cpRi > 0 && trim($cpR['days']) === '' && trim($cpR['pct']) === '' ? ' hidden' : ''; ?>>
                                                 <span>Cancelled fewer than</span>
@@ -2230,7 +2214,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                             <input type="number" name="<?php echo $cpPfx; ?>_noshow" min="0" max="100" step="0.01" value="<?php echo htmlspecialchars($cpVal($cpPfx . '_noshow', $cpPol !== null ? rh_cancel_policy_pct_label($cpPol['noshow_pct']) : '100'), ENT_QUOTES); ?>" style="width:90px;" aria-label="No-show percent of the stay">
                                             <span>% of the stay</span>
                                         </div>
-                                        <p class="help-text" style="margin:4px 0 0;">100% = the guest who never arrives pays the booked stay (as today). Below 100%, the charge is posted as one line on the bill and the stay is no longer billed.</p>
+                                        <p class="help-text">100% = the guest who never arrives pays the booked stay (as today). Below 100%, the charge is posted as one line on the bill and the stay is no longer billed.</p>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
@@ -2241,7 +2225,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             </div>
                             <div style="margin-top:14px;background:#f8f9fa;border-radius:8px;padding:12px;">
                                 <strong>What guests will read</strong>
-                                <p class="help-text" style="margin:2px 0 8px;">The wording is made from the rows above. After you save, the saved wording is what each new booking keeps.</p>
+                                <p class="help-text">The wording is made from the rows above. After you save, the saved wording is what each new booking keeps.</p>
                                 <div id="cp-preview" data-arrival="<?php echo htmlspecialchars($cpArrival->format('Y-m-d'), ENT_QUOTES); ?>" style="white-space:pre-line;font-size:13px;color:#333;"><?php
                                     $cpPrevInd = $cpPreview('individual');
                                     $cpPrevGrp = $cpS['group'] !== null ? $cpPreview('group') : '';
@@ -2249,10 +2233,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                     echo htmlspecialchars(trim($cpPrevInd . ($cpPrevGrp !== '' ? "\n\n" . $cpPrevGrp : '') . ($cpEx !== '' ? "\n\n" . $cpEx : '')) ?: 'No policy set yet.');
                                 ?></div>
                             </div>
-                            <p class="help-text" style="margin-top:10px;"><i class="fas fa-info-circle"></i> Percentages are of the whole stay as it stands when cancelled (room nights, children, packages, VAT and tourism levy); extras already used stay payable. Pending and tentative bookings never pay a fee. Current version: <?php echo (int)$cpS['version']; ?>.</p>
+                            <p class="help-text">Percentages are of the whole stay as it stands when cancelled (room nights, children, packages, VAT and tourism levy); extras already used stay payable. Pending and tentative bookings never pay a fee. Current version: <?php echo (int)$cpS['version']; ?>.</p>
                         </fieldset>
                         <?php if ($canEditRefundRules): ?>
-                        <button type="submit" class="btn-submit" style="margin-top: 10px;"><i class="fas fa-save"></i> Save Cancellation Policy</button>
+                        <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save cancellation policy</button>
                         <?php endif; ?>
                     </form>
                     <script>
@@ -2354,8 +2338,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <?php if (!$canEditRefundRules): ?>
                             <p class="help-text"><i class="fas fa-lock"></i> You can view these rules. Only users with the "Change VAT &amp; refund settings" permission can change them.</p>
                         <?php endif; ?>
-                        <h3 style="margin:0 0 8px;">When a room booking is cancelled</h3>
-                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <h3>When a room booking is cancelled</h3>
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> class="bs-fieldset">
                         <?php
                         $cancelModeOptions = [
                             'void_refund_all'  => ['Void the bill and refund everything paid', 'The booking owes nothing and the full net amount paid is refunded automatically.'],
@@ -2363,15 +2347,15 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             'keep_first_night' => ['Charge the first night, refund the rest', 'The guest is charged the first night (nightly rate including its VAT/levy share); the bill is reduced to that amount and the rest of the net paid is refunded.'],
                         ];
                         foreach ($cancelModeOptions as $modeKey => [$modeTitle, $modeHelp]): ?>
-                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
-                                <input type="radio" name="cancellation_refund_mode" value="<?php echo htmlspecialchars($modeKey, ENT_QUOTES); ?>" <?php echo $cancelModeNow === $modeKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                            <label class="bs-option">
+                                <input type="radio" name="cancellation_refund_mode" value="<?php echo htmlspecialchars($modeKey, ENT_QUOTES); ?>" <?php echo $cancelModeNow === $modeKey ? 'checked' : ''; ?>>
                                 <span>
-                                    <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($modeTitle); ?></span><br>
+                                    <span class="bs-option__title"><?php echo htmlspecialchars($modeTitle); ?></span><br>
                                     <span class="help-text"><?php echo htmlspecialchars($modeHelp); ?></span>
                                 </span>
                             </label>
                         <?php endforeach; ?>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Applies to every cancellation made after you save. Bookings already cancelled are not changed. Folio charges already posted to a booking stay billable.</p>
+                        <p class="help-text">Applies to every cancellation made after you save. Bookings already cancelled are not changed. Folio charges already posted to a booking stay billable.</p>
 
                         <?php
                         $ruleGroups = [
@@ -2390,12 +2374,12 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         ];
                         foreach ($ruleGroups as $ruleKey => [$ruleTitle, $ruleChoices]):
                             $ruleNow = rh_refund_rule($ruleKey); ?>
-                            <h3 style="margin:18px 0 8px;"><?php echo htmlspecialchars($ruleTitle); ?></h3>
+                            <h3><?php echo htmlspecialchars($ruleTitle); ?></h3>
                             <?php foreach ($ruleChoices as $choiceKey => [$choiceTitle, $choiceHelp]): ?>
-                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
-                                    <input type="radio" name="<?php echo htmlspecialchars($ruleKey, ENT_QUOTES); ?>" value="<?php echo htmlspecialchars($choiceKey, ENT_QUOTES); ?>" <?php echo $ruleNow === $choiceKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                                <label class="bs-option">
+                                    <input type="radio" name="<?php echo htmlspecialchars($ruleKey, ENT_QUOTES); ?>" value="<?php echo htmlspecialchars($choiceKey, ENT_QUOTES); ?>" <?php echo $ruleNow === $choiceKey ? 'checked' : ''; ?>>
                                     <span>
-                                        <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($choiceTitle); ?></span><br>
+                                        <span class="bs-option__title"><?php echo htmlspecialchars($choiceTitle); ?></span><br>
                                         <span class="help-text"><?php echo htmlspecialchars($choiceHelp); ?></span>
                                     </span>
                                 </label>
@@ -2403,7 +2387,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <?php endforeach; ?>
                         </fieldset>
                         <?php if ($canEditRefundRules): ?>
-                        <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save Refund Settings</button>
+                        <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save refund settings</button>
                         <?php endif; ?>
                     </div>
                 </form>
@@ -2412,22 +2396,22 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="save_group_noshow_charge" value="1">
                     <div class="form-group">
-                        <h3 style="margin:18px 0 8px;">Charge no-show / expired rooms in a group</h3>
+                        <h3>Charge no-show / expired rooms in a group</h3>
                         <p class="help-text">For a room that is part of a group booking (2 or more rooms) when it is marked a no-show or expires. Single bookings are never changed. The charge is posted once, as its own line on that room's bill, and anything paid above it (and above any extras) goes back to the guest: as a refund when the no-show refund rule is First night or Full, or as credit owed to the guest when it is No automatic refund.</p>
-                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> class="bs-fieldset">
                         <?php foreach ($rh_group_noshow_choices as $gnsKey => [$gnsTitle, $gnsHelp]): ?>
-                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
-                                <input type="radio" name="group_noshow_charge" value="<?php echo htmlspecialchars((string)$gnsKey, ENT_QUOTES); ?>" <?php echo $gnsNow === (string)$gnsKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                            <label class="bs-option">
+                                <input type="radio" name="group_noshow_charge" value="<?php echo htmlspecialchars((string)$gnsKey, ENT_QUOTES); ?>" <?php echo $gnsNow === (string)$gnsKey ? 'checked' : ''; ?>>
                                 <span>
-                                    <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($gnsTitle); ?></span><br>
+                                    <span class="bs-option__title"><?php echo htmlspecialchars($gnsTitle); ?></span><br>
                                     <span class="help-text"><?php echo htmlspecialchars($gnsHelp); ?></span>
                                 </span>
                             </label>
                         <?php endforeach; ?>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Applies only to rooms that become a no-show or expire after you save. Rooms already charged are never charged again.</p>
+                        <p class="help-text">Applies only to rooms that become a no-show or expire after you save. Rooms already charged are never charged again.</p>
                         </fieldset>
                         <?php if ($canEditRefundRules): ?>
-                        <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save No-show Charge</button>
+                        <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save no-show charge</button>
                         <?php endif; ?>
                     </div>
                 </form>
@@ -2436,29 +2420,29 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="save_no_show_refund_policy" value="1">
                     <div class="form-group">
-                        <h3 style="margin:18px 0 8px;">Refund when a guest is a no-show</h3>
+                        <h3>Refund when a guest is a no-show</h3>
                         <p class="help-text">What happens to money already paid when a booking is marked a no-show. A refund made here is created as pending, for staff to settle on the refunds screen.</p>
-                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> class="bs-fieldset">
                         <?php foreach ($rh_noshow_refund_choices as $nsKey => [$nsTitle, $nsHelp]): ?>
-                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
-                                <input type="radio" name="no_show_refund_policy" value="<?php echo htmlspecialchars($nsKey, ENT_QUOTES); ?>" <?php echo $nsRuleNow === $nsKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                            <label class="bs-option">
+                                <input type="radio" name="no_show_refund_policy" value="<?php echo htmlspecialchars($nsKey, ENT_QUOTES); ?>" <?php echo $nsRuleNow === $nsKey ? 'checked' : ''; ?>>
                                 <span>
-                                    <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($nsTitle); ?></span><br>
+                                    <span class="bs-option__title"><?php echo htmlspecialchars($nsTitle); ?></span><br>
                                     <span class="help-text"><?php echo htmlspecialchars($nsHelp); ?></span>
                                 </span>
                             </label>
                         <?php endforeach; ?>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Applies to bookings marked no-show after you save.</p>
+                        <p class="help-text">Applies to bookings marked no-show after you save.</p>
                         </fieldset>
                         <?php if ($canEditRefundRules): ?>
-                        <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save No-show Refund Rule</button>
+                        <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save no-show refund rule</button>
                         <?php endif; ?>
                     </div>
                 </form>
             </div>
 
             <div class="rh-panel settings-card" id="tourism-levy"<?php echo $bsAttr('tourism-levy'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Tourism Levy / City Tax</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Tourism levy (city tax)</h2></div>
 
                 <?php
                 /* Locked high-value setting (owner 2026-11-25): the whole form, Save included, stays disabled until the
@@ -2476,23 +2460,16 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <input type="hidden" name="tourism_levy_settings" value="1">
 
                     <div class="form-group">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox"
-                                id="tourism_levy_enabled"
-                                name="tourism_levy_enabled"
-                                value="1"
-                                style="margin-right: 10px;"
-                                <?php echo (getSetting('tourism_levy_enabled', '0') === '1') ? 'checked' : ''; ?>>
-                            <strong>Enable Tourism Levy</strong>
+                        <label class="bs-check">
+                            <input type="checkbox" id="tourism_levy_enabled" name="tourism_levy_enabled" value="1" <?php echo (getSetting('tourism_levy_enabled', '0') === '1') ? 'checked' : ''; ?>>
+                            <span>Add the tourism levy to new bookings</span>
                         </label>
-                        <p class="help-text" style="margin-top: 10px;">
-                            <i class="fas fa-info-circle"></i>
-                            When enabled, a tourism levy (city tax) will be automatically added to all new bookings.
+                        <p class="help-text">A tourism levy (city tax) is added automatically to every new booking.
                         </p>
                     </div>
 
                     <div class="form-group">
-                        <label for="tourism_levy_percent">Tourism Levy Percentage (%)</label>
+                        <label for="tourism_levy_percent">Tourism levy percentage (%)</label>
                         <input type="number"
                             id="tourism_levy_percent"
                             name="tourism_levy_percent"
@@ -2502,28 +2479,26 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             max="100"
                             step="0.01"
                             required>
-                        <p class="help-text">
-                            <i class="fas fa-info-circle"></i>
-                            The percentage of the total booking amount (room rate + child supplement) to charge as tourism levy.
+                        <p class="help-text">The percentage of the total booking amount (room rate + child supplement) to charge as tourism levy.
                             Common values range from 1% to 5% depending on local regulations.
                         </p>
                     </div>
 
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save Tourism Levy Settings
+                        <i class="fas fa-save"></i> Save tourism levy
                     </button>
                     </fieldset>
                 </form>
 
                 <details class="tips-box">
-                    <summary><i class="fas fa-circle-info"></i> How Tourism Levy Works</summary>
+                    <summary><i class="fas fa-circle-info"></i> How the tourism levy works</summary>
                     <div class="tips-body">
                         <ul>
-                            <li><strong>Calculation:</strong> (Room Rate + Child Supplement) × (Levy % / 100)</li>
-                            <li><strong>Display:</strong> A hint "Includes X% Tourism Levy" shown on the booking page</li>
+                            <li><strong>Calculation:</strong> (room rate + child supplement) × (levy % / 100)</li>
+                            <li><strong>Display:</strong> A hint "Includes X% tourism levy" shown on the booking page</li>
                             <li><strong>Invoices:</strong> Appears as a separate line item on invoices</li>
-                            <li><strong>Existing Bookings:</strong> Only affects new bookings, not existing ones</li>
-                            <li><strong>Compliance:</strong> Ensure your rate complies with local tourism tax regulations</li>
+                            <li><strong>Existing bookings:</strong> Only affects new bookings, not existing ones</li>
+                            <li><strong>Compliance:</strong> Make sure your rate follows local tourism tax rules</li>
                         </ul>
                     </div>
                 </details>
@@ -2542,14 +2517,14 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <?php if (!$canEditBranding): ?>
                         <p class="help-text"><i class="fas fa-lock"></i> You can view these. Only users with the "Change VAT &amp; refund settings" permission can change them.</p>
                     <?php endif; ?>
-                    <fieldset <?php echo $canEditBranding ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                    <fieldset <?php echo $canEditBranding ? '' : 'disabled'; ?> class="bs-fieldset">
                         <div class="form-group">
                             <label for="brand_primary_color">Primary colour (table headers, total bar, title band)</label>
-                            <input type="color" id="brand_primary_color" name="brand_primary_color" value="<?php echo htmlspecialchars($brandPrimaryNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
+                            <input type="color" id="brand_primary_color" name="brand_primary_color" value="<?php echo htmlspecialchars($brandPrimaryNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" class="bs-colour">
                         </div>
                         <div class="form-group">
                             <label for="brand_accent_color">Accent colour (small labels and rules)</label>
-                            <input type="color" id="brand_accent_color" name="brand_accent_color" value="<?php echo htmlspecialchars($brandAccentNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
+                            <input type="color" id="brand_accent_color" name="brand_accent_color" value="<?php echo htmlspecialchars($brandAccentNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" class="bs-colour">
                         </div>
                         <div class="form-group">
                             <label for="document_footer_text">Footer line (printed at the bottom of every PDF)</label>
@@ -2566,7 +2541,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </div>
                     </fieldset>
                     <?php if ($canEditBranding): ?>
-                    <button type="submit" class="btn-submit" style="margin-top: 8px;"><i class="fas fa-save"></i> Save Document Branding</button>
+                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save document branding</button>
                     <?php endif; ?>
                 </form>
             </div>
@@ -2579,7 +2554,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <p class="bs-group__intro">The email server, sender details and who gets booking alerts.</p>
 
             <div class="rh-panel settings-card" id="email-config"<?php echo $bsAttr('email-config'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Email Configuration</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Email server and sender</h2></div>
 
                 <?php
                 $email_settings = getAllEmailSettings();
@@ -2593,68 +2568,70 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <input type="hidden" name="email_settings" value="1">
 
                     <h3 class="bs-subhead">
-                        <i class="fas fa-server"></i> SMTP Server Settings
+                        <i class="fas fa-server"></i> Email server (SMTP)
                     </h3>
                     <?php if (!$canEmailServer): ?>
-                        <p class="help-text"><i class="fas fa-lock"></i> Only a super admin can change the email server and the switches under Email Settings. You can still change the sender name and the email addresses below.</p>
+                        <p class="help-text"><i class="fas fa-lock"></i> Only a super admin can change the email server and the email switches below. You can still change the sender name and the email addresses below.</p>
                     <?php endif; ?>
-                    <fieldset<?php echo $canEmailServer ? '' : ' disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                    <fieldset<?php echo $canEmailServer ? '' : ' disabled'; ?> class="bs-fieldset">
+                    <div class="bs-field-grid">
 
                     <div class="form-group">
-                        <label for="smtp_host">SMTP Host *</label>
+                        <label for="smtp_host">SMTP host *</label>
                         <input type="text" id="smtp_host" name="smtp_host" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['smtp_host'] ?? ''); ?>" required>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Your SMTP server hostname (e.g., mail.yourdomain.com, smtp.gmail.com)</p>
+                        <p class="help-text">Your SMTP server hostname (e.g., mail.yourdomain.com, smtp.gmail.com)</p>
                     </div>
 
                     <div class="form-group">
-                        <label for="smtp_port">SMTP Port *</label>
+                        <label for="smtp_port">SMTP port *</label>
                         <input type="number" id="smtp_port" name="smtp_port" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['smtp_port'] ?? ''); ?>" min="1" max="65535" required>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Common ports: 465 (SSL), 587 (TLS), 25 (Standard)</p>
+                        <p class="help-text">Common ports: 465 (SSL), 587 (TLS), 25 (Standard)</p>
                     </div>
 
                     <div class="form-group">
-                        <label for="smtp_username">SMTP Username *</label>
+                        <label for="smtp_username">SMTP username *</label>
                         <input type="text" id="smtp_username" name="smtp_username" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['smtp_username'] ?? ''); ?>" required>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> The mailbox that sends every email (usually its full email address). Mail servers only allow sending as this address, so guests see it in the From line next to the sender name. It is not shown anywhere else.</p>
+                        <p class="help-text">The mailbox that sends every email (usually its full email address). Mail servers only allow sending as this address, so guests see it in the From line next to the sender name. It is not shown anywhere else.</p>
                     </div>
 
                     <div class="form-group">
-                        <label for="smtp_password">SMTP Password</label>
+                        <label for="smtp_password">SMTP password</label>
                         <input type="password" id="smtp_password" name="smtp_password" class="form-control"
                             value="" placeholder="Leave blank to keep current password">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Your email account password. Only enter if you want to change it.</p>
+                        <p class="help-text">Your email account password. Only enter if you want to change it.</p>
                     </div>
 
                     <div class="form-group">
-                        <label for="smtp_secure">SMTP Security</label>
+                        <label for="smtp_secure">SMTP security</label>
                         <select id="smtp_secure" name="smtp_secure" class="form-control">
                             <option value="ssl" <?php echo ($current_settings['smtp_secure'] ?? 'ssl') === 'ssl' ? 'selected' : ''; ?>>SSL</option>
                             <option value="tls" <?php echo ($current_settings['smtp_secure'] ?? 'ssl') === 'tls' ? 'selected' : ''; ?>>TLS</option>
                             <option value="" <?php echo empty($current_settings['smtp_secure'] ?? '') ? 'selected' : ''; ?>>None</option>
                         </select>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Security protocol for SMTP connection</p>
+                        <p class="help-text">Security protocol for SMTP connection</p>
+                    </div>
                     </div>
                     </fieldset>
 
                     <h3 class="bs-subhead">
-                        <i class="fas fa-user"></i> Email Identity
+                        <i class="fas fa-user"></i> Sender and reply addresses
                     </h3>
 
                     <div class="form-group">
                         <label for="email_from_name">Sender name *</label>
                         <input type="text" id="email_from_name" name="email_from_name" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_from_name'] ?? ''); ?>" required>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> The name guests see on every email, for example the hotel's name.</p>
+                        <p class="help-text">The name guests see on every email, for example the hotel's name.</p>
                     </div>
 
                     <div class="form-group">
                         <label for="email_from_email">Reply-to and contact email (optional)</label>
                         <input type="email" id="email_from_email" name="email_from_email" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_from_email'] ?? ''); ?>">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> When guests reply to an email, their reply goes here, and it is printed as the contact email on emails and documents. Use the hotel's own address. Leave blank if the hotel has no email domain yet: the main contact email from Hotel Details is used instead.</p>
+                        <p class="help-text">When guests reply to an email, their reply goes here, and it is printed as the contact email on emails and documents. Use the hotel's own address. Leave blank if the hotel has no email domain yet: the main contact email from Hotel Details is used instead.</p>
                         <?php
                         $rhGuestContact = rh_guest_contact_email();
                         $rhSavedContact = trim((string)($current_settings['email_from_email'] ?? ''));
@@ -2672,7 +2649,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <input type="text" id="email_reply_to_backup" name="email_reply_to_backup" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_reply_to_backup'] ?? ''); ?>"
                             placeholder="frontdesk@example.com, manager@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Up to 5, comma-separated. When guests reply to an email, their reply also goes to these addresses. Guests can see them in the reply line, so don't use an address guests shouldn't see. For a hidden monitoring copy, use Backup staff copy emails instead. Only used when there is a reply-to and contact email (or a main contact email in Hotel Details).</p>
+                        <p class="help-text">Up to 5, comma-separated. When guests reply to an email, their reply also goes to these addresses. Guests can see them in the reply line, so don't use an address guests shouldn't see. For a hidden monitoring copy, use Backup staff copy emails instead. Only used when there is a reply-to and contact email (or a main contact email in Hotel Details).</p>
                         <?php $rhReplyBackups = array_slice(rh_mail_reply_to_addresses(), 1); ?>
                         <p class="help-text"><i class="fas fa-envelope"></i> Replies currently also go to:
                             <?php if ($rhReplyBackups): ?><strong><?php echo htmlspecialchars(implode(', ', $rhReplyBackups)); ?></strong><?php elseif ($rhGuestContact === '' && trim((string)($current_settings['email_reply_to_backup'] ?? '')) !== ''): ?>no backup addresses (there is no reply-to and contact email for them to back up)<?php else: ?>no backup addresses<?php endif; ?></p>
@@ -2682,7 +2659,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <label for="email_admin_email">Staff copy email</label>
                         <input type="email" id="email_admin_email" name="email_admin_email" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_admin_email'] ?? ''); ?>">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Gets: a hidden copy of every email while the switch below is on; a copy of bookings created in the admin panel and of conference confirmations; new gym membership enquiries; booking, conference, gym and expired-hold alerts when their own boxes and fallbacks are blank; the end-of-day report when no report recipient is set. Guests never see it.</p>
+                        <p class="help-text">Gets: a hidden copy of every email while the switch below is on; a copy of bookings created in the admin panel and of conference confirmations; new gym membership enquiries; booking, conference, gym and expired-hold alerts when their own boxes and fallbacks are blank; the end-of-day report when no report recipient is set. Guests never see it.</p>
                     </div>
 
                     <div class="form-group">
@@ -2690,7 +2667,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <input type="text" id="email_admin_backup" name="email_admin_backup" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_admin_backup'] ?? ''); ?>"
                             placeholder="owner@example.com, accounts@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Up to 5, comma-separated. <strong>What adding an address here does:</strong> it gets a hidden copy (BCC) of every email the system sends while the switch below is on: guest emails such as booking confirmations, cancellations and invoices, and staff alerts such as new bookings. Guests never see these addresses. They are not used as the main recipient of an alert or report when its own box is blank. Reports are separate: to copy someone on the End of Day and daily reports, add them to "End-of-day report CC" (Payments &amp; documents); for the kitchen, bar and coffee bar reports, to "Copy (CC) on the station report emails" (Automated Emails).</p>
+                        <p class="help-text">Up to 5, comma-separated. <strong>What adding an address here does:</strong> it gets a hidden copy (BCC) of every email the system sends while the switch below is on: guest emails such as booking confirmations, cancellations and invoices, and staff alerts such as new bookings. Guests never see these addresses. They are not used as the main recipient of an alert or report when its own box is blank. Reports are separate: to copy someone on the End of Day and daily reports, add them to "End-of-day report CC" (Payments &amp; documents); for the kitchen, bar and coffee bar reports, to "Copy (CC) on the station report emails" (Automated Emails).</p>
                         <?php
                         $rhStaffBackups = rh_mail_staff_backup_addresses();
                         $rhBccOn = ($current_settings['email_bcc_admin'] ?? '1') === '1';
@@ -2700,44 +2677,44 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </div>
 
                     <h3 class="bs-subhead">
-                        <i class="fas fa-sliders-h"></i> Email Settings
+                        <i class="fas fa-sliders-h"></i> Email switches
                     </h3>
-                    <fieldset<?php echo $canEmailServer ? '' : ' disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                    <fieldset<?php echo $canEmailServer ? '' : ' disabled'; ?> class="bs-fieldset">
 
                     <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px;">
+                        <label class="bs-check">
                             <input type="checkbox" id="email_bcc_admin" name="email_bcc_admin" value="1"
                                 <?php echo ($current_settings['email_bcc_admin'] ?? '1') === '1' ? 'checked' : ''; ?>>
                             <span>Send the staff copy email and the backup staff copy emails a hidden copy of every email</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Guests can't see this copy. It covers guest emails and staff alerts (new bookings, conference and gym alerts, expired holds, contact-form messages), once each: an email that already goes to the staff copy email is not copied again. Automated reminders use their own switch on the Automated Emails page.</p>
+                        <p class="help-text">Guests can't see this copy. It covers guest emails and staff alerts (new bookings, conference and gym alerts, expired holds, contact-form messages), once each: an email that already goes to the staff copy email is not copied again. Automated reminders use their own switch on the Automated Emails page.</p>
                     </div>
 
                     <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px;">
+                        <label class="bs-check">
                             <input type="checkbox" id="email_development_mode" name="email_development_mode" value="1"
                                 <?php echo ($current_settings['email_development_mode'] ?? '1') === '1' ? 'checked' : ''; ?>>
                             <span>Preview only (testing on this computer)</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Only works when the system runs on a local computer: emails are saved as previews instead of being sent. It has no effect on the live website.</p>
+                        <p class="help-text">Only works when the system runs on a local computer: emails are saved as previews instead of being sent. It has no effect on the live website.</p>
                     </div>
 
                     <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px;">
+                        <label class="bs-check">
                             <input type="checkbox" id="email_log_enabled" name="email_log_enabled" value="1"
                                 <?php echo ($current_settings['email_log_enabled'] ?? '1') === '1' ? 'checked' : ''; ?>>
                             <span>Keep a log of sent emails</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Records each email sent or failed (time, recipient, subject) so delivery problems can be traced.</p>
+                        <p class="help-text">Records each email sent or failed (time, recipient, subject) so delivery problems can be traced.</p>
                     </div>
 
                     <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px;">
+                        <label class="bs-check">
                             <input type="checkbox" id="email_preview_enabled" name="email_preview_enabled" value="1"
                                 <?php echo ($current_settings['email_preview_enabled'] ?? '1') === '1' ? 'checked' : ''; ?>>
                             <span>Save a preview copy of each email</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Keeps a viewable copy of each email for checking how it looks. Only used together with Preview only on a local computer.</p>
+                        <p class="help-text">Keeps a viewable copy of each email for checking how it looks. Only used together with Preview only on a local computer.</p>
                     </div>
                     </fieldset>
 
@@ -2746,27 +2723,27 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <input type="text" id="invoice_recipients" name="invoice_recipients" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['invoice_recipients'] ?? ''); ?>"
                             placeholder="accounts@example.com, manager@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Comma-separated. Each address gets a hidden copy of every invoice, statement, credit note and receipt emailed to a guest; the guest doesn't see these copies. The sending mailbox also gets a hidden copy of invoices and statements automatically.</p>
+                        <p class="help-text">Comma-separated. Each address gets a hidden copy of every invoice, statement, credit note and receipt emailed to a guest; the guest doesn't see these copies. The sending mailbox also gets a hidden copy of invoices and statements automatically.</p>
                     </div>
 
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save Email Settings
+                        <i class="fas fa-save"></i> Save email settings
                     </button>
                 </form>
 
-                <form method="POST" action="booking-settings.php" id="email-settings-test-form" style="margin-top:24px;padding-top:16px;border-top:1px solid #e0e0e0;">
+                <form method="POST" action="booking-settings.php" id="email-settings-test-form" class="bs-footer-row">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="email_settings_test" value="1">
                     <h3 class="bs-subhead bs-subhead--plain">
                         <i class="fas fa-paper-plane"></i> Test these settings
                     </h3>
-                    <p class="help-text"><i class="fas fa-info-circle"></i> Sends one test email using the saved settings, with the same sender, reply-to and hidden copies as a real email. Save your changes first.</p>
+                    <p class="help-text">Sends one test email using the saved settings, with the same sender, reply-to and hidden copies as a real email. Save your changes first.</p>
                     <div class="form-group">
                         <label for="email_test_to">Send a test to</label>
                         <input type="email" id="email_test_to" name="email_test_to" class="form-control" value="" autocomplete="off"
                             placeholder="you@example.com" required maxlength="254" style="min-height:44px;">
                     </div>
-                    <button type="submit" class="btn-submit" id="email-settings-test-btn" style="min-height:44px;">
+                    <button type="submit" class="btn-submit" id="email-settings-test-btn">
                         <i class="fas fa-paper-plane"></i> Send test email
                     </button>
                     <div id="email-settings-test-result" role="status" aria-live="polite" style="margin-top:12px;<?php echo $rh_email_test_result === null ? 'display:none;' : ''; ?>">
@@ -2832,8 +2809,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 })();
                 </script>
 
-                <details class="tips-box" style="margin-top:10px;">
-                    <summary><i class="fas fa-circle-info"></i> Email Configuration Tips</summary>
+                <details class="tips-box">
+                    <summary><i class="fas fa-circle-info"></i> Email tips</summary>
                     <div class="tips-body">
                         <ul>
                             <li><strong>Testing:</strong> Use Preview only on a local computer to test without actually sending</li>
@@ -2845,7 +2822,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
             <?php if ($mod_bookings): ?>
             <div class="rh-panel settings-card" id="notification-email"<?php echo $bsAttr('notification-email'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Booking Notification Email</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Booking alerts and guest reminders</h2></div>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="booking_notification_settings" value="1">
 
@@ -2854,7 +2831,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <input type="email" id="booking_notification_email" name="booking_notification_email"
                             class="form-control" value="<?php echo htmlspecialchars($current_booking_notification_email ?? ''); ?>"
                             placeholder="reservations@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Alerts about new bookings made on the website. Leave blank to use the Staff notification email from Hotel Details, then the Staff copy email.</p>
+                        <p class="help-text">Alerts about new bookings made on the website. Leave blank to use the Staff notification email from Hotel Details, then the Staff copy email.</p>
                         <?php echo $rh_route_line(rh_booking_alert_recipient(), (string)$current_booking_notification_email); ?>
                     </div>
 
@@ -2863,13 +2840,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <input type="text" id="booking_notification_cc_emails" name="booking_notification_cc_emails"
                             class="form-control" value="<?php echo htmlspecialchars($current_booking_notification_cc_emails ?? ''); ?>"
                             placeholder="accounts@example.com, manager@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Optional, comma-separated. Each address gets its own copy of the alert. Only for bookings made on the website; bookings created in the admin panel send a copy to the Staff copy email instead.</p>
+                        <p class="help-text">Optional, comma-separated. Each address gets its own copy of the alert. Only for bookings made on the website; bookings created in the admin panel send a copy to the Staff copy email instead.</p>
                     </div>
 
-                    <h3 style="margin-top:24px;">Guest communication emails</h3>
+                    <h3 class="bs-subhead">Guest communication emails</h3>
 
                     <div class="form-group">
-                        <label style="display:flex; align-items:center; gap:10px;">
+                        <label class="bs-check">
                             <input type="checkbox" name="booking_prearrival_reminder_enabled" value="1" <?php echo $current_prearrival_reminder_enabled ? 'checked' : ''; ?>>
                             <span>Send pre-arrival reminder email to guests</span>
                         </label>
@@ -2877,13 +2854,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <div class="form-group">
                         <label for="booking_prearrival_reminder_days">Days before check-in</label>
                         <input type="number" id="booking_prearrival_reminder_days" name="booking_prearrival_reminder_days"
-                            class="form-control" min="1" max="14" style="max-width:120px;"
+                            class="form-control bs-narrow-lg" min="1" max="14"
                             value="<?php echo htmlspecialchars((string)$current_prearrival_reminder_days); ?>">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Sends once per booking, 1-14 days before check-in date.</p>
+                        <p class="help-text">Sends once per booking, 1-14 days before check-in date.</p>
                     </div>
 
                     <div class="form-group">
-                        <label style="display:flex; align-items:center; gap:10px;">
+                        <label class="bs-check">
                             <input type="checkbox" name="booking_poststay_review_enabled" value="1" <?php echo $current_poststay_review_enabled ? 'checked' : ''; ?>>
                             <span>Send post-stay review request email to guests</span>
                         </label>
@@ -2891,13 +2868,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <div class="form-group">
                         <label for="booking_poststay_review_days">Days after check-out</label>
                         <input type="number" id="booking_poststay_review_days" name="booking_poststay_review_days"
-                            class="form-control" min="0" max="14" style="max-width:120px;"
+                            class="form-control bs-narrow-lg" min="0" max="14"
                             value="<?php echo htmlspecialchars((string)$current_poststay_review_days); ?>">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Sends once per booking, 0-14 days after check-out date (0 = checkout day).</p>
+                        <p class="help-text">Sends once per booking, 0-14 days after check-out date (0 = checkout day).</p>
                     </div>
 
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save Notification Email
+                        <i class="fas fa-save"></i> Save booking alerts
                     </button>
                 </form>
             </div>
@@ -2910,12 +2887,12 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <p class="bs-group__intro">Service module emails, review import keys and the install-app banner.</p>
 
             <div class="rh-panel settings-card" id="service-modules"<?php echo $bsAttr('service-modules'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Service Modules &amp; Dedicated Notification Emails</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Service modules and alert emails</h2></div>
                 <p class="help-text">Turning a service off here also removes its page — and every page that module governs — from the guest site navigation. The Events switch lives in <a href="module-settings.php">Module Settings</a>.</p>
                 <?php echo $rh_site_switch_note; ?>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="service_channel_settings" value="1">
-                    <fieldset<?php echo $rhSwDis; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                    <fieldset<?php echo $rhSwDis; ?> class="bs-fieldset">
 
                     <?php /* Each row shows only when its module is active for this preset.
                              Hidden rows keep their stored values via hidden inputs — the save
@@ -2923,7 +2900,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                              silently mutate settings for modules this preset doesn't manage. */ ?>
                     <?php if ($mod_conference): ?>
                     <div class="form-group">
-                        <label style="display:flex; align-items:center; gap:10px;">
+                        <label class="bs-check">
                             <input type="checkbox" name="conference_system_enabled" value="1" <?php echo $current_conference_system_enabled ? 'checked' : ''; ?>>
                             <span>Enable Conference page &amp; conference enquiry functionality</span>
                         </label>
@@ -2931,7 +2908,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <div class="form-group">
                         <label for="conference_email">Conference enquiry alerts go to</label>
                         <input type="email" id="conference_email" name="conference_email" class="form-control" value="<?php echo htmlspecialchars($current_conference_email ?? ''); ?>" placeholder="conference@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> New conference enquiries from the website. Leave blank to use the main contact email from Hotel Details, then the Staff copy email. When staff confirm an enquiry, a copy goes to the Staff copy email.</p>
+                        <p class="help-text">New conference enquiries from the website. Leave blank to use the main contact email from Hotel Details, then the Staff copy email. When staff confirm an enquiry, a copy goes to the Staff copy email.</p>
                         <?php echo $rh_route_line(rh_conference_alert_recipient(), (string)$current_conference_email); ?>
                     </div>
                     <?php else: ?>
@@ -2941,7 +2918,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
                     <?php if ($mod_gym): ?>
                     <div class="form-group">
-                        <label style="display:flex; align-items:center; gap:10px;">
+                        <label class="bs-check">
                             <input type="checkbox" name="gym_system_enabled" value="1" <?php echo $current_gym_system_enabled ? 'checked' : ''; ?>>
                             <span>Enable Gym page &amp; gym booking/enquiry functionality</span>
                         </label>
@@ -2949,7 +2926,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <div class="form-group">
                         <label for="gym_email">Gym booking alerts go to</label>
                         <input type="email" id="gym_email" name="gym_email" class="form-control" value="<?php echo htmlspecialchars($current_gym_email ?? ''); ?>" placeholder="gym@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> New gym booking requests from the website. Leave blank to use the main contact email from Hotel Details, then the Staff copy email. New membership enquiries go to the Staff copy email.</p>
+                        <p class="help-text">New gym booking requests from the website. Leave blank to use the main contact email from Hotel Details, then the Staff copy email. New membership enquiries go to the Staff copy email.</p>
                         <?php echo $rh_route_line(rh_gym_alert_recipient(), (string)$current_gym_email); ?>
                     </div>
                     <?php else: ?>
@@ -2959,7 +2936,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
                     <?php if ($mod_pos): ?>
                     <div class="form-group">
-                        <label style="display:flex; align-items:center; gap:10px;">
+                        <label class="bs-check">
                             <input type="checkbox" name="restaurant_system_enabled" value="1" <?php echo $current_restaurant_system_enabled ? 'checked' : ''; ?>>
                             <span>Enable Restaurant page and related restaurant functionality</span>
                         </label>
@@ -2967,7 +2944,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <div class="form-group">
                         <label for="email_restaurant">Restaurant contact email</label>
                         <input type="email" id="email_restaurant" name="email_restaurant" class="form-control" value="<?php echo htmlspecialchars($current_restaurant_email ?? ''); ?>" placeholder="restaurant@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Shown to guests as the restaurant's contact email on the restaurant page and the printed menu. No alerts are sent to it. While it has never been saved, the reservations email is shown.</p>
+                        <p class="help-text">Shown to guests as the restaurant's contact email on the restaurant page and the printed menu. No alerts are sent to it. While it has never been saved, the reservations email is shown.</p>
                         <?php echo $rh_route_line(rh_restaurant_contact_recipient(), (string)$current_restaurant_email, 'Restaurant page currently shows', 'no email'); ?>
                     </div>
                     <?php else: ?>
@@ -2978,7 +2955,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
                     <?php if ($canSiteSwitches): ?>
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save Service Module Settings
+                        <i class="fas fa-save"></i> Save service modules
                     </button>
                     <?php endif; ?>
                 </form>
@@ -2987,7 +2964,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <?php if ($mod_website_cms): rh_review_sources_render($user, $csrf_token); endif; ?>
 
             <div class="rh-panel settings-card" id="pwa-settings"<?php echo $bsAttr('pwa-settings'); ?>>
-                <div class="rh-panel__head"><h2 class="rh-panel__title">PWA Install Banner</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Install app banner</h2></div>
                 <p class="help-text">Controls how often the &ldquo;Install Admin App&rdquo; banner reappears after a staff member dismisses it.</p>
                 <form method="POST" action="booking-settings.php#pwa-settings">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
@@ -2995,13 +2972,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <div class="form-group">
                         <label for="pwa_install_dismiss_days">Re-show banner after dismissal (days)</label>
                         <input type="number" id="pwa_install_dismiss_days" name="pwa_install_dismiss_days"
-                            class="form-control" style="max-width:120px;"
+                            class="form-control bs-narrow-lg"
                             min="1" max="365"
                             value="<?php echo (int)getSetting('pwa_install_dismiss_days', '14'); ?>">
-                        <p class="help-text" style="margin-top:6px;">Default: 14 days. Set to 1 to show it every day. Set to 365 to suppress it almost permanently.</p>
+                        <p class="help-text">Default: 14 days. Set to 1 to show it every day. Set to 365 to suppress it almost permanently.</p>
                     </div>
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save PWA Settings
+                        <i class="fas fa-save"></i> Save banner setting
                     </button>
                 </form>
             </div>

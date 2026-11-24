@@ -146,7 +146,7 @@ if (!function_exists('rh_review_sources_save')) {
             . '<input type="text" id="rs_place" name="google_place_id" maxlength="210" value="' . $e($st['place_id']) . '" placeholder="ChIJ…"></div>';
         echo '</div>';
         if ($st['google']) {
-            echo '<label class="help-text"><input type="checkbox" name="google_remove" value="1"> Remove the saved Google key</label>';
+            echo '<label class="bs-check"><input type="checkbox" name="google_remove" value="1"> Remove the saved Google key</label>';
         }
         echo '<p class="help-text"><i class="fas fa-receipt"></i> Usage this month: <strong>' . (int)$calls . '</strong> of about ' . number_format($free)
             . ' free lookups. One lookup per search (repeat searches within 6 hours reuse the last result). Finding the hotel costs nothing.</p>';
@@ -156,12 +156,12 @@ if (!function_exists('rh_review_sources_save')) {
         echo '<div class="bs-field-grid"><div class="form-group"><label for="rs_brave">Brave Search API key</label>'
             . '<input type="password" id="rs_brave" name="brave" maxlength="300" autocomplete="new-password" placeholder="' . ($st['brave'] ? 'Saved — type to replace' : 'BSA…') . '"></div></div>';
         if ($st['brave']) {
-            echo '<label class="help-text"><input type="checkbox" name="brave_remove" value="1"> Remove the saved Brave key</label>';
+            echo '<label class="bs-check"><input type="checkbox" name="brave_remove" value="1"> Remove the saved Brave key</label>';
         }
 
-        echo '<div class="bs-actions" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;">';
-        echo '<button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save</button>';
-        echo '<button type="submit" name="test_review_sources" value="1" class="btn-submit"><i class="fas fa-plug"></i> Save &amp; test connection</button>';
+        echo '<div class="bs-actions">';
+        echo '<button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save review sources</button>';
+        echo '<button type="submit" name="test_review_sources" value="1" class="btn-submit"><i class="fas fa-plug"></i> Save and test connection</button>';
         echo '</div></form></div>';
     }
 }

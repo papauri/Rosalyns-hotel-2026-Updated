@@ -115,7 +115,8 @@
 
 /* ---- Group headings (Website & booking, Rooms & rates rules, ...) ---- */
 .bs-group__title {
-    margin: 1.25rem 0 0.6rem;
+    margin: 1.5rem 0 0.6rem;
+    font-family: inherit;
     padding: 0;
     border: 0;
     color: var(--rh-muted, #5E554D);
@@ -164,11 +165,21 @@
 }
 
 .settings-card h3 {
-    margin: 18px 0 10px;
+    margin: 20px 0 10px;
     padding-bottom: 7px;
     border-bottom: 1px solid var(--rh-line-soft, #eceff3);
     color: var(--rh-ink, #231F1C);
+    font-family: inherit;
     font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.settings-card h4 {
+    margin: 14px 0 6px;
+    color: var(--rh-ink, #231F1C);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
 }
 
 /* Hotel details field grid (markup from includes/hotel-details-settings.php) */
@@ -233,6 +244,21 @@
     font-size: 0.95rem;
 }
 
+/* One status pattern for every on/off block (Frontend, Booking system, Tentative, refund handling). */
+.current-value > i {
+    flex: 0 0 auto;
+    color: var(--rh-muted, #5E554D);
+    font-size: 1.1rem;
+}
+
+.current-value > i.is-on {
+    color: var(--au-success, #15803d);
+}
+
+.current-value > i.is-off {
+    color: var(--au-danger, #b4232f);
+}
+
 .current-value .value {
     color: var(--color-primary, #766550);
     font-weight: 700;
@@ -268,10 +294,10 @@
 }
 
 .help-text {
-    margin: 3px 0 0;
-    color: #6b7280;
-    font-size: 11px;
-    line-height: 1.4;
+    margin: 4px 0 0;
+    color: var(--rh-muted, #5E554D);
+    font-size: 12px;
+    line-height: 1.45;
 }
 
 /* ---- 2-column form grid ---- */
@@ -289,23 +315,40 @@
 
 /* ---- Buttons ---- */
 .btn-submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    margin-top: 14px;
     border: none;
     border-radius: 8px;
-    padding: 9px 15px;
-    background: linear-gradient(135deg, var(--color-primary, #766550) 0%, #6b5a47 100%);
+    padding: 0 18px;
+    background: var(--color-primary, #766550);
     color: #fff;
     font-weight: 700;
     font-size: 13px;
     cursor: pointer;
-    transition: transform 0.15s;
 }
 
 .btn-submit:hover {
-    transform: translateY(-1px);
+    background: var(--color-primary-dark, #5F5343);
 }
 
 .btn-preview {
-    background: linear-gradient(135deg, #1f4d7a 0%, #2a6aa5 100%);
+    background: var(--color-primary-dark, #5F5343);
+}
+
+/* Field inputs: 44px tap height, one look in every card. */
+.form-control,
+.bs-field-grid .form-group input,
+.bs-field-grid .form-group select {
+    min-height: 44px;
+}
+
+textarea.form-control,
+.bs-field-grid .form-group textarea {
+    min-height: 0;
 }
 
 /* ---- Info / tip boxes ---- */
@@ -896,4 +939,200 @@ details.template-block[open]>summary::after {
     margin-bottom: 10px;
     padding-bottom: 0;
     border-bottom: 0;
+}
+
+
+/* ---- Shared option rows (were inline styles) ---- */
+.settings-card label.bs-check,
+.settings-card label.bs-option {
+    display: flex;
+    gap: 10px;
+    margin: 0 0 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--rh-ink, #231F1C);
+}
+
+.settings-card label.bs-check {
+    align-items: center;
+    min-height: 44px;
+}
+
+.settings-card label.bs-option {
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.settings-card label.bs-check input[type="checkbox"],
+.settings-card label.bs-option input[type="checkbox"],
+.settings-card label.bs-option input[type="radio"] {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+}
+
+.settings-card label.bs-option input {
+    margin-top: 2px;
+}
+
+.bs-option__title {
+    font-weight: 600;
+    color: var(--rh-ink, #231F1C);
+}
+
+/* Disabled-by-permission fieldset: no box of its own. */
+.bs-fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+/* Boxed block inside a card (cancellation policy). */
+.bs-subcard {
+    margin: 0 0 18px;
+    padding: 14px 16px;
+    border: 1px solid var(--rh-line-soft, #e8e0d4);
+    border-radius: 10px;
+}
+
+.bs-subcard > h3:first-child {
+    margin-top: 0;
+}
+
+.bs-subhead-row {
+    margin-top: 14px;
+}
+
+.bs-inline-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.bs-inline-row input[type="number"] {
+    width: 80px;
+}
+
+.bs-narrow {
+    max-width: 160px;
+}
+
+.bs-narrow-lg {
+    max-width: 120px;
+}
+
+.bs-footer-row {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rh-line-soft, #eceff3);
+}
+
+.bs-preview-box {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 8px;
+    background: var(--admin-bg, #f4f2ef);
+}
+
+.bs-warning {
+    margin-top: 10px;
+    padding: 10px 14px;
+    border: 1px solid #c9bda9;
+    border-radius: 8px;
+    background: #fff8e1;
+    color: #856404;
+    font-size: 13px;
+}
+
+/* Colour pickers. */
+.bs-colour {
+    width: 70px;
+    min-height: 44px;
+    padding: 2px;
+}
+
+@media (max-width: 1024px) {
+    .bs-jump a {
+        min-height: 44px;
+    }
+
+    details.tips-box>summary {
+        min-height: 44px;
+    }
+}
+
+.bs-upper {
+    text-transform: uppercase;
+}
+
+/* One line of plain description right under a card heading. */
+.settings-card > .rh-panel__head + p.help-text {
+    margin: 0 0 12px;
+}
+
+.form-group > small.help-text {
+    display: block;
+}
+
+/* Field grids: label, field and help line of neighbours share rows, so wrapped labels never push a field out of line. */
+.bs-field-grid {
+    column-gap: 18px;
+    row-gap: 0;
+}
+
+.bs-field-grid > .form-group {
+    margin-bottom: 12px;
+}
+
+@supports (grid-template-rows: subgrid) {
+    .bs-field-grid > .form-group:not([data-wide]) {
+        display: grid;
+        grid-row: span 3;
+        grid-template-rows: subgrid;
+        row-gap: 0;
+    }
+}
+
+.bs-field-grid .form-group label {
+    align-self: end;
+}
+.settings-card label.bs-option .help-text,
+.settings-card label.bs-check .help-text {
+    display: block;
+    font-weight: 400;
+}
+
+.bs-check + .help-text,
+.bs-check + .help-text + .help-text {
+    margin-top: -2px;
+}
+
+.settings-card > form > .help-text:first-child,
+.settings-card .bs-subcard > .help-text {
+    margin-bottom: 10px;
+}
+.bs-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.bs-actions .btn-submit {
+    margin-top: 0;
+}
+.settings-card .form-group label small {
+    display: inline;
+    font-weight: 400;
+    color: var(--rh-muted, #5E554D);
+}
+
+.settings-card p.help-text + .form-group,
+.settings-card p.help-text + .bs-field-grid {
+    margin-top: 12px;
 }
