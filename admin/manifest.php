@@ -35,7 +35,9 @@ if (strpos($logo, 'http') !== 0) {
 }
 
 $adminBase = rtrim(siteUrl('admin'), '/') . '/';
-$startUrl  = siteUrl('admin/pos.php');
+// Not pos.php: a signed-out start saved pos.php as the after-login page, so everyone opening the app landed on the
+// till whatever their permissions. index.php sends each person to their own main page (rhUserHomePage).
+$startUrl  = siteUrl('admin/index.php');
 
 $manifest = [
     'name'             => $name . ' Admin',
