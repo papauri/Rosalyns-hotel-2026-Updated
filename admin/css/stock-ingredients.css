@@ -812,41 +812,47 @@
 .smb-bar button[disabled] { opacity: .55; cursor: not-allowed; }
 .smb-ticked { font-size: 13px; color: #3f4654; font-weight: 600; }
 .smb-note { flex: 1 1 100%; font-size: 13px; color: #856404; }
-#smbModal .modal-content { max-width: 860px; }
-#smbModal .smb-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; margin-top: 12px; }
-#smbModal .smb-ml { margin: 14px 0 0; padding: 10px 14px 12px; border: 1px solid var(--admin-surface-border, #e3e6ea); border-radius: 10px; min-width: 0; }
-#smbModal .smb-ml > legend { padding: 0 4px; font-size: 13px; font-weight: 600; color: #3f4654; }
-#smbModal .smb-ml .smb-grid { margin-top: 4px; }
-#smbModal .smb-ml-ok { color: #155724; font-weight: 600; }
-#smbModal .smb-ml-bad { color: #721c24; font-weight: 600; }
-#smbModal .smb-change { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; min-height: 44px; font-size: 14px; font-weight: 600; cursor: pointer; }
-#smbModal .smb-change input { width: 20px; height: 20px; margin: 0; accent-color: var(--au-accent-deep, #7a5b34); }
-#smbModal .smb-errors { margin-top: 12px; padding: 8px 12px; border: 1px solid #c0392b; border-radius: 8px; color: #721c24; font-size: 14px; }
-#smbModal .smb-errors ul { margin: 0; padding-left: 18px; }
-#smbModal .smb-summary { margin: 14px 0 8px; font-weight: 600; font-size: 14px; }
-#smbModal .smb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-#smbModal .smb-table th, #smbModal .smb-table td { padding: 8px 10px; border-bottom: 1px solid var(--admin-surface-border, #eaecef); text-align: left; vertical-align: top; }
-#smbModal .smb-table th { font-size: 12px; color: #3f4654; white-space: nowrap; }
-#smbModal .smb-unit { color: #6c757d; }
-#smbModal .smb-why { margin-top: 4px; color: #721c24; font-size: 12px; }
-#smbModal .smb-badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #e9ecef; color: #495057; }
-#smbModal .smb-badge-set, #smbModal .smb-badge-done_set { background: #d4edda; color: #155724; }
-#smbModal .smb-badge-change, #smbModal .smb-badge-done_change { background: #eff6ff; color: #1e3a8a; }
-#smbModal .smb-badge-different { background: #fff3cd; color: #856404; }
-#smbModal .smb-badge-skip { background: #f8d7da; color: #721c24; }
-#smbModal .modal-footer .btn-primary, #smbModal .modal-footer .btn-secondary { height: auto; min-height: 44px; }
-#smbModal .modal-footer [hidden] { display: none; }
+:is(#smbModal, #smaModal) .modal-content { max-width: 860px; }
+:is(#smbModal, #smaModal) .smb-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; margin-top: 12px; }
+:is(#smbModal, #smaModal) .smb-ml { margin: 14px 0 0; padding: 10px 14px 12px; border: 1px solid var(--admin-surface-border, #e3e6ea); border-radius: 10px; min-width: 0; }
+:is(#smbModal, #smaModal) .smb-ml > legend { padding: 0 4px; font-size: 13px; font-weight: 600; color: #3f4654; }
+:is(#smbModal, #smaModal) .smb-ml .smb-grid { margin-top: 4px; }
+:is(#smbModal, #smaModal) .smb-ml-ok { color: #155724; font-weight: 600; }
+:is(#smbModal, #smaModal) .smb-ml-bad { color: #721c24; font-weight: 600; }
+:is(#smbModal, #smaModal) .smb-change { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; min-height: 44px; font-size: 14px; font-weight: 600; cursor: pointer; }
+:is(#smbModal, #smaModal) .smb-change input { width: 20px; height: 20px; margin: 0; accent-color: var(--au-accent-deep, #7a5b34); }
+:is(#smbModal, #smaModal) .smb-errors { margin-top: 12px; padding: 8px 12px; border: 1px solid #c0392b; border-radius: 8px; color: #721c24; font-size: 14px; }
+:is(#smbModal, #smaModal) .smb-errors ul { margin: 0; padding-left: 18px; }
+:is(#smbModal, #smaModal) .smb-summary { margin: 14px 0 8px; font-weight: 600; font-size: 14px; }
+:is(#smbModal, #smaModal) .smb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+:is(#smbModal, #smaModal) .smb-table th, :is(#smbModal, #smaModal) .smb-table td { padding: 8px 10px; border-bottom: 1px solid var(--admin-surface-border, #eaecef); text-align: left; vertical-align: top; }
+:is(#smbModal, #smaModal) .smb-table th { font-size: 12px; color: #3f4654; white-space: nowrap; }
+:is(#smbModal, #smaModal) .smb-unit { color: #6c757d; }
+:is(#smbModal, #smaModal) .smb-why { margin-top: 4px; color: #721c24; font-size: 12px; }
+:is(#smbModal, #smaModal) .smb-badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #e9ecef; color: #495057; }
+:is(#smbModal, #smaModal) .smb-badge-set, :is(#smbModal, #smaModal) .smb-badge-done_set { background: #d4edda; color: #155724; }
+:is(#smbModal, #smaModal) .smb-badge-change, :is(#smbModal, #smaModal) .smb-badge-done_change { background: #eff6ff; color: #1e3a8a; }
+:is(#smbModal, #smaModal) .smb-badge-different { background: #fff3cd; color: #856404; }
+:is(#smbModal, #smaModal) .smb-badge-skip { background: #f8d7da; color: #721c24; }
+:is(#smbModal, #smaModal) .modal-footer .btn-primary, :is(#smbModal, #smaModal) .modal-footer .btn-secondary { height: auto; min-height: 44px; }
+:is(#smbModal, #smaModal) .modal-footer [hidden] { display: none; }
+
+/* Fill count measures from bottle sizes (owner 2026-11-24): the same dialog look, plus a tick column and greyed "nothing to do" rows */
+#smaModal .sma-tick-col { width: 52px; text-align: center; }
+#smaModal .sma-tick { width: 20px; height: 20px; min-height: 0; margin: 0; vertical-align: middle; cursor: pointer; accent-color: var(--au-accent-deep, #7a5b34); }
+#smaModal .sma-muted { color: #6c757d; }
+#smaModal .modal-footer .btn-primary[disabled] { opacity: .55; cursor: not-allowed; }
 
 /* page buttons follow the shared 40px button height (admin-uniform.css); the tick boxes and the dialog keep 44px */
 @media (max-width: 768px) {
     .smb-bar #smb-open { flex: 1 1 100%; justify-content: center; }
-    #smbModal .smb-grid { grid-template-columns: minmax(0, 1fr); }
-    #smbModal input, #smbModal select { min-height: 44px; }
+    :is(#smbModal, #smaModal) .smb-grid { grid-template-columns: minmax(0, 1fr); }
+    :is(#smbModal, #smaModal) input, :is(#smbModal, #smaModal) select { min-height: 44px; }
 }
 @media (max-width: 600px) {
-    #smbModal .smb-table thead { display: none; }
-    #smbModal .smb-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--admin-surface-border, #eaecef); }
-    #smbModal .smb-table td { display: block; border: 0; padding: 2px 4px; }
-    #smbModal .smb-table tr[hidden] { display: none; }
-    #smbModal .smb-table td[data-label]::before { content: attr(data-label) ": "; font-weight: 600; color: #3f4654; }
+    :is(#smbModal, #smaModal) .smb-table thead { display: none; }
+    :is(#smbModal, #smaModal) .smb-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--admin-surface-border, #eaecef); }
+    :is(#smbModal, #smaModal) .smb-table td { display: block; border: 0; padding: 2px 4px; }
+    :is(#smbModal, #smaModal) .smb-table tr[hidden] { display: none; }
+    :is(#smbModal, #smaModal) .smb-table td[data-label]::before { content: attr(data-label) ": "; font-weight: 600; color: #3f4654; }
 }

@@ -12,6 +12,7 @@ require_once 'includes/procurement-schema.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/stock-list-filters.php';
 require_once __DIR__ . '/includes/stock-measure-bulk-lib.php';
+require_once __DIR__ . '/includes/stock-measure-auto-lib.php';
 
 // Dashboard filter (?filter=low): exactly the items the low-stock alert counts (rh_stock_alert_summary 'attention').
 $ingFilter = rh_stock_ingredient_filter_key($_GET['filter'] ?? '');
@@ -112,6 +113,49 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     echo json_encode($smbOut, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/* Fill count measures from bottle sizes (owner 2026-11-24): preview for every active item (nothing saved), then apply only the
+ * ticked rows, both JSON. Same page permission as Set count measure; sizes come only from the hotel's Drink measures list
+ * (stock-measure-auto-lib.php). Hand-set measures change only when their row is ticked. */
+if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['preview_measure_auto', 'measure_auto_apply'], true)) {
+    $smaOut = ['ok' => false, 'errors' => []];
+    $smaApply = (string)$_POST['action'] === 'measure_auto_apply';
+    if (!validateCsrfToken((string)($_POST['csrf_token'] ?? ''))) {
+        $smaOut['errors'][] = 'Security token invalid. Please reload the page.';
+        http_response_code(403);
+    } elseif (!rh_stock_measure_ready($pdo) || !rh_stock_drink_ready($pdo)) {
+        $smaOut['errors'][] = 'Count measures and bottle sizes are not set up on this system yet.';
+    } else {
+        try {
+            $smaList = rh_drink_measures_list();
+            if (!$smaList) {
+                $smaOut['errors'][] = 'The Drink measures list is empty. Add your measures (for example shot 25 ml) with the Drink measures button on this page first.';
+            } else {
+                $smaItems = rh_sma_items($pdo);
+                if (!$smaApply) {
+                    $smaPlan = rh_sma_plan($pdo, $smaItems, $smaList);
+                    $smaOut = ['ok' => true, 'errors' => [], 'rows' => rh_sma_public_rows($smaPlan['rows']), 'counts' => $smaPlan['counts'],
+                        'fingerprint' => $smaPlan['fingerprint'], 'measures' => rh_drink_measures_describe($smaList)];
+                } else {
+                    $smaOut = rh_sma_apply($pdo, $smaItems, $smaList, (string)($_POST['fingerprint'] ?? ''), (string)($_POST['ticked'] ?? ''), (int)$user['id']);
+                    if (!empty($smaOut['ok']) && ($smaOut['set'] || $smaOut['changed']) && function_exists('deleteCache')) {
+                        rh_clear_stock_dashboard_cache();
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('stock-ingredients measure auto: ' . $e->getMessage());
+            $smaOut = ['ok' => false, 'errors' => ['The count measures could not be worked out. Nothing was saved. Reload the page and try again.']];
+        }
+    }
+    if ($smaApply && empty($smaOut['ok']) && http_response_code() < 400) {
+        http_response_code(409); // refused: nothing saved
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode($smaOut, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -759,6 +803,8 @@ $canPutOnMenu = function_exists('hasPermission') && hasPermission((int)$user['id
     && ($user['role'] === 'admin' || !function_exists('rh_module_key_enabled') || rh_module_key_enabled('pos'));
 // Set count measure for several items (owner 2026-11-23): anyone who may edit an item's measure here (this page's permission)
 $canBulkMeasure = !$error && $measureReady;
+// Fill count measures from bottle sizes (owner 2026-11-24): the same permission, plus bottle sizes (migration 089)
+$canAutoMeasure = $canBulkMeasure && $drinkReady;
 $showTicks = $canPutOnMenu || $canBulkMeasure;
 try {
     $supplierOptions = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
@@ -1000,6 +1046,10 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <button type="button" class="btn-primary" id="smb-open" onclick="smbOpen()" disabled><i class="fas fa-ruler"></i> <span id="smb-open-text">Set count measure</span></button>
                     <i class="help" data-tip="Count measure: how you count part-used bottles, e.g. 25 shots in one bottle. Tick the items (or Tick all shown after a search or category, every page), then choose the measure once. You see what happens to each item before anything is saved. Stock, costs and batches do not change.">?</i>
                 <?php endif; ?>
+                <?php if ($canAutoMeasure): ?>
+                    <button type="button" class="btn-secondary" id="sma-open" onclick="smaOpen()"><i class="fas fa-wine-bottle"></i> Fill from bottle sizes</button>
+                    <i class="help" data-tip="Works out a count measure for every item from its bottle size and the drink measures its menu items are sold in (sizes from the Drink measures list only), e.g. a 750 ml bottle sold by the 25 ml shot = 30 shots in one bottle. You see every item first and untick any; nothing is saved until you press Apply. A measure you set by hand is only changed when you tick it. Stock, costs and batches do not change.">?</i>
+                <?php endif; ?>
                 <span class="smb-note" id="smb-note" role="status" hidden></span>
             </div>
         <?php endif; ?>
@@ -1015,6 +1065,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <th class="col-optional-lg">Category <i class="help" data-tip="Free-text grouping (e.g. Dairy, Meat, Pantry). Used to keep the recipe-builder dropdown tidy.">?</i></th>
                         <th class="col-optional-md">Unit <i class="help" data-tip="Base unit of measure for this ingredient. All stock-in receipts, recipe quantities, and adjustments use this same unit. Pick once and stick to it.">?</i></th>
                         <th style="text-align:right;">Current <i class="help" data-tip="How much you have on hand right now (sum of all active batches). Updated automatically when you receive stock or when a recipe is sold/wasted. An item with a count measure shows whole bottles plus the rest in shots (or its own measures); point at the figure for the exact amount.">?</i></th>
+                        <th class="col-optional-lg" style="text-align:right;">Shots per bottle <i class="help" data-tip="How many of the smaller measure (shot, glass...) one of the item's bigger unit holds, from the item's count measure: set on the item, with Set count measure or with Fill from bottle sizes. – = no count measure. Shown on this screen only, not in the Excel export.">?</i></th>
                         <th class="col-optional-lg" style="text-align:right;">Min <i class="help" data-tip="The low-stock line: the reorder point if you set one, otherwise the minimum quantity. At or below it the row turns yellow (Low) and shows up in reorder reports.">?</i></th>
                         <th class="col-optional-lg" style="text-align:right;">Yield % <i class="help" data-tip="The part of what you buy that ends up on the plate after peeling, trimming, bones or cooking. Example: 10 kg of potatoes gives 8 kg once peeled = 80 %. A plate with 250 g of chips then takes 313 g of raw potato off stock (250 ÷ 0.80). 100 % = nothing thrown away (oil, sugar, bottled drinks).">?</i></th>
                         <th style="text-align:right;">Avg cost / unit <i class="help" data-tip="Weighted-average cost across all batches received. Recalculated automatically every time you stock-in at a different price. This drives recipe food-cost %. A &quot;May be a case price&quot; note appears when this hotel's own data suggests the cost is for a whole case: the menu selling price of a linked recipe, its delivery costs, its pack size, or most items of the same category and unit costing far less. The note changes nothing; its ? says what it compared.">?</i></th>
@@ -1069,6 +1120,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             <td class="col-optional-lg"><?php echo htmlspecialchars($i['category']); ?></td>
                             <td class="col-optional-md"><?php echo htmlspecialchars($i['unit']); ?></td>
                             <td class="qty-num <?php echo $qtyClass; ?>" style="text-align:right;"<?php echo rh_stock_qty_sort_attr($cur); ?>><?php echo rh_stock_qty_html($cur, $i, (string)$i['unit']); ?></td>
+                            <?php $perBottle = rh_sma_column_text($i); $perBottleM = rh_stock_measure_get($i); ?>
+                            <td class="col-optional-lg" style="text-align:right;" data-sort-value="<?php echo $perBottleM !== null ? number_format((float)$perBottleM['n'], 4, '.', '') : '0'; ?>"><?php echo $perBottle !== null ? htmlspecialchars($perBottle) : '<span style="color:#6c757d;">–</span>'; ?></td>
                             <td class="qty-num col-optional-lg" style="text-align:right;"<?php echo rh_stock_qty_sort_attr($min); ?>><?php echo rh_stock_qty_html($min, $i, (string)$i['unit']); ?></td>
                             <td class="qty-num col-optional-lg rh-ph-skip" style="text-align:right;"><?php echo number_format((float)$i['yield_percent'], 1); ?></td>
                             <td class="qty-num" style="text-align:right;"><?php echo $currency_symbol . ' ' . number_format((float)$i['cost_per_unit'], 2); ?>
@@ -1152,11 +1205,11 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <?php endforeach; ?>
                     <?php if (empty($ingredients) && $ingFilter === 'low'): ?>
                         <tr>
-                            <td colspan="<?php echo $showTicks ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">Nothing needs restocking right now. <a href="stock-ingredients.php">Show all <?php echo strtolower($stockNounPl); ?></a></td>
+                            <td colspan="<?php echo $showTicks ? 12 : 11; ?>" style="text-align:center; padding:30px; color:#6c757d;">Nothing needs restocking right now. <a href="stock-ingredients.php">Show all <?php echo strtolower($stockNounPl); ?></a></td>
                         </tr>
                     <?php elseif (empty($ingredients)): ?>
                         <tr>
-                            <td colspan="<?php echo $showTicks ? 11 : 10; ?>" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
+                            <td colspan="<?php echo $showTicks ? 12 : 11; ?>" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -1697,6 +1750,35 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     </script>
     <script src="js/stock-ingredients-measure-bulk.js?v=<?php echo @filemtime(__DIR__ . '/js/stock-ingredients-measure-bulk.js'); ?>"></script>
+    <?php endif; ?>
+
+    <?php if ($canAutoMeasure): ?>
+    <!-- Fill count measures from bottle sizes (owner 2026-11-24): every active item, preview first, nothing saved until Apply. -->
+    <div class="modal-overlay" id="smaModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Fill count measures from bottle sizes</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="smaClose()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="field-note">For every item: its bottle size and the drink measures its menu items are sold in give one count measure, e.g. a 750 ml bottle sold by the 25 ml shot = 30 shots in one bottle. Sizes come only from your Drink measures list<?php echo $drinkList ? ' (' . htmlspecialchars(rh_drink_measures_describe($drinkList)) . ')' : ''; ?>. Ticked rows are saved when you press Apply; untick any you do not want. A measure set by hand is kept unless you tick its row. Quantities, costs and batches do not change.</p>
+                <div class="smb-errors" id="sma_errors" role="alert" hidden></div>
+                <div id="sma_result" hidden>
+                    <p class="smb-summary" id="sma_summary"></p>
+                    <div id="sma_table_wrap"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="sma_cancel" onclick="smaClose()">Cancel</button>
+                <button type="button" class="btn-secondary" id="sma_preview" onclick="smaPreview()">Preview again</button>
+                <button type="button" class="btn-primary" id="sma_apply" onclick="smaApply()" disabled>Apply to ticked items</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        window.SMA_CFG = <?php echo json_encode(['csrf' => (string)$csrf_token], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    </script>
+    <script src="js/stock-ingredients-measure-auto.js?v=<?php echo @filemtime(__DIR__ . '/js/stock-ingredients-measure-auto.js'); ?>"></script>
     <?php endif; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
     <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
