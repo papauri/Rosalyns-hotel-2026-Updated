@@ -7,10 +7,12 @@
  *  menu       the admin-wide right-click menu RhContextMenu (admin/js/admin-context-menu.js, loaded first): opened
  *             by right-click, the ContextMenu key / Shift+F10, or a long press on touch
  *  bar        the sticky bulk bar (the .admin-bulk-bar look) the timelines use; lists keep admin-bulk.js's own bar
- *  cells(cfg) the selection on a .tl-grid: click = one night, drag = rectangle across rooms, Shift+click = rectangle
- *             from the anchor, Ctrl/Cmd+click = add / remove, room name = its shown nights, day head = that night in
- *             every shown room, arrows + Shift + Space on the keyboard, Esc clears (the engine calls clear()).
- *             Touch: a tap toggles a night, a long press opens the menu, no drag. Bars keep their own gestures
+ *  cells(cfg) the selection on a .tl-grid: click = one night, drag = rectangle across rooms, Shift+click ADDS: the
+ *             room's own run grows to the night (a room with nothing picked: the rectangle from the anchor),
+ *             Ctrl/Cmd+click = add / remove, room name = its shown nights, day head = that night in every shown room, arrows + Shift + Space on the keyboard, Esc clears (the engine calls clear()).
+ *             Touch: a tap toggles a night, a long press opens the menu (on a night outside the selection it
+ *             offers "Select <anchor> to here", the touch Shift-click), no drag. The picks outlive the date range on
+ *             screen: next / previous keep them until Clear (owner 2026-11-24). Bars keep their own gestures
  *             (booking drag, end grip, drawer); ops modes add Ctrl/Cmd or Shift + click to pick several bars.
  *  listBulk   reads a list's admin-bulk.js bar (its action, CSRF token, buttons, confirm words, fields) so a timeline
  *             can run exactly the same bulk action on the jobs / tasks picked on the grid
@@ -38,18 +40,81 @@
         var i = String(k).lastIndexOf('|');
         return { lane: String(k).slice(0, i), d: String(k).slice(i + 1) };
     }
-    /** Keys of the rectangle between cells a and b ({lane, d}), in the given visible order; ok(lane, d) filters. */
+    /** Every night from a to b ('Y-m-d', either order), both included; [] past two years (a stray anchor). */
+    function span(a, b) {
+        var x = dnum(a), y = dnum(b), out = [];
+        if (isNaN(x) || isNaN(y)) return out;
+        if (x > y) { var t = x; x = y; y = t; }
+        if (y - x > 731) return out;
+        for (var n = x; n <= y; n++) out.push(dstr(n));
+        return out;
+    }
+    /** Keys of the rectangle between cells a and b ({lane, d}), in the given visible order; ok(lane, d) filters.
+        Rooms come from the shown order; nights are every night between a and b, also nights that are not on screen
+        (Shift-click in the next range extends from an anchor picked in an earlier one, owner 2026-11-24). */
     function rect(lanes, dates, a, b, ok) {
         var la = lanes.indexOf(String(a.lane)), lb = lanes.indexOf(String(b.lane));
+        if (la < 0 || lb < 0) return [];
         var da = dates.indexOf(a.d), db = dates.indexOf(b.d);
-        if (la < 0 || lb < 0 || da < 0 || db < 0) return [];
+        var ds = da >= 0 && db >= 0 ? dates.slice(Math.min(da, db), Math.max(da, db) + 1) : span(a.d, b.d);
         var out = [];
         for (var r = Math.min(la, lb); r <= Math.max(la, lb); r++) {
-            for (var c = Math.min(da, db); c <= Math.max(da, db); c++) {
-                if (!ok || ok(lanes[r], dates[c])) out.push(key(lanes[r], dates[c]));
+            for (var c = 0; c < ds.length; c++) {
+                if (!ok || ok(lanes[r], ds[c])) out.push(key(lanes[r], ds[c]));
             }
         }
         return out;
+    }
+    /** The picks to keep when the grid is drawn again: a room still shown and a night still selectable. Nights off
+        screen stay picked (next / previous range keep the selection until it is cleared, owner 2026-11-24). */
+    function keep(keys, lanesShown, ok) {
+        var shown = {};
+        lanesShown.forEach(function (l) { shown[String(l)] = true; });
+        return keys.filter(function (k) { var p = parts(k); return shown[p.lane] && (!ok || ok(p.lane, p.d)); });
+    }
+    /** The column under a screen x: from the RENDERED track (its left and width in the same pixels as the pointer),
+        never from the CSS day width: at display size 90% (html zoom) the two differ and the night before was picked
+        (owner 2026-11-24). -1 = outside the track. */
+    function colAt(x, left, width, n) {
+        if (!(width > 0) || !(n > 0)) return -1;
+        var i = Math.floor((x - left) * n / width);
+        return i >= 0 && i < n ? i : -1;
+    }
+    /** colAt for a drag: the same rendered-track measure, NOT limited to the track (the caller clamps, so a pointer
+        past the right edge means the last night shown, never the first). null = no rendered track. */
+    function colOf(x, left, width, n) {
+        if (!(width > 0) || !(n > 0)) return null;
+        return Math.floor((x - left) * n / width);
+    }
+    /** Whole nights a pointer moved sideways (dx in screen pixels) on a rendered track of n nights; 0 if none. */
+    function colsMoved(dx, width, n) {
+        if (!(width > 0) || !(n > 0)) return 0;
+        return Math.round(dx * n / width) || 0;
+    }
+    /** Where a Shift-click (Shift+Arrow, touch "Select ... to here") on night hit starts. The room under the pointer
+        extends ITS OWN run from its picked night nearest hit (also one in another date range); a room with nothing
+        picked takes the rectangle from the anchor (when that room is shown); else hit alone (owner 2026-11-24). */
+    function extendFrom(keys, anchor, hit, lanes) {
+        var own = byLane(keys).map[String(hit.lane)] || [], h = dnum(hit.d), from = null, gap = null;
+        own.forEach(function (d) { var g = Math.abs(dnum(d) - h); if (gap === null || g < gap) { gap = g; from = d; } });
+        if (from) return { lane: String(hit.lane), d: from };
+        if (anchor && lanes.indexOf(String(anchor.lane)) !== -1) return { lane: String(anchor.lane), d: anchor.d };
+        return { lane: String(hit.lane), d: hit.d };
+    }
+    /** Shift-click: the picks KEPT plus the extension from extendFrom (never a replacement). */
+    function shiftAdd(keys, anchor, hit, lanes, dates, ok) {
+        var from = extendFrom(keys, anchor, hit, lanes), out = {};
+        keys.concat(rect(lanes, dates, from, hit, ok)).forEach(function (k) { out[k] = true; });
+        return { from: from, keys: Object.keys(out) };
+    }
+    /** Touch long press on night hit outside the picks: hit itself is added, and when the extension from extendFrom
+        covers more nights, `range` is offered as "Select <from.d> to here". Nothing for a picked or refused night. */
+    function pressPlan(keys, anchor, hit, lanes, dates, ok) {
+        var k = key(hit.lane, hit.d);
+        if (keys.indexOf(k) !== -1 || (ok && !ok(hit.lane, hit.d))) return { add: [], from: null, range: [] };
+        var from = extendFrom(keys, anchor, hit, lanes);
+        var range = from.lane === String(hit.lane) && from.d === hit.d ? [] : rect(lanes, dates, from, hit, ok);
+        return { add: [k], from: from, range: range.length > 1 ? range : [] };
     }
     /** Keys grouped by room: {lanes: [lane ids in first-seen order, or in `order`], map: {lane: [sorted dates]}}. */
     function byLane(keys, order) {
@@ -120,9 +185,24 @@
         return out;
     }
 
+    /** The selected nights in words for the bar, off-screen nights included: "Room 101: 1 to 30 Dec; Room 102: 2 Dec";
+        more than 3 rooms: "5 rooms: 1 to 30 Dec, 2 Jan". name(lane) -> the room's name. */
+    function where(keys, order, name) {
+        var g = byLane(keys, order);
+        if (!g.lanes.length) return '';
+        if (g.lanes.length > 3) {
+            var all = {};
+            g.lanes.forEach(function (l) { g.map[l].forEach(function (d) { all[d] = true; }); });
+            return g.lanes.length + ' rooms: ' + nightsText(Object.keys(all));
+        }
+        return g.lanes.map(function (l) { return name(l) + ': ' + nightsText(g.map[l]); }).join('; ');
+    }
+
     var logic = {
         dnum: dnum, dstr: dstr, key: key, parts: parts, rect: rect, byLane: byLane, runs: runs, oneRun: oneRun,
-        bounds: bounds, countWords: countWords, nightsText: nightsText, pairs: pairs, plural: plural
+        bounds: bounds, countWords: countWords, nightsText: nightsText, pairs: pairs, plural: plural,
+        span: span, keep: keep, colAt: colAt, colOf: colOf, colsMoved: colsMoved, where: where,
+        extendFrom: extendFrom, shiftAdd: shiftAdd, pressPlan: pressPlan
     };
     if (typeof module === 'object' && module && module.exports) module.exports = logic;
     if (typeof window === 'undefined' || !window.document || window.RhGridSel) return;
@@ -306,6 +386,7 @@
         var sel = {};      // key -> true
         var bars = {};     // item id -> true
         var anchor = null; // {lane, d}
+        var kb = null; // a run of Shift+Arrows: {base: picks before it, from, at: cell key, sig: picks after it}
         var cursor = null; // {lane, d} the cell with the Tab stop
         var drag = null, touch = null, ctxMuteUntil = 0;
         root.classList.add('has-cellsel');
@@ -335,8 +416,18 @@
             var track = row.querySelector('.tl-track');
             if (!track) return null;
             var dates = cfg.dates();
-            var idx = Math.floor((x - track.getBoundingClientRect().left) / cfg.dayW());
-            if (idx < 0 || idx >= dates.length) return null;
+            // The cell itself when the pointer is on it; over a block / bar, the rendered track (screen pixels, so a
+            // display size below 100% (html zoom) can never shift the night).
+            // A block / bar sits INSIDE its first night's cell, so over one the cell would name that first night
+            // (clicking 18 Aug on a 17-18 Aug block picked 17 Aug, 2026-11-24): use the track there.
+            var cell = node.closest('.tl-block, .tl-bar') ? null : node.closest('.tl-cell[data-tl-day]');
+            var idx;
+            if (cell && cell.parentNode === track) idx = Number(cell.getAttribute('data-tl-day'));
+            else {
+                var tr = track.getBoundingClientRect();
+                idx = logic.colAt(x, tr.left, tr.width, dates.length);
+            }
+            if (!(idx >= 0) || idx >= dates.length) return null;
             return { lane: row.getAttribute(attr), d: dates[idx], idx: idx, row: row };
         }
         function keys() { return Object.keys(sel); }
@@ -356,17 +447,15 @@
             dates.forEach(function (d, i) { dIdx[d] = i; });
             var rows = {};
             grid.querySelectorAll('.tl-lane[' + attr + ']').forEach(function (r) { rows[r.getAttribute(attr)] = r; });
-            // Nothing stays picked out of sight: a hidden room / night is never acted on by mistake.
-            Object.keys(sel).forEach(function (k) {
-                var p = logic.parts(k);
-                if (!rows[p.lane] || !(p.d in dIdx) || !ok(p.lane, p.d)) delete sel[k];
-            });
+            // A room no longer shown (filter, collapsed type) is dropped so it is never acted on by mistake; nights in
+            // another date range stay picked until Clear (owner 2026-11-24) and the bar counts and names them.
+            setKeys(logic.keep(Object.keys(sel), Object.keys(rows), ok));
             grid.querySelectorAll('.tl-sel').forEach(function (x) { x.parentNode.removeChild(x); });
             grid.querySelectorAll('.tl-cell[aria-selected]').forEach(function (c) { c.removeAttribute('aria-selected'); });
             var g = logic.byLane(Object.keys(sel)), w = cfg.dayW();
             g.lanes.forEach(function (lane) {
                 var track = rows[lane].querySelector('.tl-track');
-                var idxs = g.map[lane].map(function (d) { return dIdx[d]; }).sort(function (a, b) { return a - b; });
+                var idxs = g.map[lane].filter(function (d) { return d in dIdx; }).map(function (d) { return dIdx[d]; }).sort(function (a, b) { return a - b; });
                 var start = null, prev = null;
                 idxs.concat([null]).forEach(function (i) {
                     if (i !== null && prev !== null && i === prev + 1) { prev = i; return; }
@@ -442,9 +531,14 @@
             var ctrl = e.ctrlKey || e.metaKey;
             pickBarsClear();
             drag = { start: hit, last: hit, moved: false, ctrl: ctrl, base: ctrl ? Object.assign({}, sel) : {}, mode: 'add', soleOff: false };
-            if (e.shiftKey && anchor && ok(anchor.lane, anchor.d) && cellOf(anchor.lane, anchor.d)) {
-                drag.from = anchor;
-                setKeys(logic.rect(lanesShown(), cfg.dates(), anchor, hit, ok), drag.base);
+            if (e.shiftKey && (anchor || Object.keys(sel).length)) {
+                // Shift ADDS: the room's own run grows from its picked night nearest the click (also one in another
+                // date range), or the rectangle from the anchor for a room with nothing picked (owner 2026-11-24).
+                drag.base = Object.assign({}, sel);
+                var sa = logic.shiftAdd(Object.keys(sel), anchor, hit, lanesShown(), cfg.dates(), ok);
+                drag.from = sa.from;
+                setKeys(sa.keys);
+                if (!anchor) anchor = { lane: drag.from.lane, d: drag.from.d };
             } else if (ctrl) {
                 drag.from = hit;
                 drag.mode = sel[k] ? 'remove' : 'add';
@@ -501,7 +595,7 @@
             if (!touch) return;
             var tp = touch;
             cancelTouch();
-            if (tp.fired) { e.preventDefault(); return; }
+            if (tp.fired) { e.preventDefault(); muteNextClick(); return; }
             if (Math.abs(e.clientX - tp.x) > 10 || Math.abs(e.clientY - tp.y) > 10) return;
             if (!ok(tp.hit.lane, tp.hit.d)) return;
             var k = logic.key(tp.hit.lane, tp.hit.d);
@@ -511,14 +605,40 @@
             cursor = { lane: tp.hit.lane, d: tp.hit.d };
             paint();
         }
+        /** The click a browser may send when the finger lifts after a long press lands on the menu that just opened
+            under it (768px: "New maintenance job" opened by itself, 2026-11-24): swallow that one click. */
+        function muteNextClick() {
+            var stop = function (ev) { ev.preventDefault(); ev.stopPropagation(); done(); };
+            var done = function () { window.removeEventListener('click', stop, true); };
+            window.addEventListener('click', stop, true);
+            window.setTimeout(done, 500);
+        }
         function longPress() {
             if (!touch) return;
             touch.fired = true;
             touch.timer = 0;
             ctxMuteUntil = Date.now() + 1000;
             var hit = touch.hit;
-            var k = logic.key(hit.lane, hit.d);
-            if (ok(hit.lane, hit.d) && !sel[k]) { pickBarsClear(); sel[k] = true; anchor = { lane: hit.lane, d: hit.d }; paint(); }
+            // A long press on a night outside the picks adds that night (the menu acts on it too) and, touch having no
+            // Shift, offers "Select <start> to here": the room's own run (or the rectangle from the anchor), also
+            // reaching back into an earlier date range (owner 2026-11-24).
+            var plan = logic.pressPlan(Object.keys(sel), anchor, hit, lanesShown(), cfg.dates(), ok);
+            if (plan.add.length) {
+                pickBarsClear();
+                setKeys(plan.add, sel);
+                anchor = { lane: hit.lane, d: hit.d };
+                cursor = { lane: hit.lane, d: hit.d };
+                paint();
+            }
+            if (plan.range.length) {
+                var from = plan.from, range = plan.range, nr = logic.byLane(range).lanes.length;
+                showCellMenu(hit, { x: touch.x, y: touch.y }, {
+                    label: 'Select ' + logic.nightsText(logic.span(from.d, hit.d)) + (nr > 1 ? ' in ' + plural(nr, 'room', 'rooms') : ''),
+                    icon: 'fa-arrows-left-right',
+                    run: function () { pickBarsClear(); setKeys(range, sel); cursor = { lane: hit.lane, d: hit.d }; paint(); }
+                });
+                return;
+            }
             showCellMenu(hit, { x: touch.x, y: touch.y });
         }
 
@@ -528,9 +648,11 @@
             pickBarsClear();
             var all = list.every(function (k) { return sel[k]; });
             if (all) dropKeys(list);
-            else setKeys(list, ctrl ? sel : null);
+            else { setKeys(list, ctrl ? sel : null); anchorAt(list); }
             paint();
         }
+        /** A room name / day head pick sets the anchor (its last night) so a Shift-click can extend from it. */
+        function anchorAt(list) { if (list.length) anchor = logic.parts(list[list.length - 1]); }
         function roomKeys(lane) {
             return cfg.dates().filter(function (d) { return ok(lane, d); }).map(function (d) { return logic.key(lane, d); });
         }
@@ -543,10 +665,11 @@
         }
 
         /* ---- menus */
-        function showCellMenu(hit, at) {
+        function showCellMenu(hit, at, first) {
             var spec = cfg.cellMenu ? cfg.cellMenu(api, hit) : null;
-            if (!spec || !spec.items || !spec.items.length) return;
-            openMenu({ title: spec.title, items: spec.items, x: at.x, y: at.y, at: at.el, opener: at.el || (hit ? cellOf(hit.lane, hit.d) : null) });
+            var items = first ? [first].concat((spec && spec.items) || []) : (spec && spec.items);
+            if (!items || !items.length) return;
+            openMenu({ title: (spec && spec.title) || '', items: items, x: at.x, y: at.y, at: at.el, opener: at.el || (hit ? cellOf(hit.lane, hit.d) : null) });
         }
         function showBarMenu(bar, at) {
             if (!cfg.barMenu) return false;
@@ -574,7 +697,8 @@
             var t = e.target, x;
             if (!t.closest) return;
             // A hatched block is a link: a pointer click selects its night (pointerdown above); Enter still opens it.
-            if ((x = t.closest('a.tl-block')) && e.detail !== 0) { e.preventDefault(); return; }
+            // stopPropagation too: the page router (admin-spa.js) ignores preventDefault and opened the block (2026-11-24).
+            if ((x = t.closest('a.tl-block')) && e.detail !== 0) { e.preventDefault(); e.stopPropagation(); return; }
             if ((x = t.closest('.tl-head__day'))) {
                 var d = headDate(x);
                 if (d) pickSet(dayKeys(d), e.ctrlKey || e.metaKey);
@@ -585,7 +709,9 @@
                 if (!row) return;
                 var link = t.closest('a');
                 if (link && e.detail === 0) return; // keyboard Enter on the room link: it opens as before
-                if (link) e.preventDefault();
+                // A pointer click picks the nights, never opens the link: the page router (admin-spa.js) ignores
+                // preventDefault, so the click also stops here (it opened Rooms, 2026-11-24).
+                if (link) { e.preventDefault(); e.stopPropagation(); }
                 pickSet(roomKeys(row.getAttribute(attr)), e.ctrlKey || e.metaKey);
                 return;
             }
@@ -618,7 +744,7 @@
                 if (!d) return;
                 e.preventDefault();
                 var dk = dayKeys(d);
-                if (dk.length && !dk.every(function (k) { return sel[k]; })) { pickBarsClear(); setKeys(dk); paint(); }
+                if (dk.length && !dk.every(function (k) { return sel[k]; })) { pickBarsClear(); setKeys(dk); anchorAt(dk); paint(); }
                 showCellMenu(null, at);
                 return;
             }
@@ -627,7 +753,7 @@
                 if (!row) return;
                 e.preventDefault();
                 var rk = roomKeys(row.getAttribute(attr));
-                if (rk.length && !rk.every(function (k) { return sel[k]; })) { pickBarsClear(); setKeys(rk); paint(); }
+                if (rk.length && !rk.every(function (k) { return sel[k]; })) { pickBarsClear(); setKeys(rk); anchorAt(rk); paint(); }
                 showCellMenu({ lane: row.getAttribute(attr), d: null, room: true }, at);
                 return;
             }
@@ -679,10 +805,17 @@
             if (r2 < 0 || r2 >= lanes.length || c2 < 0 || c2 >= dates.length) return;
             var next = { lane: lanes[r2], d: dates[c2] };
             if (e.shiftKey) {
-                if (!anchor || !cellOf(anchor.lane, anchor.d)) anchor = { lane: lane, d: d };
+                // Shift+Arrow ADDS like Shift-click: the picks from before this run of Shift+Arrows stay, the extension
+                // grows from where the run started (the room's own run or the anchor) and can shrink back to it.
+                if (!kb || kb.at !== k || kb.sig !== keys().sort().join()) {
+                    if (!anchor || !rowOf(anchor.lane)) anchor = { lane: lane, d: d };
+                    kb = { base: Object.assign({}, sel), from: logic.extendFrom(keys(), anchor, { lane: lane, d: d }, lanes) };
+                }
                 pickBarsClear();
-                setKeys(logic.rect(lanes, dates, anchor, next, ok));
+                setKeys(logic.rect(lanes, dates, kb.from, next, ok), kb.base);
+                kb.at = logic.key(next.lane, next.d);
                 paint();
+                kb.sig = keys().sort().join();
             }
             focusCell(next.lane, next.d);
         });
@@ -691,7 +824,7 @@
             keys: keys,
             barIds: function () { return Object.keys(bars); },
             count: function () { return Object.keys(sel).length + Object.keys(bars).length; },
-            clear: function () { sel = {}; bars = {}; anchor = null; paint(); },
+            clear: function () { sel = {}; bars = {}; anchor = null; kb = null; paint(); },
             paint: paint,
             lanes: lanesShown,
             busy: function () { return !!drag; }

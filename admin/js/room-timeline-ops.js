@@ -472,8 +472,11 @@
                 var started = X.gripDrag(e, {
                     dayAt: function (x) {
                         if (!track) return null;
-                        var n = st.first + Math.floor((x - track.getBoundingClientRect().left) / st.dayW);
-                        return Math.min(lastVis, Math.max(floor, n));
+                        // Rendered track width / nights (screen pixels, like x): a display size below 100% never
+                        // names the night before (owner 2026-11-24).
+                        var tr = track.getBoundingClientRect();
+                        var c = window.RhGridSel.logic.colOf(x, tr.left, tr.width, st.cols.length);
+                        return c === null ? null : Math.min(lastVis, Math.max(floor, st.first + c));
                     },
                     onMove: function (n) {
                         bar.classList.add('is-resizing');
@@ -850,7 +853,9 @@
             var ids = st.picks.barIds(), keys = st.picks.keys();
             var clear = function () { st.picks.clear(); };
             if (ids.length) st.pickBar.show(ids.length + ' ' + st.A.noun(ids.length) + ' selected', '', bulkActs(st, ids), clear);
-            else if (keys.length) st.pickBar.show(dayWords(st, keys), '', cellActs(st, keys), clear);
+            else if (keys.length) st.pickBar.show(dayWords(st, keys), window.RhGridSel.logic.where(keys, st.picks.lanes(), function (l) { // every picked day by name, also off screen
+                return 'Room ' + (st.lanesById[l] ? st.lanesById[l].number : l);
+            }), cellActs(st, keys), clear);
             else st.pickBar.hide();
         }
         function cellMenu(st, hit) {

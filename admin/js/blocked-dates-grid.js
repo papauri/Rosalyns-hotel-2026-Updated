@@ -58,29 +58,47 @@
     }
 
     var STORE_KEY = 'bdg-selection-v1';
+    var ANCHOR_KEY = 'bdg-anchor-v1';
+    // The Shift-click anchor once its month is off screen ({t, id, d, label}), so Shift-click (or a long press on touch)
+    // in the next month extends the run from it (owner 2026-11-24).
+    var anchorRec = null;
+    function anchorInfo() { return anchor ? rec(anchor) : anchorRec; }
     function persist() {
         try {
-            if (!selected.size) { sessionStorage.removeItem(STORE_KEY); return; }
+            if (!selected.size) { anchorRec = null; sessionStorage.removeItem(STORE_KEY); sessionStorage.removeItem(ANCHOR_KEY); return; }
             sessionStorage.setItem(STORE_KEY, JSON.stringify(Array.from(selected.values())));
+            var a = anchorInfo();
+            if (a) sessionStorage.setItem(ANCHOR_KEY, JSON.stringify(a)); else sessionStorage.removeItem(ANCHOR_KEY);
         } catch (e) { /* storage blocked: the selection just stays on this month */ }
+    }
+    function todayStr() {
+        var now = new Date();
+        return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    }
+    /** A stored pick checked before use (room line kind, id digits, a night from today on), or null. */
+    function cleanRec(v, today) {
+        if (!v || ['all', 'type', 'room'].indexOf(v.t) < 0 || typeof v.d !== 'string'
+            || !/^\d{4}-\d{2}-\d{2}$/.test(v.d) || v.d < today) return null;
+        var id = v.id === null || v.id === undefined ? '' : String(v.id);
+        if (id !== '' && !/^\d+$/.test(id)) return null;
+        return {
+            t: v.t, id: id, d: v.d, label: typeof v.label === 'string' ? v.label : 'Room',
+            state: typeof v.state === 'string' ? v.state : '', booked: v.booked === true,
+            info: typeof v.info === 'string' ? v.info : ''
+        };
     }
     function restore() {
         var list = null;
         try { list = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch (e) { list = null; }
         if (!Array.isArray(list)) return;
-        var now = new Date();
-        var today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+        var today = todayStr();
         list.slice(0, 5000).forEach(function (v) {
-            if (!v || ['all', 'type', 'room'].indexOf(v.t) < 0 || typeof v.d !== 'string'
-                || !/^\d{4}-\d{2}-\d{2}$/.test(v.d) || v.d < today) return;
-            var id = v.id === null || v.id === undefined ? '' : String(v.id);
-            if (id !== '' && !/^\d+$/.test(id)) return;
-            selected.set(v.t + '|' + id + '|' + v.d, {
-                t: v.t, id: id, d: v.d, label: typeof v.label === 'string' ? v.label : 'Room',
-                state: typeof v.state === 'string' ? v.state : '', booked: v.booked === true,
-                info: typeof v.info === 'string' ? v.info : ''
-            });
+            var r = cleanRec(v, today);
+            if (r) selected.set(r.t + '|' + r.id + '|' + r.d, r);
         });
+        if (!anchorRec) {
+            try { anchorRec = cleanRec(JSON.parse(sessionStorage.getItem(ANCHOR_KEY) || 'null'), today); } catch (e) { anchorRec = null; }
+        }
     }
 
     function visibleRows() {
@@ -251,6 +269,47 @@
         paint();
     }
 
+    /** The room line of a row: "t|id" from its cells. */
+    function lineOf(tr) {
+        var c = tr && tr.querySelector('td[data-t]');
+        return c ? c.dataset.t + '|' + (c.dataset.id || '') : '';
+    }
+    /** Every night from the anchor a ({t, id, d}, maybe in another month) to td, on the shown lines between the two,
+        added to base. Nights on screen count only when selectable; nights off screen from today on (the server still
+        decides past, joined and wider-blocked nights on save). false = the anchor's line is not shown. */
+    function extendTo(a, td, base) {
+        var L = window.RhGridSel && window.RhGridSel.logic;
+        if (!a || !td || !L) return false;
+        var rows = visibleRows(), ra = -1, rb = rows.indexOf(td.parentElement);
+        rows.forEach(function (tr, i) { if (ra < 0 && lineOf(tr) === a.t + '|' + (a.id || '')) ra = i; });
+        var dates = L.span(a.d, td.dataset.d);
+        if (ra < 0 || rb < 0 || !dates.length) return false;
+        var today = todayStr();
+        selected = new Map(base);
+        for (var r = Math.min(ra, rb); r <= Math.max(ra, rb); r++) {
+            var tr = rows[r], ln = lineOf(tr).split('|'), label = tr.getAttribute('data-row-label') || 'Room';
+            dates.forEach(function (d) {
+                var c = tr.querySelector('td[data-d="' + d + '"]');
+                if (c) { if (isSel(c)) selected.set(keyOf(c), rec(c)); }
+                else if (d >= today) selected.set(ln[0] + '|' + ln[1] + '|' + d, { t: ln[0], id: ln[1], d: d, label: label, state: '', booked: false, info: '' });
+            });
+        }
+        paint();
+        return true;
+    }
+    /** Touch has no Shift: the long-press menu offers "Select <anchor> to here" on a night outside the selection. */
+    function extendItem(td) {
+        var a = anchorInfo();
+        if (!a || !td || selected.has(keyOf(td)) || (a.t + '|' + (a.id || '') + '|' + a.d) === keyOf(td)) return null;
+        var L = window.RhGridSel && window.RhGridSel.logic;
+        if (!L) return null;
+        return {
+            label: 'Select ' + nightsText(L.span(a.d, td.dataset.d)),
+            icon: 'fa-arrows-left-right',
+            run: function () { extendTo(a, td, new Map(selected)); }
+        };
+    }
+
     function toggle(td) {
         var k = keyOf(td);
         if (selected.has(k)) selected.delete(k); else selected.set(k, rec(td));
@@ -278,6 +337,7 @@
             applyRect(anchor, td, 'add', base);
             return;
         }
+        if (e.shiftKey && !anchor && anchorRec && extendTo(anchorRec, td, new Map(selected))) return; // anchor in another month
         drag = { start: td, mode: selected.has(keyOf(td)) ? 'remove' : 'add', base: new Map(selected), moved: false };
         applyRect(td, td, drag.mode, drag.base);
         anchor = td;
@@ -387,6 +447,14 @@
     if (menuApi()) {
         menuApi().register('#bdgTable', function (node, e) {
             if (busy || asking || !e.target || !e.target.closest) return null;
+            var tdx = e.target.closest('#bdgTable td[data-sel="1"]');
+            var ext = tdx && lastPointer === 'touch' ? extendItem(tdx) : null;
+            if (ext) { // a long press outside the selection: extend to here first, the selection's actions after
+                selected.set(keyOf(tdx), rec(tdx)); // the pressed night is picked too, so the actions include it
+                paint();
+                var acts = actions();
+                return { title: acts ? acts.title : '', items: [ext].concat(acts ? acts.items : []) };
+            }
             return pickFor(e.target) ? actions() : null;
         });
     }
@@ -687,6 +755,7 @@
     window.bdgAfterRefresh = function () {
         var f = document.getElementById('bdgTypeFilter');
         if (f && f.value !== '') f.dispatchEvent(new Event('change', { bubbles: true }));
+        if (anchor) anchorRec = rec(anchor); // the old grid's anchor, for a Shift-click on the new one
         prune();
         anchor = null;
         initFocus();
@@ -698,6 +767,7 @@
     // (admin-spa.js): this file is not run again, so the new month is painted on rh:content-updated.
     function boot() {
         if (!table()) return;
+        if (anchor) anchorRec = rec(anchor); // the last month's anchor: Shift-click here extends from it
         restore();
         prune();
         anchor = null;

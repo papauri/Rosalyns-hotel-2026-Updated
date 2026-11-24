@@ -32,6 +32,7 @@
     var fallback = null;  // build(el, event) used when no registration answered
     var muteUntil = 0;    // a long press that opened the menu must not also click what is under the finger
     var press = null;
+    var liftMute = 0;     // the menu opened under a held finger: the click its lift may send never runs an item
 
     function el(tag, cls, text) {
         var n = document.createElement(tag);
@@ -214,18 +215,23 @@
         open(null, null, b.spec.items, { title: b.spec.title, anchorEl: t, opener: t });
     });
     /* ---- long press (touch) */
-    function endPress() { if (press) { window.clearTimeout(press.timer); press = null; } }
+    function endPress(e) {
+        if (!press) return;
+        window.clearTimeout(press.timer);
+        if (press.opened && e && e.type === 'pointerup') liftMute = Date.now() + 400;
+        press = null;
+    }
     document.addEventListener('pointerdown', function (e) {
         if (cur && !cur.el.contains(e.target)) close(false);
         endPress();
         if (e.pointerType !== 'touch' || wantsNative(e) || !find(e.target)) return;
         var t = e.target, x = e.clientX, y = e.clientY;
-        press = { x: x, y: y, timer: window.setTimeout(function () {
-            press = null;
+        var mine = press = { x: x, y: y, timer: window.setTimeout(function () {
             var ev = { type: 'longpress', target: t, clientX: x, clientY: y, preventDefault: function () {} };
             var b = build(t, ev);
-            if (!b) return;
+            if (!b) { if (press === mine) press = null; return; }
             muteClicks(800);
+            mine.opened = true; // kept until the finger lifts (endPress), so that lift's click is swallowed
             open(x, y, b.spec.items, { title: b.spec.title, opener: b.node });
         }, LONG_PRESS_MS) };
     }, true);
@@ -235,6 +241,7 @@
     document.addEventListener('pointerup', endPress, true);
     document.addEventListener('pointercancel', endPress, true);
     document.addEventListener('click', function (e) {
+        if (Date.now() < liftMute) { liftMute = 0; e.preventDefault(); e.stopPropagation(); return; }
         if (Date.now() < muteUntil && !(cur && cur.el.contains(e.target))) { e.preventDefault(); e.stopPropagation(); }
     }, true);
 

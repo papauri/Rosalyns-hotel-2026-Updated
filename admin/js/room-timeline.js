@@ -1043,6 +1043,19 @@
         if (!kind) return;
         st.drag = { kind: kind, rules: r, bar: bar, b: b, row: bar.closest('.tl-lane'), x: e.clientX, y: e.clientY, id: e.pointerId, started: false };
     }
+    /* Pointer x -> night, measured on the RENDERED track (its width / number of nights, the same pixels as the pointer),
+       never on the CSS day width: at a display size below 100% (html zoom) the two differ and the night before was
+       named (owner 2026-11-24). Without room-timeline-select.js the old measure stays. */
+    function dayUnder(st, track, x) { // day number under x, not clamped (callers clamp); null = no rendered track
+        var tr = track.getBoundingClientRect(), L = window.RhGridSel && window.RhGridSel.logic;
+        var c = L ? L.colOf(x, tr.left, tr.width, st.dates.length) : Math.floor((x - tr.left) / st.dayW);
+        return c === null ? null : st.first + c;
+    }
+    function nightsMoved(st, row, dx) { // whole nights a sideways drag moved on that row
+        var track = row && row.querySelector('.tl-track'), L = window.RhGridSel && window.RhGridSel.logic;
+        if (!track || !L) return Math.round(dx / st.dayW) || 0;
+        return L.colsMoved(dx, track.getBoundingClientRect().width, st.dates.length);
+    }
     function dragMove(st, e) {
         var d = st.drag;
         if (!d.started) {
@@ -1061,7 +1074,7 @@
             var row = hit && hit.closest('.tl-lane');
             if (row && !q(st, '[data-tl-grid]').contains(row)) row = null;
             // Sideways on a confirmed stay = the same nights on other dates (Change dates). Another row = Move room.
-            d.shift = d.rules.dates ? Math.round((e.clientX - d.x) / st.dayW) : 0;
+            d.shift = d.rules.dates ? nightsMoved(st, d.row, e.clientX - d.x) : 0;
             if (d.shift !== 0) {
                 var sameRow = !row || row === d.row || (row.hasAttribute('data-tl-lane') && d.b.lanes.indexOf(row.getAttribute('data-tl-lane')) !== -1);
                 d.target = null;
@@ -1087,9 +1100,9 @@
         // End edge: the check-out moves to the day under the pointer (never before tomorrow's first night).
         var track = d.row && d.row.querySelector('.tl-track');
         if (!track) return;
-        var tr = track.getBoundingClientRect();
         var last = st.first + st.dates.length - 1;
-        var co = st.first + Math.floor((e.clientX - tr.left) / st.dayW);
+        var co = dayUnder(st, track, e.clientX);
+        if (co === null) return;
         co = Math.min(last, Math.max(co, dnum(d.b.ci) + 1, dnum(st.data.today)));
         d.newCo = co;
         placeGhost(st, d, d.row, left, (co - st.first + 0.5) * st.dayW - 2 - left);
@@ -1620,8 +1633,11 @@
         if (!st.pickBar) return;
         var keys = st.picks.keys();
         if (!keys.length) { st.pickBar.hide(); return; }
-        var booked = keys.filter(function (k) { var p = window.RhGridSel.logic.parts(k); return nightBooked(st, p.lane, p.d); }).length;
-        st.pickBar.show(window.RhGridSel.logic.countWords(keys), booked ? '(' + booked + ' already booked)' : '', pickActions(st, keys), function () { st.picks.clear(); });
+        var L = window.RhGridSel.logic;
+        var booked = keys.filter(function (k) { var p = L.parts(k); return nightBooked(st, p.lane, p.d); }).length;
+        // Every selected night by name, also those in another date range (owner 2026-11-24).
+        var words = L.where(keys, st.picks.lanes(), function (l) { return 'Room ' + (st.lanesById[l] ? st.lanesById[l].number : l); });
+        st.pickBar.show(L.countWords(keys), words + (booked ? ' (' + booked + ' already booked)' : ''), pickActions(st, keys), function () { st.picks.clear(); });
     }
     function pickMenu(st, hit) {
         var L = window.RhGridSel.logic, can = st.data.can || {};
@@ -1762,8 +1778,8 @@
             var started = window.RhExtend.gripDrag(e, {
                 dayAt: function (x) {
                     if (!track) return null;
-                    var n = st.first + Math.floor((x - track.getBoundingClientRect().left) / st.dayW);
-                    return Math.min(lastVis, Math.max(floor, n));
+                    var n = dayUnder(st, track, x);
+                    return n === null ? null : Math.min(lastVis, Math.max(floor, n));
                 },
                 onMove: function (n) {
                     blk.classList.add('is-resizing');
@@ -1823,9 +1839,9 @@
     function datesEdgeMove(st, d, e, left, width) {
         var track = d.row && d.row.querySelector('.tl-track');
         if (!track) return;
-        var tr = track.getBoundingClientRect();
         var lastVis = st.first + st.dates.length - 1;
-        var day = st.first + Math.floor((e.clientX - tr.left) / st.dayW);
+        var day = dayUnder(st, track, e.clientX);
+        if (day === null) return;
         var ci = dnum(d.b.ci), co = dnum(d.b.co), today = dnum(st.data.today);
         if (d.kind === 'ci') {
             d.newCi = Math.max(today, Math.min(day, co - 1));
