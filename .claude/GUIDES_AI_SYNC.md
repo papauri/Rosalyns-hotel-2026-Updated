@@ -51,6 +51,12 @@ when prompted."
   change days or month; Shift-click / long press "Select <start> to here" extends the room's run across months; the
   bar and Block confirm name every selected night. Guides: calendar / blocked dates selection. Manager Guide:
   Bookings, Housekeeping and Maintenance.
+- 2026-11-24 Liwonde 2323967 / Rosalyn's 75d564c (owner PATCH): Housekeeping and Room Maintenance pages re-laid out
+  like the Calendar: KPI chips on one row, grid first, then a compact list ("Needs action" / "Rooms needing work") with
+  an Assign dropdown per row (no open task = adds today's task/job; open task/job = hands it to the person picked) and
+  "Guest has left" per row; Staff Workload is one chip row. Maintenance list now shows only rooms out of order / under
+  maintenance or with an open job (no longer every occupied room). Guides: housekeeping, room maintenance. Manager
+  Guide: Housekeeping and Maintenance (screenshots + wording). Showcase SYNC QUEUE: both screens changed.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
