@@ -341,8 +341,8 @@ if (!function_exists('import_rv_build')) {
     }
 
     /**
-     * Step 3 / 4 opening-count check over the whole job: not_counted = items with stock that will NOT be in the opening count, by reason
-     * (import_cont_not_counted; overlap = already in another unfinished opening count, read here); qty_tick = matched items that have an
+     * Step 3 / 4 count check over the whole job: not_counted = items with stock that will NOT be in the count (opening or regular), by reason
+     * (import_cont_not_counted; overlap = already in another unfinished stock count, read here); qty_tick = matched items that have an
      * "Opening stock quantity" box (n) and how many are ticked; cost_tick = the same for "use the file's unit cost" (zero_to_tick = unticked items whose
      * current cost is 0); no_price = the items with truly no usable cost (the old key, now exact).
      */
@@ -733,7 +733,12 @@ if (!function_exists('import_rv_build')) {
         $V = import_rv_build($state, $stockById);
         $res = $state['res'];
         $an = $state['analysis'];
-        $out = ['ok' => true];
+        // "When was this counted?": the stored time, the kind of count (opening / regular) and why it cannot be used yet. Import stays off
+        // until it can (the commit checks the same again inside its locks).
+        $ct = import_count_time_view($pdo, $state, $res);
+        $canConfirm = $res['can_confirm'] && $ct['problem'] === '';
+        $whyNot = $res['can_confirm'] && $ct['problem'] !== '' ? $ct['problem'] : $res['why_not'];
+        $out = ['ok' => true, 'count_time' => $ct];
         if (($opts['overview'] ?? true) !== false) {
             // the sheet's own value column vs Quantity x Unit Cost: counts and sums only (the rows come page by page from action value_rows)
             $vc = import_vc_overview(import_job_value_check($state)) + ['currency' => function_exists('getSetting') ? (string)getSetting('currency_symbol', '') : ''];
@@ -741,7 +746,7 @@ if (!function_exists('import_rv_build')) {
                 'job' => ['id' => (int)$state['job']['id'], 'file' => $state['job']['original_name'], 'status' => $state['job']['status'], 'target' => $state['job']['target'],
                     'created_at' => $state['job']['created_at']],
                 'file' => $an['file'], 'warnings' => $an['warnings'] ?? [], 'totals' => $an['totals'] ?? [], 'counts' => $res['counts'], 'by_sheet' => $res['by_sheet'],
-                'can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'], 'open_sheet_questions' => $res['open_sheet_questions'],
+                'can_confirm' => $canConfirm, 'why_not' => $whyNot, 'open_sheet_questions' => $res['open_sheet_questions'],
                 'sheets' => import_review_sheets_payload($an, (array)$state['answers']), 'unit_options' => $state['ctx']['unit_options'], 'lean' => true,
                 'questions' => array_map(function ($id) use ($V) {
                     return $V['qs'][$id];
@@ -749,7 +754,7 @@ if (!function_exists('import_rv_build')) {
                 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress'], 'confirm' => import_rv_count_check($pdo, $res) + $V['confirm'],
             ] + import_cont_overview($res) + ['handled' => import_cont_handled_rows($an), 'value_check' => $vc];
         } else {
-            $out += ['can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'], 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress']] + import_cont_overview($res);
+            $out += ['can_confirm' => $canConfirm, 'why_not' => $whyNot, 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress']] + import_cont_overview($res);
         }
         if ($params !== null) {
             $p = import_rv_resolve_status(import_rv_params($params), $V['entry_counts']);

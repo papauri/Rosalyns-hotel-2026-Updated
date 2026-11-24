@@ -19,6 +19,7 @@ $tmpFiles = [];
 try {
     require_once $root . '/admin/includes/permissions.php';
     require_once $root . '/includes/import/commit-stock.php';
+    require_once $root . '/scripts/tests/import_count_time_helper.php';   // "When was this counted?" for the commits (2026-11-25)
     $n = function (string $s) use ($run) { return 'ZZD ' . $run . ' ' . $s; };
     $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', '1', 'import') ON DUPLICATE KEY UPDATE setting_value = '1'")->execute();
     $admin = (int)($_SESSION['admin_user_id'] ?? 0);
@@ -157,14 +158,14 @@ try {
 
     // ---- import refused for a person without the Menu permission: nothing at all is written ------------------------------------
     $preIng = (int)$col("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE ?", ['ZZD ' . $run . ' %']);
-    $cNo = import_commit_stock($pdo, $jA, $mgrNoMenu);
+    $cNo = import_test_commit($pdo, $jA, $mgrNoMenu);
     $ck('permission: importing ticked drinks without the Menu permission is refused, nothing written', empty($cNo['ok']) && stripos((string)$cNo['error'], 'Menu permission') !== false
         && (int)$col("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE ?", ['ZZD ' . $run . ' %']) === $preIng
         && (int)$col('SELECT COUNT(*) FROM drink_menu WHERE item_name = ?', [$n('Cola')]) === 0
         && abs((float)$col('SELECT price FROM drink_menu WHERE id = ?', [$lagerMenu]) - 2000) < 0.0001, json_encode($cNo));
 
     // ---- import: the ticked rows go on the menu, the till and the stock link -----------------------------------------------------
-    $cA = import_commit_stock($pdo, $jA, $admin);
+    $cA = import_test_commit($pdo, $jA, $admin);
     $resA = $cA['result'] ?? [];
     $ck('import: ok, drinks added and updated are reported', !empty($cA['ok']) && ($resA['drinks_added'] ?? -1) === ($measureOn ? 3 : 2) && ($resA['drinks_updated'] ?? -1) === 1, json_encode($cA));
     $cm = $pdo->prepare('SELECT * FROM drink_menu WHERE item_name = ?');
@@ -221,14 +222,14 @@ try {
     import_job_drinks_set($pdo, $jB, $admin, ['mode' => 'tick', 'key' => $B[$n('Soda')]['key'], 'on' => true]);
     $menuBefore = (int)$col('SELECT COUNT(*) FROM drink_menu');
     $tillBefore = (int)$col('SELECT COUNT(*) FROM menu_items');
-    $cB = import_commit_stock($pdo, $jB, $admin);
+    $cB = import_test_commit($pdo, $jB, $admin);
     $ck('unticked: Tonic (not ticked) changed nothing on the menu or the till; only the ticked Soda was added', !empty($cB['ok']) && (int)$col('SELECT COUNT(*) FROM drink_menu WHERE item_name = ?', [$n('Tonic')]) === 0
         && (int)$col('SELECT COUNT(*) FROM menu_items WHERE item_name = ?', [$n('Tonic')]) === 0 && (int)$col('SELECT COUNT(*) FROM drink_menu') === $menuBefore + 1
         && (int)$col('SELECT COUNT(*) FROM menu_items') === $tillBefore + 1 && mb_strtolower((string)$col('SELECT category FROM drink_menu WHERE item_name = ?', [$n('Soda')])) === 'bar', json_encode($cB));
 
     // ---- file C: nothing ticked at all -> the menu is untouched, no Menu permission needed -------------------------------------
     $jC = $start($file($headB, [[$n('Juice'), 'bottle', '600', '4', '1500']], 'c.csv'), 'zzd-c-' . $run . '.csv');
-    $cC = import_commit_stock($pdo, $jC, $mgrNoMenu);
+    $cC = import_test_commit($pdo, $jC, $mgrNoMenu);
     $ck('unticked: an import with no drink ticked writes nothing to the menu, and needs no Menu permission', !empty($cC['ok']) && (int)$col('SELECT COUNT(*) FROM drink_menu WHERE item_name = ?', [$n('Juice')]) === 0
         && (int)$col('SELECT COUNT(*) FROM menu_items WHERE item_name = ?', [$n('Juice')]) === 0 && ($cC['result']['drinks_added'] ?? -1) === 0, json_encode($cC));
 
@@ -303,7 +304,7 @@ try {
         foreach (['Vodka', 'Tequila'] as $nm) { import_job_drinks_set($pdo, $jD, $admin, ['mode' => 'tick', 'key' => $D1[$n($nm)]['key'], 'on' => true]); }
         // since the review, somebody set Tequila's size in Stock: the import never replaces it
         $pdo->prepare('UPDATE stock_ingredients SET volume_ml = 1000 WHERE id = ?')->execute([$teqIng]);
-        $cD = import_commit_stock($pdo, $jD, $admin);
+        $cD = import_test_commit($pdo, $jD, $admin);
         $resD = $cD['result'] ?? [];
         $vol = function (string $name) use ($col) { $v = $col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$name]); return $v === null || $v === false ? null : (float)$v; };
         $ck('import: the typed sizes are saved on their stock items (Vodka 750 group, Whisky 700 row, Red Wine 750 row); counted in the result',
@@ -435,7 +436,7 @@ try {
             json_encode([$callsF, $nF]));
         // ---- tick Orange juice + Fresh milk, import: one sale of each takes 0.25 of a carton off stock; the read size is saved on Orange juice
         foreach (['Orange juice', 'Fresh milk'] as $nm) { import_job_drinks_set($pdo, $jE, $admin, ['mode' => 'tick', 'key' => $E1[$n($nm)]['key'], 'on' => true]); }
-        $cE = import_commit_stock($pdo, $jE, $admin);
+        $cE = import_test_commit($pdo, $jE, $admin);
         $ojIng = (int)$col('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Orange juice')]);
         $fmIng = (int)$col('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$n('Fresh milk')]);
         $ck('import: the carton sizes are saved on their stock items (Orange juice 1000 read from its unit cell and ticked, Fresh milk 1000 typed); Pineapple (not ticked) is not',
@@ -591,7 +592,7 @@ try {
             $r = import_job_drinks_set($pdo, $jG, $admin, ['mode' => 'tick', 'key' => $G4[$n($nm)]['key'] ?? '', 'on' => true]);
             if (empty($r['ok'])) { $ck('shot: tick ' . $nm, false, json_encode([$r, $G4[$n($nm)] ?? null])); }
         }
-        $cG = import_commit_stock($pdo, $jG, $admin);
+        $cG = import_test_commit($pdo, $jG, $admin);
         $lineOf = function (string $name) use ($pdo) {
             $p = rh_menu_pos_find($pdo, $name, 'Bar');
             if (!$p) { return null; }
@@ -760,7 +761,7 @@ try {
             $r = import_job_drinks_set($pdo, $jH, $admin, ['mode' => 'tick', 'key' => $kH($nm), 'on' => true]);
             if (empty($r['ok'])) { $ck('mass: tick ' . $nm, false, json_encode([$r, $DH7[$n($nm)] ?? null])); }
         }
-        $cH = import_commit_stock($pdo, $jH, $admin);
+        $cH = import_test_commit($pdo, $jH, $admin);
         $l1 = $lineOf($n('Gin H1'));
         $l2 = $lineOf($n('Gin H2'));
         $l9 = $lineOf($n('Brandy H9 750ml'));
@@ -961,7 +962,7 @@ try {
     $ck('tick all: every tickable row (8); step 4 counts: 3 drinks + 5 food, 8 new, 0 price changes, 0 below cost',
         !empty($taAll['ok']) && ($c9['ticked'] ?? 0) === 8 && ($c9['ticked_drink'] ?? 0) === 3 && ($c9['ticked_food'] ?? 0) === 5 && ($c9['add'] ?? 0) === 8 && ($c9['update'] ?? -1) === 0
         && ($c9['below'] ?? -1) === 0 && ($c9['todo'] ?? -1) === 0, json_encode($c9));
-    $cF = import_commit_stock($pdo, $jF, $admin);
+    $cF = import_test_commit($pdo, $jF, $admin);
     $resF = $cF['result'] ?? [];
     $fm = $pdo->prepare('SELECT * FROM food_menu WHERE item_name = ?');
     $fm->execute([$n('Crisps')]);
@@ -1168,7 +1169,7 @@ try {
         if (empty($r['ok'])) { $ck('file N: tick ' . $nm, false, json_encode([$r, $rOvClr])); }
     }
     $tillLager = (int)$col('SELECT COUNT(*) FROM menu_items WHERE item_name = ?', [$n('Lager')]);
-    $cN = import_commit_stock($pdo, $jN, $admin);
+    $cN = import_test_commit($pdo, $jN, $admin);
     $lposN = rh_menu_pos_find($pdo, $n('Lager'), $lagerCat);
     $ck('import: Lager keeps its one Drinks menu row, now 2700.00: no Food copy, no new till item, still one stock link line; Pie N goes on the Food menu',
         !empty($cN['ok']) && (string)$col('SELECT price FROM drink_menu WHERE id = ?', [$lagerMenu]) === '2700.00' && (int)$col('SELECT COUNT(*) FROM drink_menu WHERE item_name = ?', [$n('Lager')]) === 1
@@ -1279,7 +1280,7 @@ try {
     $ck('count measure, step 4: "2 items will be counted in shots from now on (e.g. Premier C: 25 shots in one bottle)", none without a measure',
         (int)($cfC['measures']['n'] ?? 0) === 2 && ($cfL[$n('Premier C')] ?? '') === '25 shots in one bottle' && ($cfL[$n('Klip C')] ?? '') === '25 shots in one bottle'
         && ($cfC['measures']['words'] ?? []) === ['shots'] && (int)($cfC['measures_not']['n'] ?? -1) === 0, json_encode([$cfC['measures'] ?? null, $cfC['measures_not'] ?? null]));
-    $cC = import_commit_stock($pdo, $jC, $admin);
+    $cC = import_test_commit($pdo, $jC, $admin);
     if (rh_stock_measure_ready($pdo)) {
         $mC = $pdo->prepare('SELECT id, unit, current_quantity, cost_per_unit, measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE name = ?');
         $mC->execute([$n('Premier C')]);

@@ -1219,6 +1219,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     if ($uncosted) {
                         throw new RuntimeException('This opening count can’t be approved: ' . count($uncosted) . ' counted line' . (count($uncosted) === 1 ? ' has' : 's have') . ' no unit cost (' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ' and ' . (count($uncosted) - 6) . ' more' : '') . '). Press “Reject count” so the counter can type the costs and submit it again.');
                     }
+                } elseif (!empty($count['import_job_id'])) {
+                    // A regular count filed by Import (critical patch 2026-11-25, ASSUMPTION in BUILD_PLAN.md): like an opening count, the person
+                    // who imported it never approves it while the two-person rule is on.
+                    if (rh_sca_self_approve_blocked((int)$user['id'], (int)$count['counted_by'], true, $secondRuleOn)) {
+                        throw new RuntimeException('You can’t approve this stock count because you imported it. A count filed by Import must be approved by a different person with the ' . SC_PERM_NAME . ' permission, so ask another manager or administrator (an administrator can change this rule in ' . SC_RULE_WHERE . ').');
+                    }
                 }
 
                 $liveSel = $pdo->prepare("SELECT current_quantity, cost_per_unit FROM stock_ingredients WHERE id = ? FOR UPDATE");
@@ -1774,10 +1780,11 @@ $csrf_token = generateCsrfToken();
             }
             $editable = $activeCount['status'] === 'draft';
             $isOpeningCount = !empty($activeCount['is_opening']);
+            $isImportCount = !empty($activeCount['import_job_id']);        // filed by Import: always a second person (opening or regular)
             $isSubmitted = $activeCount['status'] === 'submitted';
             $isOwnCount = (int)$activeCount['counted_by'] === (int)$user['id'];
             $canWorkCount = $isOwnCount || $canApprove;
-            $blockSelfApprove = $isSubmitted && ($anyOverThreshold || $isOpeningCount) && $isOwnCount && $secondRuleOn;
+            $blockSelfApprove = $isSubmitted && ($anyOverThreshold || $isOpeningCount || $isImportCount) && $isOwnCount && $secondRuleOn;
             $canDecide = rh_sca_may_decide((int)$user['id'], (int)$activeCount['counted_by'], $canApprove, $secondRuleOn);
             ?>
             <div class="count-header">
@@ -1836,7 +1843,7 @@ $csrf_token = generateCsrfToken();
             <?php if ($isSubmitted):
                 $countApprovers = $approversFor((int)$activeCount['counted_by']);
                 $counterNm = (string)($activeCount['counted_by_name'] ?: 'the person who counted it');
-                $needsSecondKnown = $secondRuleOn && ($isOpeningCount || ($canApprove && $anyOverThreshold));
+                $needsSecondKnown = $secondRuleOn && ($isOpeningCount || $isImportCount || ($canApprove && $anyOverThreshold));
                 $remindWait = rh_sca_remind_wait($pdo, (int)$activeCount['id']);
                 $mayRemind = rh_sca_may_remind((int)$user['id'], (int)$activeCount['counted_by'], $canApprove);
             ?>
@@ -1891,13 +1898,13 @@ $csrf_token = generateCsrfToken();
             /* "Differences from the uploaded file" (owner 2026-11-23): an opening count filed by Import carries a link to its job
              * (stock_counts.import_job_id); the job holds the list, frozen at the import. Older counts have no link: nothing is shown. */
             $scDiff = null;
-            if ($isOpeningCount && !empty($activeCount['import_job_id'])) {
+            if (!empty($activeCount['import_job_id'])) {        // opening or regular count filed by Import (critical patch 2026-11-25)
                 require_once __DIR__ . '/../includes/import/diff-report.php';
                 $scDiff = import_diff_for_count($pdo, $activeCount);
             }
             if ($scDiff):
                 $dRep = $scDiff['report'];
-                $dKinds = import_diff_kinds();
+                $dKinds = import_diff_kinds((string)($dRep['term'] ?? 'opening count'));
                 $dTotal = (int)($dRep['total'] ?? 0);
                 $dWant = isset($_GET['diff']) && isset($dKinds[(string)$_GET['diff']]) ? (string)$_GET['diff'] : '';
                 $dOpen = $isSubmitted || $dWant !== '' || isset($_GET['diff']);
@@ -2293,7 +2300,7 @@ $csrf_token = generateCsrfToken();
                         </label>
                         <?php endif; ?>
                     <?php elseif ($isSubmitted && $canDecide && $blockSelfApprove): ?>
-                        <span class="sc-lockednote"><i class="fas fa-user-lock"></i> <?php echo $isOpeningCount ? 'An opening stock count' : 'This count has shortages over the approval threshold, so it'; ?> must be approved by someone other than the person who counted it.</span>
+                        <span class="sc-lockednote"><i class="fas fa-user-lock"></i> <?php echo $isOpeningCount ? 'An opening stock count' : ($isImportCount ? 'A stock count filed by Import' : 'This count has shortages over the approval threshold, so it'); ?> must be approved by someone other than the person who counted it.</span>
                         <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject count</button>
                         <input type="hidden" name="rejection_reason" id="rejection_reason" value="">
                         <span id="reject_err" style="color:#c82333;font-size:13px;display:none;"></span>
@@ -2833,7 +2840,7 @@ $csrf_token = generateCsrfToken();
                                             <span class="pill st-<?php echo htmlspecialchars($c['status']); ?>"><?php echo htmlspecialchars(scStatusLabel((string)$c['status'])); ?></span>
                                             <?php if ($c['status'] === 'submitted'):
                                                 $rowApprovers = $approversFor((int)$c['counted_by']);
-                                                $rowSecond = $secondRuleOn && (!empty($c['is_opening']) || ($canApprove && rh_sca_needs_second_person($pdo, $c, $blockPct, $minCost)));
+                                                $rowSecond = $secondRuleOn && (!empty($c['is_opening']) || !empty($c['import_job_id']) || ($canApprove && rh_sca_needs_second_person($pdo, $c, $blockPct, $minCost)));
                                             ?>
                                                 <?php if ($rowSecond): ?><div class="count-note count-note--second">Needs a second person to approve &mdash; not <?php echo htmlspecialchars((string)($c['counted_by_name'] ?: 'the counter')); ?></div><?php endif; ?>
                                                 <div class="count-note">Can approve: <?php echo $rowApprovers ? htmlspecialchars(rh_sca_approver_names($rowApprovers)) : '<span class="count-note--warn">nobody else yet</span>'; ?></div>

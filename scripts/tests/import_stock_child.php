@@ -20,6 +20,7 @@ $tmpFiles = [];
 try {
     require_once $root . '/admin/includes/permissions.php';
     require_once $root . '/includes/import/commit-stock.php';
+    require_once $root . '/scripts/tests/import_count_time_helper.php';   // "When was this counted?" for the commits (2026-11-25)
     require_once $root . '/scripts/tests/fixtures/import/build_fixture.php';
     $n = function (string $s) use ($run) { return 'ZZT ' . $run . ' ' . $s; };
     $put = function (string $bytes, string $name) use ($tmp, &$tmpFiles) {
@@ -190,7 +191,7 @@ try {
     foreach ($aj['questions'] as &$qT) { $qT['answer'] = 'skip'; } unset($qT);
     $pdo->prepare('UPDATE import_jobs SET analysis_json = ? WHERE id = ?')->execute([json_encode($aj), $fixJob]);
     $ck('tamper: statuses and answers written into the stored analysis are ignored (still cannot confirm)', !import_job_can_confirm($pdo, $fixJob));
-    $cm = import_commit_stock($pdo, $fixJob, $admin);
+    $cm = import_test_commit($pdo, $fixJob, $admin);
     $ck('tamper: commit refuses while questions are open', !$cm['ok'] && !$cm['already'], $cm['error']);
     $pdo->prepare('UPDATE import_jobs SET analysis_json = ? WHERE id = ?')->execute([$jt['analysis_json'], $fixJob]);
     $ck('csv: formula-looking cells are prefixed so a spreadsheet shows them as text', import_csv_safe('=cmd|x') === "'=cmd|x" && import_csv_safe('+1') === "'+1" && import_csv_safe('@a') === "'@a" && import_csv_safe('Plain') === 'Plain');
@@ -232,17 +233,17 @@ try {
         'counts' => (int)$pdo->query("SELECT COUNT(*) FROM stock_counts WHERE notes LIKE 'Stock sheet import%'")->fetchColumn(),
     ];
     $pre = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT $run %'")->fetchColumn();
-    $cf = import_commit_stock($pdo, $jid, $admin, ['fail_after_apply' => true]);
+    $cf = import_test_commit($pdo, $jid, $admin, ['fail_after_apply' => true]);
     $ck('rollback: a forced failure after the writes leaves nothing behind', !$cf['ok'] && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT $run %'")->fetchColumn() === $pre
         && (int)$pdo->query("SELECT COUNT(*) FROM stock_counts WHERE notes LIKE 'Stock sheet import%'")->fetchColumn() === $before['counts'] && import_job_get($pdo, $jid)['status'] !== 'committed', $cf['error']);
     $setSwitch('0');
-    $cOff = import_commit_stock($pdo, $jid, $admin);
+    $cOff = import_test_commit($pdo, $jid, $admin);
     $ck('commit: refused while the kill switch is OFF', !$cOff['ok']);
     $setSwitch('1');
-    $cRec = import_commit_stock($pdo, $jid, $rec);
+    $cRec = import_test_commit($pdo, $jid, $rec);
     $ck('commit: refused for a person without data_import', !$cRec['ok']);
 
-    $c1 = import_commit_stock($pdo, $jid, $admin);
+    $c1 = import_test_commit($pdo, $jid, $admin);
     $res = $c1['result'] ?? [];
     $ck('commit: ok, 4 ingredients created (Alpha, Beta, Gamma, Delta), none updated', $c1['ok'] && !$c1['already'] && ($res['created'] ?? -1) === 4 && ($res['updated'] ?? -1) === 0, json_encode($c1));
     $ing = [];
@@ -264,7 +265,7 @@ try {
     $ck('commit: the job is committed with a result, and its staged file is gone', $jobAfter['status'] === 'committed' && $jobAfter['stored_path'] === null && (int)$jobAfter['committed_by'] === $admin && json_decode($jobAfter['result_json'], true)['created'] === 4);
     $aud = (int)$pdo->query("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_import' AND details LIKE 'Import #$jid %'")->fetchColumn();
     $ck('commit: an audit log row was written', $aud === 1);
-    $c2 = import_commit_stock($pdo, $jid, $admin);
+    $c2 = import_test_commit($pdo, $jid, $admin);
     $ck('commit: a second call is a no-op returning the stored result', $c2['ok'] && $c2['already'] && ($c2['result']['created'] ?? 0) === 4
         && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT $run %'")->fetchColumn() === 5
         && (int)$pdo->query("SELECT COUNT(*) FROM stock_counts WHERE notes LIKE 'Stock sheet import%'")->fetchColumn() === $before['counts'] + 1);
@@ -293,7 +294,7 @@ try {
     $answerAll($j2, $admin);    // the price check judges against this hotel's real data, so answer whatever it asks ("the file's price is right" changes nothing by itself)
     $cacheKey = defined('RH_STOCK_DASH_CACHE_KEY') ? RH_STOCK_DASH_CACHE_KEY : 'stock_dashboard_metrics_v5';
     $cacheWorks = function_exists('setCache') && function_exists('getCache') && setCache($cacheKey, ['zzt' => 1], 600) && getCache($cacheKey, null) !== null;
-    $c3 = import_commit_stock($pdo, $j2, $admin);
+    $c3 = import_test_commit($pdo, $j2, $admin);
     $ck('commit: the stock dashboard cache is dropped after the commit (checked when the cache works in this process)', !$cacheWorks || getCache($cacheKey, null) === null);
     $costLogs = $pdo->prepare("SELECT details FROM admin_activity_log WHERE action = 'stock_import_cost' AND details LIKE ?");
     $costLogs->execute(['Import #' . $j2 . ': cost of "' . $n('Tickme') . '"%']);
@@ -330,10 +331,10 @@ try {
     $answerAll($j4, $admin);
     $w1 = import_job_review_summary($pdo, $j4);
     $ws = $find($w1, $n('Stocky'))['cost_stock_warning'] ?? null;
-    $ck('cost warning: ticked cost on an item with stock names the item, quantity, unit, old and new cost', is_string($ws) && strpos($ws, $n('Stocky') . ' already has 12 bottle in stock') !== false && strpos($ws, 'from 500 to 800.5') !== false && strpos($ws, 'before the opening count is approved') !== false, (string)$ws);
+    $ck('cost warning: ticked cost on an item with stock names the item, quantity, unit, old and new cost', is_string($ws) && strpos($ws, $n('Stocky') . ' already has 12 bottle in stock') !== false && strpos($ws, 'from 500 to 800.5') !== false && strpos($ws, 'before the stock count is approved') !== false, (string)$ws);
     $ck('cost warning: an item with no stock gets none', array_key_exists('cost_stock_warning', $find($w1, $n('Emptyy')) ?? []) && $find($w1, $n('Emptyy'))['cost_stock_warning'] === null && ($find($w1, $n('Emptyy'))['on_hand']['has_stock'] ?? true) === false);
     $ck('cost warning: it is a warning only, the import can still be confirmed', !empty($w1['can_confirm']) && import_job_can_confirm($pdo, $j4));
-    $c4 = import_commit_stock($pdo, $j4, $admin);
+    $c4 = import_test_commit($pdo, $j4, $admin);
     $costLogs->execute(['Import #' . $j4 . ': cost of "' . $n('Stocky') . '"%']);
     $sk = $pdo->prepare('SELECT cost_per_unit, current_quantity FROM stock_ingredients WHERE name = ?');
     $sk->execute([$n('Stocky')]);
@@ -393,7 +394,7 @@ try {
     $sZ2 = import_job_review_summary($pdo, $jZ);
     $itZ = null; foreach ($sZ2['items'] as $x) { if ($x['typed_name'] === $n('Zero')) { $itZ = $x; } }
     $ck('price check (database): "keep the current price" unticks the cost and keeps the quantity line', $tk['ok'] && $ra['ok'] && $sZ2['can_confirm'] && $itZ && $itZ['ticked'] === ['quantity'] && $itZ['in_count'] === true, json_encode($itZ['ticked'] ?? null));
-    $cZ = import_commit_stock($pdo, $jZ, $admin);
+    $cZ = import_test_commit($pdo, $jZ, $admin);
     $zc = $pdo->prepare('SELECT cost_per_unit FROM stock_ingredients WHERE id = ?');
     $zc->execute([$idZ]);
     $lineZ = $pdo->prepare('SELECT cost_per_unit, actual_quantity FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
@@ -413,11 +414,11 @@ try {
     $sH = import_job_review_summary($pdo, $jH);
     $qH = $pcQ($sH, 'cost-too-large');
     $ck('storage limit (database): a cost that cannot be stored is a blocking question with only "skip"', $qH !== null && $qH['bad'] && array_column($qH['options'], 'key') === ['skip'] && !$sH['can_confirm'] && strpos($qH['text'], 'too large for a stock cost') !== false, (string)($qH['text'] ?? ''));
-    $cH0 = import_commit_stock($pdo, $jH, $admin);
+    $cH0 = import_test_commit($pdo, $jH, $admin);
     $ck('storage limit (database): commit is refused while it is open, nothing is written', !$cH0['ok'] && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT $run Hugeone%' OR name LIKE 'ZZT $run Fineone%'")->fetchColumn() === 0);
     import_job_answer($pdo, $jH, $qH['id'], 'skip', $admin);
     $answerAll($jH, $admin);
-    $cH = import_commit_stock($pdo, $jH, $admin);
+    $cH = import_test_commit($pdo, $jH, $admin);
     $ck('storage limit (database): skipped, the rest imports and the oversized row never reaches the table', $cH['ok'] && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name = " . $pdo->quote($n('Fineone')))->fetchColumn() === 1 && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name = " . $pdo->quote($n('Hugeone')))->fetchColumn() === 0, (string)($cH['error'] ?? ''));
     $ck('storage limit: commit re-checks it on the server (import_cost_storage_problems runs in import_job_revalidate; the helper flags the oversized item)',
         strpos((string)file_get_contents($root . '/includes/import/review.php'), 'import_cost_storage_problems($it, import_cost_limits_from_ctx($ctx))') !== false
@@ -644,6 +645,9 @@ try {
         if ($q['type'] === 'no-unit') { $pick = in_array('unit:each', $keys, true) ? 'unit:each' : $keys[0]; }
         import_job_answer($pdo, $jBig, $q['id'], $pick, $admin);
     }
+    $noT = $V([]);
+    $ck('count time: everything answered but no "When was this counted?" -> Import stays off and says why', empty($noT['can_confirm']) && strpos((string)$noT['why_not'], 'Enter when the stock in this file was counted') === 0 && isset($noT['count_time']) && array_key_exists('at', $noT['count_time']) && $noT['count_time']['at'] === null, json_encode([$noT['can_confirm'] ?? null, $noT['why_not'] ?? null, $noT['count_time'] ?? null]));
+    import_test_set_counted_at($pdo, $jBig, (string)$pdo->query('SELECT NOW()')->fetchColumn(), $admin);
     $fin = $V([]);
     $ck('progress: after everything is answered the default list is empty, nothing is open and the job is confirmable', $fin['page']['filters']['status_default'] && $fin['page']['filters']['status'] === [] && $fin['progress']['open'] === 0 && $fin['can_confirm'] === true, json_encode([$fin['progress'], $fin['can_confirm'], $fin['why_not'] ?? '']));
     // ---- a file that cannot fit, a read that died: plain message, no half-made job (memory.php) -----------------------------------------
@@ -733,7 +737,7 @@ try {
     $ck('skipped export (csv): lists the skipped rows with their row numbers, the reason and what the row said; none of the good row', $csvS['ok'] && strpos($csvS['body'], $n('Sk Bad')) !== false && strpos($csvS['body'], 'lots') !== false && strpos($csvS['body'], 'not a number') !== false && strpos($csvS['body'], $n('Sk Good')) === false && substr_count($csvS['body'], $n('Sk Twin')) >= 2);
     $xlsS = import_job_skipped_export($pdo, $jS, 'xlsx');
     $ck('skipped export (xlsx): a real workbook', $xlsS['ok'] && substr($xlsS['body'], 0, 2) === 'PK' && strlen($xlsS['body']) > 500 && substr($xlsS['name'], -5) === '.xlsx');
-    $cS = import_commit_stock($pdo, $jS, $admin);
+    $cS = import_test_commit($pdo, $jS, $admin);
     $nameIn = function (string $nm) use ($pdo) { $st = $pdo->prepare('SELECT COUNT(*) FROM stock_ingredients WHERE name = ?'); $st->execute([$nm]); return (int)$st->fetchColumn(); };
     $ck('commit: only the good row reaches the database; the four skipped rows (bad, negative, the duplicate pair) are absent', $cS['ok'] && $nameIn($n('Sk Good')) === 1 && $nameIn($n('Sk Bad')) === 0 && $nameIn($n('Sk Neg')) === 0 && $nameIn($n('Sk Twin')) === 0 && ($cS['result']['created'] ?? -1) === 1, json_encode($cS['result'] ?? $cS['error']));
     $ck('commit: the result says how many rows the person left out', ($cS['result']['skipped_by_you'] ?? -1) === 4);
@@ -800,9 +804,9 @@ try {
     $ck('units (one item): choosing the unit for the one remaining item finishes the sheet question and the import can be confirmed', $pU['ok'] && $qU3['answer'] === 'per-item' && $sU3['can_confirm'], json_encode($sU3['counts']));
     $learnN = function () use ($pdo, $run) { return (int)$pdo->query("SELECT COUNT(*) FROM import_aliases WHERE kind LIKE 'learned\\_%' AND term LIKE 'zzt " . strtolower($run) . " %'")->fetchColumn(); };
     $ck('learning: nothing is remembered before the import is committed', $learnN() === 0);
-    $cfU = import_commit_stock($pdo, $jU, $admin, ['fail_after_apply' => true]);
+    $cfU = import_test_commit($pdo, $jU, $admin, ['fail_after_apply' => true]);
     $ck('learning: a rolled-back commit teaches nothing', !$cfU['ok'] && $learnN() === 0);
-    $cU = import_commit_stock($pdo, $jU, $admin);
+    $cU = import_test_commit($pdo, $jU, $admin);
     $ingU = []; foreach ($pdo->query("SELECT name, unit, category FROM stock_ingredients WHERE name LIKE 'ZZT $run New%' OR name LIKE 'ZZT $run Odd%'")->fetchAll(PDO::FETCH_ASSOC) as $x) { $ingU[$x['name']] = $x; }
     $ck('commit: the chosen units are what was created (bottle, bottle, kg)', $cU['ok'] && ($ingU[$n('NewLager')]['unit'] ?? '') === 'bottle' && ($ingU[$n('NewStout')]['unit'] ?? '') === 'bottle' && ($ingU[$n('OddThing')]['unit'] ?? '') === 'kg', json_encode($ingU));
     $lrn = import_load_learned($pdo);
@@ -839,7 +843,7 @@ try {
     $ck('heal (undo): the original value is back, the row is blocked and asked again, the fix stays listed as taken back', $hu['ok'] && $hu['reanalysed'] && $sH3['counts']['blocked'] === 1 && $hl3['total'] === 1 && $hl3['rows'][0]['undone'] === true);
     $hr = import_job_heal_undo($pdo, $jH2, $hl['rows'][0]['id'], false, $admin);
     $ck('heal (redo): "Fix it again" puts the repair back', $hr['ok'] && import_job_review_summary($pdo, $jH2)['counts']['blocked'] === 0 && !import_job_heal_undo($pdo, $jH2, 'nonexistent00', true, $admin)['ok']);
-    $cH2 = import_commit_stock($pdo, $jH2, $admin);
+    $cH2 = import_test_commit($pdo, $jH2, $admin);
     $ck('heal: committing re-checks the repaired values against the file (the invariant) and imports the repaired quantity', $cH2['ok'] && $nameIn($n('Heal Lager')) === 1 && ($cH2['result']['fixed_for_you'] ?? 0) === 1, json_encode($cH2['error'] ?? $cH2['result'] ?? ''));
 
     // ---- tick every matched quantity at once; the stock left out of the opening count, by its TRUE reason (2026-11-16) ---------------
@@ -912,7 +916,7 @@ try {
     $by2 = import_job_review_view($pdo, $jQ, null)['confirm']['not_counted']['by'] ?? [];
     $ck('pre-import warning after tick all: only the one left unticked is "not ticked"; Tia is now counted', $dS2['n'] === 4 && $aS2['ok'] && !empty($sQ2['can_confirm'])
         && $names($by2['not_ticked']) === [$n('QF Plain')] && $names($by2['cost_not_ticked']) === [$n('QB Nocost')] && $names($by2['overlap']) === [$n('QD Overlap')], json_encode($by2));
-    $cQ = import_commit_stock($pdo, $jQ, $admin);
+    $cQ = import_test_commit($pdo, $jQ, $admin);
     $rQ = $cQ['result'] ?? [];
     $srt = function ($x) { $x = (array)$x; sort($x); return $x; };
     $ck('result: the left-out lists are split by true reason and match the warning (Tia is not called "no price")', $cQ['ok']
@@ -995,7 +999,7 @@ try {
         !empty($xV['ok']) && $xV['name'] === 'zzt-vc-' . $run . ' stock check ' . (string)$pdo->query('SELECT CURDATE()')->fetchColumn() . '.xlsx' && array_column($rdV['sheets'] ?? [], 'name') === ['Summary', 'Stock Value wrong', 'Missing prices']
         && count($rdV['sheets'][1]['cells'] ?? []) === 4 && count($rdV['sheets'][2]['cells'] ?? []) === 2, json_encode([$xV['name'] ?? $xV['error'] ?? '', array_column($rdV['sheets'] ?? [], 'name')]));
     $sVa = $answerAll($jV, $admin);
-    $cV = import_commit_stock($pdo, $jV, $admin);
+    $cV = import_test_commit($pdo, $jV, $admin);
     $costOf = function (string $nm) use ($pdo) { $st = $pdo->prepare('SELECT cost_per_unit FROM stock_ingredients WHERE name = ?'); $st->execute([$nm]); return $st->fetchColumn(); };
     $ck('value check: the commit uses Quantity x Unit Price, never the Stock Value column, and records what the check found',
         !empty($cV['ok']) && abs((float)$costOf($n('VC Over')) - 1000) < 0.00005 && abs((float)$costOf($n('VC Under')) - 500) < 0.00005
@@ -1105,7 +1109,7 @@ try {
     $ck('bar layout (database aliases): no question but "is the gin\'s count in bottles or in shots?"', $jB > 0 && isset($sB['questions']) && count($openB) === 1 && ($openB[0]['type'] ?? '') === 'count-in'
         && array_column((array)($openB[0]['count_rows'] ?? []), 'name') === [$n('BR Gin')], json_encode([$uB, array_keys($sB), $sB['error'] ?? null, array_column($openB, 'text')]));
     if ($openB) { import_job_answer($pdo, $jB, $openB[0]['id'], 'stock', $admin); }
-    $cB = $jB ? import_commit_stock($pdo, $jB, $admin) : ['ok' => false];
+    $cB = $jB ? import_test_commit($pdo, $jB, $admin) : ['ok' => false];
     $ingB = [];
     foreach ($pdo->query("SELECT name, unit, cost_per_unit, pack_name, pack_size FROM stock_ingredients WHERE name LIKE 'ZZT $run BR %'")->fetchAll(PDO::FETCH_ASSOC) as $x) { $ingB[$x['name']] = $x; }
     $lB = $ingB[$n('BR Lager')] ?? [];
@@ -1153,13 +1157,13 @@ try {
         foreach ([$n('MS Gin'), $n('MS Brandy'), $n('MS Cane')] as $nm) { $tkM[] = !empty(import_job_set_update_fields($pdo, $jM, rh_ssi_key($nm), ['quantity'], $admin)['ok']); }
         $restM = $answerAll($jM, $admin);
         $logRumQ = $pdo->prepare("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_measure_changed' AND details LIKE ?");
-        $cfM = $jM ? import_commit_stock($pdo, $jM, $admin, ['fail_after_apply' => true]) : ['ok' => true];
+        $cfM = $jM ? import_test_commit($pdo, $jM, $admin, ['fail_after_apply' => true]) : ['ok' => true];
         $logRumQ->execute(['%' . $n('MS Rum') . '%']);
         $ck('tots (database): a commit that fails after the stock writes leaves nothing: no Rum, no saved measure on Cane, no measure log line, the job not imported',
             empty($cfM['ok']) && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name = " . $pdo->quote($n('MS Rum')))->fetchColumn() === 0
             && $pdo->query("SELECT measure_per_big FROM stock_ingredients WHERE id = " . $idMC)->fetchColumn() === null
             && (int)$logRumQ->fetchColumn() === 0 && import_job_get($pdo, $jM)['status'] !== 'committed', json_encode([$cfM['error'] ?? null]));
-        $cM = $jM ? import_commit_stock($pdo, $jM, $admin) : ['ok' => false];
+        $cM = $jM ? import_test_commit($pdo, $jM, $admin) : ['ok' => false];
         $resM = $cM['result'] ?? [];
         $ingM = [];
         foreach ($pdo->query("SELECT id, name, current_quantity, cost_per_unit, measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE name LIKE 'ZZT $run MS %'")->fetchAll(PDO::FETCH_ASSOC) as $x) { $ingM[$x['name']] = $x; }
@@ -1229,7 +1233,7 @@ try {
             VALUES (?, ?, 0, ?, ?, 9000, 0, '', NOW(), 'both', 1, 4, 30)")->execute([$cidX, $idMR, round(1 + 4 / 30, 6), round(1 + 4 / 30, 6)]);
         $lineX = (int)$pdo->lastInsertId();
         $answerAll($jX, $admin);
-        $cX = $jX ? import_commit_stock($pdo, $jX, $admin) : ['ok' => false];
+        $cX = $jX ? import_test_commit($pdo, $jX, $admin) : ['ok' => false];
         $rX = $cX['result'] ?? [];
         $mx = function (int $id) use ($pdo) { $q = $pdo->prepare('SELECT measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id = ?'); $q->execute([$id]); return $q->fetch(PDO::FETCH_ASSOC) ?: []; };
         $gX = $mx($idMG); $caX = $mx($idMC); $ruX = $mx($idMR);
@@ -1270,7 +1274,7 @@ try {
             VALUES (?, ?, 0, ?, ?, 9000, 0, '', NOW(), 'both', 1, 5, 25)")->execute([$cidY, $idMG, round(1 + 5 / 25, 6), round(1 + 5 / 25, 6)]);
         $lineY = (int)$pdo->lastInsertId();
         $answerAll($jY, $admin);
-        $cY = $jY ? import_commit_stock($pdo, $jY, $admin) : ['ok' => false];
+        $cY = $jY ? import_test_commit($pdo, $jY, $admin) : ['ok' => false];
         $rY2 = $cY['result'] ?? [];
         $gY = $mx($idMG);
         $lnY = $pdo->query('SELECT actual_quantity, entry_per_big FROM stock_count_lines WHERE id = ' . $lineY)->fetch(PDO::FETCH_ASSOC) ?: [];

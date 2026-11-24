@@ -17,7 +17,7 @@
         min_qty: 'Minimum quantity', lead_time: 'Lead time (days)', qty_total: 'Total balance', days_to_expiry: 'Days to expiry',
         status: 'Status', action: 'Action', purchase_qty: 'Quantity to order', total_cost: 'Total value', row_no: 'Row number'
     };
-    var DIFF_LABEL = { category: 'Category', cost: 'Cost per unit', par: 'Par level', pack: 'Pack size', quantity: 'Opening stock quantity' };
+    var DIFF_LABEL = { category: 'Category', cost: 'Cost per unit', par: 'Par level', pack: 'Pack size', quantity: 'Stock quantity' };
     var STATUS_LABEL = { 'ready': 'Ready', 'needs-answer': 'Needs answer', 'skipped': 'Skipped', 'blocked': 'Blocked' };
     var JOB_STATUS = { uploaded: 'In progress', analysed: 'In progress', reviewing: 'In progress', confirmed: 'In progress', committed: 'Imported', failed: 'Could not be read' };
 
@@ -116,6 +116,12 @@
         var mineList = root.querySelector('#diMineList');
         var S = { job: 0, sum: null, result: null, step: 1, reach: 1, busy: false, file: null, chain: Promise.resolve(), f: null, R: null, page: null, facets: null, statusEff: [], seq: 0, openCats: {}, bulkSel: null, uiUnits: {}, uiCount: {} };
         S.f = { q: '', sheet: '', cat: '', status: null, type: '', kind: '', warn: 0, cost: 0, stock: 0, answered: 0, sort: 'order', size: 50, page: 1, view: 'list' };
+        var countedEl = root.querySelector('#diCountedAt');     // Step 1 "When was this counted?" (required, no default)
+        // the one word for the count this import files, from the server (count-time.php): 'opening count' until an opening count is approved, then 'stock count'
+        function cT() { return (S.result && S.result.count_term) || (S.sum && S.sum.count_time && S.sum.count_time.term) || 'opening count'; }
+        function capCT() { var t = cT(); return t.charAt(0).toUpperCase() + t.slice(1); }
+        function aCT() { return (/^[aeiou]/i.test(cT()) ? 'an ' : 'a ') + cT(); }
+        function isRegular() { return cT() === 'stock count'; }
 
         // ---------- plumbing ----------
         function post(action, data, extra) {
@@ -324,6 +330,12 @@
         uploadBtn.addEventListener('click', function () {
             if (!S.file || S.busy) { return; }
             if (!fileOk(S.file.name)) { chosen(S.file); return; }
+            var ctVal = countedEl ? String(countedEl.value || '') : '';
+            if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ctVal)) {
+                msg('Enter when the stock in this file was counted (date and time). It is needed so sales and deliveries since then are not lost.');
+                if (countedEl) { countedEl.focus(); }
+                return;
+            }
             S.busy = true;
             uploadBtn.disabled = true;
             var old = uploadBtn.innerHTML;
@@ -332,6 +344,7 @@
             fd.append('csrf_token', csrf);
             fd.append('action', 'upload');
             fd.append('file', S.file, S.file.name);
+            fd.append('counted_at', ctVal);
             var re = root.querySelector('#diReimport');
             if (canReimport && re && re.checked) { fd.append('allow_reimport', '1'); }
             fetch(page, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
@@ -343,9 +356,10 @@
                     uploadBtn.disabled = !S.file;
                     if (!r.ok) { msg(r.error || 'The file could not be read.'); return; }
                     fileInput.value = '';
+                    if (countedEl) { countedEl.value = ''; }      // no carried-over time for the next file
                     chosen(null);
                     S.reach = 1;
-                    loadJob(r.job, 2);
+                    Promise.resolve(loadJob(r.job, 2)).then(function () { if (r.count_time_error) { msg(r.count_time_error); } });
                 });
         });
 
@@ -752,10 +766,10 @@
                 if (mode === 'set' && isQty) {
                     details.push('Only the quantity is ticked. Ticks you already set for cost, par level, pack size or category stay as they are.');
                     if (r.no_cost) { details.push(itemsWord(r.no_cost) + ' of these ' + (r.no_cost === 1 ? 'has' : 'have') + ' no cost in stock and no cost ticked, so ' + (r.no_cost === 1 ? 'it stays' : 'they stay') + ' out of the count until you tick Cost (or add a cost later).'); }
-                    if (r.to_zero) { details.push(itemsWord(r.to_zero) + ' ' + (r.to_zero === 1 ? 'has' : 'have') + ' 0 in your file: the opening count will set ' + (r.to_zero === 1 ? 'its' : 'their') + ' stock to 0 once approved.'); }
+                    if (r.to_zero) { details.push(itemsWord(r.to_zero) + ' ' + (r.to_zero === 1 ? 'has' : 'have') + ' 0 in your file: the ' + cT() + ' will set ' + (r.to_zero === 1 ? 'its' : 'their') + ' stock to 0 once approved.'); }
                 } else if (mode === 'set') {
                     details.push('Only the cost is ticked. Ticks you already set for quantity, par level, pack size or category stay as they are.');
-                    details.push('The cost per unit becomes the one written in your file (VAT not added or removed) when you press Import, before the opening count is approved. Recipe costs and the value of stock already on hand use it from then on. Every change is logged, old to new.');
+                    details.push('The cost per unit becomes the one written in your file (VAT not added or removed) when you press Import, before the ' + cT() + ' is approved. Recipe costs and the value of stock already on hand use it from then on. Every change is logged, old to new.');
                     if (r.from_zero) { details.push(itemsWord(r.from_zero) + ' of these ' + (r.from_zero === 1 ? 'has' : 'have') + ' no cost in stock yet (0).'); }
                     if (r.value && r.value.items_counted) {
                         details.push('Value of the counts in your file: ' + num(r.value.before, 2) + ' at the current costs → ' + num(r.value.after, 2) + ' at the file\'s costs (' + itemsWord(r.value.items_counted) + '; ' + num(r.value.down, 0) + ' cost' + (r.value.down === 1 ? '' : 's') + ' go down, ' + num(r.value.up, 0) + ' go up).');
@@ -768,12 +782,12 @@
                 (r.samples || []).forEach(function (x) { details.push(shortName(x)); });
                 if (r.n > (r.samples || []).length) { details.push('… and ' + num(r.n - (r.samples || []).length, 0) + ' more'); }
                 var msgSet = isQty
-                    ? 'This ticks ' + itemsWord(r.n) + '. ' + num(r.already, 0) + ' already ticked. Their stock from your file goes into the opening count, which a different manager must approve.'
+                    ? 'This ticks ' + itemsWord(r.n) + '. ' + num(r.already, 0) + ' already ticked. Their stock from your file goes into the ' + cT() + ', which a different manager must approve.'
                     : 'This uses the unit cost from your file for ' + itemsWord(r.n) + '. ' + num(r.already, 0) + ' already ticked.';
                 return ask({
                     title: mode === 'set' ? (isQty ? 'Tick the quantity for ' : 'Use the file\'s unit cost for ') + itemsWord(r.n) + '?' : 'Clear the ' + what + ' tick on ' + itemsWord(r.n) + '?',
                     message: mode === 'set' ? msgSet
-                        : 'This clears the ' + what + ' tick on ' + itemsWord(r.n) + '. ' + (isQty ? 'Their stock will NOT be in the opening count unless you tick it again.' : 'They keep the cost they have in stock now.'),
+                        : 'This clears the ' + what + ' tick on ' + itemsWord(r.n) + '. ' + (isQty ? 'Their stock will NOT be in the ' + cT() + ' unless you tick it again.' : 'They keep the cost they have in stock now.'),
                     details: details, confirmText: mode === 'set' ? (isQty ? 'Tick ' : 'Use the file cost for ') + itemsWord(r.n) : 'Clear ' + itemsWord(r.n), tone: 'warning'
                 }).then(function (yes) {
                     if (!yes) { return; }
@@ -796,7 +810,7 @@
             if (box.hidden) { return; }
             add(box, h('strong', null, 'Items already in stock: tick for all of them'));
             if (qt.n) {
-                box.appendChild(helpLine(itemsWord(qt.n) + ' already in your stock ' + (qt.n === 1 ? 'has' : 'have') + ' a different quantity in your file. Each one goes into the opening count only when its quantity is ticked. Ticked now: ' + num(qt.ticked, 0) + ' of ' + num(qt.n, 0) + '.'));
+                box.appendChild(helpLine(itemsWord(qt.n) + ' already in your stock ' + (qt.n === 1 ? 'has' : 'have') + ' a different quantity in your file (compared with its stock at the count time you gave). Each one goes into the ' + cT() + ' only when its quantity is ticked. Ticked now: ' + num(qt.ticked, 0) + ' of ' + num(qt.n, 0) + '.'));
                 var acts = h('div', 'di-actions');
                 var setB = h('button', 'btn-primary di-btn', 'Set quantity for every matched item (' + itemsWord(qt.n) + ')'); setB.type = 'button';
                 setB.disabled = !qt.to_tick;
@@ -831,7 +845,7 @@
             ['cost_not_ticked', function (n) { return itemsWord(n) + ' already in stock: your file has a cost, but it is not ticked (the item\'s current cost is 0)'; }],
             ['no_cost', function (n) { return itemsWord(n) + ' with no cost in your file (and none in stock)'; }],
             ['skipped', function (n) { return itemsWord(n) + ' in skipped rows'; }],
-            ['overlap', function (n) { return itemsWord(n) + ' already in another opening count that is not approved yet'; }],
+            ['overlap', function (n) { return itemsWord(n) + ' already in another stock count that is not finished yet'; }],
             ['same', function (n) { return itemsWord(n) + ' where your stock already shows exactly this quantity (nothing to count)'; }]
         ];
         function notCountedBlock(nc, qt, ct) {
@@ -839,7 +853,7 @@
             if (!total) { return null; }
             var box = h('div', 'di-continue di-notcounted');
             box.setAttribute('role', 'status');
-            add(box, h('p', 'di-warn', itemsWord(total) + ' with stock will NOT be in the opening count.'));
+            add(box, h('p', 'di-warn', itemsWord(total) + ' with stock will NOT be in the ' + cT() + '.'));
             NOT_COUNTED.forEach(function (rc) {
                 var b = by[rc[0]];
                 if (!b || !b.n) { return; }
@@ -1472,7 +1486,7 @@
         }
         function absorb(r) {
             // r = a page reply (lite) or an answer/bulk/fields reply's summary (overview + page)
-            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job', 'skipped_by_code', 'skipped_by_you', 'heal_counts', 'heal_total', 'heals_undone', 'handled', 'value_check', 'case_auto'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
+            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job', 'skipped_by_code', 'skipped_by_you', 'heal_counts', 'heal_total', 'heals_undone', 'handled', 'value_check', 'case_auto', 'count_time'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
             var pg = r.page;
             if (!pg) { return; }
             if (pg.facets) { S.facets = pg.facets; } else if (S.page && S.page.facets) { pg.facets = S.page.facets; }
@@ -1851,7 +1865,7 @@
             ['Item', 'The stock item name, exactly as written in your file.'],
             ['Category', 'The heading the item sits under, or the sheet name if there was none.'],
             ['Unit', 'How the item is counted (bottle, kg...). Taken from the sheet or the answer you gave.'],
-            ['Opening stock', 'The quantity in your file. It goes into an opening stock count that must be approved.'],
+            ['Counted stock', 'The quantity in your file, counted at the time you gave. It goes into a stock count that a manager must approve.'],
             ['Cost per unit', 'The price from your file for one unit, taken as written: VAT is not added or removed. Blank means no price was given.'],
             ['Par level', 'The most you normally hold (the maximum level from your file).'],
             ['What happens', 'Whether a new ingredient is created or an existing one is matched.'],
@@ -1923,7 +1937,7 @@
             var t1 = cell('Item'); add(t1, itemNameEl(e.r.name || '(no name)'), src(e.r.ref));
             var t2 = cell('Category', 'di-mute'); t2.textContent = '—';
             var t3 = cell('Unit', 'di-mute'); t3.textContent = '—';
-            var t4 = cell('Opening stock', 'di-mute'); t4.textContent = '—';
+            var t4 = cell('Counted stock', 'di-mute'); t4.textContent = '—';
             var t5 = cell('Cost per unit', 'di-mute'); t5.textContent = '—';
             var t6 = cell('Par level', 'di-mute'); t6.textContent = '—';
             var t7 = cell('What happens'); t7.textContent = e.r.reason || 'Not imported.';
@@ -1952,7 +1966,7 @@
             add(t2, h('span', null, it.category || '—'), h('div', 'di-capline'), it.category_source ? src(it.category_source) : h('span', 'di-small', it.category_how === 'sheet-name' ? 'from the sheet name' : ''));
             var t3 = cell('Unit');
             add(t3, h('span', null, it.unit || '—'), h('div', 'di-capline'), it.unit_source ? src(it.unit_source) : (it.unit ? h('span', 'di-small', it.unit_how || '') : h('span', 'di-small', 'not in the file')));
-            var t4 = cell('Opening stock');
+            var t4 = cell('Counted stock');
             add(t4, it.balance === null || it.balance === undefined ? h('span', null, '—') : (it.count_n ? qtyEl(it.balance, it.count_n, it.unit) : h('span', null, num(it.balance))));
             if (it.balance_sources && it.balance_sources.length) { t4.appendChild(h('div', 'di-capline')); it.balance_sources.forEach(function (x) { t4.appendChild(src(x)); t4.appendChild(document.createTextNode(' ')); }); }
             if (it.qty_how) { t4.appendChild(h('div', 'di-small', it.qty_how)); }      // a count in shots / tots / glasses, turned into the stock unit
@@ -1974,7 +1988,7 @@
             } else {
                 t7.appendChild(h('span', null, e.status === 'skipped' ? 'Not imported.' : 'New ingredient will be created.'));
             }
-            if (e.status !== 'skipped') { t7.appendChild(h('div', 'di-small', it.in_count ? 'Its stock goes into the opening count.' : (it.balance ? 'Stock is NOT put in the opening count.' : ''))); }
+            if (e.status !== 'skipped') { t7.appendChild(h('div', 'di-small', it.in_count ? 'Its stock goes into the ' + cT() + '.' : (it.balance ? 'Stock is NOT put in the ' + cT() + '.' : ''))); }
             var t8 = cell('Status');
             t8.appendChild(pill(e.status));
             (it.warnings || []).forEach(function (w) { t8.appendChild(h('div', 'di-warnline', w)); });
@@ -1996,7 +2010,9 @@
                 var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = k; cb.checked = (it.ticked || []).indexOf(k) >= 0;
                 boxes.push(cb);
                 var fmt = function (v) { return typeof v === 'number' ? (k === 'quantity' && it.count_n ? qtyWords(v, it.count_n, it.unit).text : num(v)) : (v === null || v === undefined || v === '' ? 'blank' : String(v)); };
-                add(lab, cb, h('span', 'di-opt-t', (DIFF_LABEL[k] || k) + ': keep ' + fmt(d[0]) + ' (now) → change to ' + fmt(d[1]) + ' (your file)'));
+                add(lab, cb, h('span', 'di-opt-t', k === 'quantity'
+                    ? 'Stock quantity: ' + fmt(d[0]) + ' at the count time you gave → counted ' + fmt(d[1]) + ' (your file)'
+                    : (DIFF_LABEL[k] || k) + ': keep ' + fmt(d[0]) + ' (now) → change to ' + fmt(d[1]) + ' (your file)'));
                 box.appendChild(lab);
                 if (k === 'cost' && it.cost_stock_warning) { box.appendChild(h('p', 'di-warn', it.cost_stock_warning)); }
                 cb.addEventListener('change', function () {
@@ -2034,7 +2050,7 @@
             if (!df || !df.kinds || !df.labels) { return null; }
             var box = h('div', 'di-what di-diff');
             box.appendChild(h('h4', 'di-diff-h', 'Differences from the uploaded file'));
-            box.appendChild(helpLine('Where what was imported is not exactly what the file says, and why. The manager who approves the opening count sees the same list on the count. Kept as it was at the import: later changes to items do not change it.'));
+            box.appendChild(helpLine('Where what was imported is not exactly what the file says, and why. The manager who approves the ' + cT() + ' sees the same list on the count. Kept as it was at the import: later changes to items do not change it.'));
             var total = Number(df.total || 0);
             if (!total) {
                 box.appendChild(h('p', 'di-small', 'None: every item was imported exactly as the file says.'));
@@ -2057,11 +2073,11 @@
                 box.appendChild(h('p', 'di-small', 'Value column (' + (v.headers || []).join(', ') + ') in your file: ' + num(v.file_total, 2) + '. Count × unit cost imported for the same ' + rowsN(v.compared) + ': ' + num(v.imported_total, 2)
                     + (v.differ ? ' (' + rowsN(v.differ) + ' differ).' : '.')));
             }
-            if (df.count_lines) { box.appendChild(h('p', 'di-small', 'The opening count holds ' + num(df.count_lines, 0) + ' line' + (df.count_lines === 1 ? '' : 's') + ' worth ' + num(df.count_value || 0, 2) + ' (count × unit cost).')); }
+            if (df.count_lines) { box.appendChild(h('p', 'di-small', 'The ' + cT() + ' holds ' + num(df.count_lines, 0) + ' line' + (df.count_lines === 1 ? '' : 's') + ' worth ' + num(df.count_value || 0, 2) + ' (count × unit cost).')); }
             if (Number(df.stored || 0) < total) { box.appendChild(h('p', 'di-small', 'Only the first ' + num(df.stored, 0) + ' of ' + num(total, 0) + ' differences are listed; the counts above are exact.')); }
             var nav = h('div', 'di-actions');
             if (countId) {
-                var a = h('a', 'btn-secondary di-btn', 'See the list on the opening count');
+                var a = h('a', 'btn-secondary di-btn', 'See the list on the ' + cT());
                 a.href = 'stock-count.php?id=' + encodeURIComponent(countId) + '#scDiff';
                 nav.appendChild(a);
             }
@@ -2101,7 +2117,7 @@
                 box.appendChild(helpLine('Quantity = "' + (sh.qty_heads || []).join('" + "') + '", Unit Cost = "' + (sh.price_head || '') + '" (divided by the pack size where you said a price is per case). The sheet total adds Quantity × Unit Cost over the ' + rowsN(g.compared) + ' that have all three filled in; the column\'s own total is ' + money(g.column_total) + '. Differences under 0.5% (or 0.5) are rounding and not counted. This is only a warning: it does not stop the import.'));
             });
             if (vc.missing_n) {
-                box.appendChild(h('p', 'di-warn', num(vc.missing_n, 0) + ' item' + (vc.missing_n === 1 ? ' has' : 's have') + ' stock but no unit cost, so ' + (vc.missing_n === 1 ? 'it is' : 'they are') + ' not in the opening count' + ((vc.missing_sample || []).length ? ': ' + vc.missing_sample.join(', ') + (vc.missing_n > vc.missing_sample.length ? ' and ' + num(vc.missing_n - vc.missing_sample.length, 0) + ' more' : '') : '') + '.'));
+                box.appendChild(h('p', 'di-warn', num(vc.missing_n, 0) + ' item' + (vc.missing_n === 1 ? ' has' : 's have') + ' stock but no unit cost, so ' + (vc.missing_n === 1 ? 'it is' : 'they are') + ' not in the ' + cT() + ((vc.missing_sample || []).length ? ': ' + vc.missing_sample.join(', ') + (vc.missing_n > vc.missing_sample.length ? ' and ' + num(vc.missing_n - vc.missing_sample.length, 0) + ' more' : '') : '') + '.'));
             }
             var dl = h('div', 'di-actions'); dl.appendChild(stockCheckLink(S.job)); box.appendChild(dl);
             box.appendChild(helpLine('The download lists every row so the manager can explain them one by one (largest difference first), plus the items to price.'));
@@ -2176,7 +2192,7 @@
                 var words = (m.words && m.words.length ? m.words : ['shots']).join(' and ');
                 var eg = list[0] ? ' (e.g. ' + list[0].name + ': ' + list[0].text + ')' : '';
                 box.appendChild(h('p', 'di-small', itemsWord(n) + (done ? (n === 1 ? ' is' : ' are') + ' now counted in ' : ' will be counted in ') + words + ' from now on' + eg
-                    + '. Saved on the item as its count measure, so the Stock screens show whole units plus the rest in that measure (for example "2 bottles + 7 shots"). Costs and this opening count do not change.'));
+                    + '. Saved on the item as its count measure, so the Stock screens show whole units plus the rest in that measure (for example "2 bottles + 7 shots"). Costs and this ' + cT() + ' do not change.'));
                 var d = h('details', 'di-details');
                 d.appendChild(h('summary', null, 'Show the ' + itemsWord(n) + ' and their count measure'));
                 var ul = h('ul', 'di-nonitems');
@@ -2208,28 +2224,30 @@
             S.plan = plan;
             plan.set(0, toAnswer ? num(toAnswer, 0) + ' row' + (toAnswer === 1 ? '' : 's') + ' still need an answer' : 'Everything is answered', !toAnswer);
             plan.set(1, 'Checking…', false);
-            plan.set(2, s.can_confirm ? 'Ready' : 'Not yet: finish step 3 first', false);
+            plan.set(2, s.can_confirm ? 'Ready' : (s.count_time && s.count_time.problem ? 'Not yet: check when the stock was counted' : 'Not yet: finish step 3 first'), false);
+            countTimeBox(p);
             var cards = h('div', 'di-cards');
             add(cards,
                 card('New ingredients', num(cf.creates || 0, 0), 'Items not in your stock yet. They will be created.', 'good'),
-                card('Existing items updated', num(cf.updates || 0, 0), 'Existing items where you ticked cost, par level, pack size or category to change. A ticked quantity alone only adds a line to the opening count.'),
-                card('Existing items left as they are', num(cf.kept || 0, 0), 'Matched to an ingredient already in stock, with no field ticked to change (a ticked quantity still goes into the opening count).'),
-                card('Lines in the opening count', num(cf.in_count || 0, 0), 'Items with stock and a price. They go into one opening count that another manager must approve.'),
+                card('Existing items updated', num(cf.updates || 0, 0), 'Existing items where you ticked cost, par level, pack size or category to change. A ticked quantity alone only adds a line to the ' + cT() + '.'),
+                card('Existing items left as they are', num(cf.kept || 0, 0), 'Matched to an ingredient already in stock, with no field ticked to change (a ticked quantity still goes into the ' + cT() + ').'),
+                card('Lines in the ' + cT(), num(cf.in_count || 0, 0), 'Items with stock and a price. They go into one ' + cT() + ' that another manager must approve.'),
                 card('Rows left out', num(c.skipped || 0, 0), 'Rows you skipped, or left out because of an answer. They are not imported; the list is below.'),
                 card('Fixed for you', num(s.heal_total || 0, 0), 'Small spelling or format fixes made while reading the file, each with the cell it came from (list below, with Undo).'),
                 s.case_auto ? card('Read as case prices', num(s.case_auto, 0), 'Prices this hotel\'s own data shows are for a whole case (the item\'s own pack size, with its cost in stock, deliveries or menu selling price). The cost is the price divided by the pack size. Each question in step 3 says why and can be changed.') : null,
                 card('Still need an answer', num(toAnswer, 0), 'Questions or blocked rows to sort out before you can confirm.', toAnswer ? 'bad' : 'good'));
             var fpN = foldPanel(p, 's4-numbers', 'The numbers for the whole file', { badge: toAnswer ? 'required' : 'done', open: true,
-                summary: num(cf.creates || 0, 0) + ' new · ' + num(cf.updates || 0, 0) + ' updated · ' + num(cf.in_count || 0, 0) + ' in the opening count · ' + num(toAnswer, 0) + ' still need an answer' });
+                summary: num(cf.creates || 0, 0) + ' new · ' + num(cf.updates || 0, 0) + ' updated · ' + num(cf.in_count || 0, 0) + ' in the ' + cT() + ' · ' + num(toAnswer, 0) + ' still need an answer' });
             fpN.body.appendChild(cards);
             var mBox = measureBlock(cf.measures, cf.measures_not, false);
             if (mBox) { fpN.body.appendChild(mBox); }
             var what = h('div', 'di-what');
             var ul = h('ul', 'di-facts');
-            var menuLi = h('li', null, 'Nothing is deleted and recipes are not touched. Stock quantities only change once the opening count is approved.');
+            var menuLi = h('li', null, 'Nothing is deleted and recipes are not touched. Stock quantities only change once the ' + cT() + ' is approved.');
             [
                 'New ingredients are created and the changes you ticked are made to existing ones.',
-                'The stock quantities are filed as an opening stock count. They are NOT added to your stock yet: a different manager must approve that count on the Stock Count page first.',
+                'The stock quantities are filed as ' + aCT() + ' dated at the count time you gave. They are NOT added to your stock yet: a different manager must approve that count on the Stock Count page first.'
+                    + (isRegular() ? ' If it finds less stock than expected, the count is saved as a draft: give each shortage a reason on the Stock Count page, then submit it.' : ''),
                 menuLi,
                 'The copy of your file on the server is deleted afterwards.'
             ].forEach(function (t) { ul.appendChild(typeof t === 'string' ? h('li', null, t) : t); });
@@ -2241,10 +2259,10 @@
             menuSummary(p, menuLi);
             var cws = cf.cost_with_stock || 0, cwsNames = cf.cost_with_stock_names || [];
             if (cws) {
-                p.appendChild(h('p', 'di-warn', num(cws, 0) + ' cost change' + (cws === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + cwsNames.join(', ') + (cws > cwsNames.length ? ' and ' + num(cws - cwsNames.length, 0) + ' more' : '') + '.'));
+                p.appendChild(h('p', 'di-warn', num(cws, 0) + ' cost change' + (cws === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the ' + cT() + ' is approved: ' + cwsNames.join(', ') + (cws > cwsNames.length ? ' and ' + num(cws - cwsNames.length, 0) + ' more' : '') + '.'));
             }
             fixedSections(p);
-            // right before the Import button: the stock that will NOT be in the opening count, by its true reason (worked out on the server)
+            // right before the Import button: the stock that will NOT be in the count, by its true reason (worked out on the server)
             var vcBox4 = valueCheckBlock();
             if (vcBox4) {
                 var fpV4 = foldPanel(p, 's4-values', 'Value check', { badge: 'optional', open: false, summary: valueSummary(s.value_check) });
@@ -2253,12 +2271,12 @@
             var ncBox = notCountedBlock(cf.not_counted, cf.qty_tick, cf.cost_tick);
             if (ncBox) {
                 var ncTotal = (cf.not_counted && cf.not_counted.total) || 0;
-                var fpNc = foldPanel(p, 's4-notcounted', 'Stock not in the opening count', { badge: 'optional', open: false, warn: true,
-                    summary: itemsWord(ncTotal) + ' with stock will NOT be in the opening count. Open to see why, and to fix it.' });
+                var fpNc = foldPanel(p, 's4-notcounted', 'Stock not in the ' + cT(), { badge: 'optional', open: false, warn: true,
+                    summary: itemsWord(ncTotal) + ' with stock will NOT be in the ' + cT() + '. Open to see why, and to fix it.' });
                 fpNc.body.appendChild(ncBox);
             }
             var fpW = foldPanel(p, 's4-what', 'What happens when you press Confirm and import', { badge: 'optional', open: false,
-                summary: 'Nothing is deleted. Stock quantities are filed as an opening count that another manager approves.' });
+                summary: 'Nothing is deleted. Stock quantities are filed as ' + aCT() + ' that another manager approves.' });
             fpW.body.appendChild(what);
             var why = h('p', 'di-why');
             var btn = h('button', 'btn-primary di-btn di-confirm');
@@ -2266,13 +2284,14 @@
             add(btn, h('i', 'fas fa-check', null), ' Confirm and import');
             if (!s.can_confirm) {
                 btn.disabled = true;
-                why.textContent = (s.why_not || 'Some questions still need an answer.') + ' (' + toAnswer + ' row' + (toAnswer === 1 ? '' : 's') + ' still to sort out.)';
+                why.textContent = (s.why_not || 'Some questions still need an answer.') + (toAnswer > 0 ? ' (' + toAnswer + ' row' + (toAnswer === 1 ? '' : 's') + ' still to sort out.)' : '');
                 if (toAnswer > 0) { why.textContent += ' Use "Continue without them" to leave those rows out and import the rest.'; }
             } else { why.textContent = 'Everything is answered. You can confirm.'; why.classList.add('is-ok'); }
             btn.addEventListener('click', function () {
                 if (btn.disabled || S.busy) { return; }
                 S.busy = true; btn.disabled = true; btn.textContent = 'Importing…';
-                post('confirm', { job: S.job, confirm: '1' }).then(function (r) {
+                // the kind of count this screen showed: the server refuses when it changed meanwhile ("review again")
+                post('confirm', { job: S.job, confirm: '1', count_kind: (s.count_time && s.count_time.kind) || '' }).then(function (r) {
                     S.busy = false;
                     if (!r.ok) {
                         msg(r.error || 'Nothing was imported.');
@@ -2295,6 +2314,37 @@
                 nav.appendChild(cont);
             }
             nav.appendChild(btn);
+        }
+        /** Step 4: "When was this counted?" (given with the file in step 1, changed here). Each quantity is compared with the stock at that time. */
+        function countTimeBox(p) {
+            var ct = (S.sum && S.sum.count_time) || {};
+            var box = h('div', 'di-when');
+            var lab = h('label', 'di-when-l', 'When was this counted? ');
+            lab.setAttribute('for', 'diCountedAt4');
+            lab.appendChild(helpDot('The date and time the stock in this file was physically counted. Each quantity in the file is compared with the stock at that time, so sales, deliveries and wastage recorded after it are kept. The ' + cT() + ' is dated at that time.'));
+            box.appendChild(lab);
+            var row = h('div', 'di-when-row');
+            var inp = document.createElement('input');
+            inp.type = 'datetime-local'; inp.id = 'diCountedAt4'; inp.className = 'di-when-in'; inp.required = true;
+            if (ct.max) { inp.max = ct.max; }
+            inp.value = ct.input || '';
+            var save = h('button', 'btn-secondary di-btn', 'Save the count time'); save.type = 'button';
+            add(row, inp, save);
+            box.appendChild(row);
+            box.appendChild(helpLine(ct.shown ? 'Counted at ' + ct.shown + '. This import files ' + aCT() + ' dated at that time.' : 'Not given yet. It is required before you can import.'));
+            if (ct.problem) { box.appendChild(h('p', 'di-warn', ct.problem)); }
+            save.addEventListener('click', function () {
+                if (S.busy) { return; }
+                if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(inp.value || ''))) { msg('Enter when the stock in this file was counted (date and time).'); inp.focus(); return; }
+                S.busy = true; save.disabled = true;
+                post('counted_at', { job: S.job, counted_at: inp.value }).then(function (r) {
+                    S.busy = false; save.disabled = false;
+                    if (!r.ok) { msg(r.error || 'The count time was not saved.'); return; }
+                    msg('Count time saved. The quantities are now compared with the stock at that time.', 'ok');
+                    refresh();
+                });
+            });
+            p.appendChild(box);
         }
         /** The small "?" beside a heading or a status (the shared admin help dot; the text is put in an attribute, never as markup). */
         function helpDot(text) { var i = h('i', 'help', '?'); i.setAttribute('data-tip', String(text).replace(/\|/g, '/')); i.setAttribute('aria-label', text); return i; }
@@ -2326,8 +2376,8 @@
                     : 'Nothing is ticked, so nothing goes on the menu. ' + num(c.listed || 0, 0) + ' item' + (c.listed === 1 ? '' : 's') + ' could.';
                 box.classList.toggle('is-warn', !!c.below);
                 if (planRef) { planRef.set(1, n ? num(n, 0) + ' on the menu' : 'Nothing on the menu', true); }
-                menuLi.textContent = n ? 'Nothing is deleted. ' + num(n, 0) + ' ticked item' + (n === 1 ? '' : 's') + ' go' + (n === 1 ? 'es' : '') + ' on the menu and the till (' + num(c.add || 0, 0) + ' new, ' + num(c.update || 0, 0) + ' price change' + (c.update === 1 ? '' : 's') + '); a new item gets a stock link of one sale, an existing stock link is never replaced. Other recipes are not touched. Stock quantities only change once the opening count is approved.'
-                    : 'Nothing is deleted and recipes are not touched. Stock quantities only change once the opening count is approved.';
+                menuLi.textContent = n ? 'Nothing is deleted. ' + num(n, 0) + ' ticked item' + (n === 1 ? '' : 's') + ' go' + (n === 1 ? 'es' : '') + ' on the menu and the till (' + num(c.add || 0, 0) + ' new, ' + num(c.update || 0, 0) + ' price change' + (c.update === 1 ? '' : 's') + '); a new item gets a stock link of one sale, an existing stock link is never replaced. Other recipes are not touched. Stock quantities only change once the ' + cT() + ' is approved.'
+                    : 'Nothing is deleted and recipes are not touched. Stock quantities only change once the ' + cT() + ' is approved.';
             });
         }
         /**
@@ -2337,7 +2387,7 @@
          */
         var MENU_HEADS = [
             ['item', 'Item', 'The item name from your file, with the cell it came from, and the menu (Drinks or Food) and category it goes to. The box in front selects it, to change several at once.'],
-            ['sold', 'Sold as', 'One sale: the "served by" cell of your file (a shot, a glass, a bottle), or your own choice; used for the menu only, your opening stock count still reads your file. For a drink sold by the shot or glass, under it: how many ml one shot or glass holds and how many ml one bottle, carton or casket holds, so the cost of one sale can be worked out. A grey word says where a size in use comes from (file, group, list); type to change it for this item.'],
+            ['sold', 'Sold as', 'One sale: the "served by" cell of your file (a shot, a glass, a bottle), or your own choice; used for the menu only, your stock count still reads your file. For a drink sold by the shot or glass, under it: how many ml one shot or glass holds and how many ml one bottle, carton or casket holds, so the cost of one sale can be worked out. A grey word says where a size in use comes from (file, group, list); type to change it for this item.'],
             ['cost', 'Cost of one', 'What one sale costs you: the item\'s cost per stock unit from your file (or stock) times the share of it one sale uses.', true],
             ['price', 'Selling price', 'The menu price of one sale, VAT included, from your file\'s selling price column. Type to change it, or to add one when the file has none. It changes the menu price only, never the stock cost.', true],
             ['profit', 'Profit', 'Selling price minus cost of one (cost to 2 decimals), per sale, VAT included in the price.', true],
@@ -2353,7 +2403,7 @@
             var last = null;        // the last overview from the server
             var sec = h('div', 'di-menu');
             add(sec, helpLine('Tick what goes on the menu and the till. Prices include VAT. Nothing goes on the menu unless it is ticked.'),
-                moreFold('Every item of your file with a selling price (or sold by a shot, glass or bottle) is listed, grouped by the category headings of your file. Each item needs a menu (Drinks or Food), a menu category and a price; a drink sold by the shot or glass also needs its sizes so the cost of one sale is known. Drinks or Food is only filled in when your file says it for certain (a heading like "Beers" or "Snacks", "Shot" or "Glass" in the served-by column, a kilo unit, or the item already on a menu); otherwise you choose once for the group. A suggestion, when shown, is only used when you press "Use suggestion". The selling price changes the menu price only: stock costs and the opening count never change here.'));
+                moreFold('Every item of your file with a selling price (or sold by a shot, glass or bottle) is listed, grouped by the category headings of your file. Each item needs a menu (Drinks or Food), a menu category and a price; a drink sold by the shot or glass also needs its sizes so the cost of one sale is known. Drinks or Food is only filled in when your file says it for certain (a heading like "Beers" or "Snacks", "Shot" or "Glass" in the served-by column, a kilo unit, or the item already on a menu); otherwise you choose once for the group. A suggestion, when shown, is only used when you press "Use suggestion". The selling price changes the menu price only: stock costs and the stock count never change here.'));
             var top = h('div', 'di-menu-top');
             var live = h('strong', 'di-menu-live'); live.setAttribute('role', 'status'); live.setAttribute('aria-live', 'polite');
             var allBtn = h('button', 'btn-primary di-btn', 'Put all on the menu'); allBtn.type = 'button';
@@ -2962,7 +3012,7 @@
                 card('Rows skipped', num(r.skipped_rows, 0), 'Rows that were skipped or are not items.'),
                 card('Left out by you', num(r.skipped_by_you || 0, 0), 'Blocked or unanswered rows you chose to leave out. The uploaded file is deleted now, so only the copy you downloaded can be fixed and imported later.'),
                 card('Fixed for you', num(r.fixed_for_you || 0, 0), 'Small spelling or format fixes made while reading the file.'),
-                card('Opening count lines', num(r.count_lines, 0), 'Stock quantities filed for approval. They are not in stock yet.'),
+                card(capCT() + ' lines', num(r.count_lines, 0), r.count_status === 'draft' ? 'Stock quantities filed as a draft: give each shortage a reason, then submit it for approval. They are not in stock yet.' : 'Stock quantities filed for approval. They are not in stock yet.'),
                 card('Expiry batches', num(r.expiry_batches, 0), 'Dated batches filed with the count, so expiry is tracked once approved.'),
                 (r.drinks_added || r.drinks_updated) ? card('Drinks added to the menu', num(r.drinks_added || 0, 0), 'Ticked drinks now on the drinks menu and the till at the selling price from step 3 (VAT included).', 'good') : null,
                 (r.drinks_added || r.drinks_updated) ? card('Drink prices changed', num(r.drinks_updated || 0, 0), 'Drinks already on the menu whose price you ticked to change. Each change is in System Logs (old and new price).') : null,
@@ -2978,6 +3028,7 @@
                 if (rmBox) { p.appendChild(rmBox); }
             } else if (r.measures_saved) { p.appendChild(h('p', 'di-small', num(r.measures_saved, 0) + ' count measure' + (r.measures_saved === 1 ? ' was' : 's were') + ' saved on stock items. Each change is in System Logs.')); }
             if (r.drinks_linked) { p.appendChild(h('p', 'di-small', num(r.drinks_linked, 0) + ' drink' + (r.drinks_linked === 1 ? '' : 's') + ' got a stock link: each sale takes one measure off stock.')); }
+            if (r.counted_at) { p.appendChild(h('p', 'di-small', 'Counted at ' + String(r.counted_at).substring(0, 16) + ': the ' + cT() + ' is dated at that time and compared with the stock then.')); }
             if (r.next_step) { p.appendChild(h('p', 'di-note', r.next_step)); }
             if (r.learned) { p.appendChild(h('p', 'di-small', num(r.learned, 0) + ' unit or category choice' + (r.learned === 1 ? '' : 's') + ' you confirmed will be remembered and suggested next time (with "Remembered from your earlier import" as the reason).')); }
             var nameList = function (names, text) {
@@ -2998,11 +3049,11 @@
                 // older imports kept one mixed list: say only what is true of every name on it
                 nameList(r.stock_not_counted_no_cost, function (n) { return itemsWord(n) + ' had stock in the file that was left out of the count (no price, a quantity that was not ticked, or stock that already matched the file)'; });
             }
-            if (r.left_out_overlap) { p.appendChild(h('p', 'di-small', num(r.left_out_overlap, 0) + ' stock line(s) were left out of the count because those ingredients are already in another opening count that is waiting for approval.')); }
+            if (r.left_out_overlap) { p.appendChild(h('p', 'di-small', num(r.left_out_overlap, 0) + ' stock line(s) were left out of the count because those ingredients are already in another stock count that is not finished yet.')); }
             var nav = h('div', 'di-actions di-actions--grid');
             /* EXPORT-BUTTON-SPOT: Part B adds its one export button to this row (Result step). Part A (Step 3 review) leaves this row alone. */
             var xb = h('button', 'btn-secondary di-btn', 'Download the updated stock workbook'); xb.type = 'button';
-            xb.title = 'An Excel workbook of the stock as it is right now, one tab per category. Stock from this import appears once its opening count is approved.';
+            xb.title = 'An Excel workbook of the stock as it is right now, one tab per category. Stock from this import appears once its ' + cT() + ' is approved.';
             xb.addEventListener('click', function () {
                 var f = document.createElement('form'); f.method = 'post'; f.action = page;
                 [['action', 'export'], ['scope', 'all'], ['csrf_token', csrf]].forEach(function (kv) { var i = document.createElement('input'); i.type = 'hidden'; i.name = kv[0]; i.value = kv[1]; f.appendChild(i); });
@@ -3015,7 +3066,7 @@
                 p.appendChild(h('p', 'di-small', (sc.differ ? 'The sheet\'s value column disagreed with Quantity × Unit Cost on ' + rowsN(sc.differ) + '. ' : '') + (sc.missing ? num(sc.missing, 0) + ' item' + (sc.missing === 1 ? '' : 's') + ' had stock but no unit cost. ' : '') + 'The stock check workbook lists them for the manager.'));
             }
             if (r.opening_count_id) {
-                var a = h('a', 'btn-primary di-btn', 'Open the opening count' + (r.opening_count_ref ? ' (' + r.opening_count_ref + ')' : ''));
+                var a = h('a', 'btn-primary di-btn', 'Open the ' + cT() + (r.opening_count_ref ? ' (' + r.opening_count_ref + ')' : ''));
                 a.href = 'stock-count.php?id=' + encodeURIComponent(r.opening_count_id);
                 nav.appendChild(a);
             }
@@ -3025,14 +3076,14 @@
                 var pp = h('a', 'btn-secondary di-btn', 'See projected profit'); pp.href = 'stock-reports.php?tab=profit';
                 pp.title = 'Stock Reports, Projected profit: stock on hand times the menu price, minus what the stock cost.';
                 nav.appendChild(pp);
-                p.appendChild(h('p', 'di-small', 'See projected profit opens Stock Reports > Projected profit for every drink on the menu. It uses stock on hand, so stock from this import counts there once its opening count is approved.'));
+                p.appendChild(h('p', 'di-small', 'See projected profit opens Stock Reports > Projected profit for every drink on the menu. It uses stock on hand, so stock from this import counts there once its ' + cT() + ' is approved.'));
             }
             var b = h('a', 'btn-secondary di-btn', 'Open ' + stockPage); b.href = 'stock-ingredients.php';
             var again = h('button', 'btn-secondary di-btn', 'Import another file'); again.type = 'button';
             again.addEventListener('click', function () { S.job = 0; S.sum = null; S.result = null; S.reach = 1; setUrl(0); showStep(1); });
             add(nav, b, again);
             p.appendChild(nav);
-            p.appendChild(helpLine('The workbook button gives you an Excel file of your stock as it is right now, one tab per category. Stock from this import shows in it once its opening count is approved.'));
+            p.appendChild(helpLine('The workbook button gives you an Excel file of your stock as it is right now, one tab per category. Stock from this import shows in it once its ' + cT() + ' is approved.'));
         }
 
         // ---------- start ----------

@@ -54,6 +54,7 @@ function zzx_render_count(string $root, int $countId, array $who): string
 try {
     require_once $root . '/admin/includes/permissions.php';
     require_once $root . '/includes/import/commit-stock.php';
+    require_once $root . '/scripts/tests/import_count_time_helper.php';   // "When was this counted?" for the commits (2026-11-25)
     $n = function (string $s) use ($run) { return 'ZZX ' . $run . ' ' . $s; };
     $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', '1', 'import') ON DUPLICATE KEY UPDATE setting_value = '1'")->execute();
     $admin = (int)($_SESSION['admin_user_id'] ?? 0);
@@ -129,7 +130,7 @@ try {
     $ck('review: everything answered, Broken skipped, the import can be confirmed', !empty($sum['can_confirm']), json_encode([$answered, $sum['why_not'] ?? null, $menuSteps, $dry['error'] ?? null]));
 
     // ---- the commit ----
-    $c = import_commit_stock($pdo, $jid, $admin);
+    $c = import_test_commit($pdo, $jid, $admin);
     $ck('commit: ok, opening count filed', !empty($c['ok']) && !empty($c['result']['opening_count_id']), json_encode([$c['error'] ?? null, $c['violations'] ?? null]));
     $cid = (int)($c['result']['opening_count_id'] ?? 0);
     $job = import_job_get($pdo, $jid);

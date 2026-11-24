@@ -853,7 +853,7 @@ if (!function_exists('import_job_skip')) {
         return import_cont_field_targets($items, 'quantity');
     }
 
-    /** Ingredient ids (of $ids) that already sit in another unfinished opening count (draft or submitted). Read only; [] when the tables are missing. */
+    /** Ingredient ids (of $ids) that already sit in another unfinished stock count, opening or regular (draft or submitted). Read only; [] when the tables are missing. */
     function import_cont_open_opening_ids(PDO $pdo, array $ids): array
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
@@ -865,7 +865,7 @@ if (!function_exists('import_job_skip')) {
             foreach (array_chunk($ids, 400) as $chunk) {
                 $ph = implode(',', array_fill(0, count($chunk), '?'));
                 $st = $pdo->prepare("SELECT DISTINCT l.ingredient_id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
-                                     WHERE c.is_opening = 1 AND c.status IN ('draft','submitted') AND l.ingredient_id IN ($ph)");
+                                     WHERE c.status IN ('draft','submitted') AND l.ingredient_id IN ($ph)");     // the same rule rh_ssi_apply applies under its lock
                 $st->execute($chunk);
                 foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
                     $out[(int)$id] = true;

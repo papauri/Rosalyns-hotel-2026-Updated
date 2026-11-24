@@ -54,6 +54,7 @@ if (!function_exists('import_commit_stock')) {
         }
         return import_diff_build([
             'file' => (string)$job['original_name'], 'job_id' => $jobId, 'count_id' => $ap['count_id'] ?? null, 'count_ref' => (string)($ap['count_ref'] ?? ''),
+            'term' => import_count_term(empty($ap['is_opening']) ? 'regular' : 'opening'),
             'res' => (array)$v['res'], 'planned' => $planned, 'lines' => $lines,
             'vc_col' => (array)($v['vc_col'] ?? []), 'vc_fin' => (array)($vcFin ?? []),
             'menu_rows' => $menuRows, 'measures_list' => $measureList, 'measures_not' => $measureNot,
@@ -230,14 +231,38 @@ if (!function_exists('import_commit_stock')) {
                 $pdo->rollBack();
                 return import_commit_fail('Drinks are ticked for the menu, and your account cannot change the menu (it needs the Menu permission). Untick them, or ask a manager who has it. Nothing was imported.');
             }
-            $ap = rh_ssi_apply($pdo, $plan, $userId);
+            // When the stock in the file was counted (T) and which kind of count it files, both decided again here, inside the locks:
+            // T must still be usable, and the kind must be the one the review showed (an opening count approved meanwhile turns this
+            // import into a regular count, with other rules for shortages: the person reviews again).
+            $countAt = import_count_time_get($answersNow);
+            $tProblem = import_count_time_problem($pdo, $countAt, [], true);
+            if ($tProblem !== '') {
+                $pdo->rollBack();
+                return import_commit_fail($tProblem);
+            }
+            $kind = import_count_kind($pdo, true);
+            if (isset($opts['expect_kind']) && (string)$opts['expect_kind'] !== $kind) {
+                $pdo->rollBack();
+                return import_commit_fail('The kind of count this import files changed while you were reviewing (it is now a ' . import_count_term($kind)
+                    . ', with its own rules for shortages). Nothing was imported: review again, then press Import.');
+            }
+            $term = import_count_term($kind);
+            $ap = rh_ssi_apply($pdo, $plan, $userId, ['counted_at' => $countAt, 'kind' => $kind,
+                'after_lock' => function (array $ids) use ($pdo, $countAt) {
+                    // the item checks (a later approved count, a later unit change) on the locked rows
+                    $p = import_count_time_problem($pdo, $countAt, $ids, true);
+                    if ($p !== '') {
+                        throw new RuntimeException($p);
+                    }
+                }]);
             if ($ap['count_id']) {
-                $note = 'Stock sheet import ' . date('Y-m-d') . ': opening balances from "' . mb_substr((string)$job['original_name'], 0, 120) . '" (Import #' . $jobId
-                    . '). Counted by the import - a second manager must approve it. Ingredients not in the file are not in this count.';
+                $note = 'Stock sheet import ' . date('Y-m-d') . ': ' . ($kind === 'regular' ? 'stock count' : 'opening balances') . ' from "' . mb_substr((string)$job['original_name'], 0, 120) . '" (Import #' . $jobId
+                    . '), counted ' . import_count_fmt((string)$countAt) . '. ' . ($ap['count_status'] === 'draft' ? 'Each shortage needs a reason before it is submitted; then a' : 'Counted by the import - a')
+                    . ' second manager must approve it. Ingredients not in the file are not in this count.';
                 if (!empty($opts['_diff_link'])) {
-                    $pdo->prepare('UPDATE stock_counts SET notes = ?, import_job_id = ? WHERE id = ? AND is_opening = 1')->execute([$note, $jobId, (int)$ap['count_id']]);
+                    $pdo->prepare('UPDATE stock_counts SET notes = ?, import_job_id = ? WHERE id = ?')->execute([$note, $jobId, (int)$ap['count_id']]);
                 } else {
-                    $pdo->prepare('UPDATE stock_counts SET notes = ? WHERE id = ? AND is_opening = 1')->execute([$note, (int)$ap['count_id']]);
+                    $pdo->prepare('UPDATE stock_counts SET notes = ? WHERE id = ?')->execute([$note, (int)$ap['count_id']]);
                 }
             }
             // "how many tots in one bottle?" answered on the review screen: saved on the item as its count measure (Step U2 d), through the stock
@@ -325,6 +350,7 @@ if (!function_exists('import_commit_stock')) {
             // stock left out of the count, by its TRUE reason (an unticked quantity is not "no price"); the overlap with another unfinished
             // opening count is decided inside rh_ssi_apply under its lock and reported as left_out_overlap
             $nc = import_cont_not_counted($v['res']['items'], [], PHP_INT_MAX)['by'];
+            $draft = ($ap['count_status'] ?? '') === 'draft';
             $result = [
                 'created' => (int)$ap['created'], 'updated' => (int)$ap['updated'], 'skipped_rows' => (int)$v['res']['counts']['skipped'],
                 'items' => count($plan['items']), 'opening_count_id' => $ap['count_id'], 'opening_count_ref' => $ap['count_ref'],
@@ -335,7 +361,10 @@ if (!function_exists('import_commit_stock')) {
                 'drinks_added' => $drinks['added'] - $drinks['food_added'], 'drinks_updated' => $drinks['updated'] - $drinks['food_updated'], 'drinks_linked' => $drinks['linked'], 'drinks_names' => $drinks['names'],
                 'food_added' => $drinks['food_added'], 'food_updated' => $drinks['food_updated'],      // 2026-11-22: food / snack items put on the food menu
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
-                'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',
+                'count_kind' => $kind, 'count_term' => $term, 'count_status' => $ap['count_status'] ?? null, 'counted_at' => $countAt,
+                'next_step' => $draft
+                    ? 'The ' . $term . ' is saved as a draft because some items are short: open it on Stock Count, pick a reason for each shortage and submit it. Then a different manager must approve it before the stock changes.'
+                    : 'A different manager must approve the ' . $term . ' on Stock Count before any stock changes.',
             ];
             // report only: does the sheet's own value column disagree with Quantity x Unit Cost, or is there stock with no unit cost?
             // (shown on the result screen and in Import history as the stock-check workbook; never changes what was imported)
@@ -355,8 +384,9 @@ if (!function_exists('import_commit_stock')) {
             $pdo->prepare("UPDATE import_jobs SET status = 'committed', committed_by = ?, committed_at = NOW(), result_json = ?, error_text = NULL WHERE id = ?")
                 ->execute([$userId > 0 ? $userId : null, import_json($result), $jobId]);
             if (function_exists('logActivity')) {
-                logActivity($userId, 'stock_import', 'Import #' . $jobId . ' (' . $job['original_name'] . '): ' . $result['created'] . ' ingredients created, ' . $result['updated'] . ' updated, opening count '
-                    . ($result['opening_count_ref'] ?? 'none') . ' with ' . $result['count_lines'] . ' lines (submitted, waiting for approval).');
+                logActivity($userId, 'stock_import', 'Import #' . $jobId . ' (' . $job['original_name'] . '): ' . $result['created'] . ' ingredients created, ' . $result['updated'] . ' updated, ' . $term . ' '
+                    . ($result['opening_count_ref'] ?? 'none') . ' with ' . $result['count_lines'] . ' lines counted ' . (string)$countAt
+                    . ($result['opening_count_ref'] ? ($draft ? ' (draft: shortages need a reason).' : ' (submitted, waiting for approval).') : '.'));
             }
             // audit trail for money: every changed cost, old -> new, one line per ingredient (written in the same transaction)
             if (function_exists('logActivity')) {

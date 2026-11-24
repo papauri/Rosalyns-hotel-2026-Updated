@@ -101,6 +101,57 @@ foreach ((array)@scandir($dir) as $f) {
 }
 ok('no staged files from this run remain on disk (any leak was deleted and is reported here)', $stray === 0, (string)$stray);
 
+// "When was this counted?" + regular counts after an approved opening count (critical patch 2026-11-25). One rolled-back harness run per
+// case (scripts/tests/import_count_time_child.php): the child's own checks come back in a file, then the REAL Stock Count page acts and
+// the verify SQL reads the result before the rollback.
+$ctCase = function (string $case, array $verify, array $grep = []) use ($root, $run) {
+    $r = $run . 'CT' . strtoupper($case);
+    $outF = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'zzt_ct_out_' . $r . '.json';
+    @unlink($outF);
+    $sub = function ($sql) use ($r) { return str_replace('{r}', $r, $sql); };
+    $cfg = ['post' => ['run' => $r, 'case' => $case, 'out' => $outF], 'verify' => array_map($sub, $verify), 'session_keys' => ['stock_msg'], 'grep' => $grep];
+    $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/tests/page_harness.php') . ' scripts/tests/import_count_time_child.php ' . escapeshellarg(base64_encode(json_encode($cfg))) . ' 2>&1');
+    $h = ['error' => 'no result'];
+    if (preg_match('/@@RESULT@@(.*)$/m', $out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $h = $x; } }
+    $c = json_decode((string)@file_get_contents($outF), true);
+    @unlink($outF);
+    ok('count time (' . $case . '): the run was rolled back, nothing leaked', !empty($h['rolled_back']) && empty($h['leak']) && empty($h['marker_lost']), substr($out, -600));
+    if (!is_array($c) || !isset($c['checks'])) {
+        ok('count time (' . $case . '): the child wrote its checks', false, substr($out, -800));
+        $c = ['checks' => [], 'T' => ''];
+    }
+    foreach ($c['checks'] as [$name, $good, $detail]) { ok($name, (bool)$good, (string)$detail); }
+    $h['T'] = (string)($c['T'] ?? '');
+    $h['diag'] = json_encode(['flash' => $h['output_flash'] ?? null, 'msg' => $h['session']['stock_msg'] ?? null]);
+    return $h;
+};
+$jobsOf = "SELECT id FROM import_jobs WHERE original_name LIKE 'zzt-ct%-{r}.csv'";
+// (a) opening count: 7 now, 3 sold after T; the file says 10 (A) and 9 (B). Approved on the real page by a different person.
+$h = $ctCase('a', ["SELECT name, current_quantity FROM stock_ingredients WHERE name LIKE 'ZZT {r} %' ORDER BY name",
+    "SELECT status, is_opening FROM stock_counts WHERE import_job_id IN ($jobsOf)"]);
+$q = []; foreach ((array)($h['verify'][0] ?? []) as $row) { $q[substr((string)$row['name'], -11)] = (float)$row['current_quantity']; }
+ok('count time (a): after approval A stays 7 (10 in the file = its stock at the count time) and B is 6 (1 short of 10, 3 sold since)',
+    isset($q['Mango Juice'], $q['Tonic Water']) && abs($q['Mango Juice'] - 7) < 0.0001 && abs($q['Tonic Water'] - 6) < 0.0001, json_encode($h['verify'] ?? null) . ' ' . $h['diag']);
+ok('count time (a): the opening count is approved', ($h['verify'][1][0]['status'] ?? '') === 'approved' && (int)($h['verify'][1][0]['is_opening'] ?? 0) === 1, json_encode($h['verify'][1] ?? null) . ' ' . $h['diag']);
+// (b) regular count, shortage, no reason, draft; then the real page saves a reason: the count time stays T.
+$h = $ctCase('b', ["SELECT l.counted_at, l.reason_code, l.system_quantity, l.actual_quantity, sc.snapshot_at, sc.status, sc.is_opening FROM stock_count_lines l
+    INNER JOIN stock_counts sc ON sc.id = l.count_id INNER JOIN stock_ingredients i ON i.id = l.ingredient_id WHERE i.name = 'ZZT {r} Ginger Ale' AND sc.import_job_id IN ($jobsOf)"]);
+$l = $h['verify'][0][0] ?? [];
+ok('count time (b): saving a reason on the real page keeps counted_at = T, snapshot_at = T and system 10 (the reason is saved, still a draft)',
+    $h['T'] !== '' && ($l['reason_code'] ?? '') === 'spillage' && (string)($l['counted_at'] ?? '') === $h['T'] && (string)($l['snapshot_at'] ?? '') === $h['T']
+    && abs((float)($l['system_quantity'] ?? 0) - 10) < 0.0001 && abs((float)($l['actual_quantity'] ?? 0) - 9) < 0.0001 && ($l['status'] ?? '') === 'draft' && (int)($l['is_opening'] ?? 1) === 0,
+    json_encode([$h['T'], $l]) . ' ' . $h['diag']);
+// (c) refusals: no count time, a future one, one before a later approved count of the item.
+$ctCase('c', []);
+// (e) regular count with no shortage: submitted; the person who imported it cannot approve it (two-person rule on).
+$h = $ctCase('e', ["SELECT sc.status, sc.approved_by, i.current_quantity FROM stock_counts sc INNER JOIN stock_count_lines l ON l.count_id = sc.id
+    INNER JOIN stock_ingredients i ON i.id = l.ingredient_id WHERE i.name = 'ZZT {r} Cola Zero' AND sc.import_job_id IN ($jobsOf)"], ['because you imported it']);
+$e = $h['verify'][0][0] ?? [];
+ok('count time (e): the importer\'s own approval is refused: the count stays submitted and the stock stays 7',
+    !empty($h['found']['because you imported it']) && ($e['status'] ?? '') === 'submitted' && empty($e['approved_by']) && abs((float)($e['current_quantity'] ?? 0) - 7) < 0.0001, json_encode($e) . ' ' . $h['diag']);
+ok('count time: no ZZT rows of these runs were left behind', (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT {$run}CT%'")->fetchColumn() === 0
+    && (int)$pdo->query("SELECT COUNT(*) FROM import_jobs WHERE original_name LIKE 'zzt-ct%-{$run}CT%.csv'")->fetchColumn() === 0);
+
 // commit-stock.php: the dashboard cache is cleared AFTER the commit (source order check; the cache layer is off inside the harness)
 $cs = (string)file_get_contents($root . '/includes/import/commit-stock.php');
 $pc = strpos($cs, '$pdo->commit();');

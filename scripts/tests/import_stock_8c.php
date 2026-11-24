@@ -26,6 +26,7 @@ require_once $root . '/admin/includes/permissions.php';
 require_once $root . '/admin/includes/import-schema.php';
 require_once $root . '/admin/includes/stock-sheet-import-lib.php';
 require_once $root . '/includes/import/commit-stock.php';
+require_once $root . '/scripts/tests/import_count_time_helper.php';   // "When was this counted?" for the commits (2026-11-25)
 require_once $root . '/includes/import/export-xlsx.php';
 
 if (sha1(DB_NAME) !== ZZ_DB_SHA1) {
@@ -35,7 +36,7 @@ if (sha1(DB_NAME) !== ZZ_DB_SHA1) {
 
 /* ---- CHILD: commit one job in its own process (I1 race) ------------------------------------------------------------ */
 if (($argv[1] ?? '') === '--child-commit') {
-    $r = import_commit_stock($pdo, (int)$argv[2], (int)$argv[3]);
+    $r = import_test_commit($pdo, (int)$argv[2], (int)$argv[3]);
     file_put_contents((string)$argv[4], json_encode($r));
     exit(0);
 }
@@ -277,7 +278,7 @@ try {
         ok('I3 (race): the ticked par is written (9)', $row && abs((float)$row['par_level'] - 9) < 0.0001, json_encode($row));
         ok('I3 (race): the count line takes the system quantity and cost from the locked row (4 at 120)', $line && abs((float)$line['system_quantity'] - 4) < 0.0001 && abs((float)$line['cost_per_unit'] - 120) < 0.0001 && abs((float)$line['actual_quantity'] - 10) < 0.0001, json_encode($line));
         // the same through the real commit (cost 120 / qty 4 are committed now): regression
-        $c = import_commit_stock($pdo, $jD['job'], $admin);
+        $c = import_test_commit($pdo, $jD['job'], $admin);
         $q = $pdo->prepare('SELECT cost_per_unit, par_level FROM stock_ingredients WHERE id = ?');
         $q->execute([$keepId]);
         $row = $q->fetch();
@@ -304,7 +305,7 @@ try {
     $zi = null;
     foreach (($jE['ok'] ? $items($jE['job']) : []) as $it) { if (($it['match']['id'] ?? 0) === $zeroId) { $zi = $it; } }
     ok('I4: the ticked 0 goes into the opening count (review shows it counted)', !empty($rz['ok']) && $zi && !empty($zi['in_count']), json_encode($zi['warnings'] ?? $zi));
-    $c = $jE['ok'] ? import_commit_stock($pdo, $jE['job'], $admin) : ['ok' => false, 'error' => 'no job'];
+    $c = $jE['ok'] ? import_test_commit($pdo, $jE['job'], $admin) : ['ok' => false, 'error' => 'no job'];
     $cid = (int)($c['result']['opening_count_id'] ?? 0);
     $q = $pdo->prepare('SELECT system_quantity, actual_quantity, variance, reason_code FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
     $q->execute([$cid, $zeroId]);
@@ -439,7 +440,7 @@ try {
             $commitOne = function (int $jobId, int $expectLines, string $label) use ($pdo, $admin, &$ownerCreatedFrom, $mask) {
                 if ($ownerCreatedFrom === null) { $ownerCreatedFrom = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM stock_ingredients')->fetchColumn(); }
                 $countFrom = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM stock_counts')->fetchColumn();
-                $c = import_commit_stock($pdo, $jobId, $admin);
+                $c = import_test_commit($pdo, $jobId, $admin);
                 $q = $pdo->prepare('SELECT id, status FROM stock_counts WHERE id > ? AND is_opening = 1');
                 $q->execute([$countFrom]);
                 $new = $q->fetchAll();
@@ -455,7 +456,7 @@ try {
                     && (int)$new[0]['id'] === (int)($c['result']['opening_count_id'] ?? -1) && $new[0]['status'] === 'submitted', $mask(($c['error'] ?? '') . ' / new counts: ' . count($new)));
                 ok("owner file ($label): one line per counted item", (int)($c['result']['count_lines'] ?? -1) + (int)($c['result']['left_out_overlap'] ?? 0) === $expectLines,
                     'lines ' . (int)($c['result']['count_lines'] ?? -1) . ' expected ' . $expectLines);
-                $again = import_commit_stock($pdo, $jobId, $admin);
+                $again = import_test_commit($pdo, $jobId, $admin);
                 $q->execute([$countFrom]);
                 ok("owner file ($label): pressing Import again changes nothing (still one count)", $again['ok'] && $again['already'] && count($q->fetchAll()) === 1);
             };

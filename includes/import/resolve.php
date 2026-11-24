@@ -2602,6 +2602,7 @@ if (!function_exists('import_resolve')) {
                     . $measureKept['word'] . ': it is kept as it is.';
             }
             // costs and stock on hand (accounting rule A11): stock with no cost is left out of the opening count
+            $cTerm = (string)($ctx['count_term'] ?? 'opening count');        // 'stock count' once an opening count is approved (count-time.php)
             $effCost = $cost;
             if ($ex && !in_array('cost', $ticked, true)) {
                 $effCost = (float)$ex['cost_per_unit'] > 0 ? (float)$ex['cost_per_unit'] : null;
@@ -2617,15 +2618,15 @@ if (!function_exists('import_resolve')) {
                         // the stored cost is the whole crate's price: counting at it would value every bottle at a crate (accounting A2 / B2). Never auto-ticked.
                         $inCount = false;
                         $packHeld = true;
-                        $warn[] = 'The quantity stays out of the opening count until Cost is ticked: the cost now in stock is the price of the whole ' . mb_strtolower((string)($packName ?? 'pack')) . '.';
+                        $warn[] = 'The quantity stays out of the ' . $cTerm . ' until Cost is ticked: the cost now in stock is the price of the whole ' . mb_strtolower((string)($packName ?? 'pack')) . '.';
                     }
                     if (in_array('quantity', $ticked, true) && !$inCount && !$packHeld) {
-                        $warn[] = 'Ticked to set the stock quantity, but there is no cost, so it is left out of the opening count.';
+                        $warn[] = 'Ticked to set the stock quantity, but there is no cost, so it is left out of the ' . $cTerm . '.';
                     }
                 } else {
                     $inCount = $effCost !== null && $effCost > 0;
                     if (!$inCount) {
-                        $warn[] = 'There is stock on hand (' . import_fmt_qty($balance) . ') but no price, so the ingredient is created with a blank cost and its stock is NOT put in the opening count. Add the cost later.';
+                        $warn[] = 'There is stock on hand (' . import_fmt_qty($balance) . ') but no price, so the ingredient is created with a blank cost and its stock is NOT put in the ' . $cTerm . '. Add the cost later.';
                     }
                 }
             } elseif ($first['price'] === null && !$ex) {
@@ -2961,21 +2962,21 @@ if (!function_exists('import_resolve')) {
     }
 
     /** The "what will be imported" CSV: one line per item that is ready. */
-    function import_resolve_csv(array $res): string
+    function import_resolve_csv(array $res, string $term = 'opening count'): string
     {
         $fh = fopen('php://memory', 'w+');
-        fputcsv($fh, ['Status', 'Item', 'Category', 'Unit', 'Opening balance', 'Cost per unit', 'Par level', 'What happens', 'Fields you ticked', 'Expiry batches', 'Where it came from', 'Notes']);
+        fputcsv($fh, ['Status', 'Item', 'Category', 'Unit', 'Counted quantity', 'Cost per unit', 'Par level', 'What happens', 'Fields you ticked', 'Expiry batches', 'Where it came from', 'Notes']);
         foreach ($res['items'] as $it) {
             $b = array_map(function ($x) {
                 return ($x['label'] !== '' ? $x['label'] . ' ' : '') . import_fmt_qty($x['qty']) . ($x['expiry'] ? ' exp ' . $x['expiry'] : '');
             }, $it['batches']);
             $what = $it['action'] === 'create' ? 'Create new ingredient' : 'Matches existing "' . ($it['match']['name'] ?? '') . '" (' . ($it['match']['how'] ?? '') . ')';
-            $what .= $it['in_count'] ? '; line in the opening count' : '; not in the opening count';
+            $what .= $it['in_count'] ? '; line in the ' . $term : '; not in the ' . $term;
             fputcsv($fh, array_map('import_csv_safe', [
                 $it['status'], $it['name'], $it['category'], $it['unit'] ?? '', $it['balance'] !== null ? import_fmt_qty($it['balance']) : '',
                 $it['cost'] !== null ? $it['cost'] : '', $it['max'] !== null ? import_fmt_qty($it['max']) : '', $what, implode(', ', $it['ticked']),
                 implode('; ', $b), implode(', ', $it['rows']),
-                trim((!empty($it['qty_words']['text']) && $it['qty_words']['text'] !== $it['qty_words']['exact'] ? 'Opening balance ' . $it['qty_words']['text'] . ' (exactly ' . $it['qty_words']['exact'] . '). ' : '') . implode(' ', $it['warnings'])),
+                trim((!empty($it['qty_words']['text']) && $it['qty_words']['text'] !== $it['qty_words']['exact'] ? 'Counted ' . $it['qty_words']['text'] . ' (exactly ' . $it['qty_words']['exact'] . '). ' : '') . implode(' ', $it['warnings'])),
             ]));
         }
         rewind($fh);

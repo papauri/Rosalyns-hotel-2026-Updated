@@ -399,6 +399,16 @@ if ($isAjax) {
         if ((int)$f['error'] !== UPLOAD_ERR_OK) {
             di_json(['ok' => false, 'error' => $errs[(int)$f['error']] ?? 'The upload failed. Please try again.']);
         }
+        // "When was this counted?" is required with the file: no default of now, nothing is stored without it
+        $ctRaw = mb_substr(trim((string)($_POST['counted_at'] ?? '')), 0, 40);
+        $ctT = import_count_time_parse($ctRaw);
+        if ($ctT === null) {
+            di_json(['ok' => false, 'error' => $ctRaw === '' ? import_count_time_problem($pdo, null, []) : 'That is not a date and time that can be read. Pick the date and the time the stock was counted.']);
+        }
+        $ctP = import_count_time_problem($pdo, $ctT, []);
+        if ($ctP !== '') {
+            di_json(['ok' => false, 'error' => $ctP]);
+        }
         import_purge_staged($pdo);       // rate-limited housekeeping: expired / finished files
         $r = import_job_create($pdo, (string)$f['tmp_name'], (string)$f['name'], $uid, ['allow_reimport' => !empty($_POST['allow_reimport'])]);
         if (empty($r['ok'])) {
@@ -408,7 +418,10 @@ if ($isAjax) {
         if (empty($a['ok'])) {
             di_json(['ok' => false, 'error' => (string)$a['error']]);
         }
-        di_json(['ok' => true, 'job' => (int)$r['job_id'], 'duplicate' => $r['duplicate'] ?? null]);
+        // the count time checked above is kept on the job (the item checks run on the review and again at commit); Step 4 can change it
+        $ctR = import_count_time_set($pdo, (int)$r['job_id'], $ctT, $uid);
+        $ctNote = empty($ctR['ok']) ? (string)$ctR['error'] : '';
+        di_json(['ok' => true, 'job' => (int)$r['job_id'], 'duplicate' => $r['duplicate'] ?? null, 'count_time_error' => $ctNote]);
     }
 
     if ($action === 'list') {
@@ -450,7 +463,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'col_use', 'count_row', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'sizes_bulk', 'menu_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'counted_at', 'col_use', 'count_row', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'sizes_bulk', 'menu_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -667,11 +680,25 @@ if ($isAjax) {
         di_json(import_job_cancel($pdo, $jobId, $uid));
     }
 
+    if ($action === 'counted_at') {     // Step 4: set or change when the stock in the file was counted
+        $r = import_count_time_set($pdo, $jobId, mb_substr((string)($_POST['counted_at'] ?? ''), 0, 40), $uid);
+        if (!empty($r['ok'])) {
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
     if ($action === 'confirm') {
         if (($_POST['confirm'] ?? '') !== '1') {
             di_json(['ok' => false, 'error' => 'Please press Confirm to import.']);
         }
-        $r = import_commit_stock($pdo, $jobId, $uid);     // re-checks the file, the answers and the permission; one transaction; safe to repeat
+        // the kind of count the review showed (opening / regular): the commit refuses when it changed meanwhile (fail-closed: no kind, no import)
+        $kindSeen = (string)($_POST['count_kind'] ?? '');
+        if (!in_array($kindSeen, ['opening', 'regular'], true)) {
+            di_json(['ok' => false, 'error' => 'Reload the page and review again: this screen did not say which kind of count it files. Nothing was imported.']);
+        }
+        $r = import_commit_stock($pdo, $jobId, $uid, ['expect_kind' => $kindSeen]);     // re-checks the file, the answers, the count time and the permission; one transaction; safe to repeat
         if (is_array($r['result'] ?? null)) {
             $r['result'] = di_result_lean($r['result']);
         }
@@ -688,6 +715,12 @@ $canReimport = rh_import_can_reimport($uid, $pdo);
 [$canDeleteHistory] = rh_sc_authorize($pdo, $uid);
 $startJob = (int)($_GET['job'] ?? 0);
 $cssV = @filemtime(__DIR__ . '/css/data-import.css');
+$diNowInput = '';            // the latest count time allowed (the database clock, the hotel's time zone)
+try {
+    $diNowInput = str_replace(' ', 'T', substr((string)$pdo->query('SELECT NOW()')->fetchColumn(), 0, 16));
+} catch (Throwable $e) {
+    $diNowInput = '';
+}
 $jsV = @filemtime(__DIR__ . '/js/data-import.js');
 ?>
 <!DOCTYPE html>
@@ -763,6 +796,7 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
                     <div class="di-plan-top"><strong class="di-plan-h">On this step</strong></div>
                     <ol class="di-plan-list">
                         <li><span class="di-plan-t">Choose your Excel or CSV file</span></li>
+                        <li><span class="di-plan-t">Enter when the stock in it was counted</span></li>
                         <li><span class="di-plan-t">Press &ldquo;Upload and read the file&rdquo;</span></li>
                         <li><span class="di-plan-t">Nothing is saved yet: you check everything in the next steps</span></li>
                     </ol>
@@ -774,6 +808,11 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
                     <label class="btn-primary di-btn" for="diFile">Choose file</label>
                     <input type="file" id="diFile" class="di-file" accept=".xlsx,.xlsm,.csv,.tsv">
                     <span class="di-file-name" id="diFileName" aria-live="polite"></span>
+                </div>
+                <div class="di-when">
+                    <label class="di-when-l" for="diCountedAt">When was this counted? <i class="help" data-tip="The date and time the stock in this file was physically counted. Sales, deliveries and wastage recorded after that time are already in your stock, so each quantity in the file is compared with the stock at that time, not with the stock now." aria-label="The date and time the stock in this file was physically counted.">?</i></label>
+                    <input type="datetime-local" id="diCountedAt" class="di-when-in" required<?php echo $diNowInput !== '' ? ' max="' . htmlspecialchars($diNowInput) . '"' : ''; ?>>
+                    <p class="di-help">Required. The date and time the stock in the file was counted (not the time you upload it). It cannot be in the future.</p>
                 </div>
                 <details class="di-details di-more">
                 <summary>What files can I upload?</summary>

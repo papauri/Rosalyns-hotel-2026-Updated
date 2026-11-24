@@ -650,11 +650,23 @@ if (!function_exists('rh_ssi_apply')) {
      * Write the plan. The caller owns the transaction (begin before, commit after); run rh_ssi_ensure_table()
      * and make sure stock_counts.is_opening exists BEFORE it (DDL).
      *
-     * @return array{created:int,updated:int,count_id:?int,count_ref:?string,count_lines:int,batches:int,budget_changed:int,budget_error:string}
+     * $opts (the Import screen; the CLI passes none and keeps the old behaviour: an opening count at the moment of the import):
+     *   counted_at  'Y-m-d H:i:s' when the stock in the file was counted (T). Each count line then starts from the stock AT T
+     *               (current_quantity read under the row lock minus the stock movements recorded after T, read with a locking read),
+     *               and the count carries snapshot_at = T, counted_at = T on every line, count_date = DATE(T).
+     *   kind        'opening' (default) or 'regular'. A regular count: shortages get no reason (the counter picks one), it stays a
+     *               draft when there is a shortage and is submitted when there is none, and no opening batches are staged.
+     *   after_lock  callable(array $ingredientIds): called once the counted items are locked, before anything is written; it throws to refuse.
+     *
+     * @return array{created:int,updated:int,count_id:?int,count_ref:?string,count_lines:int,batches:int,budget_changed:int,budget_error:string,count_status:?string,is_opening:int}
      */
-    function rh_ssi_apply(PDO $pdo, array $plan, int $userId): array
+    function rh_ssi_apply(PDO $pdo, array $plan, int $userId, array $opts = []): array
     {
-        $res = ['created' => 0, 'updated' => 0, 'count_id' => null, 'count_ref' => null, 'count_lines' => 0, 'batches' => 0, 'budget_changed' => 0, 'budget_error' => ''];
+        $res = ['created' => 0, 'updated' => 0, 'count_id' => null, 'count_ref' => null, 'count_lines' => 0, 'batches' => 0, 'budget_changed' => 0, 'budget_error' => '',
+            'count_status' => null, 'is_opening' => 1];
+        $countAt = isset($opts['counted_at']) && is_string($opts['counted_at']) && $opts['counted_at'] !== '' ? $opts['counted_at'] : null;
+        $isOpening = ($opts['kind'] ?? 'opening') !== 'regular';
+        $res['is_opening'] = $isOpening ? 1 : 0;
 
         $ins = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, yield_percent, notes, reorder_point, par_level, pack_name, pack_size)
                               VALUES (?, ?, ?, 0, 0, ?, 100, ?, ?, ?, ?, ?)");
@@ -674,6 +686,28 @@ if (!function_exists('rh_ssi_apply')) {
             foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $locked[(int)$r['id']] = $r;
             }
+        }
+        // Stock at the count time: the rows are locked, so no stock write on them can commit now; the movements are read with a
+        // locking read so they include every one committed so far (the same set current_quantity already reflects).
+        $since = [];
+        if ($countAt !== null && $locked) {
+            foreach (array_chunk(array_keys($locked), 400) as $chunk) {
+                $q = $pdo->prepare('SELECT ingredient_id, COALESCE(SUM(quantity_change), 0) FROM stock_adjustments WHERE ingredient_id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')
+                                    AND created_at > ? AND created_at <= NOW() GROUP BY ingredient_id LOCK IN SHARE MODE');
+                $q->execute(array_merge($chunk, [$countAt]));
+                foreach ($q->fetchAll(PDO::FETCH_NUM) as $r) {
+                    $since[(int)$r[0]] = (float)$r[1];
+                }
+            }
+        }
+        if (isset($opts['after_lock']) && is_callable($opts['after_lock'])) {
+            $cIds = [];
+            foreach ($plan['items'] as $it) {
+                if (!empty($it['in_count']) && $it['action'] === 'update' && !empty($it['existing']['id'])) {
+                    $cIds[] = (int)$it['existing']['id'];
+                }
+            }
+            ($opts['after_lock'])($cIds);
         }
         $dupName = $pdo->prepare('SELECT id, name FROM stock_ingredients WHERE name = ? FOR UPDATE');      // locking read (sees rows committed since the plan), uses the name index
         $dupKey = $pdo->prepare('SELECT id, name FROM stock_ingredients WHERE LOWER(TRIM(name)) = ? LIMIT 1');
@@ -709,7 +743,7 @@ if (!function_exists('rh_ssi_apply')) {
                 }
                 $it['existing'] = $e;                 // the count line below takes its cost from the locked row when the cost is not changed
                 $it['id'] = (int)$e['id'];
-                $it['system_qty'] = (float)$e['current_quantity'];
+                $it['system_qty'] = round((float)$e['current_quantity'] - ($since[(int)$e['id']] ?? 0.0), 6);     // the stock at the count time (now, without one)
                 $set = [];
                 $args = [];
                 foreach (array_keys((array)$it['changes']) as $field) {
@@ -762,10 +796,12 @@ if (!function_exists('rh_ssi_apply')) {
                 throw new RuntimeException('Another opening count is being started right now. Run the import again in a moment.');
             }
             $taken = [];
+            // the Import screen (a count time given) leaves out items in ANY unfinished count, opening or regular; the CLI keeps opening counts only
+            $openWhere = $countAt !== null ? "c.status IN ('draft','submitted')" : "c.is_opening = 1 AND c.status IN ('draft','submitted')";
             foreach (array_chunk(array_map(static fn($i) => (int)$i['id'], array_values($lines)), 400) as $chunk) {
                 $ph = implode(',', array_fill(0, count($chunk), '?'));
                 $q = $pdo->prepare("SELECT DISTINCT l.ingredient_id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
-                                    WHERE c.is_opening = 1 AND c.status IN ('draft','submitted') AND l.ingredient_id IN ($ph) LOCK IN SHARE MODE"); // locking read: sees rows committed since this transaction's snapshot (the plan's reads)
+                                    WHERE $openWhere AND l.ingredient_id IN ($ph) LOCK IN SHARE MODE"); // locking read: sees rows committed since this transaction's snapshot (the plan's reads)
                 $q->execute($chunk);
                 foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $tid) { $taken[(int)$tid] = true; }
             }
@@ -780,14 +816,20 @@ if (!function_exists('rh_ssi_apply')) {
             $hasCountedAt = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_count_lines' AND COLUMN_NAME = 'counted_at'")->fetchColumn() > 0;
             $hasCountedBy = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_count_lines' AND COLUMN_NAME = 'counted_by'")->fetchColumn() > 0;
             $note = 'Stock sheet import ' . date('Y-m-d') . ': opening balances (bar and kitchen plus stores) from the October 2026 stock sheet. Counted by the import - a second manager must approve it. Ingredients not on the sheet are not in this count.';
+            if ($countAt !== null && (!$hasSnap || !$hasCountedAt)) {
+                throw new RuntimeException('Stock counts on this system cannot record when the stock was counted, so nothing was imported. Ask your administrator to run the database updates.');
+            }
+            // with a count time: count_date = its date, snapshot_at = it (the start of the approval's movement window); without: now (CLI)
+            $cArgs = $countAt !== null ? [$ref, substr($countAt, 0, 10), $userId, $note] : [$ref, $userId, $note];
+            if ($hasSnap && $countAt !== null) { $cArgs[] = $countAt; }
             $pdo->prepare("INSERT INTO stock_counts (reference, count_date, shift, scope, scope_value, status, counted_by, notes" . ($hasSnap ? ', snapshot_at' : '') . ", is_opening)
-                           VALUES (?, CURDATE(), NULL, 'full', NULL, 'draft', ?, ?" . ($hasSnap ? ', NOW()' : '') . ", 1)")
-                ->execute([$ref, $userId, $note]);
+                           VALUES (?, " . ($countAt !== null ? '?' : 'CURDATE()') . ", NULL, 'full', NULL, 'draft', ?, ?" . ($hasSnap ? ($countAt !== null ? ', ?' : ', NOW()') : '') . ", " . ($isOpening ? 1 : 0) . ")")
+                ->execute($cArgs);
             $countId = (int)$pdo->lastInsertId();
             $lineIns = $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost, reason_code" . ($hasCountedAt ? ', counted_at' : '') . ($hasCountedBy ? ', counted_by' : '') . ")
-                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?" . ($hasCountedAt ? ', NOW()' : '') . ($hasCountedBy ? ', ?' : '') . ")");
+                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?" . ($hasCountedAt ? ($countAt !== null ? ', ?' : ', NOW()') : '') . ($hasCountedBy ? ', ?' : '') . ")");
             $batchIns = $pdo->prepare("INSERT INTO stock_opening_batches (count_id, ingredient_id, batch_label, quantity, expiry_date) VALUES (?, ?, ?, ?, ?)");
-            $short = 0.0; $surplus = 0.0;
+            $short = 0.0; $surplus = 0.0; $anyShort = false;
             foreach ($lines as $it) {
                 $sys = (float)($it['system_qty'] ?? 0);
                 $actual = (float)$it['balance'];
@@ -795,17 +837,26 @@ if (!function_exists('rh_ssi_apply')) {
                 $cost = (float)($it['cost'] ?? ($it['existing']['cost_per_unit'] ?? 0));
                 $vc = round($variance * $cost, 4);
                 if ($vc < 0) { $short += $vc; } else { $surplus += $vc; }
-                $args = [$countId, $it['id'], $sys, $actual, $variance, $cost, $vc, $variance < -0.0001 ? 'correction' : ''];
+                if ($variance < -0.0001) { $anyShort = true; }
+                // an opening count's shortage is a correction of the books; a regular count's shortage needs the counter's own reason
+                $args = [$countId, $it['id'], $sys, $actual, $variance, $cost, $vc, ($isOpening && $variance < -0.0001) ? 'correction' : ''];
+                if ($hasCountedAt && $countAt !== null) { $args[] = $countAt; }
                 if ($hasCountedBy) { $args[] = $userId; }
                 $lineIns->execute($args);
                 $res['count_lines']++;
+                if (!$isOpening) {
+                    continue;                   // expiry batches are staged for an opening count only
+                }
                 foreach ($it['batches'] as $b) {
                     $batchIns->execute([$countId, $it['id'], $b['label'] !== '' ? $b['label'] : null, $b['qty'], $b['expiry']]);
                     $res['batches']++;
                 }
             }
-            $pdo->prepare("UPDATE stock_counts SET status = 'submitted', total_variance_cost = ?, shortage_cost = ?, surplus_cost = ?, updated_at = NOW() WHERE id = ?")
-                ->execute([round($short + $surplus, 2), round($short, 2), round($surplus, 2), $countId]);
+            // an opening count is submitted; a regular count with a shortage stays a draft until the counter gives each shortage a reason
+            $status = ($isOpening || !$anyShort) ? 'submitted' : 'draft';
+            $pdo->prepare("UPDATE stock_counts SET status = ?, total_variance_cost = ?, shortage_cost = ?, surplus_cost = ?, updated_at = NOW() WHERE id = ?")
+                ->execute([$status, round($short + $surplus, 2), round($short, 2), round($surplus, 2), $countId]);
+            $res['count_status'] = $status;
             $res['count_id'] = $countId;
             $res['count_ref'] = $ref;
         }

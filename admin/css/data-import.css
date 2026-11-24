@@ -744,3 +744,10 @@
 a.di-diff-chip:hover { background: var(--tbl-row-hover, #FAF6F0); border-color: var(--color-primary, #766550); }
 a.di-diff-chip:focus-visible { outline: 2px solid var(--color-primary, #766550); outline-offset: 2px; }
 .di-diff-chip-n { font-weight: 600; min-width: 1.5em; text-align: center; padding: 0 6px; border-radius: 999px; background: var(--gold-light, #F3ECE4); }
+/* "When was this counted?" (Step 1 with the file, Step 4 to change it) */
+.di-when { margin: 14px 0 6px; max-width: 420px; }
+.di-when-l { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; color: var(--navy, #231F1C); margin-bottom: 6px; }
+.di-when-in { width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--tbl-border, #E8E0D6); border-radius: 6px; background: #fff; color: var(--navy, #231F1C); font: inherit; font-size: 14px; }
+.di-when-in:focus-visible { outline: 2px solid var(--color-primary, #766550); outline-offset: 2px; }
+.di-when-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.di-when-row .di-when-in { width: auto; flex: 1 1 220px; }

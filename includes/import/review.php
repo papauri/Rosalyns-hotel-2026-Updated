@@ -29,6 +29,7 @@
 require_once __DIR__ . '/store.php';
 require_once __DIR__ . '/resolve.php';
 require_once __DIR__ . '/value-check.php';
+require_once __DIR__ . '/count-time.php';
 require_once dirname(__DIR__, 2) . '/admin/includes/import-schema.php';
 
 if (!function_exists('import_job_analyse')) {
@@ -391,7 +392,7 @@ if (!function_exists('import_job_analyse')) {
         // answers are written into it directly instead of into a second copy.
         $job['analysis_json'] = null;
         $answers = import_job_answers($job);
-        $ctx = import_job_ctx($pdo);
+        $ctx = import_count_ctx_at($pdo, import_job_ctx($pdo), $answers);     // the file is compared with the stock at the time it was counted
         $state = ['job' => $job, 'analysis' => $analysis, 'answers' => $answers, 'ctx' => $ctx, 'res' => null];
         unset($analysis);
         $state['row_src'] = import_review_row_sources($state['analysis']);      // slim copies of the little the screens need from the rows ...
@@ -790,7 +791,7 @@ if (!function_exists('import_job_analyse')) {
             return null;
         }
         $batchQty = (float)($batchTotals[$ingredientId] ?? 0.0);
-        $qty = (float)$e['current_quantity'];
+        $qty = (float)($e['qty_now'] ?? $e['current_quantity']);      // the stock now (current_quantity is the stock at the count time in a review context)
         return ['qty' => $qty, 'unit' => (string)$e['unit'], 'batch_qty' => $batchQty, 'has_stock' => $qty > 0.00005 || $batchQty > 0.00005, 'recipes' => (int)($e['recipes'] ?? 0)];
     }
 
@@ -801,7 +802,7 @@ if (!function_exists('import_job_analyse')) {
         $unit = trim((string)$onHand['unit']);
         $oldTxt = ($old === null || $old === '') ? 'blank' : import_fmt_money($old);
         $s = $name . ' already has ' . import_fmt_qty($q) . ($unit !== '' ? ' ' . $unit : '') . ' in stock. Changing its cost from ' . $oldTxt . ' to ' . import_fmt_money($new)
-            . ' (as written, VAT not added or removed) changes recipe costs and the value of that stock straight away — before the opening count is approved.';
+            . ' (as written, VAT not added or removed) changes recipe costs and the value of that stock straight away — before the stock count is approved.';
         if ($onHand['recipes'] > 0) {
             $s .= ' It is used in ' . $onHand['recipes'] . ' recipe' . ($onHand['recipes'] === 1 ? '' : 's') . '.';
         }
@@ -1011,7 +1012,7 @@ if (!function_exists('import_job_analyse')) {
     function import_job_csv(PDO $pdo, int $jobId): string
     {
         $state = import_job_state($pdo, $jobId);
-        return $state ? import_resolve_csv($state['res']) : '';
+        return $state ? import_resolve_csv($state['res'], (string)($state['ctx']['count_term'] ?? 'opening count')) : '';
     }
 
     function import_job_cancel(PDO $pdo, int $jobId, int $userId = 0): array
@@ -1054,7 +1055,7 @@ if (!function_exists('import_job_analyse')) {
             return $bad('The stored file does not match the file that was uploaded. Nothing was imported.');
         }
         $answers = import_job_answers($job);
-        $ctx = import_job_ctx($pdo);
+        $ctx = import_count_ctx_at($pdo, import_job_ctx($pdo), $answers);     // stock at the count time (the commit re-reads it under lock)
         $eng = import_job_engine_opts($pdo, $answers, $ctx);
         require_once __DIR__ . '/memory.php';
         $chk = import_mem_check($path, (string)$job['original_name'], $eng['aliases']);      // a plain message, not a fatal error, when the file cannot fit here

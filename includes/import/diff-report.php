@@ -32,13 +32,13 @@ require_once __DIR__ . '/text-util.php';
 if (!function_exists('import_diff_build')) {
 
     /** kind => [chip label, plain helper]. The order is the order shown. */
-    function import_diff_kinds(): array
+    function import_diff_kinds(string $term = 'opening count'): array
     {
         return [
             'count' => ['Counts converted', 'Counts your file wrote in shots, glasses or another measure, turned into the stock unit (bottles, cartons ...). Shows how many make one and where that number came from.'],
             'cost' => ['Costs worked out', 'Unit costs that are not the file\'s price as written: a case or pack price divided by its pack size, the cost already in stock kept because Cost was not ticked, or a price not used as a cost.'],
             'fixed' => ['Fixed for you', 'Small spelling or number-format fixes made while reading the file (the cell as written and as read), and fixes someone took back.'],
-            'left' => ['Left out', 'Rows that were skipped, and stock in the file that is not in this opening count, with the reason.'],
+            'left' => ['Left out', 'Rows that were skipped, and stock in the file that is not in this ' . $term . ', with the reason.'],
             'value' => ['Value check', 'Rows where the file\'s own value column (Stock Value / Total) is not the count times the unit cost that was imported.'],
             'answer' => ['Answers given', 'Questions answered during the review, in short, with the choice that was made.'],
             'menu' => ['Menu', 'Items put on the menu or given a new menu price, and prices typed in step 3 instead of the file\'s price.'],
@@ -121,6 +121,7 @@ if (!function_exists('import_diff_build')) {
         $planned = (array)($in['planned'] ?? []);
         $lines = (array)($in['lines'] ?? []);
         $page = import_stock_page_name();
+        $term = (string)($in['term'] ?? 'opening count');       // 'opening count' | 'stock count' (count-time.php import_count_term)
         $out = [];
         $add = function (string $k, string $item, string $cell, string $file, string $used, string $why) use (&$out) {
             $out[$k][] = ['k' => $k, 'item' => $item, 'cell' => $cell, 'file' => $file, 'used' => $used, 'why' => $why];
@@ -203,11 +204,11 @@ if (!function_exists('import_diff_build')) {
                 $code = !empty($it['in_count']) ? 'overlap' : (function_exists('import_cont_not_counted_reason') ? import_cont_not_counted_reason($it) : null);
                 $whyMap = [
                     'no_cost' => !empty($it['match'])
-                        ? 'Not in the opening count: there is no cost for it (none in the file is used and none in stock).'
-                        : 'Not in the opening count: no price in the file, so it is created with a blank cost. Add the cost in ' . $page . ' and count it later.',
-                    'not_ticked' => 'Not in the opening count: it is already in stock and its quantity was not ticked, so its stock stays as it is.',
-                    'cost_not_ticked' => 'Not in the opening count: it is already in stock with no cost, and the file\'s cost was not ticked.',
-                    'overlap' => 'Not in this opening count: it is already in another opening count waiting for approval.',
+                        ? 'Not in the ' . $term . ': there is no cost for it (none in the file is used and none in stock).'
+                        : 'Not in the ' . $term . ': no price in the file, so it is created with a blank cost. Add the cost in ' . $page . ' and count it later.',
+                    'not_ticked' => 'Not in the ' . $term . ': it is already in stock and its quantity was not ticked, so its stock stays as it is.',
+                    'cost_not_ticked' => 'Not in the ' . $term . ': it is already in stock with no cost, and the file\'s cost was not ticked.',
+                    'overlap' => 'Not in this ' . $term . ': it is already in another stock count that is not finished yet (being counted or waiting for approval).',
                 ];
                 if ($code !== null && isset($whyMap[$code])) {
                     $cnt = $it['qty_words']['text'] ?? null;
@@ -312,7 +313,7 @@ if (!function_exists('import_diff_build')) {
                     $nm = $it ? (string)$it['name'] : (string)$r[2];
                     $unit = $it ? (string)($it['unit'] ?? '') : (string)$r[4];
                     if ($line === null) {
-                        $why = ($skipped && ($uid === '' || ($rowsRes[$uid]['status'] ?? '') === 'skipped') ? 'The row was skipped' : 'Not in the opening count') . ', so nothing of it is valued (see Left out).';
+                        $why = ($skipped && ($uid === '' || ($rowsRes[$uid]['status'] ?? '') === 'skipped') ? 'The row was skipped' : 'Not in the ' . $term) . ', so nothing of it is valued (see Left out).';
                         $used = '0.00 (not in the count)';
                     } else {
                         $parts = [];
@@ -435,7 +436,7 @@ if (!function_exists('import_diff_build')) {
         return [
             'v' => 1, 'built_at' => date('Y-m-d H:i:s'), 'file' => (string)($in['file'] ?? ''), 'job_id' => (int)($in['job_id'] ?? 0),
             'count_id' => isset($in['count_id']) ? (int)$in['count_id'] : null, 'count_ref' => (string)($in['count_ref'] ?? ''),
-            'kinds' => $kinds, 'total' => array_sum($kinds), 'stored' => count($rows), 'value' => $value, 'count_value' => round($countValue, 2),
+            'term' => $term, 'kinds' => $kinds, 'total' => array_sum($kinds), 'stored' => count($rows), 'value' => $value, 'count_value' => round($countValue, 2),
             'count_lines' => count($lines), 'rows' => $rows,
         ];
     }
@@ -448,7 +449,7 @@ if (!function_exists('import_diff_build')) {
         }
         $s = $rep;
         unset($s['rows']);
-        $s['labels'] = import_diff_kinds();     // the chip names and helpers come from here (the screens never spell them out themselves)
+        $s['labels'] = import_diff_kinds((string)($rep['term'] ?? 'opening count'));     // the chip names and helpers come from here (the screens never spell them out themselves)
         return $s;
     }
 
@@ -477,7 +478,7 @@ if (!function_exists('import_diff_build')) {
     {
         try {
             $jid = (int)($count['import_job_id'] ?? 0);
-            if ($jid <= 0 || empty($count['is_opening'])) {
+            if ($jid <= 0) {             // any count an import filed (opening or regular) carries the link
                 return null;
             }
             $st = $pdo->prepare("SELECT id, original_name, status, result_json FROM import_jobs WHERE id = ? AND status = 'committed'");
@@ -501,7 +502,8 @@ if (!function_exists('import_diff_build')) {
     /** The download: csv | xlsx. Values only. Returns ['ok', 'name', 'mime', 'body'] or ['ok' => false, 'error']. */
     function import_diff_export(array $rep, string $format): array
     {
-        $kinds = import_diff_kinds();
+        $term = (string)($rep['term'] ?? 'opening count');
+        $kinds = import_diff_kinds($term);
         $file = (string)($rep['file'] ?? 'stock list');
         $base = trim((string)preg_replace('/[^A-Za-z0-9 ._()-]+/', '_', (string)pathinfo($file, PATHINFO_FILENAME)));
         $base = ($base !== '' ? $base : 'stock list') . ' differences import ' . (int)($rep['job_id'] ?? 0);
@@ -510,7 +512,7 @@ if (!function_exists('import_diff_build')) {
             return [$kinds[$r['k']][0] ?? $r['k'], (string)$r['item'], (string)$r['cell'], (string)$r['file'], (string)$r['used'], (string)$r['why']];
         };
         $summary = [['Differences from the uploaded file', $file], ['Import', '#' . (int)($rep['job_id'] ?? 0)],
-            ['Opening count', (string)($rep['count_ref'] ?? '')], ['Made at', (string)($rep['built_at'] ?? '')]];
+            [ucfirst($term), (string)($rep['count_ref'] ?? '')], ['Made at', (string)($rep['built_at'] ?? '')]];
         foreach ($kinds as $k => $kl) {
             $summary[] = [$kl[0], (string)(int)($rep['kinds'][$k] ?? 0)];
         }
@@ -518,7 +520,7 @@ if (!function_exists('import_diff_build')) {
             $summary[] = ['Value column total in your file', import_diff_money2($rep['value']['file_total'])];
             $summary[] = ['Count x unit cost imported (same rows)', import_diff_money2($rep['value']['imported_total'])];
         }
-        $summary[] = ['Opening count value (all lines)', import_diff_money2($rep['count_value'] ?? 0)];
+        $summary[] = [ucfirst($term) . ' value (all lines)', import_diff_money2($rep['count_value'] ?? 0)];
         if ((int)($rep['stored'] ?? 0) < (int)($rep['total'] ?? 0)) {
             $summary[] = ['Note', 'Only the first ' . (int)$rep['stored'] . ' of ' . (int)$rep['total'] . ' differences are listed.'];
         }
