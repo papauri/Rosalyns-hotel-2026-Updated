@@ -523,6 +523,8 @@ a.tl-block:hover .tl-block__label { text-decoration: underline; }
 .tl-ops.has-cellsel .tl-lane[data-ops-lane] .tl-cell:not(.tl-cell--past) { cursor: cell; }
 .tl-bar.is-picked { z-index: 2; outline: 3px solid var(--admin-accent, #766550); outline-offset: 1px; }
 .tl-bulkbar__detail, .tl-bulkbar__none { font-size: 13px; opacity: .85; }
+/* The picked nights by name (any date range) wrap inside the bar instead of running off a phone screen. */
+.tl-bulkbar .admin-bulk-bar__count { white-space: normal; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .tl-bulkbar .btn { min-height: 44px; }
 /* Add form opened for several picked rooms / days (Housekeeping, Maintenance): says what will be added. */
 .tl-multi-note { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--admin-surface-border, #e8e0d6); border-radius: 8px; background: var(--tl-soft, #f7f3ee); font-size: 13px; line-height: 1.4; }

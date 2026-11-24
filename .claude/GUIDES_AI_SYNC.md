@@ -51,6 +51,10 @@ when prompted."
   change days or month; Shift-click / long press "Select <start> to here" extends the room's run across months; the
   bar and Block confirm name every selected night. Guides: calendar / blocked dates selection. Manager Guide:
   Bookings, Housekeeping and Maintenance.
+- 2026-11-24 (owner PATCH, commit "Calendar: Unblock / Extend judge off-screen nights" in both repos): the calendar and
+  Blocked Dates selection bar now checks every selected night, also ones in another month ("checking..." first);
+  Unblock nights is offered for a room's own block only and unblocks just those nights; the booked count covers the
+  whole selection. Guides: calendar / blocked dates selection. Manager Guide: Bookings.
 - 2026-11-24 Liwonde 2323967 / Rosalyn's 75d564c (owner PATCH): Housekeeping and Room Maintenance pages re-laid out
   like the Calendar: KPI chips on one row, grid first, then a compact list ("Needs action" / "Rooms needing work") with
   an Assign dropdown per row (no open task = adds today's task/job; open task/job = hands it to the person picked) and

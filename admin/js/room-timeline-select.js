@@ -198,11 +198,64 @@
         return g.lanes.map(function (l) { return name(l) + ': ' + nightsText(g.map[l]); }).join('; ');
     }
 
+    /* Selected nights outside the loaded range (owner 2026-11-24): judged on real Timeline payloads
+       (admin/includes/calendar-data.php rh_cal_timeline_payload via admin/api/calendar-timeline.php), never guessed. */
+    /** True when payload / window {start, dates|days} holds night d. */
+    function holds(p, d) {
+        if (!p || !p.start) return false;
+        var n = dnum(d), a = dnum(p.start), len = p.dates ? p.dates.length : (p.days || 0);
+        return n >= a && n < a + len;
+    }
+    /** Fetch windows for the nights `dates` (the range API takes min..max days): [{start, days}], sorted, the fewest
+        windows that hold every night; nights months apart get their own window (the months between are not read). */
+    function windows(dates, max, min) {
+        var ds = dates.filter(function (d, i) { return dates.indexOf(d) === i; }).sort(), out = [], i = 0;
+        while (i < ds.length) {
+            var s = dnum(ds[i]), j = i;
+            while (j + 1 < ds.length && dnum(ds[j + 1]) - s < max) j++;
+            out.push({ start: ds[i], days: Math.max(min, dnum(ds[j]) - s + 1) });
+            i = j + 1;
+        }
+        return out;
+    }
+    /** Judge picked nights on payloads ({start, dates, bookings [{lanes, ci, eco}], blocks [{lane, kind, scope, from,
+        to}]}); the first payload that holds a night decides it (the loaded range first).
+        -> {missing: nights no payload holds, booked: picked nights with a stay, own: keys on the room's own block,
+            extend: [{t: 'room', id, last}] one per own-block run seen}. */
+    function judge(keys, payloads) {
+        var idx = (payloads || []).filter(function (p) { return p && p.start && p.dates && p.dates.length; }).map(function (p) {
+            var bk = {}, bl = {};
+            (p.bookings || []).forEach(function (b) { (b.lanes || []).forEach(function (l) { (bk[String(l)] = bk[String(l)] || []).push(b); }); });
+            (p.blocks || []).forEach(function (b) { if (b.kind === 'blocked') (bl[String(b.lane)] = bl[String(b.lane)] || []).push(b); });
+            return { p: p, bk: bk, bl: bl };
+        });
+        var out = { missing: [], booked: 0, own: [], extend: [] }, seenMiss = {}, seenRun = {}, seenKey = {};
+        keys.forEach(function (k) {
+            if (seenKey[k]) return;
+            seenKey[k] = true;
+            var x = parts(k), n = dnum(x.d), ix = null;
+            for (var i = 0; i < idx.length && !ix; i++) if (holds(idx[i].p, x.d)) ix = idx[i];
+            if (!ix) {
+                if (!seenMiss[x.d]) { seenMiss[x.d] = true; out.missing.push(x.d); }
+                return;
+            }
+            if ((ix.bk[x.lane] || []).some(function (b) { return dnum(b.ci) <= n && dnum(b.eco) - 1 >= n; })) out.booked++;
+            var hit = (ix.bl[x.lane] || []).filter(function (b) { return b.from <= x.d && b.to >= x.d; })[0];
+            if (!hit || hit.scope !== 'own') return;
+            out.own.push(k);
+            var run = x.lane + '|' + hit.to;
+            if (!seenRun[run]) { seenRun[run] = true; out.extend.push({ t: 'room', id: Number(x.lane), last: hit.to }); }
+        });
+        out.missing.sort();
+        return out;
+    }
+
     var logic = {
         dnum: dnum, dstr: dstr, key: key, parts: parts, rect: rect, byLane: byLane, runs: runs, oneRun: oneRun,
         bounds: bounds, countWords: countWords, nightsText: nightsText, pairs: pairs, plural: plural,
         span: span, keep: keep, colAt: colAt, colOf: colOf, colsMoved: colsMoved, where: where,
-        extendFrom: extendFrom, shiftAdd: shiftAdd, pressPlan: pressPlan
+        extendFrom: extendFrom, shiftAdd: shiftAdd, pressPlan: pressPlan,
+        holds: holds, windows: windows, judge: judge
     };
     if (typeof module === 'object' && module && module.exports) module.exports = logic;
     if (typeof window === 'undefined' || !window.document || window.RhGridSel) return;

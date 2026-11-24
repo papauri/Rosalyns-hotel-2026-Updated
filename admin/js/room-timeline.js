@@ -1609,8 +1609,40 @@
         });
         return hit;
     }
-    function pickActions(st, keys) {
+    /* Picked nights outside the loaded range (owner 2026-11-24: Unblock / Extend / the booked count looked only at the
+       dates on screen): every picked night is judged on real data. Nights st.data does not hold are read from the range
+       API (the same payload, at most 31 nights a request) and kept until st.data changes (a new range or a save reloads
+       it, so a check never outlives its data). Until they arrive: "checking..." and no Unblock / Extend.
+       -> {ready, failed, j: RhGridSel.logic.judge result}. */
+    function pickFacts(st, keys) {
+        var L = window.RhGridSel.logic;
+        if (!st.pickFx || st.pickFx.data !== st.data) st.pickFx = { data: st.data, got: [], wait: [], failed: [] };
+        var fx = st.pickFx, j = L.judge(keys, [st.data].concat(fx.got));
+        if (!j.missing.length) return { ready: true, failed: false, j: j };
+        var busy = fx.wait.concat(fx.failed);
+        var todo = j.missing.filter(function (d) { return !busy.some(function (w) { return L.holds(w, d); }); });
+        L.windows(todo, 31, 3).forEach(function (w) {
+            fx.wait.push(w);
+            var url = st.api + '?start=' + encodeURIComponent(w.start) + '&days=' + encodeURIComponent(w.days);
+            fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json().then(function (p) { return r.ok && p && p.ok && covers(p, w.start, w.days) ? p : null; }); })
+                .catch(function () { return null; })
+                .then(function (p) {
+                    if (st.pickFx !== fx || cur !== st) return; // st.data changed meanwhile: this answer is not used
+                    fx.wait.splice(fx.wait.indexOf(w), 1);
+                    if (p) fx.got.push(p); else fx.failed.push(w);
+                    picksChanged(st);
+                });
+        });
+        var failed = j.missing.some(function (d) {
+            return fx.failed.some(function (w) { return L.holds(w, d); }) && !fx.wait.some(function (w) { return L.holds(w, d); });
+        });
+        return { ready: false, failed: failed, j: j };
+    }
+    function pickActions(st, keys, fx) {
         var L = window.RhGridSel.logic, can = st.data.can || {}, out = [];
+        fx = fx || pickFacts(st, keys);
+        var wait = fx.failed ? 'Some selected nights could not be checked. Use Check again.' : 'Checking the selected nights in other dates...';
         var one = L.oneRun(keys);
         if (can.create && one) {
             var lane = st.lanesById[one.lane], a = dayIdx(st, one.from), z = dayIdx(st, one.to);
@@ -1620,27 +1652,30 @@
         }
         if (can.block) {
             out.push({ label: 'Block nights', icon: 'fa-ban', run: function () { blockPicks(st, 'block'); } });
-            var anyBlocked = keys.some(function (k) { var p = L.parts(k); return !!blockAt(st, p.lane, p.d, 'blocked'); });
-            if (anyBlocked) out.push({ label: 'Unblock nights', icon: 'fa-unlock', run: function () { blockPicks(st, 'unblock'); } });
+            // Only a room's own block is unblocked here (grid_apply unblock); judged on every picked night.
+            if (!fx.ready) out.push({ label: 'Unblock nights', icon: 'fa-unlock', disabled: true, hint: wait });
+            else if (fx.j.own.length) out.push({ label: 'Unblock nights', icon: 'fa-unlock', run: function () { blockPicks(st, 'unblock'); } });
         }
         if (can.block && window.RhExtend) {
-            var ext = extendItems(st, keys);
-            out.push(ext.length
+            var ext = fx.ready ? fx.j.extend : [];
+            out.push(!fx.ready ? { label: 'Extend...', icon: 'fa-arrows-left-right', disabled: true, hint: wait } : ext.length
                 ? { label: 'Extend...', icon: 'fa-arrows-left-right', run: function () { extendBlocks(st, ext); } }
                 : { label: 'Extend...', icon: 'fa-arrows-left-right', disabled: true, hint: 'Select a night of a room\'s own block (a room-type or All rooms block is extended on Blocked Dates).' });
         }
         if (can.maint_page) out.push({ label: 'New maintenance job', icon: 'fa-screwdriver-wrench', href: maintHref(st, keys) });
+        if (fx.failed) out.push({ label: 'Check again', icon: 'fa-rotate', run: function () { if (st.pickFx) st.pickFx.failed = []; picksChanged(st); } });
         return out;
     }
     function picksChanged(st) {
         if (!st.pickBar) return;
         var keys = st.picks.keys();
         if (!keys.length) { st.pickBar.hide(); return; }
-        var L = window.RhGridSel.logic;
-        var booked = keys.filter(function (k) { var p = L.parts(k); return nightBooked(st, p.lane, p.d); }).length;
+        var L = window.RhGridSel.logic, fx = pickFacts(st, keys);
+        // Booked nights counted over every picked night, also those in another date range (owner 2026-11-24).
+        var note = !fx.ready ? (fx.failed ? ' (could not check every night)' : ' (checking...)') : (fx.j.booked ? ' (' + fx.j.booked + ' already booked)' : '');
         // Every selected night by name, also those in another date range (owner 2026-11-24).
         var words = L.where(keys, st.picks.lanes(), function (l) { return 'Room ' + (st.lanesById[l] ? st.lanesById[l].number : l); });
-        st.pickBar.show(L.countWords(keys), words + (booked ? ' (' + booked + ' already booked)' : ''), pickActions(st, keys), function () { st.picks.clear(); });
+        st.pickBar.show(L.countWords(keys), words + note, pickActions(st, keys, fx), function () { st.picks.clear(); });
     }
     function pickMenu(st, hit) {
         var L = window.RhGridSel.logic, can = st.data.can || {};
@@ -1697,6 +1732,18 @@
         if (st.blockBusy || !st.picks) return;
         var L = window.RhGridSel.logic, keys = st.picks.keys();
         if (!keys.length) return;
+        var others = 0;
+        if (op === 'unblock') {
+            // Exactly the picked nights that carry the room's own block, on or off screen, judged on loaded data now.
+            var fx = pickFacts(st, keys);
+            if (!fx.ready) {
+                toast(st, fx.failed ? 'Some selected nights could not be checked. Use Check again.' : 'Still checking the selected nights. Try again in a moment.', 'error');
+                return;
+            }
+            others = keys.length - fx.j.own.length;
+            keys = fx.j.own;
+            if (!keys.length) { toast(st, 'None of the selected nights has a block of its own. Nothing to unblock.', 'error'); return; }
+        }
         var g = L.byLane(keys, st.picks.lanes());
         var items = g.lanes.map(function (l) { return { t: 'room', id: Number(l), d: g.map[l] }; });
         var local = g.lanes.map(function (l) { return 'Room ' + (st.lanesById[l] ? st.lanesById[l].number : l) + ' on ' + L.nightsText(g.map[l]); }).join('; ');
@@ -1709,7 +1756,8 @@
             var where = p && p.where ? p.where : local;
             var msg = op === 'block'
                 ? 'Block ' + where + '? Guests will not be able to book them.' + (p && p.note ? ' ' + p.note : '')
-                : 'Unblock ' + where + '? Nights blocked by a room type or All rooms stay blocked; unblock those on Blocked Dates.';
+                : 'Unblock ' + where + '?' + (others ? ' The other ' + L.plural(others, 'selected night has', 'selected nights have') + ' no block of the room\'s own and ' + (others === 1 ? 'is' : 'are') + ' left as is.' : '')
+                    + ' Nights blocked by a room type or All rooms stay blocked; unblock those on Blocked Dates.';
             return window.RhGridSel.ask({
                 title: op === 'block' ? 'Block nights' : 'Unblock nights',
                 message: msg,
@@ -1742,19 +1790,8 @@
        Block runs: Extend... (admin-extend.js dialog -> blocked-dates.php extend_blocks: one transaction, booked nights
        skipped and listed) and the end handle: drag right = extend (same action, a confirm with the check first), drag
        left = unblock the trimmed nights (grid_apply unblock: only the room's own block). Bookings: a drag on a confirmed
-       stay opens its own Change dates screen prefilled; nothing is saved on the timeline. */
-    function extendItems(st, keys) {
-        var L = window.RhGridSel.logic, seen = {}, out = [];
-        keys.forEach(function (k) {
-            var p = L.parts(k), bl = blockAt(st, p.lane, p.d, 'blocked');
-            if (!bl || bl.scope !== 'own') return;
-            var id = p.lane + '|' + bl.to;
-            if (seen[id]) return;
-            seen[id] = true;
-            out.push({ t: 'room', id: Number(p.lane), last: bl.to });
-        });
-        return out;
-    }
+       stay opens its own Change dates screen prefilled; nothing is saved on the timeline.
+       Extend... items (one per own-block run of the picked nights, on or off screen): RhGridSel.logic.judge. */
     function blockSaved(st, res, revert) {
         var msg = dot((res && res.message) || (res && res.success ? 'Saved.' : 'Nothing was changed.'));
         if (!res || !res.success) { if (revert) revert(); toast(st, msg, 'error'); return; }

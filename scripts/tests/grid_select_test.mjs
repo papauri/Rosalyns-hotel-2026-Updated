@@ -159,5 +159,50 @@ ok('byLane counts a night once', eq(L.byLane(['10|2026-12-01', '10|2026-12-01'])
         L.pressPlan(room101Dec, null, { lane: '101', d: '2026-12-05' }, rooms, dec, yes).add.length === 0 && L.pressPlan([], null, { lane: '101', d: '2026-11-20' }, rooms, dec, yes).add.length === 0);
 }
 
+// Off-screen picks judged on real Timeline payloads (owner 2026-11-24: Unblock / Extend / booked count looked only at
+// the dates on screen). Payload shape: admin/includes/calendar-data.php rh_cal_timeline_payload.
+{
+    const days = (start, n) => L.span(start, L.dstr(L.dnum(start) + n - 1)).map((d) => ({ d }));
+    // Loaded range: 1-14 Dec. Room 101 has its own block 3-5 Dec; Room 102 a room-type block 4 Dec; Room 101 booked 8-9 Dec.
+    const dec = { start: '2026-12-01', dates: days('2026-12-01', 14),
+        bookings: [{ lanes: [101], ci: '2026-12-08', eco: '2026-12-10' }],
+        blocks: [{ lane: 101, kind: 'blocked', scope: 'own', from: '2026-12-03', to: '2026-12-05' },
+                 { lane: 102, kind: 'blocked', scope: 'type', from: '2026-12-04', to: '2026-12-04' },
+                 { lane: 103, kind: 'maintenance', scope: 'job', from: '2026-12-02', to: '2026-12-02' }] };
+    // Fetched window 30 Dec - 29 Jan (crosses the year end): Room 102 own block 2-6 Jan, Room 102 booked 31 Dec - 1 Jan.
+    const jan = { start: '2026-12-30', dates: days('2026-12-30', 31),
+        bookings: [{ lanes: [102], ci: '2026-12-31', eco: '2027-01-02' }],
+        blocks: [{ lane: 102, kind: 'blocked', scope: 'own', from: '2027-01-02', to: '2027-01-06' }] };
+    const picks = ['101|2026-12-04', '101|2026-12-08', '102|2026-12-04', '102|2026-12-31', '102|2027-01-01', '102|2027-01-03', '103|2026-12-02'];
+
+    const before = L.judge(picks, [dec]);
+    ok('judge on the loaded range only: the Jan nights are missing (not guessed free)', eq(before.missing, ['2026-12-31', '2027-01-01', '2027-01-03']));
+    ok('judge on the loaded range only: 1 booked night, 1 own-block night on screen', before.booked === 1 && eq(before.own, ['101|2026-12-04']));
+    const all = L.judge(picks, [dec, jan]);
+    ok('judge over both ranges: nothing missing', all.missing.length === 0);
+    ok('booked counted over both ranges (8 Dec + 31 Dec + 1 Jan = 3)', all.booked === 3, all);
+    ok('Unblock nights = only the room\'s own block, on and off screen (room-type and maintenance nights left out)',
+        eq(all.own, ['101|2026-12-04', '102|2027-01-03']), all.own);
+    ok('Extend items: one per own-block run, the off-screen run included',
+        eq(all.extend, [{ t: 'room', id: 101, last: '2026-12-05' }, { t: 'room', id: 102, last: '2027-01-06' }]), all.extend);
+    // A night both payloads hold is judged once, by the first (the loaded range wins, never counted twice).
+    const overlap = { start: '2026-12-08', dates: days('2026-12-08', 3), bookings: [{ lanes: [101], ci: '2026-12-08', eco: '2026-12-10' }], blocks: [] };
+    ok('a night held by two payloads counts once', L.judge(['101|2026-12-08', '101|2026-12-08'], [dec, overlap]).booked === 1);
+    ok('a picked night on a stay\'s check-out day is not booked', L.judge(['101|2026-12-10'], [dec]).booked === 0);
+    ok('no payloads: every night missing, nothing offered', (() => { const j = L.judge(['101|2026-12-04'], []); return eq(j.missing, ['2026-12-04']) && !j.own.length && !j.extend.length && j.booked === 0; })());
+
+    ok('windows: nothing missing = no request', L.windows([], 31, 3).length === 0);
+    ok('windows: one night = a 3-night request (the API minimum)', eq(L.windows(['2027-01-03'], 31, 3), [{ start: '2027-01-03', days: 3 }]));
+    ok('windows: nights across the year end in one request', eq(L.windows(['2027-01-03', '2026-12-31', '2027-01-01', '2026-12-31'], 31, 3), [{ start: '2026-12-31', days: 4 }]));
+    ok('windows: a span over 31 nights is split (1 Jan - 1 Feb = 31 + 1 nights)',
+        eq(L.windows(['2027-01-01', '2027-01-31', '2027-02-01'], 31, 3), [{ start: '2027-01-01', days: 31 }, { start: '2027-02-01', days: 3 }]));
+    ok('windows: months apart are two requests, the months between not read',
+        eq(L.windows(['2027-03-10', '2027-06-20'], 31, 3), [{ start: '2027-03-10', days: 3 }, { start: '2027-06-20', days: 3 }]));
+    const w = L.windows(['2027-01-01', '2027-01-31', '2027-02-01', '2027-03-10'], 31, 3);
+    ok('windows: every missing night is held by a window', ['2027-01-01', '2027-01-31', '2027-02-01', '2027-03-10'].every((d) => w.some((x) => L.holds(x, d))));
+    ok('holds: window end is exclusive, payload uses its dates', !L.holds({ start: '2027-01-01', days: 3 }, '2027-01-04') && L.holds({ start: '2027-01-01', days: 3 }, '2027-01-03')
+        && L.holds(jan, '2027-01-29') && !L.holds(jan, '2027-01-30'));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -117,6 +117,7 @@
             td.classList.toggle('is-selected', on);
             td.setAttribute('aria-selected', on ? 'true' : 'false');
         });
+        Object.keys(offMonths).forEach(function (m) { if (offMonths[m].state === 'fail') delete offMonths[m]; }); // try again
         summary();
     }
 
@@ -135,6 +136,55 @@
             if (!seen[k] && !shown[v.d]) { var r = Object.assign({}, v); r.offMonth = true; out.push(r); }
         });
         return out;
+    }
+
+    /* Picks in other months are judged on that month's real grid (owner 2026-11-24: a pick kept from another month, or
+       added there by Shift-click, carried the state it had when picked, or none). That month's page is read
+       (blocked-dates.php?month=YYYY-MM, no-store, the same cells as on screen) and each pick takes its state / booked /
+       info from it. Until it arrives: "checking..." and no Unblock / Extend. Read again after every month change or
+       save; a month that failed is read again on the next selection change. */
+    var offGen = 0;
+    var offMonths = {}; // 'YYYY-MM' -> {state: 'wait' | 'ok' | 'fail', cells: {key: rec}}
+    function offReset() { offGen++; offMonths = {}; }
+    function offLoad(m, gen) {
+        fetch(window.location.pathname + '?month=' + encodeURIComponent(m), { cache: 'no-store', credentials: 'same-origin' })
+            .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+            .then(function (html) {
+                var t = new DOMParser().parseFromString(html, 'text/html').getElementById('bdgTable');
+                if (!t || !t.querySelector('td[data-d^="' + m + '-"]')) throw new Error('No grid for ' + m);
+                var cells = {};
+                t.querySelectorAll('td[data-sel="1"]').forEach(function (td) { cells[keyOf(td)] = rec(td); });
+                return cells;
+            })
+            .then(function (cells) {
+                if (gen !== offGen) return;
+                offMonths[m] = { state: 'ok', cells: cells };
+                summary();
+            }, function () {
+                if (gen !== offGen) return;
+                offMonths[m] = { state: 'fail', cells: null };
+                summary();
+            });
+    }
+    /** Refresh the off-screen picks from their month's grid: {pending, failed} nights still without real data. */
+    function offCheck() {
+        var shown = shownDates(), pending = 0, failed = 0;
+        selected.forEach(function (v, k) {
+            if (!v || !v.d || shown[v.d]) return;
+            var m = v.d.slice(0, 7), om = offMonths[m];
+            if (!om) { om = offMonths[m] = { state: 'wait', cells: null }; offLoad(m, offGen); }
+            if (om.state === 'ok') {
+                // Not selectable in that month now (past, or the line is gone): no block, no booking known here; the
+                // server decides on save.
+                var c = om.cells[k];
+                selected.set(k, c || { t: v.t, id: v.id, d: v.d, label: v.label, state: '', booked: false, info: '' });
+            } else if (om.state === 'fail') {
+                failed++;
+            } else {
+                pending++;
+            }
+        });
+        return { pending: pending, failed: failed };
     }
 
     var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -187,6 +237,8 @@
     function summary() {
         var el = document.getElementById('bdgSummary');
         if (!el) return;
+        var chk = offCheck();
+        var waiting = chk.pending > 0 || chk.failed > 0;
         var cells = selectedCells();
         var direct = 0, inherited = 0, open = 0, booked = 0, offMonth = 0;
         cells.forEach(function (c) {
@@ -205,6 +257,11 @@
             : ' on ' + groups.length + (groups.length === 1 ? ' line' : ' lines'));
         if (n === 0) {
             text = 'No nights selected';
+        } else if (waiting) {
+            // No counts until every night in another month is read from its own grid.
+            text = whereText(groups, 4) + (chk.pending
+                ? ' (checking the nights in another month...)'
+                : ' (' + chk.failed + (chk.failed === 1 ? ' night' : ' nights') + ' in another month could not be checked: change the selection or reload the page to try again)');
         } else if (n === 1) {
             text = cells[0].info || '1 night selected';
         } else {
@@ -214,7 +271,7 @@
             if (open) parts.push(open + ' open');
             text = whereText(groups, 4) + ' (' + parts.join(', ') + ')';
         }
-        if (n > 0 && booked > 0) {
+        if (n > 0 && booked > 0 && !waiting) {
             text += '. ' + booked + ' selected night(s) already have a booking: blocking does not move the guest.';
         }
         if (offMonth > 0) {
@@ -237,9 +294,9 @@
         var unblockBtn = document.getElementById('bdgUnblockBtn');
         var clearBtn = document.getElementById('bdgClearBtn');
         if (blockBtn) blockBtn.disabled = busy || n === 0;
-        if (unblockBtn) unblockBtn.disabled = busy || direct === 0;
+        if (unblockBtn) unblockBtn.disabled = busy || waiting || direct === 0;
         var extendBtn = document.getElementById('bdgExtendBtn');
-        if (extendBtn) extendBtn.disabled = busy || direct === 0 || !window.RhExtend;
+        if (extendBtn) extendBtn.disabled = busy || waiting || direct === 0 || !window.RhExtend;
         if (clearBtn) clearBtn.disabled = busy || n === 0;
     }
 
@@ -398,16 +455,19 @@
     function menuApi() { return window.RhContextMenu || null; }
     function actions() {
         if (busy || asking) return null;
+        var chk = offCheck();
         var cells = selectedCells();
         if (!cells.length) return null;
         var direct = cells.some(function (c) { return c.state === 'direct'; });
         var n = cells.length;
+        // Nights in another month not read yet: no Unblock / Extend until they are (offCheck).
+        var wait = chk.pending ? 'Checking the nights in another month...' : (chk.failed ? 'Some nights in another month could not be checked. Change the selection or reload the page.' : '');
         return {
             title: n + (n === 1 ? ' night selected' : ' nights selected'),
             items: [
                 { label: 'Block', icon: 'fa-ban', run: function () { save('block'); } },
-                { label: 'Unblock', icon: 'fa-unlock', disabled: !direct, hint: direct ? '' : 'None of these nights has its own block.', run: function () { save('unblock'); } },
-                { label: 'Extend...', icon: 'fa-arrows-left-right', disabled: !direct || !window.RhExtend, hint: direct ? '' : 'Select a night of a line\'s own block.', run: function () { extendSel(); } },
+                { label: 'Unblock', icon: 'fa-unlock', disabled: !!wait || !direct, hint: wait || (direct ? '' : 'None of these nights has its own block.'), run: function () { save('unblock'); } },
+                { label: 'Extend...', icon: 'fa-arrows-left-right', disabled: !!wait || !direct || !window.RhExtend, hint: wait || (direct ? '' : 'Select a night of a line\'s own block.'), run: function () { extendSel(); } },
                 { label: 'Clear selection', icon: 'fa-xmark', run: function () { selected.clear(); paint(); } }
             ]
         };
@@ -553,8 +613,22 @@
     }
 
     function save(op) {
+        if (busy || asking) return;
+        var chk = offCheck();
         var cells = selectedCells();
-        if (!cells.length || busy || asking) return;
+        if (!cells.length) return;
+        var others = 0;
+        if (op === 'unblock') {
+            // Exactly the picked nights with their line's own block, in any month, read from real grids first.
+            if (chk.pending || chk.failed) {
+                feedback(false, chk.pending ? 'Still checking the nights in another month. Try again in a moment.' : 'Some nights in another month could not be checked. Change the selection or reload the page.');
+                return;
+            }
+            others = cells.length;
+            cells = cells.filter(function (c) { return c.state === 'direct'; });
+            others -= cells.length;
+            if (!cells.length) { feedback(false, 'None of the selected nights has a block of its own. Nothing to unblock.'); return; }
+        }
         asking = true;
         var grouped = groupCells(cells);
         var items = grouped.map(function (g) { return { t: g.t, id: g.id, d: g.d }; });
@@ -563,7 +637,8 @@
         var baseMsg = op === 'block'
             ? 'Block ' + where + '? Guests will not be able to book them.'
               + (wide.length ? ' ' + wide.join(' and ') + (wide.length === 1 ? ' blocks every room under it.' : ' block every room under them.') : '')
-            : 'Unblock ' + where + '? Nights blocked by a room type or All rooms stay blocked; unblock those on that line.';
+            : 'Unblock ' + where + '?' + (others ? ' The other ' + others + (others === 1 ? ' selected night has' : ' selected nights have') + ' no block of its line\'s own and ' + (others === 1 ? 'is' : 'are') + ' left as is.' : '')
+              + ' Nights blocked by a room type or All rooms stay blocked; unblock those on that line.';
         // Blocking: ask the server first which bookings already sleep on these nights (nothing is saved), so the
         // decision is made before the rooms go off sale. Unblocking needs no check.
         var ask = op === 'block' ? preview(items).then(function (p) {
@@ -635,6 +710,8 @@
     }
     function extendSel(opener) {
         if (!window.RhExtend || busy || asking) return;
+        var chk = offCheck();
+        if (chk.pending || chk.failed) return; // nights in another month not read yet (the buttons say so)
         var byRow = {};
         selectedCells().forEach(function (c) {
             if (c.state !== 'direct') return;
@@ -753,6 +830,7 @@
 
     // After the grid is swapped (a save here or in a Block modal): keep the type filter, clear stale picks.
     window.bdgAfterRefresh = function () {
+        offReset(); // blocks may have changed: other months are read again
         var f = document.getElementById('bdgTypeFilter');
         if (f && f.value !== '') f.dispatchEvent(new Event('change', { bubbles: true }));
         if (anchor) anchorRec = rec(anchor); // the old grid's anchor, for a Shift-click on the new one
@@ -767,6 +845,7 @@
     // (admin-spa.js): this file is not run again, so the new month is painted on rh:content-updated.
     function boot() {
         if (!table()) return;
+        offReset(); // a new month on screen: the picks in other months are read again from their own grids
         if (anchor) anchorRec = rec(anchor); // the last month's anchor: Shift-click here extends from it
         restore();
         prune();
