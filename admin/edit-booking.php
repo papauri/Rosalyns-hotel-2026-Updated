@@ -24,6 +24,52 @@ require_once __DIR__ . '/../includes/guest-allocation.php';
 require_once __DIR__ . '/../includes/alert.php';
 require_once __DIR__ . '/../includes/booking-room-change.php';
 require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights line (owner 2026-11-09)
+require_once __DIR__ . '/../includes/stale-edit.php';
+
+/**
+ * Stale-edit guard (CONCURRENCY_PLAN task 7): the booking columns this form shows and saves. A Save is refused when
+ * any of them changed since the form was opened. Payments, totals and status are not in the list (status keeps its
+ * own check under the lock), so a payment taken meanwhile never refuses the edit.
+ */
+function eb_stale_cols(): array
+{
+    return ['guest_name', 'room_guest_name', 'guest_email', 'guest_phone', 'guest_country', 'special_requests',
+        'check_in_date', 'check_out_date', 'number_of_guests', 'child_guests', 'occupancy_type', 'individual_room_id'];
+}
+
+/**
+ * The refusal message for a stale Save. Names who changed it and when only from the latest booking_audit_log row that
+ * changed one of the form's own columns; without such a row the message names nobody.
+ */
+function eb_stale_message(PDO $pdo, int $bookingId): string
+{
+    $tail = ' since you opened it, so nothing was saved. Reload the page to see the new details, then make your change again.';
+    try {
+        $st = $pdo->prepare("SELECT changed_fields, new_values, performed_by_name, performed_at FROM booking_audit_log
+                              WHERE booking_id = ? ORDER BY id DESC LIMIT 50");
+        $st->execute([$bookingId]);
+        $cols = eb_stale_cols();
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $a) {
+            $fields = json_decode((string)($a['changed_fields'] ?? ''), true);
+            if (!is_array($fields) || $fields === []) {
+                $nv = json_decode((string)($a['new_values'] ?? ''), true);
+                $fields = is_array($nv) ? array_keys($nv) : [];
+            }
+            if (!array_intersect(array_map('strval', $fields), $cols)) {
+                continue;
+            }
+            $who = trim((string)($a['performed_by_name'] ?? ''));
+            $ts = strtotime((string)($a['performed_at'] ?? ''));
+            if ($who === '' || !$ts) {
+                break;
+            }
+            return 'This booking was changed by ' . $who . ' on ' . date('j M Y', $ts) . ' at ' . date('H:i', $ts) . $tail;
+        }
+    } catch (Throwable $e) {
+        // no audit table: the message names nobody
+    }
+    return 'This booking was changed by someone else' . $tail;
+}
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -434,6 +480,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
 
         if (empty($error)) {
             $oldRoomIds = [];
+            $ebStaleError = '';
             try {
                 // Phase 2b: booking -> room types -> rooms (the chosen room included) locked first, planned before
                 // BEGIN, in the booking-creation order; the stay-change gate below re-checks under these locks.
@@ -446,6 +493,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 $locked = $lockSt->fetch(PDO::FETCH_ASSOC);
                 if (!$locked || (string)$locked['status'] !== $status || !empty($locked['deleted_at'])) {
                     throw new Exception('The booking changed while you were editing. Reload the page and try again.');
+                }
+                // Stale-edit guard (task 7): the form's own columns must still be what the form was opened with.
+                $ebPostedHash = rh_stale_posted();
+                if ($ebPostedHash === '') {
+                    $ebStaleError = 'This page was opened before a change to how saving works. Reload it and try again.';
+                    throw new Exception($ebStaleError);
+                }
+                if (!hash_equals(rh_stale_hash($locked, eb_stale_cols()), $ebPostedHash)) {
+                    $ebStaleError = eb_stale_message($pdo, (int)$booking_id);
+                    throw new Exception($ebStaleError);
                 }
 
                 $number_of_nights = (int)round((strtotime($check_out) - strtotime($check_in)) / 86400);
@@ -568,7 +625,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $error = strpos($e->getMessage(), 'Not saved: ') === 0 ? $e->getMessage()
+                $error = $ebStaleError !== '' || strpos($e->getMessage(), 'Not saved: ') === 0 ? $e->getMessage()
                     : 'Cannot save: ' . (rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage());
             }
 
@@ -646,6 +703,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
 if (!$booking) {
     echo '<p>Booking not found.</p>';
     exit;
+}
+
+// Stale-edit hash (task 7) from a PLAIN read of the booking row (the page's own load is a JOIN that aliases
+// individual_room_id). The form always shows the stored values, so a form shown again after an error carries the
+// hash of what it shows.
+$eb_row_hash = '';
+try {
+    $ebHashSt = $pdo->prepare('SELECT `' . implode('`, `', eb_stale_cols()) . '` FROM bookings WHERE id = ?');
+    $ebHashSt->execute([$booking_id]);
+    $ebHashRow = $ebHashSt->fetch(PDO::FETCH_ASSOC);
+    if ($ebHashRow) {
+        $eb_row_hash = rh_stale_hash($ebHashRow, eb_stale_cols());
+    }
+} catch (Throwable $e) {
+    $eb_row_hash = ''; // a Save is then refused with "Reload it and try again"
 }
 
 // Live price preview data (same rule as the server: booked rate + rack difference).
@@ -793,6 +865,12 @@ $back_url = 'booking-details.php?id=' . $booking_id;
             </span></div>
         <?php endif; ?>
 
+        <?php /* "Also open right now" warning, filled by js/edit-presence.js (admin/api/presence.php?editing=edit-booking). Never blocks saving. */ ?>
+        <div class="cb-presence" data-edit-presence data-key="edit-booking" data-id="<?php echo (int)$booking_id; ?>" data-endpoint="api/presence.php" role="status" aria-live="polite" hidden>
+            <strong class="cb-presence__title">Also open right now</strong>
+            <ul class="cb-presence__list"></ul>
+        </div>
+
         <div class="edit-form">
             <form method="POST"
                 data-admin-confirm="Save these booking changes?"
@@ -803,6 +881,7 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                 data-admin-loader-text="Saving booking..."
                 data-admin-submit-text="Saving...">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                <?php echo rh_stale_field($eb_row_hash); ?>
 
                 <h3 class="form-section-title">
                     <i class="fas fa-user"></i> Guest Information
@@ -1264,4 +1343,5 @@ $back_url = 'booking-details.php?id=' . $booking_id;
     </script>
 
     <script src="js/admin-components.js"></script>
+    <script src="js/edit-presence.js?v=<?php echo (int)@filemtime(__DIR__ . '/js/edit-presence.js'); ?>"></script>
     <?php require_once 'includes/admin-footer.php'; ?>

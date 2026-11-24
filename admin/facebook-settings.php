@@ -16,6 +16,7 @@ require_once 'admin-init.php';
 
 require_once '../includes/facebook-functions.php';
 require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
+require_once __DIR__ . '/../includes/settings-save-changed.php'; // save only the settings the person changed
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
@@ -118,6 +119,17 @@ if (!empty($_SESSION['fb_flash']) && is_array($_SESSION['fb_flash'])) {
     }
 }
 
+// Save only what the person changed (concurrency guardrails task 14, includes/settings-save-changed.php): every
+// setting the main form shows, with the default the page shows when there is no row. The App Secret and Page token
+// are secrets: never in this list, written only when a new one is typed.
+$fbSpec = [
+    'facebook_posting_enabled' => '0', 'facebook_page_id' => '', 'facebook_page_name' => '',
+    'facebook_default_hashtags' => '#hotel #accommodation #luxury',
+    'facebook_rooms_enabled' => '1', 'facebook_events_enabled' => '1', 'facebook_conference_enabled' => '1',
+    'facebook_gym_enabled' => '1', 'facebook_menu_enabled' => '1', 'facebook_post_log_enabled' => '1',
+    'facebook_app_id' => '', 'facebook_login_config_id' => '',
+];
+
 // ── POST actions ──────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? 'save');
@@ -145,6 +157,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // ── save / connect: validate and store the form ───────────────────────
+        $fbBase = rh_settings_base_parse($_POST['_settings_base'] ?? null);
+        if ($fbBase === null) {
+            throw new RuntimeException(rh_settings_base_reload_message());
+        }
         $newToken  = trim($_POST['facebook_page_access_token'] ?? '');
         $newSecret = trim($_POST['facebook_app_secret'] ?? '');
 
@@ -241,8 +257,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Settings change log (System Logs > Settings changes): one row per setting that changed, written in the same
         // transaction and ended before the connection stamps below. The App Secret and Page token show as hidden.
         rh_settings_log_begin($user);
+        $fbWritten = [];
+        $fbConflicts = [];
         try {
-            $fbWrites = $settings;
+            // Each setting goes through the changed-only decision first: written only when the person changed it and
+            // nobody else did; a setting both changed is refused and named; the rest are left as stored.
+            $fbWrites = [];
+            foreach ($settings as $key => $value) {
+                $d = rh_settings_base_decide($pdo, $fbBase, $key, $value, $fbSpec[$key] ?? '');
+                if ($d['outcome'] === 'no_base') {
+                    throw new RuntimeException($d['message']);
+                }
+                if ($manual !== null && $key === 'facebook_page_id') {
+                    // A pasted token belongs to one Page ($value = the Page ID Facebook gave for it): it is stored only
+                    // when this ID is written now or is already the stored one. Otherwise (someone else connected
+                    // another Page meanwhile) the whole save is refused, so the ID and token always stay a pair.
+                    $fbPairRefusal = rh_settings_base_pair_refusal($pdo, $key, $d, (string)$value);
+                    if ($fbPairRefusal !== null) {
+                        throw new RuntimeException($fbPairRefusal);
+                    }
+                }
+                if ($d['outcome'] === 'conflict') {
+                    $fbConflicts[] = $d['message'];
+                }
+                if ($d['outcome'] === 'write') {
+                    $fbWrites[$key] = $value;
+                }
+            }
             // Secrets are stored encrypted, and only when a new one was submitted.
             if ($newSecret !== '') {
                 $fbWrites['facebook_app_secret'] = facebookEncryptSecret($newSecret);
@@ -259,6 +300,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($fbLogOld[$key] !== null) {
                     rh_settings_log_record('site_settings', $key, $fbLogOld[$key]['value'], $value);
                 }
+                $fbWritten[] = $key;
             }
         } finally {
             rh_settings_log_end();
@@ -268,7 +310,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (function_exists('clearSettingsCache')) {
             clearSettingsCache();
         }
-        foreach ($settings as $key => $value) {
+        // Only what was written: a refused or unchanged setting is shown as stored, never as posted.
+        foreach (array_intersect_key($fbWrites, $settings) as $key => $value) {
             $_SITE_SETTINGS[$key] = $value;
         }
 
@@ -283,13 +326,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
         }
 
-        rh_log_event('facebook_settings', 'info', 'Facebook settings saved', [
+        if ($fbWritten) rh_log_event('facebook_settings', 'info', 'Facebook settings saved', [
             'enabled'        => $settings['facebook_posting_enabled'],
             'has_page_id'    => $settings['facebook_page_id'] !== '',
             'new_token'      => $manual !== null,
             'saved_by'       => $connectedBy ?: 'unknown',
         ]);
 
+        if ($fbConflicts && $action === 'connect') {
+            // Someone else changed a setting this person also changed: show it, never go on to Facebook.
+            $fbFlashRedirect('error', implode(' ', $fbConflicts) . ($fbWritten ? ' Your other changes were saved.' : ''));
+        }
         if ($action === 'connect') {
             [$appId, $secret] = facebookAppCredentials();
             if ($appId === '' || $secret === '') {
@@ -299,7 +346,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        $message = 'Facebook settings saved successfully.';
+        if ($fbConflicts) {
+            $error = implode(' ', $fbConflicts) . ($fbWritten ? ' Your other changes were saved.' : '');
+        } else {
+            $message = $fbWritten ? 'Facebook settings saved successfully.' : 'Nothing had changed, so nothing was saved.';
+        }
     } catch (Exception $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
@@ -498,6 +549,7 @@ $h = static function ($v): string {
         <!-- Main settings form -->
         <form method="POST" action="" autocomplete="off" id="fbMainForm">
             <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+            <?php echo rh_settings_base_field($pdo, $fbSpec); // what the page was opened with: only changed settings are saved ?>
             <!-- First submit button in the form, so pressing Enter in a field saves rather than connects -->
             <button type="submit" name="action" value="save" class="fb-default-submit" tabindex="-1" aria-hidden="true">Save</button>
 

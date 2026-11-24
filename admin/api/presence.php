@@ -18,6 +18,14 @@
  *                                  opened; skipped when idle=1 so an abandoned tab ages out) and returns
  *                                  the OTHER people with that page open right now. Same
  *                                  X-Requested-With rule as the ping.
+ *   GET presence.php?editing=edit-booking&id=42[&idle=1]
+ *                               -> the "someone else has this open" warning (never blocks). The key must
+ *                                  be one of rh_presence_edit_pages() (edit-booking, stock-count,
+ *                                  data-import, stock-ingredients) and id a whole number > 0, else 400.
+ *                                  Needs permission to open the key's page (403 otherwise, nothing
+ *                                  written). Records the caller's own note (skipped when idle=1) and
+ *                                  returns the OTHER people with the same record open right now.
+ *                                  Same X-Requested-With rule as the ping.
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -72,6 +80,36 @@ if (isset($_GET['booking'])) {
     echo json_encode([
         'success' => true,
         'data' => ['others' => $others, 'overlap' => (bool)array_filter($others, function ($o) { return $o['overlap']; })],
+    ]);
+    exit;
+}
+
+if (isset($_GET['editing'])) {
+    if (strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) !== 'xmlhttprequest') {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Bad request']);
+        exit;
+    }
+    $editPages = rh_presence_edit_pages();
+    $editKey = is_string($_GET['editing']) ? $_GET['editing'] : '';
+    $editIdRaw = isset($_GET['id']) && is_string($_GET['id']) ? $_GET['id'] : '';
+    if (!array_key_exists($editKey, $editPages) || preg_match('/^[1-9][0-9]{0,9}$/', $editIdRaw) !== 1) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Bad request']);
+        exit;
+    }
+    $editId = (int)$editIdRaw;
+    if (!rhCanOpenPage($userId, $editPages[$editKey])) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Permission denied']);
+        exit;
+    }
+    if (empty($_GET['idle'])) {
+        rh_presence_edit_write($pdo, $userId, $editKey, $editId);
+    }
+    echo json_encode([
+        'success' => true,
+        'data' => ['others' => rh_presence_edit_others($pdo, $userId, $editKey, $editId)],
     ]);
     exit;
 }

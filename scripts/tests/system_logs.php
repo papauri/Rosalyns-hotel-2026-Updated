@@ -112,6 +112,14 @@ function run_page(string $page, array $cfg): array {
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { return $r; } }
     return ['error' => 'no result', 'raw' => substr((string)$out, -300), 'rolled_back' => false];
 }
+// Settings pages save only what the person changed: a save carries the "_settings_base" copy from a rolled-back GET render.
+function settings_base(string $page): string {
+    $file = tempnam(sys_get_temp_dir(), 'sbase');
+    run_page($page, ['method' => 'GET', 'dump_html' => $file]);
+    $html = (string)@file_get_contents($file);
+    @unlink($file);
+    return preg_match('/name="_settings_base" value="([^"]*)"/', $html, $m) ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '';
+}
 $clean = function (array $r): bool { return !empty($r['rolled_back']) && empty($r['leak']) && empty($r['marker_lost']); };
 $seed = [
     "INSERT INTO system_event_log (source, level, message, created_at) VALUES ('zz_logtest', 'error', 'ZZ real failure alpha', NOW())",
@@ -150,11 +158,11 @@ foreach ([
 
 // ---- Refused vs failed settings saves log at the right level ----
 $lvl = ["SELECT level FROM system_event_log WHERE source = 'whatsapp_settings' AND message LIKE 'WhatsApp settings not saved%' ORDER BY id DESC LIMIT 1"];
-$r = run_page('admin/whatsapp-settings.php', ['post' => ['whatsapp_number' => 'hello', 'whatsapp_api_token' => '', 'whatsapp_phone_id' => '', 'whatsapp_business_id' => '', 'whatsapp_admin_numbers' => '', 'whatsapp_confirmed_template' => 'booking_confirmed', 'whatsapp_cancelled_template' => 'booking_cancelled'], 'verify' => $lvl]);
+$r = run_page('admin/whatsapp-settings.php', ['post' => ['_settings_base' => settings_base('admin/whatsapp-settings.php'), 'whatsapp_number' => 'hello', 'whatsapp_api_token' => '', 'whatsapp_phone_id' => '', 'whatsapp_business_id' => '', 'whatsapp_admin_numbers' => '', 'whatsapp_confirmed_template' => 'booking_confirmed', 'whatsapp_cancelled_template' => 'booking_cancelled'], 'verify' => $lvl]);
 check(($r['verify'][0][0]['level'] ?? '') === 'warning', 'a refused WhatsApp number is logged as a warning, not an error', json_encode($r['verify'] ?? $r));
 check($clean($r), 'refused WhatsApp save rolled back');
 $lvl = ["SELECT level FROM system_event_log WHERE source = 'facebook_settings' AND message LIKE 'Facebook settings not saved%' ORDER BY id DESC LIMIT 1"];
-$r = run_page('admin/facebook-settings.php', ['post' => ['facebook_page_id' => '12ab', 'facebook_page_name' => 'ZZ', 'facebook_default_hashtags' => '', 'facebook_page_access_token' => ''], 'verify' => $lvl]);
+$r = run_page('admin/facebook-settings.php', ['post' => ['_settings_base' => settings_base('admin/facebook-settings.php'), 'facebook_page_id' => '12ab', 'facebook_page_name' => 'ZZ', 'facebook_default_hashtags' => '', 'facebook_page_access_token' => ''], 'verify' => $lvl]);
 check(($r['verify'][0][0]['level'] ?? '') === 'warning', 'a refused Facebook Page ID is logged as a warning, not an error', json_encode($r['verify'] ?? $r));
 check($clean($r), 'refused Facebook save rolled back');
 foreach (['admin/whatsapp-settings.php', 'admin/facebook-settings.php'] as $pf) {

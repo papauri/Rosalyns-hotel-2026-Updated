@@ -26,6 +26,19 @@ function run_page(string $page, array $post, array $verify = [], bool $ajax = fa
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { return $r; } }
     return ['error' => 'no result', 'raw' => substr((string)$out, -400), 'rolled_back' => false];
 }
+// Settings pages save only what the person changed (includes/settings-save-changed.php): a save must carry the
+// "_settings_base" copy the page rendered. Taken from a rolled-back GET render of the page, once per page.
+function settings_base(string $page): string {
+    global $h;
+    static $memo = [];
+    if (isset($memo[$page])) { return $memo[$page]; }
+    $file = tempnam(sys_get_temp_dir(), 'sbase');
+    $cmd = 'php ' . escapeshellarg($h) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg(base64_encode(json_encode(['method' => 'GET', 'dump_html' => $file]))) . ' 2>&1';
+    shell_exec($cmd);
+    $html = (string)@file_get_contents($file);
+    @unlink($file);
+    return $memo[$page] = preg_match('/name="_settings_base" value="([^"]*)"/', $html, $m) ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '';
+}
 function flash(array $r): string { return strtolower(implode(' | ', $r['output_flash'] ?? [])); }
 function jmsg(array $r): string { return strtolower((string)($r['json']['message'] ?? $r['json']['error'] ?? '')); }
 require_once $root . '/config/database.php';
@@ -121,7 +134,7 @@ foreach ([
 }
 
 echo "== WhatsApp settings ==\n";
-$wb = ['whatsapp_number' => '+265888123456', 'whatsapp_api_token' => '', 'whatsapp_phone_id' => '', 'whatsapp_business_id' => '', 'whatsapp_admin_numbers' => '', 'whatsapp_confirmed_template' => 'booking_confirmed', 'whatsapp_cancelled_template' => 'booking_cancelled'];
+$wb = ['_settings_base' => settings_base('admin/whatsapp-settings.php'), 'whatsapp_number' => '+265888123456', 'whatsapp_api_token' => '', 'whatsapp_phone_id' => '', 'whatsapp_business_id' => '', 'whatsapp_admin_numbers' => '', 'whatsapp_confirmed_template' => 'booking_confirmed', 'whatsapp_cancelled_template' => 'booking_cancelled'];
 $wv = ["SELECT setting_key,setting_value FROM site_settings WHERE setting_key IN ('whatsapp_provider','whatsapp_number')"];
 $r = run_page('admin/whatsapp-settings.php', $wb, $wv);
 $wmap = []; foreach (($r['verify'][0] ?? []) as $row) { $wmap[$row['setting_key']] = $row['setting_value']; }
@@ -134,7 +147,7 @@ foreach ([['whatsapp_number' => 'hello', 'phone number'], ['whatsapp_phone_id' =
 }
 
 echo "== Facebook settings ==\n";
-$fb = ['facebook_page_id' => '123456789', 'facebook_page_name' => 'ZZ Page', 'facebook_default_hashtags' => '#hotel #malawi', 'facebook_page_access_token' => ''];
+$fb = ['_settings_base' => settings_base('admin/facebook-settings.php'), 'facebook_page_id' => '123456789', 'facebook_page_name' => 'ZZ Page', 'facebook_default_hashtags' => '#hotel #malawi', 'facebook_page_access_token' => ''];
 $fv = ["SELECT setting_value FROM site_settings WHERE setting_key='facebook_page_name'"];
 $r = run_page('admin/facebook-settings.php', $fb, $fv);
 ok('valid Facebook save', (($r['verify'][0][0]['setting_value'] ?? '') === 'ZZ Page'), json_encode($r['output_flash'] ?? $r));
@@ -200,7 +213,7 @@ ok('blank backup fields saved as empty', ($bm['email_reply_to_backup'] ?? 'x') =
 echo "== Station hours, automated emails, cache management ==\n";
 $r = run_page('admin/station-settings.php', ['stations' => ['kitchen' => ['opens_at' => '25:99', 'closes_at' => '10:00']]], ["SELECT COUNT(*) c FROM site_settings WHERE setting_value='25:99'"], false, ['Use 24-hour HH:MM format']);
 ok('bad station time rejected, nothing written', !empty($r['found']['Use 24-hour HH:MM format']) && (int)($r['verify'][0][0]['c'] ?? 1) === 0, json_encode($r['found'] ?? $r));
-$r = run_page('admin/automated-emails.php', ['action' => 'save', 'automated_email_reminder_stages' => '9, 2, 400, 2', 'automated_email_test_recipient' => 'nope', 'automated_email_interval_minutes' => '1'], ["SELECT setting_key,setting_value FROM site_settings WHERE setting_key IN ('automated_email_reminder_stages','automated_email_interval_minutes','automated_email_test_recipient')"]);
+$r = run_page('admin/automated-emails.php', ['action' => 'save', '_settings_base' => settings_base('admin/automated-emails.php'), 'automated_email_reminder_stages' => '9, 2, 400, 2', 'automated_email_test_recipient' => 'nope', 'automated_email_interval_minutes' => '1'], ["SELECT setting_key,setting_value FROM site_settings WHERE setting_key IN ('automated_email_reminder_stages','automated_email_interval_minutes','automated_email_test_recipient')"]);
 $am = []; foreach (($r['verify'][0] ?? []) as $row) { $am[$row['setting_key']] = $row['setting_value']; }
 ok('reminder stages sanitised to 2,9; interval floored to 5; bad test recipient cleared', ($am['automated_email_reminder_stages'] ?? '') === '2,9' && ($am['automated_email_interval_minutes'] ?? '') === '5' && ($am['automated_email_test_recipient'] ?? 'x') === '', json_encode($am));
 $r = run_page('admin/cache-management.php', ['action' => 'set_schedule', 'schedule_enabled' => '1', 'schedule_interval' => 'bogus', 'schedule_time' => '99:99', 'custom_seconds' => '1'], ["SELECT setting_key,setting_value FROM site_settings WHERE setting_key IN ('cache_schedule_interval','cache_schedule_time','cache_custom_seconds')"]);

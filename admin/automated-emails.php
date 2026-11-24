@@ -14,6 +14,7 @@ require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/../includes/auto-email-jobs.php';
 require_once __DIR__ . '/../includes/daily-reports-send.php';
 require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
+require_once __DIR__ . '/../includes/settings-save-changed.php'; // save only the keys the person changed
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -30,6 +31,16 @@ $timedNote = 'Needs the Timed report emails permission';
 $companyJobs = ['company_statements'];
 $canCompanyEmails = hasPermission((int)$user['id'], 'company_statement_emails');
 $companyNote = 'Needs the Company statement emails permission';
+// Every setting the Settings form shows, with the default it shows when there is no row (includes/settings-save-changed.php).
+$aeSpec = [];
+foreach (['automated_email_master', 'automated_email_reminder_stages', 'automated_email_test_recipient', 'automated_email_payment_terms_days',
+    'automated_email_lookback_days', 'automated_email_quotation_days', 'automated_email_interval_minutes', 'automated_email_bcc_hotel',
+    'automated_job_daily_reports_cc', 'automated_job_station_reports_to', 'automated_job_station_reports_cc', 'automated_job_company_statements_cc'] as $aeK) {
+    $aeSpec[$aeK] = rh_auto_defaults()[$aeK] ?? '';
+}
+foreach ($jobs as $aeJob) {
+    $aeSpec[$aeJob['toggle']] = (string)$aeJob['toggle_default'];
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -39,9 +50,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = (string)($_POST['action'] ?? '');
 
         if ($action === 'save') {
+            // Save only what the person changed (concurrency guardrails tasks 12-13): every key goes through
+            // rh_settings_base_decide() against the "_settings_base" copy rendered with the form. A key someone else
+            // changed meanwhile is refused and named; the other keys are saved. No valid copy = nothing is saved.
+            $aeBase = rh_settings_base_parse($_POST['_settings_base'] ?? null);
+            $aeConflicts = [];
+            $aeWritten = [];
             // Settings change log (System Logs > Settings changes): this save block only, ended in finally.
             rh_settings_log_begin($user);
             try {
+                if ($aeBase === null) {
+                    throw new RuntimeException(rh_settings_base_reload_message());
+                }
+                $pdo->beginTransaction();
+                // true = write this key now; a conflict is collected; a key missing from the copy stops the whole save.
+                $aeWrite = static function (string $k, string $v, ?string $raw = null) use ($pdo, $aeBase, $aeSpec, &$aeConflicts, &$aeWritten): bool {
+                    $d = rh_settings_base_decide($pdo, $aeBase, $k, $v, ['raw' => $raw] + rh_settings_base_entry($aeSpec[$k] ?? ''));
+                    if ($d['outcome'] === 'no_base') {
+                        throw new RuntimeException($d['message']);
+                    }
+                    if ($d['outcome'] === 'conflict') {
+                        $aeConflicts[] = $d['message'];
+                    }
+                    if ($d['outcome'] === 'write') {
+                        $aeWritten[] = $k;
+                        return true;
+                    }
+                    return false;
+                };
+                $aeRaw = static function (string $k): string {
+                    return is_scalar($_POST[$k] ?? null) ? (string)$_POST[$k] : '';
+                };
                 // A text / number setting is written only when its field was posted, so a form opened before a field
                 // existed (or a disabled field) never blanks the stored value. Checkboxes: absent = off, as before.
                 $posted = static function (string $k): bool {
@@ -71,7 +110,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!$stages) {
                         $stages = [1, 3, 7];
                     }
-                    updateSetting('automated_email_reminder_stages', implode(',', $stages));
+                    if ($aeWrite('automated_email_reminder_stages', implode(',', $stages), $aeRaw('automated_email_reminder_stages'))) {
+                        updateSetting('automated_email_reminder_stages', implode(',', $stages));
+                    }
                 }
                 // The test recipient and the master switch decide where (and whether) the timed report emails go, so they
                 // need 'timed_report_emails' too (owner 2026-11-13, L16). Without it they are NOT written.
@@ -81,45 +122,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $testRecipient = '';
                         $message = 'The test recipient was not a valid email address and was cleared. ';
                     }
-                    updateSetting('automated_email_test_recipient', $testRecipient);
+                    if ($aeWrite('automated_email_test_recipient', $testRecipient, $aeRaw('automated_email_test_recipient'))) {
+                        updateSetting('automated_email_test_recipient', $testRecipient);
+                    }
                 }
                 $flag = static function (string $k): string {
                     return isset($_POST[$k]) ? '1' : '0';
                 };
-                if ($canTimedReports) {
+                if ($canTimedReports && $aeWrite('automated_email_master', $flag('automated_email_master'))) {
                     updateSetting('automated_email_master', $flag('automated_email_master'));
                 }
                 if ($posted('automated_email_payment_terms_days')) {
-                    updateSetting('automated_email_payment_terms_days', (string)max(0, min(120, (int)($_POST['automated_email_payment_terms_days'] ?? 7))));
+                    $aeV = (string)max(0, min(120, (int)($_POST['automated_email_payment_terms_days'] ?? 7)));
+                    if ($aeWrite('automated_email_payment_terms_days', $aeV, $aeRaw('automated_email_payment_terms_days'))) {
+                        updateSetting('automated_email_payment_terms_days', $aeV);
+                    }
                 }
                 if ($posted('automated_email_lookback_days')) {
-                    updateSetting('automated_email_lookback_days', (string)max(1, min(365, (int)($_POST['automated_email_lookback_days'] ?? 30))));
+                    $aeV = (string)max(1, min(365, (int)($_POST['automated_email_lookback_days'] ?? 30)));
+                    if ($aeWrite('automated_email_lookback_days', $aeV, $aeRaw('automated_email_lookback_days'))) {
+                        updateSetting('automated_email_lookback_days', $aeV);
+                    }
                 }
                 if ($posted('automated_email_quotation_days')) {
-                    updateSetting('automated_email_quotation_days', (string)max(1, min(30, (int)($_POST['automated_email_quotation_days'] ?? 2))));
+                    $aeV = (string)max(1, min(30, (int)($_POST['automated_email_quotation_days'] ?? 2)));
+                    if ($aeWrite('automated_email_quotation_days', $aeV, $aeRaw('automated_email_quotation_days'))) {
+                        updateSetting('automated_email_quotation_days', $aeV);
+                    }
                 }
                 if ($posted('automated_email_interval_minutes')) {
-                    updateSetting('automated_email_interval_minutes', (string)max(5, min(1440, (int)($_POST['automated_email_interval_minutes'] ?? 15))));
+                    $aeV = (string)max(5, min(1440, (int)($_POST['automated_email_interval_minutes'] ?? 15)));
+                    if ($aeWrite('automated_email_interval_minutes', $aeV, $aeRaw('automated_email_interval_minutes'))) {
+                        updateSetting('automated_email_interval_minutes', $aeV);
+                    }
                 }
-                updateSetting('automated_email_bcc_hotel', $flag('automated_email_bcc_hotel'));
+                if ($aeWrite('automated_email_bcc_hotel', $flag('automated_email_bcc_hotel'))) {
+                    updateSetting('automated_email_bcc_hotel', $flag('automated_email_bcc_hotel'));
+                }
                 // Timed report emails (daily reports + station reports): switches, To and CC need 'timed_report_emails'.
                 // Without it these keys are NOT written at all; the stored values stay as they are.
                 if ($canTimedReports) {
                     if ($posted('automated_job_daily_reports_cc')) {
                         // Visible copy (CC) on the daily reports email: valid addresses only; empty = no copy.
                         $reportCc = $cleanList('automated_job_daily_reports_cc', 'daily reports copy (CC)');
-                        updateSetting('automated_job_daily_reports_cc', $reportCc);
+                        if ($aeWrite('automated_job_daily_reports_cc', $reportCc, $aeRaw('automated_job_daily_reports_cc'))) {
+                            updateSetting('automated_job_daily_reports_cc', $reportCc);
+                        }
                     }
                     if ($posted('automated_job_station_reports_to')) {
                         // Empty = the End of Day report recipients.
-                        updateSetting('automated_job_station_reports_to', $cleanList('automated_job_station_reports_to', 'station report emails "go to" list'));
+                        $aeV = $cleanList('automated_job_station_reports_to', 'station report emails "go to" list');
+                        if ($aeWrite('automated_job_station_reports_to', $aeV, $aeRaw('automated_job_station_reports_to'))) {
+                            updateSetting('automated_job_station_reports_to', $aeV);
+                        }
                     }
                     if ($posted('automated_job_station_reports_cc')) {
-                        updateSetting('automated_job_station_reports_cc', $cleanList('automated_job_station_reports_cc', 'station report emails copy (CC)'));
+                        $aeV = $cleanList('automated_job_station_reports_cc', 'station report emails copy (CC)');
+                        if ($aeWrite('automated_job_station_reports_cc', $aeV, $aeRaw('automated_job_station_reports_cc'))) {
+                            updateSetting('automated_job_station_reports_cc', $aeV);
+                        }
                     }
                 }
                 if ($canCompanyEmails && $posted('automated_job_company_statements_cc')) {
-                    updateSetting('automated_job_company_statements_cc', $cleanList('automated_job_company_statements_cc', 'company statements copy (CC)'));
+                    $aeV = $cleanList('automated_job_company_statements_cc', 'company statements copy (CC)');
+                    if ($aeWrite('automated_job_company_statements_cc', $aeV, $aeRaw('automated_job_company_statements_cc'))) {
+                        updateSetting('automated_job_company_statements_cc', $aeV);
+                    }
                 }
                 // Only the switches this form showed are written: a form opened before a job existed never switches it off.
                 // A form without the list predates 'station_reports' (2026-11-12), the only job added since.
@@ -134,11 +202,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!$canCompanyEmails && in_array($jobName, $companyJobs, true)) {
                         continue; // needs the Company statement emails permission: keep the stored switch
                     }
-                    updateSetting($job['toggle'], $flag('job_' . $jobName));
+                    if ($aeWrite($job['toggle'], $flag('job_' . $jobName))) {
+                        updateSetting($job['toggle'], $flag('job_' . $jobName));
+                    }
                 }
-                $message .= 'Automated email settings saved.';
+                $pdo->commit();
+                if ($aeConflicts) {
+                    $message .= implode(' ', $aeConflicts) . ($aeWritten ? ' Your other changes were saved.' : '');
+                    $messageType = 'error';
+                } else {
+                    $message .= $aeWritten ? 'Automated email settings saved.' : 'Nothing had changed, so nothing was saved.';
+                }
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $aeWritten = [];
+                $message = $e instanceof RuntimeException ? $e->getMessage() : 'The settings could not be saved, so nothing was changed. Please try again.';
+                $messageType = 'error';
+                if (!($e instanceof RuntimeException)) {
+                    error_log('automated emails save: ' . $e->getMessage());
+                }
             } finally {
                 rh_settings_log_end();
+            }
+            // The page below must show what is stored now: drop any copy cached while the save was open.
+            foreach ($aeWritten as $aeKey) {
+                unset($_SITE_SETTINGS[$aeKey]);
+                deleteCache('setting_' . $aeKey);
             }
         } elseif ($action === 'run_now') {
             $r = rh_scheduler_execute(true, ['time_budget' => 20, 'email_budget' => 25], false);
@@ -280,6 +371,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
         <form method="POST" class="settings-card">
             <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf_token); ?>">
             <input type="hidden" name="action" value="save">
+            <?php echo rh_settings_base_field($pdo, $aeSpec); ?>
             <h2>Settings</h2>
 
             <div class="form-group">

@@ -1407,7 +1407,8 @@ try {
         $cA1 = $colsOf($sA1);
         $ck('Assistant (database): ONE call for the import (step 2 and step 3 share it), the unplaced headings sent with up to 5 values; the checked suggestion is shown, a reading that does not fit the values ("red" as a size) is dropped',
             $nA === 1 && $nA2 === 0 && count($calls) === 1 && count($sentCols) === 2 && ($sentCols[0]['samples'] ?? null) === ['30', '25', '30']
-            && ($cA1['Tots in btl (approx)']['suggest'] ?? null) === ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle', 'label' => 'Tots per bottle'] && empty($cA1['Odd stuff']['suggest']),
+            && array_diff_key((array)($cA1['Tots in btl (approx)']['suggest'] ?? []), ['khash' => 1]) === ['field' => 'measures_per_unit', 'measure' => 'tot', 'unit' => 'bottle', 'label' => 'Tots per bottle']
+            && strlen((string)($cA1['Tots in btl (approx)']['suggest']['khash'] ?? '')) === 16 && empty($cA1['Odd stuff']['suggest']),
             json_encode([$nA, $nA2, count($calls), $sentCols, $cA1['Tots in btl (approx)'] ?? null]));
         $ck('Assistant (database): a suggestion is never applied or learned without the click (column still not read, nothing in import_aliases)',
             ($cA1['Tots in btl (approx)']['state'] ?? '') === 'unmapped' && $learnedRow('field', 'tots in btl approx', 'measures_per_unit') === false);

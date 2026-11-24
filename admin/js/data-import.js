@@ -161,6 +161,8 @@
                 if (job) { u.searchParams.set('job', job); } else { u.searchParams.delete('job'); ['q', 'sheet', 'cat', 'status', 'type', 'kind', 'warn', 'cost', 'stock', 'answered', 'sort', 'size', 'page', 'view'].forEach(function (k) { u.searchParams.delete(k); }); }
                 window.history.replaceState(window.history.state, '', u.pathname + u.search);
             } catch (e) { /* ignore */ }
+            // "Also open right now" warning (js/edit-presence.js): follows the open import, 0 = none open.
+            try { if (window.RHEditPresence) { window.RHEditPresence.setId(job || 0); } } catch (e) { /* warning only */ }
         }
         function scrollTo(el) {
             if (!el) { return; }
@@ -365,7 +367,21 @@
                     S.busy = false;
                     uploadBtn.innerHTML = old;
                     uploadBtn.disabled = !S.file;
-                    if (!r.ok) { msg(r.error || 'The file could not be read.'); return; }
+                    if (!r.ok) {
+                        msg(r.error || 'The file could not be read.');
+                        // the same file is already being imported: offer that import (only to someone who may open it)
+                        var dj = r.duplicate && r.duplicate.open && r.duplicate.can_open ? parseInt(r.duplicate.job_id, 10) : 0;
+                        if (dj > 0) {
+                            var ob = h('button', 'btn-secondary di-btn di-btn--small', 'Open that import');
+                            ob.type = 'button';
+                            ob.addEventListener('click', function () {
+                                msg(''); fileInput.value = ''; if (countedEl) { countedEl.value = ''; } chosen(null);
+                                loadJob(dj);      // as the "Open" button in the list: the step that job is at
+                            });
+                            add(msgEl, ' ', ob);
+                        }
+                        return;
+                    }
                     fileInput.value = '';
                     if (countedEl) { countedEl.value = ''; }      // no carried-over time for the next file
                     chosen(null);
@@ -681,7 +697,9 @@
             el.classList.add('is-saving');
             Array.prototype.forEach.call(el.querySelectorAll('input,button'), function (x) { x.disabled = true; });
             var d = Object.assign({ job: S.job, ref: s.ref, field: s.field }, pagedExtra());
-            S.chain = S.chain.then(function () { return post('col_use', d); }).then(function (r) {
+            // khash = the suggestion as this screen got it; read when the request goes (after any earlier click's reply updated it)
+            S.chain = S.chain.then(function () { d.key_hash = s.khash || ''; return post('col_use', d); }).then(function (r) {
+                if (r.ok && r.key_hash) { s.khash = r.key_hash; }
                 if (!r.ok) {
                     msg(r.error || 'That could not be saved.');
                     el.classList.remove('is-saving');
@@ -703,7 +721,9 @@
             Array.prototype.forEach.call(cardEl.querySelectorAll('input,button'), function (x) { x.disabled = true; });
             var d = Object.assign({ job: S.job, question: q.id, answer: key }, pagedExtra());
             if (pack !== null && pack !== undefined) { d.pack_size = String(pack).trim(); }
-            S.chain = S.chain.then(function () { return post('answer', d); }).then(function (r) {
+            // khash = this question's stored answer as this screen got it (the server refuses the click when somebody else changed it since)
+            S.chain = S.chain.then(function () { d.key_hash = q.khash || ''; return post('answer', d); }).then(function (r) {
+                if (r.ok && r.key_hash) { q.khash = r.key_hash; }
                 if (!r.ok) {
                     msg(r.error || 'That answer could not be saved.');
                     cardEl.classList.remove('is-saving');
@@ -948,8 +968,9 @@
                     });
                     sel.addEventListener('change', function () {
                         sel.disabled = true;
-                        S.chain = S.chain.then(function () { return post('count_row', Object.assign({ job: S.job, question: q.id, uid: x.uid, answer: sel.value }, pagedExtra())); }).then(function (a) {
-                            if (!a.ok) { msg(a.error || 'That answer could not be saved.'); sel.disabled = false; return; }
+                        S.chain = S.chain.then(function () { return post('count_row', Object.assign({ job: S.job, question: q.id, uid: x.uid, answer: sel.value, key_hash: x.khash || '' }, pagedExtra())); }).then(function (a) {
+                            if (a.ok && a.key_hash) { x.khash = a.key_hash; x.answer = sel.value; }      // this row's next change is checked against what was just saved
+                            if (!a.ok) { msg(a.error || 'That answer could not be saved.'); sel.value = x.answer || ''; sel.disabled = false; return; }      // refused: show what is saved
                             msg(''); refresh(a.summary);
                         });
                     });
@@ -2029,8 +2050,9 @@
                 cb.addEventListener('change', function () {
                     boxes.forEach(function (b) { b.disabled = true; });
                     var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
-                    S.chain = S.chain.then(function () { return post('fields', Object.assign({ job: S.job, key: it.update_key, fields: picked }, pagedExtra())); }).then(function (r) {
-                        if (!r.ok) { msg(r.error || 'That choice could not be saved.'); boxes.forEach(function (b) { b.disabled = false; }); return; }
+                    S.chain = S.chain.then(function () { return post('fields', Object.assign({ job: S.job, key: it.update_key, fields: picked, key_hash: it.upd_khash || '' }, pagedExtra())); }).then(function (r) {
+                        if (r.ok && r.key_hash) { it.upd_khash = r.key_hash; it.ticked = picked; }      // the next tick on this item is checked against what was just saved
+                        if (!r.ok) { msg(r.error || 'That choice could not be saved.'); cb.checked = !cb.checked; boxes.forEach(function (b) { b.disabled = false; }); return; }      // refused: the tick goes back
                         refresh(r.summary);
                     });
                 });

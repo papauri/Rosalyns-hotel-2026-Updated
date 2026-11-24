@@ -46,6 +46,7 @@ $secondRuleOn = rh_sca_second_approver_required();
 
 $message = '';
 $error = '';
+$scErrorOpenId = 0; // > 0: the error dialog also offers "Open that count" (stock-count.php?id=N)
 $currency = getSetting('currency_symbol');
 $alertRaw = getSetting('stock_variance_alert_pct', null); // 0 is allowed (alert on any shortage worth the minimum)
 $alertPct = ($alertRaw === null || $alertRaw === false || trim((string)$alertRaw) === '') ? 2.0 : (float)$alertRaw;
@@ -381,6 +382,17 @@ function scTakeOpeningLock(PDO $pdo): string
     $name = substr('rh_stock_count_opening_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
     if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($name) . ', 10)')->fetchColumn() !== 1) {
         throw new RuntimeException('Another opening count is being started or reopened at this moment, so nothing was saved. Wait a few seconds and try again.');
+    }
+    return $name;
+}
+
+/* One count start at a time (any scope), so two people cannot both pass the "already open" check (CONCURRENCY_PLAN
+ * task 5). Taken BEFORE scTakeOpeningLock; released with scReleaseApproveLock in the start's finally. */
+function scTakeStartLock(PDO $pdo): string
+{
+    $name = substr('rh_stock_count_start_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+    if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($name) . ', 10)')->fetchColumn() !== 1) {
+        throw new RuntimeException('Someone else is starting a stock count at this moment, so nothing was saved. Wait a few seconds and try again.');
     }
     return $name;
 }
@@ -967,66 +979,96 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     throw new RuntimeException('Choose at least one item to count. Tick the items in the list, or choose One category or Everything.');
                 }
 
-                // Double-submit guard: the same user starting the identical draft count within 30 seconds
-                // is a double click - open the count that already exists.
-                // (An opening count and a regular count with the same scope are different counts: never merged.)
-                $recentCount = $pdo->prepare("SELECT id FROM stock_counts WHERE status = 'draft' AND counted_by = ? AND scope = ? AND scope_value <=> ? AND shift <=> ? AND created_at >= (NOW() - INTERVAL 30 SECOND)"
-                    . (scHasOpeningCol($pdo) ? ' AND is_opening = ' . ($isOpeningStart ? '1' : '0') : '') . " ORDER BY id DESC LIMIT 1");
-                $recentCount->execute([$user['id'], $scope, $scopeValue ?: null, $shift ?: null]);
-                if ($existingCountId = (int)$recentCount->fetchColumn()) {
-                    $_SESSION['stock_msg'] = 'That count was already started - opened it.';
-                    header('Location: stock-count.php?id=' . $existingCountId);
-                    exit;
-                }
-
-                // The items in scope (current quantity + cost are the snapshot the count is measured against).
-                $sql = "SELECT id, current_quantity, cost_per_unit FROM stock_ingredients WHERE is_archived = 0";
-                $params = [];
-                if ($scope === 'category') {
-                    $sql .= " AND category = ?";
-                    $params[] = $scopeValue;
-                } elseif ($scope === 'spot') {
-                    $ids = array_filter(array_map('intval', explode(',', $scopeValue)));
-                    if (empty($ids)) throw new RuntimeException('Choose at least one item to count. Tick the items in the list, or choose One category or Everything.');
-                    $ph = implode(',', array_fill(0, count($ids), '?'));
-                    $sql .= " AND id IN ($ph)";
-                    $params = array_merge($params, $ids);
-                }
-
+                // Locks (CONCURRENCY_PLAN task 5): the start lock first, then (opening counts) scTakeOpeningLock. Both are
+                // released in the finally below on EVERY path; the redirect happens after it (exit would skip a finally).
+                $scStartGate = '';
                 $scStartLock = '';
-                if ($isOpeningStart) {
-                    // An item may be in only one open opening count: refuse (naming them) rather than leave some out silently.
-                    $scStartLock = scTakeOpeningLock($pdo);
-                }
-                $pdo->beginTransaction();
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
-                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                if (!$rows) throw new RuntimeException('There are no stock items to count for that choice (archived items are left out). Pick a different category or Everything, or add the items in Stock Ingredients first.');
-                if ($isOpeningStart) {
-                    $overlap = scOpeningOverlap($pdo, array_map(static fn($r) => (int)$r['id'], $rows));
-                    if ($overlap) throw new RuntimeException(scOpeningOverlapMessage($overlap, 'started'));
-                }
+                $scGoTo = 0;
+                try {
+                    $scStartGate = scTakeStartLock($pdo);
 
-                $ref = generateCountReference();
-                $ins = $pdo->prepare("INSERT INTO stock_counts (reference, count_date, shift, scope, scope_value, status, counted_by, notes" . (scHasSnapshotCol($pdo) ? ', snapshot_at' : '') . ") VALUES (?, CURDATE(), ?, ?, ?, 'draft', ?, ?" . (scHasSnapshotCol($pdo) ? ', NOW()' : '') . ")");
-                $ins->execute([$ref, $shift ?: null, $scope, $scopeValue ?: null, $user['id'], $notes ?: null]);
-                $countId = (int)$pdo->lastInsertId();
-                if ($isOpeningStart) {
-                    $pdo->prepare("UPDATE stock_counts SET is_opening = 1 WHERE id = ?")->execute([$countId]);
-                }
+                    // Double-submit guard: the same user starting the identical draft count within 30 seconds
+                    // is a double click - open the count that already exists.
+                    // (An opening count and a regular count with the same scope are different counts: never merged.)
+                    $openingSql = scHasOpeningCol($pdo) ? ' AND is_opening = ' . ($isOpeningStart ? '1' : '0') : '';
+                    $recentCount = $pdo->prepare("SELECT id FROM stock_counts WHERE status = 'draft' AND counted_by = ? AND scope = ? AND scope_value <=> ? AND shift <=> ? AND created_at >= (NOW() - INTERVAL 30 SECOND)"
+                        . $openingSql . " ORDER BY id DESC LIMIT 1");
+                    $recentCount->execute([$user['id'], $scope, $scopeValue ?: null, $shift ?: null]);
+                    if ($existingCountId = (int)$recentCount->fetchColumn()) {
+                        $_SESSION['stock_msg'] = 'That count was already started - opened it.';
+                        $scGoTo = $existingCountId;
+                    } else {
+                        // One open count per scope: ANOTHER person's draft or submitted count of the same scope, items,
+                        // label (shift) and kind (opening or regular) is refused, naming who started it and when.
+                        $otherOpen = $pdo->prepare("SELECT c.id, c.reference, c.created_at, COALESCE(NULLIF(TRIM(u.full_name), ''), u.username) AS who
+                            FROM stock_counts c LEFT JOIN admin_users u ON u.id = c.counted_by
+                            WHERE c.status IN ('draft', 'submitted') AND NOT (c.counted_by <=> ?) AND c.scope = ? AND c.scope_value <=> ? AND c.shift <=> ?"
+                            . str_replace('is_opening', 'c.is_opening', $openingSql) . " ORDER BY c.id DESC LIMIT 1");
+                        $otherOpen->execute([$user['id'], $scope, $scopeValue ?: null, $shift ?: null]);
+                        if ($other = $otherOpen->fetch(PDO::FETCH_ASSOC)) {
+                            $whenDt = DateTime::createFromFormat('Y-m-d H:i:s', (string)$other['created_at']);
+                            $when = $whenDt ? $whenDt->format('H:i') . ' on ' . $whenDt->format('j M Y') : (string)$other['created_at'];
+                            $who = trim((string)($other['who'] ?? '')) !== '' ? trim((string)$other['who']) : 'Another member of staff';
+                            $scErrorOpenId = (int)$other['id'];
+                            throw new RuntimeException($who . ' already started this count (' . displayCountReference((string)$other['reference']) . ') at ' . $when . '. Open it to carry on.');
+                        }
 
-                $lineIns = $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost) VALUES (?, ?, ?, 0, 0, ?, 0)");
-                foreach ($rows as $r) {
-                    $lineIns->execute([$countId, (int)$r['id'], (float)$r['current_quantity'], (float)$r['cost_per_unit']]);
-                }
-                $pdo->commit();
-                scReleaseApproveLock($pdo, $scStartLock);
+                        // The items in scope (current quantity + cost are the snapshot the count is measured against).
+                        $sql = "SELECT id, current_quantity, cost_per_unit FROM stock_ingredients WHERE is_archived = 0";
+                        $params = [];
+                        if ($scope === 'category') {
+                            $sql .= " AND category = ?";
+                            $params[] = $scopeValue;
+                        } elseif ($scope === 'spot') {
+                            $ids = array_filter(array_map('intval', explode(',', $scopeValue)));
+                            if (empty($ids)) throw new RuntimeException('Choose at least one item to count. Tick the items in the list, or choose One category or Everything.');
+                            $ph = implode(',', array_fill(0, count($ids), '?'));
+                            $sql .= " AND id IN ($ph)";
+                            $params = array_merge($params, $ids);
+                        }
 
-                $_SESSION['stock_msg'] = $isOpeningStart
-                    ? "Opening stock count {$ref} started for " . scScopePhrase(['scope' => $scope, 'scope_value' => $scopeValue]) . ' (' . count($rows) . ' item' . (count($rows) === 1 ? '' : 's') . "). Enter the quantity AND the unit cost for every item you have; someone other than you must approve it. Items that are not in this count are not changed."
-                    : "Count {$ref} started. Enter your physical readings.";
-                header('Location: stock-count.php?id=' . $countId);
+                        if ($isOpeningStart) {
+                            // An item may be in only one open opening count: refuse (naming them) rather than leave some out silently.
+                            $scStartLock = scTakeOpeningLock($pdo);
+                        }
+                        $pdo->beginTransaction();
+                        $stmt = $pdo->prepare($sql);
+                        $stmt->execute($params);
+                        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        if (!$rows) throw new RuntimeException('There are no stock items to count for that choice (archived items are left out). Pick a different category or Everything, or add the items in Stock Ingredients first.');
+                        if ($isOpeningStart) {
+                            $overlap = scOpeningOverlap($pdo, array_map(static fn($r) => (int)$r['id'], $rows));
+                            if ($overlap) throw new RuntimeException(scOpeningOverlapMessage($overlap, 'started'));
+                        }
+
+                        $ref = generateCountReference();
+                        $ins = $pdo->prepare("INSERT INTO stock_counts (reference, count_date, shift, scope, scope_value, status, counted_by, notes" . (scHasSnapshotCol($pdo) ? ', snapshot_at' : '') . ") VALUES (?, CURDATE(), ?, ?, ?, 'draft', ?, ?" . (scHasSnapshotCol($pdo) ? ', NOW()' : '') . ")");
+                        $ins->execute([$ref, $shift ?: null, $scope, $scopeValue ?: null, $user['id'], $notes ?: null]);
+                        $countId = (int)$pdo->lastInsertId();
+                        if ($isOpeningStart) {
+                            $pdo->prepare("UPDATE stock_counts SET is_opening = 1 WHERE id = ?")->execute([$countId]);
+                        }
+
+                        $lineIns = $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost) VALUES (?, ?, ?, 0, 0, ?, 0)");
+                        foreach ($rows as $r) {
+                            $lineIns->execute([$countId, (int)$r['id'], (float)$r['current_quantity'], (float)$r['cost_per_unit']]);
+                        }
+                        $pdo->commit();
+
+                        $_SESSION['stock_msg'] = $isOpeningStart
+                            ? "Opening stock count {$ref} started for " . scScopePhrase(['scope' => $scope, 'scope_value' => $scopeValue]) . ' (' . count($rows) . ' item' . (count($rows) === 1 ? '' : 's') . "). Enter the quantity AND the unit cost for every item you have; someone other than you must approve it. Items that are not in this count are not changed."
+                            : "Count {$ref} started. Enter your physical readings.";
+                        $scGoTo = $countId;
+                    }
+                } catch (Throwable $startEx) {
+                    // Roll back BEFORE the locks are released, so nobody can start against a half-written count.
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    throw $startEx;
+                } finally {
+                    scReleaseApproveLock($pdo, $scStartLock);
+                    scReleaseApproveLock($pdo, $scStartGate);
+                }
+                header('Location: stock-count.php?id=' . $scGoTo);
                 exit;
             }
 
@@ -1599,6 +1641,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
             if ($pdo->inTransaction()) $pdo->rollBack();
             if (!empty($scApproveLock)) scReleaseApproveLock($pdo, $scApproveLock);
             if (!empty($scStartLock)) scReleaseApproveLock($pdo, $scStartLock);
+            if (!empty($scStartGate)) scReleaseApproveLock($pdo, $scStartGate);
+            if (!($e instanceof RuntimeException)) $scErrorOpenId = 0;
             if ($e instanceof RuntimeException) {
                 $error = $e->getMessage();
             } else {
@@ -2092,6 +2136,13 @@ $csrf_token = generateCsrfToken();
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
+
+            <?php /* "Also open right now" warning, filled by js/edit-presence.js (admin/api/presence.php?editing=stock-count). Never blocks saving. */ ?>
+            <div class="cb-presence" data-edit-presence data-key="stock-count" data-id="<?php echo (int)$activeCount['id']; ?>" data-endpoint="api/presence.php" role="status" aria-live="polite" hidden>
+                <strong class="cb-presence__title">Also open right now</strong>
+                <ul class="cb-presence__list"></ul>
+            </div>
+            <script src="js/edit-presence.js?v=<?php echo (int)@filemtime(__DIR__ . '/js/edit-presence.js'); ?>"></script>
 
             <form method="POST" id="countForm">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
@@ -2938,6 +2989,7 @@ $csrf_token = generateCsrfToken();
                 <p class="sc-banner-msg" id="scBannerMsg"><?php echo htmlspecialchars((string)($scBannerErr ? $error : $message), ENT_QUOTES, 'UTF-8'); ?></p>
             </div>
             <div class="modal-footer">
+                <?php if ($scBannerErr && $scErrorOpenId > 0): ?><a id="scBannerOpenLink" class="btn btn-secondary" href="<?php echo htmlspecialchars('stock-count.php?id=' . (int)$scErrorOpenId, ENT_QUOTES, 'UTF-8'); ?>">Open that count</a><?php endif; ?>
                 <button type="button" class="btn btn-primary" id="scBannerOk" onclick="scCloseBanner()">OK</button>
             </div>
         </div>

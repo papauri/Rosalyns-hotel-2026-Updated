@@ -372,9 +372,26 @@ check(stripos($flash($r), 'plural') !== false && (string)($r['verify'][0][0]['se
 $ingName = "ZZT DM $run Gin";
 $setup = ["INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES ('$ingName', 'ZZDM', 'bottle', 4, 24000)",
           "INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES ('ZZT DM $run Juice', 'ZZDM', 'litre', 4, 2000)"];
-$vars = ['gin' => "SELECT id FROM stock_ingredients WHERE name = '$ingName'", 'juice' => "SELECT id FROM stock_ingredients WHERE name = 'ZZT DM $run Juice'"];
+// Stale-edit (task 9): the Save posts the hash of the item's form columns as the page would have rendered it (rh_stock_item_stale_cols in
+// admin/stock-ingredients.php; same list here), computed in SQL inside the run after the setup rows.
+$siHashSql = function (string $name) use ($pdo): string {
+    $cols = ['name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'lead_time_days', 'preferred_supplier_id', 'pack_name', 'pack_size', 'pieces_per_unit'];
+    if (rh_stock_measure_ready($pdo)) { array_push($cols, 'measure_big_name', 'measure_small_name', 'measure_per_big', 'measure_stock_side'); }
+    if (rh_stock_drink_ready($pdo)) { $cols[] = 'volume_ml'; }
+    $parts = ["'a:" . count($cols) . ":{'"];
+    foreach ($cols as $i => $c) {
+        $v = "CONVERT(`$c` USING utf8mb4)";
+        $parts[] = "'i:$i;'";
+        $parts[] = "IF(`$c` IS NULL, 'N;', CONCAT('s:', LENGTH($v), ':\"', $v, '\";'))";
+    }
+    $parts[] = "'}'";
+    return "SELECT MD5(CONCAT(" . implode(', ', $parts) . ")) FROM stock_ingredients WHERE name = '" . str_replace("'", "''", $name) . "'";
+};
+// One hash per run (the Windows command line caps the harness argument at 8 KB).
+$vars = ['gin' => "SELECT id FROM stock_ingredients WHERE name = '$ingName'", 'hg' => $siHashSql($ingName)];
+$varsJ = ['juice' => "SELECT id FROM stock_ingredients WHERE name = 'ZZT DM $run Juice'", 'hj' => $siHashSql("ZZT DM $run Juice")];
 $ingSql = "SELECT name, unit, current_quantity AS q, cost_per_unit AS c, volume_ml AS v FROM stock_ingredients WHERE name LIKE 'ZZT DM $run %' ORDER BY id";
-$base = ['action' => 'update', 'id' => '{gin}', 'name' => $ingName, 'category' => 'ZZDM', 'unit' => 'bottle', 'min_quantity' => '0', 'reorder_point' => '0', 'par_level' => '0', 'yield_percent' => '100'];
+$base = ['action' => 'update', 'id' => '{gin}', 'name' => $ingName, 'category' => 'ZZDM', 'unit' => 'bottle', 'min_quantity' => '0', 'reorder_point' => '0', 'par_level' => '0', 'yield_percent' => '100', '_row_hash' => '{hg}'];
 $r = $page('admin/stock-ingredients.php', ['setup' => $setup, 'vars' => $vars, 'post' => $base + ['volume_present' => '1', 'volume_ml' => '750'], 'verify' => [$ingSql, $logSql]]);
 $safe($r, 'Bottle size on the item form');
 $I = $r['verify'][0] ?? [];
@@ -385,7 +402,7 @@ $r = $page('admin/stock-ingredients.php', ['setup' => $setup2, 'vars' => $vars, 
 check(near(($r['verify'][0][0]['v'] ?? null), 700), 'A form without the bottle size field (old page) never wipes it', json_encode($r['verify'][0] ?? null) . ' ' . $flash($r));
 $r = $page('admin/stock-ingredients.php', ['setup' => $setup2, 'vars' => $vars, 'post' => $base + ['volume_present' => '1', 'volume_ml' => 'abc'], 'verify' => [$ingSql]]);
 check(near(($r['verify'][0][0]['v'] ?? null), 700) && stripos($flash($r), 'Bottle size') !== false, 'A bad bottle size is refused with a plain message', $flash($r));
-$r = $page('admin/stock-ingredients.php', ['setup' => $setup, 'vars' => $vars, 'post' => ['action' => 'update', 'id' => '{juice}', 'name' => "ZZT DM $run Juice", 'category' => 'ZZDM', 'unit' => 'litre', 'volume_present' => '1', 'volume_ml' => '750'], 'verify' => [$ingSql]]);
+$r = $page('admin/stock-ingredients.php', ['setup' => $setup, 'vars' => $varsJ, 'post' => ['action' => 'update', 'id' => '{juice}', 'name' => "ZZT DM $run Juice", 'category' => 'ZZDM', 'unit' => 'litre', 'volume_present' => '1', 'volume_ml' => '750', '_row_hash' => '{hj}'], 'verify' => [$ingSql]]);
 check(is_array($r['verify'][0][1] ?? null) && array_key_exists('v', $r['verify'][0][1]) && $r['verify'][0][1]['v'] === null, 'Stock kept in litres never keeps a bottle size', json_encode($r['verify'][0] ?? null) . ' ' . $flash($r));
 
 // Stock > Recipes: typed in shots, the page's own figure is ignored.

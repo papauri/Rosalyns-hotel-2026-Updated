@@ -16,6 +16,29 @@ require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/pricing.php';
 require_once __DIR__ . '/../includes/price-history.php';
 require_once __DIR__ . '/includes/child-charge-fields.php';
+require_once __DIR__ . '/../includes/stale-edit.php';
+
+/**
+ * Stale-edit guard (CONCURRENCY_PLAN task 10): the room-type columns the Edit window shows and saves. Left out on
+ * purpose: rooms_available (bookings move it; it is written only when the person changed it), display_order (drag to
+ * reorder) and image_url (the pictures panel writes it while the window is open).
+ */
+function rm_stale_cols(): array
+{
+    return ['name', 'description', 'short_description', 'price_per_night', 'price_single_occupancy', 'price_double_occupancy',
+        'price_triple_occupancy', 'child_price_multiplier', 'child_charge_mode', 'child_charge_amount', 'free_children',
+        'max_children', 'single_occupancy_enabled', 'double_occupancy_enabled', 'triple_occupancy_enabled', 'children_allowed',
+        'size_sqm', 'max_guests', 'total_rooms', 'bed_type', 'amenities', 'is_featured', 'is_active'];
+}
+
+/** The current stale-edit hash of one room type (plain read), or '' when the row is gone. */
+function rm_stale_hash_for(PDO $pdo, int $id): string
+{
+    $st = $pdo->prepare('SELECT `' . implode('`, `', rm_stale_cols()) . '` FROM rooms WHERE id = ?');
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ? rh_stale_hash($row, rm_stale_cols()) : '';
+}
 
 /**
  * The tax inside an all-in room price, for display: "Room X · VAT <rate>% Y · Tourism levy <rate>% Z" from
@@ -234,14 +257,102 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
 
         if ($action === 'update') {
-            $rooms_available = (int)($_POST['rooms_available'] ?? 0);
+            $rmId = (int)($_POST['id'] ?? 0);
             $total_rooms = (int)($_POST['total_rooms'] ?? 0);
             $room_image_url = normalizeRoomImagePath($_POST['image_url'] ?? '');
-
             $_POST['name'] = rh_clean_text($_POST['name'] ?? '');
-            $validationError = (int)($_POST['id'] ?? 0) <= 0
-                ? 'Room not found.'
-                : rm_validate_room_input($pdo, (string)$_POST['name'], $total_rooms, $rooms_available, (int)$_POST['id']);
+            // Rooms available (plan Q1): bookings move it while the window is open, so the posted figure is written
+            // only when the person changed it (posted differs from the figure the window opened with); otherwise the
+            // stored figure is kept.
+            $rmPostedAvail = (int)($_POST['rooms_available'] ?? 0);
+            $rmLoadedAvail = trim((string)($_POST['rooms_available_loaded'] ?? ''));
+            $rmAvailChanged = ctype_digit($rmLoadedAvail) && (int)$rmLoadedAvail !== $rmPostedAvail;
+            $rooms_available = $rmPostedAvail;
+            $rmReplyHash = '';
+            $rmPriceBefore = [];
+            $rmPriceFields = ['price_per_night', 'price_single_occupancy', 'price_double_occupancy', 'price_triple_occupancy'];
+
+            $validationError = $rmId <= 0 ? 'Room not found.' : null;
+            if ($validationError === null) {
+                // Stale-edit guard (task 10): lock, compare, write, commit; a refused Save writes nothing.
+                $pdo->beginTransaction();
+                try {
+                    $rmStale = rh_stale_verify($pdo, 'rooms', $rmId, rm_stale_cols(), rh_stale_posted());
+                    if (!$rmStale['ok']) {
+                        $validationError = $rmStale['row'] !== null
+                            ? 'This room type was changed by someone else since you opened it, so nothing was saved. Reload the page to see the new details, then make your change again.'
+                            : $rmStale['error'];
+                    } else {
+                        if (!$rmAvailChanged) {
+                            $rmAvailSt = $pdo->prepare("SELECT rooms_available FROM rooms WHERE id = ?");
+                            $rmAvailSt->execute([$rmId]);
+                            $rooms_available = (int)$rmAvailSt->fetchColumn();
+                        }
+                        $validationError = rm_validate_room_input($pdo, (string)$_POST['name'], $total_rooms, $rooms_available, $rmId);
+                    }
+                    if ($validationError !== null) {
+                        $pdo->rollBack();
+                    } else {
+                        $description = !empty($_POST['description']) ? $_POST['description'] : ($_POST['short_description'] ?? '');
+                        // Price history (room_price_history): the prices before this save.
+                        $rmPriceBefore = rh_price_history_snapshot($pdo, 'rooms', $rmId, $rmPriceFields);
+
+                        $stmt = $pdo->prepare("
+                            UPDATE rooms
+                            SET name = ?, description = ?, short_description = ?, price_per_night = ?,
+                                price_single_occupancy = ?, price_double_occupancy = ?, price_triple_occupancy = ?, child_price_multiplier = ?,
+                                child_charge_mode = ?, child_charge_amount = ?, free_children = ?, max_children = ?,
+                                single_occupancy_enabled = ?, double_occupancy_enabled = ?, triple_occupancy_enabled = ?, children_allowed = ?,
+                                size_sqm = ?, max_guests = ?, rooms_available = ?, total_rooms = ?,
+                                bed_type = ?, amenities = ?, image_url = ?, is_featured = ?, is_active = ?, display_order = ?
+                            WHERE id = ?
+                        ");
+                        $maxGuests = max(1, (int)($_POST['max_guests'] ?? 2));
+                        $singleEnabled = $maxGuests >= 1 ? 1 : 0;
+                        $doubleEnabled = $maxGuests >= 2 ? 1 : 0;
+                        $tripleEnabled = ($maxGuests >= 3 && isset($_POST['triple_occupancy_enabled'])) ? 1 : 0;
+                        $childrenAllowed = isset($_POST['children_allowed']) ? 1 : 0;
+                        $cc = rh_child_rule_post($_POST, false);   // validated above
+                        $stmt->execute([
+                            trim((string)$_POST['name']),
+                            $description,
+                            $_POST['short_description'] ?? '',
+                            rm_num($_POST['price_per_night'] ?? 0),
+                            rm_num($_POST['price_single_occupancy'] ?? null, null),
+                            rm_num($_POST['price_double_occupancy'] ?? null, null),
+                            rm_num($_POST['price_triple_occupancy'] ?? null, null),
+                            $cc['percent'],
+                            $cc['mode'],
+                            $cc['amount'],
+                            $cc['free'],
+                            $cc['max'],
+                            $singleEnabled,
+                            $doubleEnabled,
+                            $tripleEnabled,
+                            $childrenAllowed,
+                            rm_num($_POST['size_sqm'] ?? 0),
+                            $maxGuests,
+                            $rooms_available,
+                            $total_rooms,
+                            $_POST['bed_type'] ?? 'Double',
+                            $_POST['amenities'] ?? '',
+                            $room_image_url,
+                            isset($_POST['is_featured']) ? 1 : 0,
+                            isset($_POST['is_active']) ? 1 : 0,
+                            (int)($_POST['display_order'] ?? 0),
+                            $rmId
+                        ]);
+                        // The window stays open after a save: it gets the new hash so the next Save is not refused.
+                        $rmReplyHash = rm_stale_hash_for($pdo, $rmId);
+                        $pdo->commit();
+                    }
+                } catch (Throwable $rmTx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $rmTx;
+                }
+            }
             if ($validationError !== null) {
                 $error = $validationError;
                 if (is_ajax_request()) {
@@ -250,68 +361,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
             } else {
-                $description = !empty($_POST['description']) ? $_POST['description'] : ($_POST['short_description'] ?? '');
-                // Price history (room_price_history): the prices before this save.
-                $rmPriceFields = ['price_per_night', 'price_single_occupancy', 'price_double_occupancy', 'price_triple_occupancy'];
-                $rmPriceBefore = rh_price_history_snapshot($pdo, 'rooms', (int)$_POST['id'], $rmPriceFields);
-
-                $stmt = $pdo->prepare("
-                    UPDATE rooms
-                    SET name = ?, description = ?, short_description = ?, price_per_night = ?,
-                        price_single_occupancy = ?, price_double_occupancy = ?, price_triple_occupancy = ?, child_price_multiplier = ?,
-                        child_charge_mode = ?, child_charge_amount = ?, free_children = ?, max_children = ?,
-                        single_occupancy_enabled = ?, double_occupancy_enabled = ?, triple_occupancy_enabled = ?, children_allowed = ?,
-                        size_sqm = ?, max_guests = ?, rooms_available = ?, total_rooms = ?,
-                        bed_type = ?, amenities = ?, image_url = ?, is_featured = ?, is_active = ?, display_order = ?
-                    WHERE id = ?
-                ");
-                $maxGuests = max(1, (int)($_POST['max_guests'] ?? 2));
-                $singleEnabled = $maxGuests >= 1 ? 1 : 0;
-                $doubleEnabled = $maxGuests >= 2 ? 1 : 0;
-                $tripleEnabled = ($maxGuests >= 3 && isset($_POST['triple_occupancy_enabled'])) ? 1 : 0;
-                $childrenAllowed = isset($_POST['children_allowed']) ? 1 : 0;
-                $cc = rh_child_rule_post($_POST, false);   // validated above
-                $stmt->execute([
-                    trim((string)$_POST['name']),
-                    $description,
-                    $_POST['short_description'] ?? '',
-                    rm_num($_POST['price_per_night'] ?? 0),
-                    rm_num($_POST['price_single_occupancy'] ?? null, null),
-                    rm_num($_POST['price_double_occupancy'] ?? null, null),
-                    rm_num($_POST['price_triple_occupancy'] ?? null, null),
-                    $cc['percent'],
-                    $cc['mode'],
-                    $cc['amount'],
-                    $cc['free'],
-                    $cc['max'],
-                    $singleEnabled,
-                    $doubleEnabled,
-                    $tripleEnabled,
-                    $childrenAllowed,
-                    rm_num($_POST['size_sqm'] ?? 0),
-                    $maxGuests,
-                    $rooms_available,
-                    $total_rooms,
-                    $_POST['bed_type'] ?? 'Double',
-                    $_POST['amenities'] ?? '',
-                    $room_image_url,
-                    isset($_POST['is_featured']) ? 1 : 0,
-                    isset($_POST['is_active']) ? 1 : 0,
-                    (int)($_POST['display_order'] ?? 0),
-                    (int)$_POST['id']
-                ]);
-
                 if ($rmPriceBefore) {
-                    $rmPriceAfter = rh_price_history_snapshot($pdo, 'rooms', (int)$_POST['id'], $rmPriceFields);
+                    $rmPriceAfter = rh_price_history_snapshot($pdo, 'rooms', $rmId, $rmPriceFields);
                     $rmPriceChanges = [];
                     foreach ($rmPriceFields as $f) {
                         $rmPriceChanges[$f] = [$rmPriceBefore[$f] ?? null, $rmPriceAfter[$f] ?? null];
                     }
-                    rh_price_history_log($pdo, 'room_type', (int)$_POST['id'], $rmPriceChanges, $user);
+                    rh_price_history_log($pdo, 'room_type', $rmId, $rmPriceChanges, $user);
                 }
 
                 $mediaSyncStmt = $pdo->prepare("SELECT id, name, description, short_description, display_order, image_url, video_path, video_type FROM rooms WHERE id = ? LIMIT 1");
-                $mediaSyncStmt->execute([$_POST['id']]);
+                $mediaSyncStmt->execute([$rmId]);
                 $roomForMedia = $mediaSyncStmt->fetch(PDO::FETCH_ASSOC);
                 if ($roomForMedia) {
                     syncRoomManagedMedia($roomForMedia);
@@ -323,7 +383,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if (is_ajax_request()) {
                     header('Content-Type: application/json');
-                    echo json_encode(['success' => true, 'message' => $message]);
+                    echo json_encode(['success' => true, 'message' => $message, 'row_hash' => $rmReplyHash, 'rooms_available' => $rooms_available]);
                     exit;
                 }
             }
@@ -335,7 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'Room status updated!';
             if (is_ajax_request()) {
                 header('Content-Type: application/json');
-                echo json_encode(['success' => true]);
+                echo json_encode(['success' => true, 'row_hash' => rm_stale_hash_for($pdo, (int)($_POST['id'] ?? 0))]); // the new stale-edit hash
                 exit;
             }
         } elseif ($action === 'toggle_featured') {
@@ -346,7 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'Featured status updated!';
             if (is_ajax_request()) {
                 header('Content-Type: application/json');
-                echo json_encode(['success' => true]);
+                echo json_encode(['success' => true, 'row_hash' => rm_stale_hash_for($pdo, (int)($_POST['id'] ?? 0))]); // the new stale-edit hash
                 exit;
             }
         } elseif ($action === 'upload_image') {
@@ -688,6 +748,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         $error = 'Error: ' . $e->getMessage();
         if (is_ajax_request()) {
             header('Content-Type: application/json');
@@ -701,6 +764,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     $stmt = $pdo->query("SELECT * FROM rooms ORDER BY display_order ASC, name ASC");
     $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Stale-edit hash (task 10) from the plain rows, before any display override below touches them.
+    foreach ($rooms as &$hashRoomRow) {
+        $hashRoomRow['_row_hash'] = rh_stale_hash($hashRoomRow, rm_stale_cols());
+    }
+    unset($hashRoomRow);
 
     // A joined room type is sold as pairs: its inventory is the number of pairs (not the two
     // physical rooms behind each), so the card shows pairs in service / pairs.
@@ -936,6 +1004,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="action" id="editAction" value="update">
                     <input type="hidden" name="id" id="editId">
+                    <input type="hidden" name="_row_hash" id="editRowHash" value="">
+                    <input type="hidden" name="rooms_available_loaded" id="editAvailableLoaded" value="">
                     <div class="modal-header">
                         <h3 id="editModalTitle"><i class="fas fa-edit"></i> Edit Room</h3>
                         <button class="modal-close" type="button" aria-label="Close" onclick="closeEditModal()">&times;</button>
@@ -1473,6 +1543,9 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 document.getElementById('editGuests').value = room.max_guests || 2;
                 document.getElementById('editBedType').value = room.bed_type || '';
                 document.getElementById('editAvailable').value = room.rooms_available || 0;
+                // Stale-edit guard: the hash of what this window shows, and the availability it opened with.
+                document.getElementById('editRowHash').value = room._row_hash || '';
+                document.getElementById('editAvailableLoaded').value = room.rooms_available || 0;
                 document.getElementById('editTotal').value = room.total_rooms || 0;
                 document.getElementById('editOrder').value = room.display_order || 0;
                 document.getElementById('editAmenities').value = room.amenities || '';
@@ -2403,6 +2476,12 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
                         fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
                         if (res.success) {
+                            if (formId === 'editForm' && res.row_hash) {
+                                // The window stays open: the next Save goes with the saved row's hash and availability.
+                                document.getElementById('editRowHash').value = res.row_hash;
+                                document.getElementById('editAvailableLoaded').value = res.rooms_available;
+                                document.getElementById('editAvailable').value = res.rooms_available;
+                            }
                             refreshRoomsGrid();
                             if (formId === 'addForm') rmAfterAdd(res, form);
                         }

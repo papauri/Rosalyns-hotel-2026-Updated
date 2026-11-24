@@ -27,6 +27,7 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../admin/includes/permissions.php';
 require_once __DIR__ . '/../../admin/includes/stock-count-approval-lib.php';
 require_once __DIR__ . '/../../admin/includes/hotel-details-settings.php';
+require_once __DIR__ . '/../../includes/settings-save-changed.php';
 
 $pass = 0; $fail = 0;
 function ok(string $l): void { global $pass; $pass++; echo "PASS $l\n"; }
@@ -212,9 +213,9 @@ try {
     ob_start(); rh_hotel_details_render(['id' => $adm], 'tok'); $htmlAdm = ob_get_clean();
     check(strpos($htmlMgr, 'stock_count_second_approver') === false, 'Switch: not shown to a non-administrator');
     check(strpos($htmlAdm, 'name="stock_count_second_approver"') !== false && strpos($htmlAdm, 'whoever counts can approve') !== false, 'Switch: shown to an administrator');
-    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => 'maybe'], ['id' => $adm, 'username' => 'zzt_adm']);
+    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => 'maybe', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], ['id' => $adm, 'username' => 'zzt_adm']);
     check($err !== '' && rh_sca_second_approver_required(), 'Switch: a value other than On or Off is refused and saves nothing', $msg . $err);
-    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => '0'], ['id' => $adm, 'username' => 'zzt_adm']);
+    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => '0', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], ['id' => $adm, 'username' => 'zzt_adm']);
     check($err === '' && !rh_sca_second_approver_required(), 'Switch: an administrator can switch it OFF', $msg . $err);
     $lg = col($pdo, "SELECT details FROM admin_activity_log WHERE action = 'stock_count_second_approver_changed' AND user_id = ? ORDER BY id DESC LIMIT 1", [$adm]);
     check(is_string($lg) && strpos($lg, 'zzt_adm') !== false && strpos($lg, 'Off') !== false && strpos($lg, 'On') !== false, 'Switch: the change is logged with who made it, from On to Off', (string)$lg);
@@ -227,7 +228,7 @@ try {
     $GLOBALS['rh_test_email_capture'] = [];
     $r = rh_sca_email_approvers($pdo, $bigId, $counter, 'submit');
     check($r['ok'] && strpos($GLOBALS['rh_test_email_capture'][0]['text'] ?? '', 'Second person needed: No') !== false, 'Rule OFF: the submit email still goes to approvers and no longer says a second person is needed');
-    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => '1'], ['id' => $adm, 'username' => 'zzt_adm']);
+    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => '1', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], ['id' => $adm, 'username' => 'zzt_adm']);
     check($err === '' && rh_sca_second_approver_required(), 'Switch: an administrator can switch it back ON', $msg . $err);
 
     // Rule ON: unchanged.

@@ -10,7 +10,37 @@ require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/../includes/pricing.php';
 require_once __DIR__ . '/../includes/price-history.php';
 require_once __DIR__ . '/includes/child-charge-fields.php';
+require_once __DIR__ . '/../includes/stale-edit.php';
 /** @var string $csrf_token */
+
+/**
+ * Stale-edit guard (CONCURRENCY_PLAN task 11): the room columns the Edit window shows and saves. status is left out
+ * (housekeeping, check-in and maintenance change it all day); amenities and photos live in their own tables.
+ */
+function ir_stale_cols(): array
+{
+    return ['room_type_id', 'room_number', 'room_name', 'floor', 'max_guests_override', 'child_price_multiplier',
+        'child_charge_mode', 'child_charge_amount', 'free_children', 'max_children', 'single_occupancy_enabled_override',
+        'double_occupancy_enabled_override', 'triple_occupancy_enabled_override', 'children_allowed_override', 'notes',
+        'is_active', 'display_order'];
+}
+
+/** Current stale-edit hashes of the given rooms (plain read), keyed by room id. */
+function ir_stale_hashes(PDO $pdo, array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($v) => $v > 0)));
+    if ($ids === []) {
+        return [];
+    }
+    $st = $pdo->prepare('SELECT id, `' . implode('`, `', ir_stale_cols()) . '` FROM individual_rooms WHERE id IN ('
+        . implode(',', array_fill(0, count($ids), '?')) . ')');
+    $st->execute($ids);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $out[(int)$row['id']] = rh_stale_hash($row, ir_stale_cols());
+    }
+    return $out;
+}
 
 /**
  * Step 12a (R5): a manual status change must not contradict the bookings (rh_room_status_contradiction()):
@@ -398,37 +428,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($dupRoom) {
                     $error = 'Room number "' . $dupRoom['value'] . '" already exists. Please use a unique room number.';
                 } else {
-                    $stmt = $pdo->prepare("
-                        UPDATE individual_rooms
-                        SET room_type_id = ?, room_number = ?, room_name = ?, floor = ?, max_guests_override = ?, child_price_multiplier = ?,
-                            child_charge_mode = ?, child_charge_amount = ?, free_children = ?, max_children = ?,
-                            single_occupancy_enabled_override = ?, double_occupancy_enabled_override = ?, triple_occupancy_enabled_override = ?, children_allowed_override = ?,
-                            notes = ?, is_active = ?, display_order = ?
-                        WHERE id = ?
-                    ");
-                    $stmt->execute([
-                        $room_type_id,
-                        $room_number,
-                        $room_name,
-                        $floor,
-                        $max_guests_override,
-                        $cc['percent'],
-                        $cc['mode'],
-                        $cc['amount'],
-                        $cc['free'],
-                        $cc['max'],
-                        $single_override,
-                        $double_override,
-                        $triple_override,
-                        $children_override,
-                        $notes,
-                        $is_active,
-                        $display_order,
-                        $id
-                    ]);
-                    saveRoomAmenities($pdo, $id, $amenities_list);
-                    saveRoomPhotos($pdo, $id, $photos_list);
-                    $message = 'Individual room updated successfully!';
+                    // Stale-edit guard (task 11): lock, compare, write, commit; a refused Save writes nothing.
+                    $pdo->beginTransaction();
+                    try {
+                        $irStale = rh_stale_verify($pdo, 'individual_rooms', $id, ir_stale_cols(), rh_stale_posted());
+                        if (!$irStale['ok']) {
+                            $pdo->rollBack();
+                            $error = $irStale['row'] !== null
+                                ? 'This room was changed by someone else since you opened it, so nothing was saved. Reload the page to see the new details, then make your change again.'
+                                : $irStale['error'];
+                        } else {
+                            $stmt = $pdo->prepare("
+                                UPDATE individual_rooms
+                                SET room_type_id = ?, room_number = ?, room_name = ?, floor = ?, max_guests_override = ?, child_price_multiplier = ?,
+                                    child_charge_mode = ?, child_charge_amount = ?, free_children = ?, max_children = ?,
+                                    single_occupancy_enabled_override = ?, double_occupancy_enabled_override = ?, triple_occupancy_enabled_override = ?, children_allowed_override = ?,
+                                    notes = ?, is_active = ?, display_order = ?
+                                WHERE id = ?
+                            ");
+                            $stmt->execute([
+                                $room_type_id,
+                                $room_number,
+                                $room_name,
+                                $floor,
+                                $max_guests_override,
+                                $cc['percent'],
+                                $cc['mode'],
+                                $cc['amount'],
+                                $cc['free'],
+                                $cc['max'],
+                                $single_override,
+                                $double_override,
+                                $triple_override,
+                                $children_override,
+                                $notes,
+                                $is_active,
+                                $display_order,
+                                $id
+                            ]);
+                            saveRoomAmenities($pdo, $id, $amenities_list);
+                            saveRoomPhotos($pdo, $id, $photos_list);
+                            $pdo->commit();
+                            $message = 'Individual room updated successfully!';
+                        }
+                    } catch (Throwable $irTx) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        throw $irTx;
+                    }
                 }
             }
         } elseif ($action === 'save_room_combination') {
@@ -1081,6 +1129,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $upd->execute([$override, $childRoomId]);
             }
 
+            // Stale-edit guard (task 11): this writes a column the Edit window hashes, without a reload. Return each
+            // room's new hash (both rooms of a pair) so the page's next Edit Save is not refused.
+            $childRowHashes = ir_stale_hashes($pdo, $childIds);
+
             // Return the resolved effective value for UI update
             $roomRow = $pdo->prepare("SELECT ir.children_allowed_override, r.children_allowed FROM individual_rooms ir JOIN rooms r ON r.id = ir.room_type_id WHERE ir.id = ?");
             $roomRow->execute([$id]);
@@ -1095,10 +1147,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'effective' => $effective,
                 'is_inherited' => $isInherited,
                 'override_value' => $override,
+                'row_hashes' => (object)$childRowHashes,
             ]);
             exit;
         }
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log('individual-rooms save failed: ' . $e->getMessage());
         $error = 'The room could not be saved. Nothing was changed - please try again, and tell a manager if it keeps happening.';
     }
@@ -1116,6 +1172,7 @@ if ($error !== '' && $_SERVER['REQUEST_METHOD'] === 'POST'
         $keepRoom[$keepField] = (string)($_POST[$keepField] ?? '');
     }
     $keepRoom['is_active'] = isset($_POST['is_active']) ? 1 : 0;
+    $keepRoom['_row_hash'] = rh_stale_posted(); // the form shows what was typed, so it keeps the hash it was opened with
     $roomFormReopen = ['action' => (string)$action, 'error' => $error, 'data' => $keepRoom];
 }
 
@@ -1241,6 +1298,12 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $irFetched) {
     }
 }
 $individualRooms = array_values($individualRooms);
+// Stale-edit hash (task 11) from a PLAIN read of each room (the list row is a JOIN), carried into every Edit opener.
+$irRowHashes = ir_stale_hashes($pdo, array_column($individualRooms, 'id'));
+foreach ($individualRooms as &$irHashRow) {
+    $irHashRow['_row_hash'] = $irRowHashes[(int)$irHashRow['id']] ?? '';
+}
+unset($irHashRow);
 
 // A joined-only pair is ONE room: merge its two rows into one (label "101A + 101B", one status,
 // the pair's current / next booking). Shared-mode pairs and inactive pairs stay separate rows.
@@ -2227,6 +2290,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                 <input type="hidden" name="action" id="formAction" value="add_individual_room">
                 <input type="hidden" name="id" id="roomId">
+                <input type="hidden" name="_row_hash" id="roomRowHash" value="">
                 <div class="modal-header">
                     <h3 id="modalTitle"><i class="fas fa-plus"></i> Add Individual Room</h3>
                     <button type="button" class="modal-close" aria-label="Close" onclick="closeModal()">&times;</button>
@@ -2486,6 +2550,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('formAction').value = 'add_individual_room';
             document.getElementById('roomForm').reset();
             document.getElementById('roomId').value = '';
+            document.getElementById('roomRowHash').value = '';
             document.getElementById('max_guests_override').value = '';
             fillChildCharge({});
             document.getElementById('single_occupancy_enabled_override').value = '';
@@ -2499,10 +2564,16 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
         }
 
         // Edit Modal
+        // Changes this page made without a reload (the children policy button), per room id: they win over the
+        // room data printed into the Edit buttons, so the window shows them and saves with the room's new hash.
+        const _irRoomPatch = {};
+
         function openEditModal(room, amenities, photos) {
+            if (_irRoomPatch[room.id]) room = Object.assign({}, room, _irRoomPatch[room.id]);
             document.getElementById('modalTitle').innerHTML = '<i class="fas fa-edit"></i> Edit Individual Room';
             document.getElementById('formAction').value = 'update_individual_room';
             document.getElementById('roomId').value = room.id;
+            document.getElementById('roomRowHash').value = room._row_hash || '';
             document.getElementById('room_type_id').value = room.room_type_id;
             document.getElementById('room_number').value = room.room_number;
             document.getElementById('room_name').value = room.room_name || '';
@@ -3003,6 +3074,13 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                     // Update button state
                     btn.dataset.override = nextOverride;
                     btn.dataset.effective = data.effective;
+                    // Stale-edit guard: keep each room's new hash (both rooms of a pair) for its Edit window.
+                    Object.keys(data.row_hashes || {}).forEach(function (rid) {
+                        _irRoomPatch[rid] = {
+                            _row_hash: data.row_hashes[rid],
+                            children_allowed_override: data.override_value === null ? null : String(data.override_value)
+                        };
+                    });
 
                     if (data.is_inherited) {
                         btn.style.background = '#e9ecef';

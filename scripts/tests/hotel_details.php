@@ -6,6 +6,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.
 require 'config/database.php';
 require 'admin/includes/permissions.php';
 require 'admin/includes/hotel-details-settings.php';
+require_once 'includes/settings-save-changed.php';
 $ok = 0; $bad = 0;
 $t = function (bool $c, string $n) use (&$ok, &$bad) { echo ($c ? 'PASS ' : 'FAIL ') . $n . "\n"; $c ? $ok++ : $bad++; };
 $f = [];
@@ -40,17 +41,17 @@ $pdo->beginTransaction();
 try {
     // Bank details are locked (owner 2026-11-25): the save needs the password unlock token in the session.
     $_SESSION['rh_settings_lock'] = ['bank' => ['uid' => $admin, 'exp' => time() + 600]];
-    [$msg, $err] = rh_hotel_details_save(['check_in_time' => '15:00', 'tentative_reminder_hours' => '12', 'booking_child_price_multiplier' => '40', 'bank_name' => 'TEST BANK'], ['id' => $admin, 'username' => 'test']);
+    [$msg, $err] = rh_hotel_details_save(['check_in_time' => '15:00', 'tentative_reminder_hours' => '12', 'booking_child_price_multiplier' => '40', 'bank_name' => 'TEST BANK', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], ['id' => $admin, 'username' => 'test']);
     $t($err === '' && strpos($msg, 'saved') !== false, "admin save ok ($msg)");
     $t(getSetting('check_in_time') === '3:00 PM' && getSetting('tentative_reminder_hours') === '12', 'values stored and read back');
     $t(getSetting('booking_child_price_multiplier') === '40' && getSetting('child_guest_price_multiplier') === '40', 'child % mirrored to the older key');
     $t(getSetting('bank_name') === 'TEST BANK', 'finance user can change bank details');
     $t(empty($_SESSION['rh_settings_lock']['bank']), 'bank unlock used up by the save');
     if ($staff) {
-        [$msg2, $err2] = rh_hotel_details_save(['bank_name' => 'HACKED', 'restaurant_tagline' => 'Tag test'], ['id' => $staff, 'username' => 'staff']);
+        [$msg2, $err2] = rh_hotel_details_save(['bank_name' => 'HACKED', 'restaurant_tagline' => 'Tag test', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], ['id' => $staff, 'username' => 'staff']);
         $t(getSetting('bank_name') === 'TEST BANK' && getSetting('restaurant_tagline') === 'Tag test', 'non-finance user: bank ignored, other fields saved');
     }
-    [$msg3, $err3] = rh_hotel_details_save(['check_in_time' => 'nonsense', 'restaurant_tagline' => 'Should not save'], ['id' => $admin]);
+    [$msg3, $err3] = rh_hotel_details_save(['check_in_time' => 'nonsense', 'restaurant_tagline' => 'Should not save', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], ['id' => $admin]);
     $t($err3 !== '' && getSetting('restaurant_tagline') !== 'Should not save', 'any invalid field -> nothing saved');
     ob_start(); rh_hotel_details_render(['id' => $admin], 'tok'); $html = ob_get_clean();
     $t(strpos($html, 'name="check_in_time"') !== false && strpos($html, 'value="3:00 PM"') !== false, 'card renders saved values');

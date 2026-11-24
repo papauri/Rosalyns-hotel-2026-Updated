@@ -256,6 +256,64 @@ try {
     try { if ($failPdo) { rh_presence_booking_write($failPdo, $staffId, $none); rh_presence_booking_others($failPdo, $adminId, $none); } } catch (Throwable $e) { $threw = true; }
     check(!$threw, 'a failing database never raises out of the booking banner functions');
 
+    // ---- "Also has this open" (editing mode, warning only) ----
+    check(rh_presence_edit_pages() === ['edit-booking' => 'edit-booking.php', 'stock-count' => 'stock-count.php', 'data-import' => 'data-import.php', 'stock-ingredients' => 'stock-ingredients.php'], 'editing: allow-list maps each key to its page file');
+    $pdo->prepare("DELETE FROM admin_presence WHERE user_id IN (?, ?, ?)")->execute([$adminId, $mgrId, $staffId]);
+    $ed42 = ['k' => 'edit-booking', 'id' => 42, 'since' => time() - 190];
+    $setBooker($mgrId, 20, 'edit-booking.php', $ed42);
+    $o = rh_presence_edit_others($pdo, $adminId, 'edit-booking', 42);
+    check(count($o) === 1 && $o[0]['text'] === $mgrWho . ' (' . $mgrLabel . ') also has this open, since 3 min ago', 'editing: another person on the same record is listed as "Name (Role) also has this open, since 3 min ago"', json_encode($o));
+    check(rh_presence_edit_others($pdo, $mgrId, 'edit-booking', 42) === [], 'editing: the person never sees themselves');
+    check(rh_presence_edit_others($pdo, $adminId, 'edit-booking', 43) === [], 'editing: a different id is not listed');
+    check(rh_presence_edit_others($pdo, $adminId, 'stock-count', 42) === [], 'editing: the same id under another key is not listed');
+    check(rh_presence_edit_others($pdo, $adminId, 'users', 42) === [] && rh_presence_edit_others($pdo, $adminId, 'edit-booking', 0) === [], 'editing: an unknown key or id 0 lists nobody');
+    check(rh_presence_booking_others($pdo, $adminId, $none) === [], 'create-booking banner ignores someone editing a booking');
+    $setBooker($mgrId, 150, 'edit-booking.php', $ed42);
+    check(rh_presence_edit_others($pdo, $adminId, 'edit-booking', 42) === [], 'editing: someone not seen for over 2 minutes is not listed');
+    // A real heartbeat moves the person to another page; the old note stays but must not count
+    $setBooker($mgrId, 20, 'edit-booking.php', $ed42);
+    $_SESSION['rh_presence_started'] = time() - 600;
+    $_SESSION['rh_presence_ts'] = 0;
+    $_SESSION['rh_presence_page'] = 'edit-booking.php';
+    rh_presence_heartbeat($pdo, $mgrId, 'bookings.php');
+    $r = $row($mgrId);
+    check($r && $r['current_page'] === 'bookings.php' && (int)$r['secs'] <= 5 && strpos((string)$r['booking_context'], '"k":"edit-booking"') !== false, 'editing: heartbeat moved the page and left the old note (precondition)', json_encode($r));
+    check(rh_presence_edit_others($pdo, $adminId, 'edit-booking', 42) === [], 'editing: someone whose heartbeat moved them to another page is not listed');
+    // A create-booking style note (no k) on the page is not a match
+    $setBooker($mgrId, 20, 'edit-booking.php', ['ci' => '', 'co' => '', 'rooms' => [], 'id' => 42, 'since' => time()]);
+    check(rh_presence_edit_others($pdo, $adminId, 'edit-booking', 42) === [], 'editing: a note without the key is not listed');
+    // Deactivated account and a name with markup
+    $setBooker($mgrId, 20, 'edit-booking.php', $ed42);
+    $pdo->prepare("UPDATE admin_users SET is_active = 0 WHERE id = ?")->execute([$mgrId]);
+    check(rh_presence_edit_others($pdo, $adminId, 'edit-booking', 42) === [], 'editing: a deactivated account is not listed');
+    $pdo->prepare("UPDATE admin_users SET is_active = 1, full_name = ? WHERE id = ?")->execute(['<img src=x onerror=alert(1)>', $mgrId]);
+    $o = rh_presence_edit_others($pdo, $adminId, 'edit-booking', 42);
+    check(count($o) === 1 && strpos($o[0]['text'], '<img src=x onerror=alert(1)>') === 0, 'editing: a name with markup is returned as plain text for textContent');
+    $pdo->prepare("UPDATE admin_users SET full_name = ? WHERE id = ?")->execute([(string)$mg['full_name'], $mgrId]);
+    // Writing my own note
+    $pdo->prepare("DELETE FROM admin_presence WHERE user_id = ?")->execute([$staffId]);
+    rh_presence_edit_write($pdo, $staffId, 'stock-count', 7);
+    $r = $row($staffId);
+    $ec = $r ? json_decode((string)$r['booking_context'], true) : null;
+    check($r && $r['current_page'] === 'stock-count.php' && (int)$r['secs'] <= 5 && is_array($ec) && array_keys($ec) === ['k', 'id', 'since'] && $ec['k'] === 'stock-count' && $ec['id'] === 7 && abs($ec['since'] - time()) <= 2, 'editing: my note is written as {"k","id","since"} on the page file', json_encode($r));
+    $pdo->prepare("UPDATE admin_presence SET booking_context = ? WHERE user_id = ?")->execute([json_encode(['k' => 'stock-count', 'id' => 7, 'since' => time() - 600]), $staffId]);
+    $old = time() - 600;
+    rh_presence_edit_write($pdo, $staffId, 'stock-count', 7);
+    $ec = json_decode((string)($row($staffId)['booking_context'] ?? ''), true);
+    check(is_array($ec) && abs((int)$ec['since'] - $old) <= 1, 'editing: a later poll on the same record keeps when it was opened', json_encode($ec));
+    rh_presence_edit_write($pdo, $staffId, 'stock-count', 8);
+    $ec = json_decode((string)($row($staffId)['booking_context'] ?? ''), true);
+    check(is_array($ec) && $ec['id'] === 8 && abs((int)$ec['since'] - time()) <= 2, 'editing: opening another record starts a new "since"', json_encode($ec));
+    $o = rh_presence_edit_others($pdo, $adminId, 'stock-count', 8);
+    check(count($o) === 1 && strpos($o[0]['text'], 'also has this open, since just now') !== false, 'editing: a freshly written note shows to the others', json_encode($o));
+    $pdo->prepare("DELETE FROM admin_presence WHERE user_id = ?")->execute([$staffId]);
+    rh_presence_edit_write($pdo, $staffId, 'users', 5);
+    rh_presence_edit_write($pdo, $staffId, 'stock-count', 0);
+    check($row($staffId) === false, 'editing: an unknown key or id 0 writes nothing');
+    $threw = false;
+    try { if ($failPdo) { rh_presence_edit_write($failPdo, $staffId, 'stock-count', 7); rh_presence_edit_others($failPdo, $adminId, 'stock-count', 7); } } catch (Throwable $e) { $threw = true; }
+    check(!$threw, 'editing: a failing database never raises out of the editing functions');
+
     // Sign-out clears
     rh_presence_clear($pdo, $mgrId);
     check($row($mgrId) === false, 'sign-out removes the presence row');
@@ -369,6 +427,59 @@ check($clean($r), 'refused booking banner run rolled back');
 $r = run_page('admin/create-booking.php', ['method' => 'GET', 'grep' => ['id="rh-cb-presence"', 'api/presence.php', 'cb-presence__list']]);
 check(!empty($r['found']['id="rh-cb-presence"']) && !empty($r['found']['cb-presence__list']), 'Create Booking page carries the banner and its script', json_encode($r['found'] ?? $r));
 check($clean($r), 'Create Booking page run rolled back');
+
+// Editing endpoint (?editing=<key>&id=<n>): warning only, anyone who can open that page
+$adminName = (string)$pdo->query("SELECT username FROM admin_users WHERE id = " . $adminId)->fetchColumn();
+$edSeed = ["DELETE FROM admin_presence",
+    "INSERT INTO admin_presence (user_id, last_seen_at, current_page, session_started_at, booking_context) VALUES ($staffId, NOW(), 'edit-booking.php', NOW(), "
+        . $pdo->quote(json_encode(['k' => 'edit-booking', 'id' => 42, 'since' => time() - 240])) . ")"];
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'get' => ['editing' => 'edit-booking', 'id' => '42'],
+    'setup' => $edSeed, 'verify' => ["SELECT current_page, booking_context FROM admin_presence WHERE user_id = $adminId"]]);
+$others = $r['json']['data']['others'] ?? null;
+check(($r['json']['success'] ?? false) === true && is_array($others) && count($others) === 1 && strpos((string)($others[0]['text'] ?? ''), 'also has this open, since 4 min ago') !== false, 'editing endpoint: lists the other person on the same record', json_encode($r['json'] ?? $r));
+$v = $r['verify'][0] ?? [];
+$vc = json_decode((string)($v[0]['booking_context'] ?? ''), true);
+check(count($v) === 1 && ($v[0]['current_page'] ?? '') === 'edit-booking.php' && is_array($vc) && ($vc['k'] ?? '') === 'edit-booking' && ($vc['id'] ?? 0) === 42, 'editing endpoint: writes my own note', json_encode($r['verify'] ?? $r));
+check($clean($r), 'editing endpoint run rolled back', json_encode($r));
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'get' => ['editing' => 'edit-booking', 'id' => '43'], 'setup' => $edSeed]);
+check(($r['json']['success'] ?? false) === true && ($r['json']['data']['others'] ?? null) === [], 'editing endpoint: a different record lists nobody', json_encode($r['json'] ?? $r));
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'get' => ['editing' => 'edit-booking', 'id' => '42', 'idle' => '1'],
+    'setup' => $edSeed, 'verify' => ["SELECT COUNT(*) AS n FROM admin_presence WHERE user_id = $adminId"]]);
+check(($r['json']['success'] ?? false) === true && (int)($r['verify'][0][0]['n'] ?? -1) === 0 && count($r['json']['data']['others'] ?? []) === 1, 'editing endpoint: an idle tab reads the warning but writes nothing', json_encode($r['json'] ?? $r));
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'get' => ['editing' => 'edit-booking', 'id' => '42'],
+    'setup' => $edSeed, 'verify' => ["SELECT COUNT(*) AS n FROM admin_presence WHERE user_id = $adminId"]]);
+check(($r['json']['success'] ?? null) === false && !isset($r['json']['data']) && (int)($r['verify'][0][0]['n'] ?? -1) === 0, 'editing endpoint: refused without the X-Requested-With header, nothing written', json_encode($r['json'] ?? $r));
+foreach ([['users', '42'], ['edit-booking', 'abc'], ['edit-booking', '0'], ['edit-booking', '-3'], ['edit-booking', ''], [['edit-booking'], '42'], ['edit-booking', ['42']]] as $bad) {
+    $r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'get' => ['editing' => $bad[0], 'id' => $bad[1]],
+        'setup' => $edSeed, 'verify' => ["SELECT COUNT(*) AS n FROM admin_presence WHERE user_id = $adminId"]]);
+    check(($r['json']['error'] ?? '') === 'Bad request' && !isset($r['json']['data']) && (int)($r['verify'][0][0]['n'] ?? -1) === 0, 'editing endpoint: ' . json_encode($bad) . ' is a bad request (400) and writes nothing', json_encode($r['json'] ?? $r));
+}
+// Permission: the staff user, denied Edit Booking, gets 403 with no names and nothing written;
+// the same user granted it is answered (positive control, so the refusal is the permission).
+$edSeedStaff = ["DELETE FROM admin_presence",
+    "INSERT INTO admin_presence (user_id, last_seen_at, current_page, session_started_at, booking_context) VALUES ($adminId, NOW(), 'edit-booking.php', NOW(), "
+        . $pdo->quote(json_encode(['k' => 'edit-booking', 'id' => 42, 'since' => time() - 60])) . ")",
+    "INSERT INTO admin_presence (user_id, last_seen_at, current_page, session_started_at, booking_context) VALUES ($staffId, NOW(), 'stock-count.php', NOW(), "
+        . $pdo->quote(json_encode(['k' => 'stock-count', 'id' => 3, 'since' => time() - 60])) . ")"];
+$edVerify = ["SELECT current_page, booking_context FROM admin_presence WHERE user_id = $staffId"];
+$grantSql = function (int $g) use ($staffId, $adminId) { return "INSERT INTO user_permissions (user_id, permission_key, is_granted, granted_by) VALUES ($staffId, 'edit_booking', $g, $adminId) ON DUPLICATE KEY UPDATE is_granted = $g"; };
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'as_username' => $staffName, 'get' => ['editing' => 'edit-booking', 'id' => '42'],
+    'setup' => array_merge($edSeedStaff, [$grantSql(0)]), 'verify' => $edVerify]);
+$raw = json_encode($r['json'] ?? []);
+check(($r['json']['error'] ?? '') === 'Permission denied' && !isset($r['json']['data']) && strpos($raw, $adminName) === false && strpos($raw, 'also has this open') === false, "editing endpoint: refused (403), with no names, for someone without Edit Booking ($staffRole)", $raw);
+$v = $r['verify'][0] ?? [];
+$vc = json_decode((string)($v[0]['booking_context'] ?? ''), true);
+check(count($v) === 1 && ($v[0]['current_page'] ?? '') === 'stock-count.php' && is_array($vc) && ($vc['k'] ?? '') === 'stock-count' && ($vc['id'] ?? 0) === 3, 'editing endpoint: the refused request wrote nothing (my seeded note is unchanged)', json_encode($r['verify'] ?? $r));
+check($clean($r), 'refused editing run rolled back');
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'as_username' => $staffName, 'get' => ['editing' => 'edit-booking', 'id' => '42', 'idle' => '1'],
+    'setup' => array_merge($edSeedStaff, [$grantSql(0)])]);
+check(($r['json']['error'] ?? '') === 'Permission denied' && !isset($r['json']['data']), 'editing endpoint: an idle request without permission is refused too (no read)', json_encode($r['json'] ?? $r));
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'as_username' => $staffName, 'get' => ['editing' => 'edit-booking', 'id' => '42'],
+    'setup' => array_merge($edSeedStaff, [$grantSql(1)]), 'verify' => $edVerify]);
+$v = $r['verify'][0] ?? [];
+$vc = json_decode((string)($v[0]['booking_context'] ?? ''), true);
+check(($r['json']['success'] ?? false) === true && count($r['json']['data']['others'] ?? []) === 1 && ($vc['k'] ?? '') === 'edit-booking' && ($v[0]['current_page'] ?? '') === 'edit-booking.php', 'editing endpoint: the same user with Edit Booking is answered and their note written (control)', json_encode([$r['json'] ?? $r, $r['verify'] ?? null]));
+check($clean($r), 'granted editing run rolled back');
 
 // Logout clears
 $r = run_page('admin/logout.php', ['method' => 'GET',

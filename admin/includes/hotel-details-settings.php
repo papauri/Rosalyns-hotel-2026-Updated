@@ -97,6 +97,30 @@ if (!function_exists('rh_hotel_details_fields')) {
     }
 
     /**
+     * The "save only what changed" spec (task 19): every field => its shared default. A map is compared by its embed
+     * link (the form shows the link, the row stores the iframe built from it). The mirror key is never decided.
+     * $canFinance / $isAdmin false: leave out the fields that person cannot change, so the page never carries their
+     * names or hashed values (the save only decides fields the person may change).
+     */
+    function rh_hotel_details_base_spec(bool $canFinance = true, bool $isAdmin = true): array
+    {
+        $spec = [];
+        foreach (rh_hotel_details_fields() as $fields) {
+            foreach ($fields as $key => $f) {
+                if ((!empty($f['finance']) && !$canFinance) || (!empty($f['admin_only']) && !$isAdmin)) {
+                    continue;
+                }
+                $spec[$key] = $f['type'] === 'maps'
+                    ? ['default' => (string)$f['default'], 'norm' => static function (string $v): string {
+                        return preg_match('/src\s*=\s*"([^"]+)"/i', $v, $m) ? html_entity_decode($m[1]) : $v;
+                    }]
+                    : (string)$f['default'];
+            }
+        }
+        return $spec;
+    }
+
+    /**
      * Validate one posted value. @return array{0:?string,1:?string} [normalised value, error]
      */
     function rh_hotel_details_clean(string $key, array $spec, string $raw): array
@@ -195,7 +219,9 @@ if (!function_exists('rh_hotel_details_fields')) {
             }
         }
         $errors = [];
-        $changes = [];
+        $posted = [];
+        $rawPosted = [];
+        $specs = [];
         foreach (rh_hotel_details_fields() as $fields) {
             foreach ($fields as $key => $spec) {
                 if (!array_key_exists($key, $post) || (!empty($spec['finance']) && !$canFinance)) {
@@ -209,26 +235,69 @@ if (!function_exists('rh_hotel_details_fields')) {
                     $errors[] = $err;
                     continue;
                 }
-                $current = rh_hotel_details_value($key, $spec);
-                if ($spec['type'] === 'maps' && $val === '' && $current === '') {
-                    continue;
-                }
-                if ($val !== $current) {
-                    $changes[$key] = [$current, $val, $spec];
-                }
+                $posted[$key] = $val;
+                $rawPosted[$key] = (string)$post[$key];
+                $specs[$key] = $spec;
             }
         }
         if ($errors) {
             return ['', implode(' ', $errors) . ' Nothing was saved.']; // unlock kept: fix the value and save again
         }
+        // Save only what this person changed (task 19): each field is decided against the copy the page was opened
+        // with; a field someone else changed meanwhile is refused by name, the rest is saved.
+        if (!$posted) {
+            return ['No changes to save.', '']; // nothing this person may change was posted
+        }
+        global $pdo;
+        require_once __DIR__ . '/../../includes/settings-save-changed.php';
+        $base = rh_settings_base_parse($post['_settings_base'] ?? null);
+        if ($base === null) {
+            return ['', rh_settings_base_reload_message()]; // unlock kept: nothing was saved
+        }
+        $own = !$pdo->inTransaction();
+        $changes = [];
+        $conflicts = [];
+        try {
+            if ($own) {
+                $pdo->beginTransaction();
+            }
+            $labels = [];
+            foreach ($specs as $key => $spec) {
+                $labels[$key] = (string)$spec['label'];
+            }
+            $d = rh_settings_base_decide_all($pdo, $base, $posted, rh_hotel_details_base_spec(), $rawPosted, ['labels' => $labels]);
+            if ($d['error'] !== '') {
+                if ($own) {
+                    $pdo->rollBack();
+                }
+                return ['', $d['error']];
+            }
+            foreach ($d['write'] as $key => $new) {
+                $changes[$key] = [(string)$d['decisions'][$key]['current'], (string)$new, $specs[$key]];
+            }
+            $conflicts = $d['conflicts'];
+            foreach ($changes as $key => [$old, $new, $spec]) {
+                if (updateSetting($key, $new) === false) {
+                    throw new RuntimeException('Could not save ' . $key);
+                }
+                if (!empty($spec['mirror'])) {
+                    updateSetting($spec['mirror'], $new); // read under both names by older code
+                }
+            }
+            if ($own) {
+                $pdo->commit();
+            }
+        } catch (Throwable $ex) {
+            if ($own && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('hotel details save: ' . $ex->getMessage());
+            return ['', 'The settings could not be saved. Nothing was saved.'];
+        }
         foreach (array_keys($lockedPosted) as $lockGroup) {
             rh_settings_lock_use($lockGroup); // used up: the card comes back locked
         }
         foreach ($changes as $key => [$old, $new, $spec]) {
-            updateSetting($key, $new);
-            if (!empty($spec['mirror'])) {
-                updateSetting($spec['mirror'], $new); // read under both names by older code
-            }
             if (!empty($spec['activity']) && function_exists('logActivity')) {
                 $lbl = $spec['labels'] ?? [];
                 logActivity($uid, (string)$spec['activity'], $spec['label'] . ' changed from "' . ($lbl[$old] ?? $old) . '" to "' . ($lbl[$new] ?? $new) . '" by ' . (string)($user['username'] ?? ('user #' . $uid)));
@@ -245,6 +314,9 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'user' => $user['username'] ?? '', 'user_id' => $uid, 'changes' => $logged,
             ]);
         }
+        if ($conflicts) {
+            return ['', implode(' ', $conflicts) . ($changes ? ' Your other changes were saved (' . count($changes) . ' setting(s)).' : '')];
+        }
         return [$changes ? count($changes) . ' setting(s) saved.' : 'No changes to save.', ''];
     }
 
@@ -258,6 +330,9 @@ if (!function_exists('rh_hotel_details_fields')) {
         echo '<div class="rh-panel settings-card" id="hotel-details" data-bs-group="web" data-bs-keywords="Hotel details &amp; policies hotel name address phone check-in check-out time bank details policy vat"><div class="rh-panel__head"><h2 class="rh-panel__title">Hotel details &amp; policies</h2></div>';
         echo '<form method="POST" action="booking-settings.php#hotel-details">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '"><input type="hidden" name="save_hotel_details" value="1">';
+        global $pdo;
+        require_once __DIR__ . '/../../includes/settings-save-changed.php';
+        echo rh_settings_base_field($pdo, rh_hotel_details_base_spec($canFinance, $isAdmin)); // save only what changed (task 19)
         $uid = (int)($user['id'] ?? 0);
         require_once __DIR__ . '/../../includes/settings-lock.php';
         // One plain line under each sub-heading (owner 2026-11-25: sections properly labelled).

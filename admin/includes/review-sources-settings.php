@@ -22,6 +22,31 @@ if (!function_exists('rh_review_sources_save')) {
         $errors = [];
         $done = [];
 
+        // Optional exact place, so the search never has to guess the hotel from its name.
+        // Saved only when this person changed it (task 19), decided before the keys below so a page opened before
+        // this change is refused with nothing written. The encrypted keys are secrets and stay typed-only.
+        if (array_key_exists('google_place_id', $post)) {
+            $pid = trim((string)$post['google_place_id']);
+            $pid = preg_replace('#^places/#i', '', $pid);
+            if ($pid !== '' && !preg_match('/^[A-Za-z0-9_-]{10,200}$/', $pid)) {
+                $errors[] = 'Google Place ID: letters, digits, - and _ only (it usually starts with ChIJ).';
+            } else {
+                global $pdo;
+                require_once __DIR__ . '/../../includes/settings-save-changed.php';
+                $r = rh_settings_base_save($pdo, rh_settings_base_parse($post['_settings_base'] ?? null),
+                    ['reviews_google_place_id' => $pid], rh_review_sources_base_spec(),
+                    ['reviews_google_place_id' => (string)$post['google_place_id']], ['labels' => ['reviews_google_place_id' => 'Google Place ID']]);
+                if ($r['error'] !== '') {
+                    return ['', $r['error']]; // checked first, so nothing else has been written yet
+                }
+                if ($r['conflicts']) {
+                    $errors[] = implode(' ', $r['conflicts']);
+                } elseif ($r['written']) {
+                    $done[] = $pid === '' ? 'Place ID cleared' : 'Place ID saved';
+                }
+            }
+        }
+
         $keys = [
             'google' => ['reviews_google_places_key', 'Google Places API key'],
             'brave'  => ['reviews_brave_search_key', 'Brave Search API key'],
@@ -42,18 +67,6 @@ if (!function_exists('rh_review_sources_save')) {
             }
             updateSetting($settingKey, review_source_encrypt($val));
             $done[] = $label . ' saved';
-        }
-
-        // Optional exact place, so the search never has to guess the hotel from its name.
-        if (array_key_exists('google_place_id', $post)) {
-            $pid = trim((string)$post['google_place_id']);
-            $pid = preg_replace('#^places/#i', '', $pid);
-            if ($pid !== '' && !preg_match('/^[A-Za-z0-9_-]{10,200}$/', $pid)) {
-                $errors[] = 'Google Place ID: letters, digits, - and _ only (it usually starts with ChIJ).';
-            } elseif ($pid !== (string)getSetting('reviews_google_place_id', '')) {
-                updateSetting('reviews_google_place_id', $pid);
-                $done[] = $pid === '' ? 'Place ID cleared' : 'Place ID saved';
-            }
         }
 
         if ($errors) {
@@ -78,6 +91,12 @@ if (!function_exists('rh_review_sources_save')) {
             $lines[] = 'No changes to save.';
         }
         return [implode('<br>', $lines), ''];
+    }
+
+    /** The "save only what changed" spec: only the Place ID (the API keys are secrets, never hashed). */
+    function rh_review_sources_base_spec(): array
+    {
+        return ['reviews_google_place_id' => ''];
     }
 
     /** Live-check each saved key. @return string[] HTML-safe result lines */
@@ -135,6 +154,9 @@ if (!function_exists('rh_review_sources_save')) {
         echo '<p class="help-text">Used by <a href="reviews.php">Reviews &rarr; Import reviews from the web</a>. Keys are saved encrypted in the live database and are never shown again; leave a box empty to keep the saved key.</p>';
         echo '<form method="POST" action="booking-settings.php#review-sources" autocomplete="off">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '"><input type="hidden" name="save_review_sources" value="1">';
+        global $pdo;
+        require_once __DIR__ . '/../../includes/settings-save-changed.php';
+        echo rh_settings_base_field($pdo, rh_review_sources_base_spec()); // save only what changed (task 19)
 
         echo '<h3>Google reviews ' . $badge($st['google']) . '</h3>';
         echo '<p class="help-text">Brings in real Google reviews with the reviewer&rsquo;s name, stars and exact post date (Google shares up to 5 &ldquo;most relevant&rdquo; reviews per place). '

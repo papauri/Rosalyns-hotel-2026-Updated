@@ -24,9 +24,22 @@ function ok(string $name, bool $cond, string $detail = ''): void {
     if ($cond) { $pass++; echo "[PASS] $name\n"; } else { $fail++; echo "[FAIL] $name" . ($detail !== '' ? ": $detail" : '') . "\n"; }
 }
 function near(float $a, float $b, float $tol = 0.005): bool { return abs($a - $b) <= $tol; }
+/** Edit Booking refuses a Save without the stale-edit hash (CONCURRENCY_PLAN task 7): a POST that has none gets the
+ *  hash of the booking as it stands after setup, computed inside the run (same as rh_stale_hash on the 12 form columns). */
+function cp_eb_hash(string $page, array $cfg): array {
+    if ($page !== 'admin/edit-booking.php' || strtoupper((string)($cfg['method'] ?? 'POST')) === 'GET' || empty($cfg['post']) || array_key_exists('_row_hash', $cfg['post'])) { return $cfg; }
+    $id = (int)($cfg['get']['id'] ?? 0);
+    if ($id <= 0) { return $cfg; }
+    $cols = ['guest_name', 'room_guest_name', 'guest_email', 'guest_phone', 'guest_country', 'special_requests', 'check_in_date', 'check_out_date', 'number_of_guests', 'child_guests', 'occupancy_type', 'individual_room_id'];
+    $p = [];
+    foreach ($cols as $i => $c) { $p[] = "'i:$i;',IF($c IS NULL,'N;',CONCAT('s:',LENGTH($c),':\"',$c,'\";'))"; }
+    $cfg['post']['_row_hash'] = '{eb_row_hash}';
+    $cfg['vars'] = ($cfg['vars'] ?? []) + ['eb_row_hash' => "SELECT MD5(CONCAT('a:12:{'," . implode(',', $p) . ",'}')) FROM bookings WHERE id = $id"];
+    return $cfg;
+}
 function cp_run(string $page, array $post, array $opts = []): array {
     global $harness;
-    $cfg = base64_encode(json_encode(['post' => $post, 'get' => $opts['get'] ?? [], 'ajax' => !empty($opts['ajax']), 'verify' => $opts['verify'] ?? [], 'setup' => $opts['setup'] ?? []]));
+    $cfg = base64_encode(json_encode(cp_eb_hash($page, ['post' => $post, 'get' => $opts['get'] ?? [], 'ajax' => !empty($opts['ajax']), 'verify' => $opts['verify'] ?? [], 'setup' => $opts['setup'] ?? [], 'vars' => $opts['vars'] ?? []])));
     $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1');
     $res = ['error' => 'no result', 'raw' => substr((string)$out, -600), 'rolled_back' => false];
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { $res = $r + ['raw' => substr((string)$out, -600)]; } }

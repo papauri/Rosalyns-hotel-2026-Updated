@@ -11,6 +11,7 @@ require_once $root . '/config/database.php';
 require_once $root . '/admin/includes/permissions.php';
 require_once $root . '/admin/includes/hotel-details-settings.php';
 require_once $root . '/includes/settings-lock.php';
+require_once $root . '/includes/settings-save-changed.php';
 if (!function_exists('rh_log_event') && is_file($root . '/includes/system-logger.php')) { require_once $root . '/includes/system-logger.php'; }
 
 $ok = 0; $bad = 0;
@@ -76,7 +77,7 @@ try {
     $t($setting('bank_name') === $beforeAll['bank_name'] && (string)getSetting('check_in_time') === $ciBefore, 'refused save changed nothing (not even the unlocked field)');
     [$msg, $err] = rh_hotel_details_save(['restaurant_service_charge_pct' => '3'], $admin);
     $t(stripos($err, 'unlock the restaurant service charge') !== false && $setting('restaurant_service_charge_pct') === $beforeAll['restaurant_service_charge_pct'], 'service charge without unlock refused, unchanged', $err);
-    [$msg, $err] = rh_hotel_details_save(['restaurant_tagline' => 'ZZ lock tagline'], $admin);
+    [$msg, $err] = rh_hotel_details_save(['restaurant_tagline' => 'ZZ lock tagline', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], $admin); // the page's opened-with copy (task 19)
     $t($err === '' && $setting('restaurant_tagline') === 'ZZ lock tagline', 'normal save of unlocked fields works', $err);
 
     $_SESSION['rh_settings_lock'] = ['bank' => ['uid' => $tmpId, 'exp' => time() - 1]];
@@ -88,9 +89,9 @@ try {
     $t(stripos($err, 'unlock the bank') !== false, 'a vat token does not unlock bank fields', $err);
 
     $_SESSION['rh_settings_lock'] = ['bank' => ['uid' => $tmpId, 'exp' => time() + 600]];
-    [$msg, $err] = rh_hotel_details_save(['bank_account_number' => 'not valid <x>'], $admin);
+    [$msg, $err] = rh_hotel_details_save(['bank_account_number' => 'not valid <x>', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], $admin);
     $t($err !== '' && rh_settings_lock_is_open('bank', $tmpId), 'validation error keeps the unlock (fix and save again)', $err);
-    [$msg, $err] = rh_hotel_details_save(['bank_name' => 'ZZ LOCK BANK'], $admin);
+    [$msg, $err] = rh_hotel_details_save(['bank_name' => 'ZZ LOCK BANK', '_settings_base' => json_encode(rh_settings_base_map($pdo, rh_hotel_details_base_spec()))], $admin);
     $t($err === '' && $setting('bank_name') === 'ZZ LOCK BANK', 'unlocked bank save works', $err . $msg);
     $t(!rh_settings_lock_is_open('bank', $tmpId), 'token used up after one save');
     [$msg, $err] = rh_hotel_details_save(['bank_name' => 'ZZ LOCK BANK 2'], $admin);

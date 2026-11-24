@@ -100,7 +100,9 @@ if (!function_exists('import_store_upload')) {
      * Check and stage an upload, create the job (status 'uploaded').
      * $opts: from_upload (default true: the file came in via PHP's upload, so move_uploaded_file; false = copy, used by tests),
      *        allow_reimport (honoured ONLY for an admin), max_bytes (default: setting data_import_max_mb).
-     * Returns ['ok'=>bool, 'error'=>string, 'job_id'=>int, 'duplicate'=>?array{job_id,committed_at,by}].
+     * Returns ['ok'=>bool, 'error'=>string, 'job_id'=>int, 'duplicate'=>?array]: duplicate = {job_id, committed_at, by} for a file already
+     * imported, or {job_id, open: true, by, started_at, created_by} for a file that another open import job holds (refused unless an admin
+     * ticked "import again"; the commit then lets only the first of them through, see import_commit_stock_locked).
      */
     function import_store_upload(PDO $pdo, string $tmpPath, string $origName, int $userId, array $opts = []): array
     {
@@ -126,17 +128,66 @@ if (!function_exists('import_store_upload')) {
             }
         }
         $sha = hash_file('sha256', $tmpPath);
+        // One open import per file (2026-11-25): the duplicate checks and the INSERT run under one named lock, so two uploads of the same
+        // file at the same moment cannot both pass the check. Released in finally on every path.
+        $upLock = import_upload_lock_name();
+        if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($upLock) . ', 10)')->fetchColumn() !== 1) {
+            return $fail('Another file is being uploaded right now, so this one was not saved. Wait a few seconds and try again.');
+        }
+        try {
+            return import_store_upload_locked($pdo, $tmpPath, $name, $sha, $userId, $opts, $fromUpload, $fail);
+        } finally {
+            try {
+                $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($upLock) . ')');
+            } catch (Throwable $e) {
+                // closing the connection releases it
+            }
+        }
+    }
+
+    /** Name of the upload lock (one per database). */
+    function import_upload_lock_name(): string
+    {
+        return substr('rh_import_upload_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+    }
+
+    /**
+     * An import of this file that is still open (uploaded / analysed / reviewing / confirmed and not past expires_at), newest first;
+     * null when there is none. $exceptId leaves one job out.
+     */
+    function import_open_job_for_sha(PDO $pdo, string $sha, int $exceptId = 0): ?array
+    {
+        $st = $pdo->prepare("SELECT j.id, j.created_at, j.created_by, COALESCE(NULLIF(u.full_name, ''), u.username, 'someone') AS by_name
+                             FROM import_jobs j LEFT JOIN admin_users u ON u.id = j.created_by
+                             WHERE j.sha256 = ? AND j.id <> ? AND j.target = 'stock' AND j.status IN ('uploaded','analysed','reviewing','confirmed')
+                               AND (j.expires_at IS NULL OR j.expires_at > NOW())
+                             ORDER BY j.id DESC LIMIT 1");
+        $st->execute([$sha, $exceptId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
+    /** The checks + staging + INSERT of import_store_upload(); the caller holds the upload lock. */
+    function import_store_upload_locked(PDO $pdo, string $tmpPath, string $name, string $sha, int $userId, array $opts, bool $fromUpload, callable $fail): array
+    {
         $dup = null;
+        $allow = !empty($opts['allow_reimport']) && rh_import_can_reimport($userId, $pdo);
         $st = $pdo->prepare("SELECT j.id, j.committed_at, COALESCE(NULLIF(u.full_name, ''), u.username, 'someone') AS by_name
                              FROM import_jobs j LEFT JOIN admin_users u ON u.id = j.committed_by
                              WHERE j.sha256 = ? AND j.status = 'committed' ORDER BY j.id DESC LIMIT 1");
         $st->execute([$sha]);
         if ($row = $st->fetch(PDO::FETCH_ASSOC)) {
             $dup = ['job_id' => (int)$row['id'], 'committed_at' => (string)$row['committed_at'], 'by' => (string)$row['by_name']];
-            $allow = !empty($opts['allow_reimport']) && rh_import_can_reimport($userId, $pdo);
             if (!$allow) {
                 return $fail('This file was already imported on ' . substr((string)$row['committed_at'], 0, 10) . ' by ' . $row['by_name'] . '. Importing it again needs an administrator to tick "import again".', ['duplicate' => $dup]);
             }
+        }
+        // the same file already being imported (not finished, not expired): carry on with that one instead of starting a second
+        $open = import_open_job_for_sha($pdo, $sha);
+        if ($open && !$allow) {
+            $openDup = ['job_id' => (int)$open['id'], 'open' => true, 'by' => (string)$open['by_name'], 'started_at' => (string)$open['created_at'],
+                'created_by' => $open['created_by'] !== null ? (int)$open['created_by'] : 0];
+            return $fail('This file is already being imported: ' . $open['by_name'] . ' started it on ' . substr((string)$open['created_at'], 0, 16) . '. Open it to carry on.', ['duplicate' => $openDup]);
         }
         $dir = import_storage_dir();
         if (!is_dir($dir) || !is_writable($dir)) {

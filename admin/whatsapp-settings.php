@@ -7,6 +7,7 @@
 require_once 'admin-init.php';
 require_once '../config/email.php';
 require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
+require_once __DIR__ . '/../includes/settings-save-changed.php'; // save only the settings the person changed
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
@@ -38,10 +39,32 @@ $whatsapp_cancelled_template = getSetting('whatsapp_cancelled_template', 'bookin
 $message = '';
 $error = '';
 
+// Save only what the person changed (concurrency guardrails task 14, includes/settings-save-changed.php): every
+// setting the form shows, with what the page shows when there is no row (the older key, else the default). The
+// access token is a secret: never in this list, written only when a new one is typed.
+$waSpec = [
+    'whatsapp_enabled' => ['default' => '0', 'fallback' => 'whatsapp_notifications_enabled'],
+    'whatsapp_phone_id' => ['default' => '', 'fallback' => 'whatsapp_meta_phone_number_id'],
+    'whatsapp_business_id' => ['default' => '', 'fallback' => 'whatsapp_meta_business_account_id'],
+    'whatsapp_number' => ['default' => '', 'fallback' => 'whatsapp_hotel_number'],
+    'whatsapp_notify_on_booking' => '1', 'whatsapp_notify_on_confirmation' => '1', 'whatsapp_notify_on_cancellation' => '1',
+    'whatsapp_notify_on_checkin' => '1', 'whatsapp_notify_on_checkout' => '1',
+    'whatsapp_guest_notifications' => '1', 'whatsapp_hotel_notifications' => '1', 'whatsapp_admin_numbers' => '',
+    'whatsapp_confirmed_template' => 'booking_confirmed', 'whatsapp_cancelled_template' => 'booking_cancelled',
+];
+// The old-name copies follow their setting's decision (written only when it is), never decided on their own.
+$waMirrorOf = ['whatsapp_notifications_enabled' => 'whatsapp_enabled', 'whatsapp_meta_phone_number_id' => 'whatsapp_phone_id',
+    'whatsapp_meta_business_account_id' => 'whatsapp_business_id', 'whatsapp_hotel_number' => 'whatsapp_number',
+    'whatsapp_meta_access_token' => 'whatsapp_api_token'];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
     try {
         if (!isset($_POST['csrf_token']) || !validateCsrfToken($_POST['csrf_token'])) {
             throw new RuntimeException('Invalid security token. Please refresh and try again.');
+        }
+        $waBase = rh_settings_base_parse($_POST['_settings_base'] ?? null);
+        if ($waBase === null) {
+            throw new RuntimeException(rh_settings_base_reload_message());
         }
 
         $pdo->beginTransaction();
@@ -125,53 +148,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
         ");
         
+        // Each setting goes through the changed-only decision first: written only when the person changed it and
+        // nobody else did; a setting both changed is refused and named; the rest are left as stored.
         // Settings change log (System Logs > Settings changes): one row per setting that changed, written in the same
         // transaction. The old-name copies (whatsapp_meta_*, whatsapp_hotel_number, whatsapp_notifications_enabled)
         // mirror a setting already logged, so they are not logged twice. The token is encrypted: it shows as hidden.
-        $waLogMirrors = ['whatsapp_notifications_enabled' => true, 'whatsapp_meta_phone_number_id' => true,
-            'whatsapp_meta_business_account_id' => true, 'whatsapp_hotel_number' => true, 'whatsapp_meta_access_token' => true];
+        $waNow = [];
+        $waWritten = [];
+        $waConflicts = [];
         rh_settings_log_begin($user);
         try {
-            $waLogOld = [];
             foreach ($settings as $key => $value) {
-                if (!isset($waLogMirrors[$key])) {
-                    $waLogOld[$key] = rh_settings_log_old($pdo, 'site_settings', $key);
+                if (isset($waMirrorOf[$key])) {
+                    continue; // written together with its setting below
                 }
-            }
-            foreach ($settings as $key => $value) {
+                if ($key !== 'whatsapp_api_token') { // the token is only here when a new one was typed
+                    $d = rh_settings_base_decide($pdo, $waBase, $key, $value,
+                        ['raw' => in_array($key, ['whatsapp_confirmed_template', 'whatsapp_cancelled_template'], true) ? (string)($_POST[$key] ?? '') : null]
+                        + rh_settings_base_entry($waSpec[$key] ?? ''));
+                    if ($d['outcome'] === 'no_base') {
+                        throw new RuntimeException($d['message']);
+                    }
+                    if ($d['outcome'] === 'conflict') {
+                        $waConflicts[] = $d['message'];
+                    }
+                    $waNow[$key] = $d['outcome'] === 'write' ? $value : (string)$d['current'];
+                    if ($d['outcome'] !== 'write') {
+                        continue;
+                    }
+                }
+                $waLogOld = rh_settings_log_old($pdo, 'site_settings', $key);
                 $stmt->execute([$key, $value]);
-                if (($waLogOld[$key] ?? null) !== null) {
-                    rh_settings_log_record('site_settings', $key, $waLogOld[$key]['value'], $value);
+                if ($waLogOld !== null) {
+                    rh_settings_log_record('site_settings', $key, $waLogOld['value'], $value);
+                }
+                $waWritten[] = $key;
+                foreach ($waMirrorOf as $mirrorKey => $primaryKey) {
+                    if ($primaryKey === $key && array_key_exists($mirrorKey, $settings)) {
+                        $stmt->execute([$mirrorKey, $settings[$mirrorKey]]);
+                    }
                 }
             }
         } finally {
             rh_settings_log_end();
         }
-        
+
         $pdo->commit();
-        
-        // Refresh settings
-        $whatsapp_enabled = $settings['whatsapp_enabled'];
+
+        // Refresh settings: what is stored now (a refused or unchanged setting keeps the stored value, never the posted one)
+        $whatsapp_enabled = $waNow['whatsapp_enabled'];
         $whatsapp_has_token = $hasTokenAfterSave;
-        $whatsapp_phone_id = $settings['whatsapp_phone_id'];
-        $whatsapp_business_id = $settings['whatsapp_business_id'];
-        $whatsapp_number = $settings['whatsapp_number'];
-        $whatsapp_notify_on_booking = $settings['whatsapp_notify_on_booking'];
-        $whatsapp_notify_on_confirmation = $settings['whatsapp_notify_on_confirmation'];
-        $whatsapp_notify_on_cancellation = $settings['whatsapp_notify_on_cancellation'];
-        $whatsapp_notify_on_checkin = $settings['whatsapp_notify_on_checkin'];
-        $whatsapp_notify_on_checkout = $settings['whatsapp_notify_on_checkout'];
-        $whatsapp_guest_notifications = $settings['whatsapp_guest_notifications'];
-        $whatsapp_hotel_notifications = $settings['whatsapp_hotel_notifications'];
-        $whatsapp_admin_numbers = $settings['whatsapp_admin_numbers'];
-        $whatsapp_confirmed_template = $settings['whatsapp_confirmed_template'];
-        $whatsapp_cancelled_template = $settings['whatsapp_cancelled_template'];
-        
-        $message = 'WhatsApp settings saved successfully!';
+        $whatsapp_phone_id = $waNow['whatsapp_phone_id'];
+        $whatsapp_business_id = $waNow['whatsapp_business_id'];
+        $whatsapp_number = $waNow['whatsapp_number'];
+        $whatsapp_notify_on_booking = $waNow['whatsapp_notify_on_booking'];
+        $whatsapp_notify_on_confirmation = $waNow['whatsapp_notify_on_confirmation'];
+        $whatsapp_notify_on_cancellation = $waNow['whatsapp_notify_on_cancellation'];
+        $whatsapp_notify_on_checkin = $waNow['whatsapp_notify_on_checkin'];
+        $whatsapp_notify_on_checkout = $waNow['whatsapp_notify_on_checkout'];
+        $whatsapp_guest_notifications = $waNow['whatsapp_guest_notifications'];
+        $whatsapp_hotel_notifications = $waNow['whatsapp_hotel_notifications'];
+        $whatsapp_admin_numbers = $waNow['whatsapp_admin_numbers'];
+        $whatsapp_confirmed_template = $waNow['whatsapp_confirmed_template'];
+        $whatsapp_cancelled_template = $waNow['whatsapp_cancelled_template'];
+
+        if ($waConflicts) {
+            $error = implode(' ', $waConflicts) . ($waWritten ? ' Your other changes were saved.' : '');
+        } else {
+            $message = $waWritten ? 'WhatsApp settings saved successfully!' : 'Nothing had changed, so nothing was saved.';
+        }
         if (function_exists('clearSettingsCache')) {
             clearSettingsCache();
         }
-        rh_log_event('whatsapp_settings', 'info', 'WhatsApp settings saved', [
+        if ($waWritten) rh_log_event('whatsapp_settings', 'info', 'WhatsApp settings saved', [
             'enabled' => $whatsapp_enabled,
             'has_number' => $whatsapp_number !== '',
             'has_phone_id' => $whatsapp_phone_id !== '',
@@ -275,6 +324,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
         <form method="POST" action="">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+            <?php echo rh_settings_base_field($pdo, $waSpec); // what the page was opened with: only changed settings are saved ?>
             <!-- API Configuration -->
             <div class="settings-card">
                 <h2><i class="fas fa-cog" style="color: var(--color-primary, #766550);"></i> API Configuration</h2>

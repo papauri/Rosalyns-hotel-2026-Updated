@@ -6,6 +6,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/menu-recipe-lib.php';
 require_once __DIR__ . '/includes/menu-pos-sync.php';
+require_once __DIR__ . '/../includes/stale-edit.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -90,6 +91,51 @@ function rh_mm_delete_one(PDO $pdo, string $table, int $itemId): array
         'mode' => $res['mode'], 'name' => (string)$webRow['item_name'], 'open_lines' => (int)$res['open_lines'],
         'deals' => (int)$res['deals'], 'stock_removed' => $res['mode'] === 'deleted' && $pos && $twins === 0,
     ];
+}
+
+/**
+ * Stale-edit check (.claude/CONCURRENCY_PLAN.md task 8): the Edit form's own columns of one website menu row. The same list
+ * is hashed at render (the raw SELECT * row) and at save. Not display_order, updated_at or anything on the till copy, so a
+ * reorder, a till sale or a till-side change never refuses a Save.
+ */
+function rh_mm_stale_cols(string $table): array
+{
+    $cols = ['item_name', 'description', 'price', 'category', 'is_available', 'station', 'show_pos', 'show_room_service'];
+    if ($table === 'drink_menu') {
+        $cols[] = 'tags';
+    }
+    return $cols;
+}
+
+/** Those columns of one row as they are in the database now ($lock: FOR UPDATE, inside the caller's transaction), or null when gone. */
+function rh_mm_stale_row(PDO $pdo, string $table, int $itemId, bool $lock = false): ?array
+{
+    $table = $table === 'drink_menu' ? 'drink_menu' : 'food_menu';
+    $st = $pdo->prepare('SELECT `' . implode('`, `', rh_mm_stale_cols($table)) . "` FROM `{$table}` WHERE id = ?" . ($lock ? ' FOR UPDATE' : ''));
+    $st->execute([$itemId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $st->closeCursor();
+    return $row ?: null;
+}
+
+/**
+ * The hash a quick switch (availability, room service) hands back to the page: the row's new hash, but only when the page's
+ * own hash matched the row just before the switch and the switch is the only change. Otherwise '' and the page keeps its old
+ * hash, so a change someone else made in the meantime is never absorbed and the next Save is refused (reload first).
+ */
+function rh_mm_switch_hash(string $table, ?array $before, ?array $after, string $col, int $newValue, string $posted): string
+{
+    if (!$before || !$after || $posted === '') {
+        return '';
+    }
+    $cols = rh_mm_stale_cols($table);
+    if (!hash_equals(rh_stale_hash($before, $cols), $posted)) {
+        return '';
+    }
+    $expected = $before;
+    $expected[$col] = $newValue;
+    $afterHash = rh_stale_hash($after, $cols);
+    return hash_equals(rh_stale_hash($expected, $cols), $afterHash) ? $afterHash : '';
 }
 
 /**
@@ -285,9 +331,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Someone else is saving a menu item right now. Please try again in a moment.');
             }
 
+            // One transaction from the stale-edit check to the till copy: nothing is written when the check fails.
+            $pdo->beginTransaction();
             $cur = null;
             if ($action === 'update') {
-                $curStmt = $pdo->prepare("SELECT * FROM `{$table}` WHERE id = ?");
+                // Refused when the item's form fields changed since this person opened it (or the page sent no hash).
+                $stale = rh_stale_verify($pdo, $table, $itemId, rh_mm_stale_cols($table), rh_stale_posted());
+                if (!$stale['ok']) {
+                    $pdo->rollBack();
+                    throw new RuntimeException(str_replace('This record ', 'This menu item ', $stale['error']));
+                }
+                $curStmt = $pdo->prepare("SELECT * FROM `{$table}` WHERE id = ? FOR UPDATE");
                 $curStmt->execute([$itemId]);
                 $cur = $curStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$cur) {
@@ -316,7 +370,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $displayOrder = (int)$ord->fetchColumn();
             }
 
-            $pdo->beginTransaction();
             if ($action === 'add') {
                 if ($menu_type === 'food') {
                     $pdo->prepare("INSERT INTO food_menu (item_name, description, price, category, is_available, display_order, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -362,9 +415,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stockMsg = $removed ? ' Stock list cleared.' : '';
                 }
             }
+            // The row's new hash, read back before the commit (the row is still locked): the page stores it for the next Save.
+            $savedRow = rh_mm_stale_row($pdo, $table, $itemId, true);
+            $newHash = $savedRow ? rh_stale_hash($savedRow, rh_mm_stale_cols($table)) : '';
             $pdo->commit();
             $message = ($action === 'add' ? 'Menu item added.' : 'Menu item updated.') . $stockMsg;
-            $jsonExtra = ['pos_id' => $pos['id']];
+            $jsonExtra = ['pos_id' => $pos['id'], 'row_hash' => $newHash];
         } elseif ($action === 'delete') {
             $res = rh_mm_delete_one($pdo, $table, (int)($_POST['id'] ?? 0));
             if ($res['mode'] === 'gone') {
@@ -481,27 +537,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $jsonExtra = ['deleted' => $nDel, 'hidden' => $nArc, 'left' => $nBlk, 'failed' => $failed];
         } elseif ($action === 'toggle_availability') {
+            // A quick switch is never refused; it hands back the row's new hash (rh_mm_switch_hash) so the next Save is not refused.
             $itemId = (int)($_POST['id'] ?? 0);
-            $rowStmt = $pdo->prepare("SELECT item_name, category, is_available FROM `{$table}` WHERE id = ?");
-            $rowStmt->execute([$itemId]);
-            $webRow = $rowStmt->fetch(PDO::FETCH_ASSOC);
+            $pdo->beginTransaction();
+            $webRow = rh_mm_stale_row($pdo, $table, $itemId, true);
             if (!$webRow) {
                 throw new RuntimeException('This item no longer exists. Reload the page.');
             }
             $newAvail = ((int)$webRow['is_available'] === 1) ? 0 : 1;
-            $pdo->beginTransaction();
             $pdo->prepare("UPDATE `{$table}` SET is_available = ? WHERE id = ?")->execute([$newAvail, $itemId]);
             $pos = rh_menu_pos_find($pdo, (string)$webRow['item_name'], (string)$webRow['category']);
             if ($pos) {
                 $pdo->prepare("UPDATE menu_items SET is_available = ? WHERE id = ?")->execute([$newAvail, $pos['id']]);
             }
+            $rowHash = rh_mm_switch_hash($table, $webRow, rh_mm_stale_row($pdo, $table, $itemId, true), 'is_available', $newAvail, rh_stale_posted());
             $pdo->commit();
             $message = $newAvail ? 'Item is available again.' : 'Item marked unavailable: hidden from the till, room service and the guest menu.';
-            $jsonExtra = ['is_available' => $newAvail];
+            $jsonExtra = ['is_available' => $newAvail, 'row_hash' => $rowHash];
         } elseif ($action === 'toggle_room_service') {
             // Room service tab switch: the website row and the till copy together. 'value' 0/1 sets it, absent flips it.
             $itemId = (int)($_POST['id'] ?? 0);
             $rawVal = (string)($_POST['value'] ?? '');
+            $before = rh_mm_stale_row($pdo, $table, $itemId); // for the new hash; any other change in between withholds it
             $res = rh_mm_set_room_service($pdo, $table, $itemId, $rawVal === '' ? null : (int)($rawVal === '1'));
             if (!$res) {
                 throw new RuntimeException('This item no longer exists. Reload the page.');
@@ -509,7 +566,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = $res['show_room_service']
                 ? '"' . $res['name'] . '" is on room service.'
                 : '"' . $res['name'] . '" is off room service.';
-            $jsonExtra = ['show_room_service' => $res['show_room_service']];
+            $rowHash = rh_mm_switch_hash($table, $before, rh_mm_stale_row($pdo, $table, $itemId), 'show_room_service', (int)$res['show_room_service'], rh_stale_posted());
+            $jsonExtra = ['show_room_service' => $res['show_room_service'], 'row_hash' => $rowHash];
         } elseif ($action === 'menu_move_category') {
             // Move selected to category: anyone who may edit items here (same page permission as the Edit form).
             // Drinks for everyone with page access; food moves stay with Clear Stock Data holders (owner asked for drinks).
@@ -709,6 +767,8 @@ $mmItemData = static function (string $tab, array $item) use ($posMap): array {
         'show_rs' => (!isset($item['show_room_service']) || (int)$item['show_room_service'] === 1) ? 1 : 0,
         'avail' => (int)$item['is_available'] === 1 ? 1 : 0,
         'barcode' => $pos && $pos['barcode'] !== null ? (string)$pos['barcode'] : '', 'pos_id' => $pos ? $pos['id'] : 0, 'slug' => $pos ? $pos['slug'] : '',
+        // Stale-edit hash of the raw database row (never the float price above); the Edit form posts it back as _row_hash.
+        'row_hash' => rh_stale_hash($item, rh_mm_stale_cols($tab === 'food' ? 'food_menu' : 'drink_menu')),
     ];
 };
 $mmJsonAttr = static function (array $data): string {
@@ -1099,6 +1159,7 @@ $mmRenderRs = static function (array $groups) use ($currencySymbol, $recipeBy, $
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                     <input type="hidden" name="action" id="mmAction" value="add">
                     <input type="hidden" name="id" id="mmId" value="">
+                    <input type="hidden" name="_row_hash" id="mmRowHash" value="">
                     <input type="hidden" name="menu_type" id="mmType" value="food">
 
                     <div class="mm-field">
@@ -1425,13 +1486,14 @@ $mmRenderRs = static function (array $groups) use ($currencySymbol, $recipeBy, $
                     action: 'toggle_room_service',
                     id: tr.dataset.id,
                     menu_type: tr.dataset.type,
-                    value: want
+                    value: want,
+                    _row_hash: mmRowHashOf(tr)
                 });
                 if (!res.success) {
                     Alert.show(mmTxt(res.message || 'Could not change room service.'), 'error');
                     return;
                 }
-                mmRsMark(tr.dataset.type, tr.dataset.id, Number(res.show_room_service) === 1 ? 1 : 0);
+                mmRsMark(tr.dataset.type, tr.dataset.id, Number(res.show_room_service) === 1 ? 1 : 0, res.row_hash || '');
                 Alert.show(mmTxt(res.message || 'Saved.'), 'success');
                 mmApplyFilters(false);
             } catch (e) {
@@ -1441,13 +1503,25 @@ $mmRenderRs = static function (array $groups) use ($currencySymbol, $recipeBy, $
             }
         }
 
-        /* After a switch: the Room service row, the Food / Drinks row (tag, data-rs, Edit form data) and the badge. No reload. */
-        function mmRsMark(type, id, on) {
+        /* The stale-edit hash a row's Edit form data carries ('' when there is none). */
+        function mmRowHashOf(tr) {
+            try {
+                return (tr && JSON.parse(tr.dataset.item).row_hash) || '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        /* After a switch: the Room service row, the Food / Drinks row (tag, data-rs, Edit form data) and the badge. No reload.
+           hash: the row's new stale-edit hash from the reply; '' (someone else changed the item meanwhile) keeps the old one,
+           so the next Save is refused and asks for a reload. */
+        function mmRsMark(type, id, on, hash) {
             const kind = type === 'drinks' ? 'drink' : 'food';
             const setItem = function(tr) {
                 try {
                     const it = JSON.parse(tr.dataset.item);
                     it.show_rs = on;
+                    if (hash) it.row_hash = hash;
                     tr.dataset.item = JSON.stringify(it);
                 } catch (e) {}
             };
@@ -1678,6 +1752,7 @@ $mmRenderRs = static function (array $groups) use ($currencySymbol, $recipeBy, $
             mmEl('mmItemTitle').textContent = mode === 'add' ? (tab === 'food' ? 'Add food item' : 'Add drink item') : 'Edit ' + (it.name || 'item');
             mmEl('mmAction').value = mode;
             mmEl('mmId').value = mode === 'update' ? it.id : '';
+            mmEl('mmRowHash').value = mode === 'update' ? (it.row_hash || '') : ''; // stale-edit check: the row as this page last saw it
             mmEl('mmType').value = tab;
             mmEl('mmName').value = mode === 'update' ? it.name : '';
             mmFillCategories(tab, it.category || '');
@@ -2841,13 +2916,23 @@ $mmRenderRs = static function (array $groups) use ($currencySymbol, $recipeBy, $
         }
 
         async function mmToggle(id, tab) {
+            const row = mmEl((tab === 'drinks' || tab === 'drink' ? 'drink' : 'food') + '-row-' + id);
             try {
                 const res = await mmPost({
                     action: 'toggle_availability',
                     id: id,
-                    menu_type: tab
+                    menu_type: tab,
+                    _row_hash: mmRowHashOf(row)
                 });
                 Alert.show(mmTxt(res.message || 'Done'), res.success ? 'success' : 'error');
+                if (res.success && res.row_hash && row) {
+                    try {
+                        const it = JSON.parse(row.dataset.item);
+                        it.row_hash = res.row_hash;
+                        it.avail = Number(res.is_available) === 1 ? 1 : 0;
+                        row.dataset.item = JSON.stringify(it);
+                    } catch (e) {}
+                }
                 if (res.success) mmRefresh();
             } catch (e) {
                 Alert.show('Could not change availability. Please try again.', 'error');

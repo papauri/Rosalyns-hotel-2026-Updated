@@ -474,7 +474,11 @@ check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 
 // Editing an existing item (Edit form > Save): the stock list is kept, replaced or cleared exactly as the form says.
 $updVars = ['webid' => "SELECT id FROM food_menu WHERE item_name = 'ZZMP $hr upd'", 'rice' => $ingVars['rice'], 'pkt' => $ingVars['pkt']];
 $updSetup = array_merge($ingSetup, $seed('upd'));
-$updPost = ['action' => 'update', 'menu_type' => 'food', 'id' => '{webid}', 'name' => "ZZMP $hr upd", 'category' => "ZZMP upd $hr", 'price' => '100', 'station' => 'kitchen', 'is_available' => '1', 'show_pos' => '1', 'show_room_service' => '1', 'description' => ''];
+// Stale-edit hash of the seeded row as the database holds it (description NULL, price "100.00", flags at their defaults).
+require_once $root . '/includes/stale-edit.php';
+$updHash = rh_stale_hash(['item_name' => "ZZMP $hr upd", 'description' => null, 'price' => '100.00', 'category' => "ZZMP upd $hr", 'is_available' => '1', 'station' => 'kitchen', 'show_pos' => '1', 'show_room_service' => '1'],
+    ['item_name', 'description', 'price', 'category', 'is_available', 'station', 'show_pos', 'show_room_service']);
+$updPost = ['action' => 'update', 'menu_type' => 'food', 'id' => '{webid}', 'name' => "ZZMP $hr upd", 'category' => "ZZMP upd $hr", 'price' => '100', 'station' => 'kitchen', 'is_available' => '1', 'show_pos' => '1', 'show_room_service' => '1', 'description' => '', '_row_hash' => $updHash];
 $updJoin = "FROM stock_recipe_ingredients sri JOIN stock_recipes sr ON sr.id = sri.recipe_id JOIN menu_categories mc ON mc.slug = sr.menu_type WHERE mc.name = 'ZZMP upd $hr'";
 $updVerify = ["SELECT COUNT(*) AS q $updJoin", "SELECT sri.quantity_per_portion AS q $updJoin ORDER BY sri.id LIMIT 1", "SELECT COUNT(*) AS q FROM stock_recipes sr JOIN menu_categories mc ON mc.slug = sr.menu_type WHERE mc.name = 'ZZMP upd $hr'"];
 $r = $page($updPost + ['price' => '120'], $updSetup, $updVars, $updVerify);

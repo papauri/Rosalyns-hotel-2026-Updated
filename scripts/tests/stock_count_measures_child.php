@@ -244,6 +244,14 @@ switch ($scn) {
         $page = 'stock-ingredients.php';
         $post += ['action' => 'update', 'id' => (string)$gin, 'name' => $P . 'Gin', 'category' => 'Bar', 'unit' => 'bottle', 'min_quantity' => '0', 'reorder_point' => '0', 'par_level' => '0',
             'yield_percent' => '100', 'lead_time_days' => '0', 'notes' => '', 'preferred_supplier_id' => '', 'pack_name' => '', 'pack_size' => '', 'pieces_per_unit' => ''];
+        // Stale-edit (task 9): the hash the page would have rendered for this item (rh_stock_item_stale_cols in admin/stock-ingredients.php).
+        require_once __DIR__ . '/../../includes/stale-edit.php';
+        $siCols = ['name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'lead_time_days', 'preferred_supplier_id', 'pack_name', 'pack_size', 'pieces_per_unit'];
+        if (rh_stock_measure_ready($pdo)) { array_push($siCols, 'measure_big_name', 'measure_small_name', 'measure_per_big', 'measure_stock_side'); }
+        if (rh_stock_drink_ready($pdo)) { $siCols[] = 'volume_ml'; }
+        $siRow = $pdo->prepare('SELECT `' . implode('`, `', $siCols) . '` FROM stock_ingredients WHERE id = ?');
+        $siRow->execute([$gin]);
+        $post['_row_hash'] = rh_stale_hash($siRow->fetch(PDO::FETCH_ASSOC), $siCols);
         if ($scn !== 'ing_no_fields') {
             $post += ['measure_present' => '1', 'measure_big_name' => 'bottle', 'measure_small_name' => 'shot', 'measure_per_big' => $scn === 'ing_bad' ? '0' : '25', 'measure_stock_side' => 'big'];
         }

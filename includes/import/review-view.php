@@ -682,7 +682,7 @@ if (!function_exists('import_rv_build')) {
         });
         $out = ['i' => $i, 'kind' => $e['k'], 'status' => $e['st'], 'sheet' => $e['sh'], 'qs' => $qs, 'wait_sheet' => false];
         if ($e['k'] === 'item') {
-            $out['it'] = import_review_enrich_item($state['res']['items'][$V['item_of'][$i]], $V['row_src'], $existingById, $batchTotals);
+            $out['it'] = import_review_enrich_item($state['res']['items'][$V['item_of'][$i]], $V['row_src'], $existingById, $batchTotals, (array)$state['answers']);
             foreach ($e['qsheet'] as $id) {
                 if ($V['qs'][$id]['is_open']) {
                     $out['wait_sheet'] = true;

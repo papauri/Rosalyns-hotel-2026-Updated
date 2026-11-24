@@ -454,8 +454,34 @@ if (!function_exists('import_job_analyse')) {
      * Keep one answer. Returns ['ok'=>bool,'error'=>string,'can_confirm'=>bool,'reanalysed'=>bool].
      * A structural answer (import a sheet that was skipped, confirm what a column is, say which column holds the names) changes
      * what the engine reads, so the file is analysed again; the other answers are kept as they are.
+     * Saved through import_cont_save (2026-11-25): refused, with nothing saved or learned, when somebody changed the answers after they
+     * were read here. $afterPlan: tests only (runs between that read and the save).
      */
-    function import_job_answer(PDO $pdo, int $jobId, string $questionId, $answer, int $userId = 0): array
+    /**
+     * Stale-screen check per answer (2026-11-25): a short hash of ONE stored answer (a question's answer, a column suggestion, one drink's count
+     * unit, one ingredient's ticked fields) as the screen was given it; 'none' = nothing stored yet. The screen sends it back with the click and
+     * the save is refused when that answer changed since, so an old screen never overwrites somebody else's answer, while two people answering
+     * DIFFERENT rows never refuse each other. Every reply carries the new hash, so the person's own next click on that row is accepted.
+     */
+    function import_key_hash($stored): string
+    {
+        return $stored === null ? 'none' : substr(md5((string)json_encode($stored)), 0, 16);
+    }
+
+    function import_key_stale_message(?string $keyHash = null): string
+    {
+        return $keyHash === ''
+            ? 'This page was opened before a change to how saving works. Reload it and try again.'
+            : 'Someone else changed this answer since you opened the page, so nothing was saved. Reload to see it.';
+    }
+
+    /** $keyHash null = not a click from the screen (the hash is not checked); '' (missing) or a different hash = refused. */
+    function import_key_hash_ok(?string $keyHash, $stored): bool
+    {
+        return $keyHash === null || ($keyHash !== '' && hash_equals(import_key_hash($stored), $keyHash));
+    }
+
+    function import_job_answer(PDO $pdo, int $jobId, string $questionId, $answer, int $userId = 0, ?callable $afterPlan = null, ?string $keyHash = null): array
     {
         $fail = function (string $m) {
             return ['ok' => false, 'error' => $m, 'can_confirm' => false, 'reanalysed' => false];
@@ -476,10 +502,14 @@ if (!function_exists('import_job_analyse')) {
             return $fail($why);
         }
         $a = import_answer_shape($answer);
+        if (!import_key_hash_ok($keyHash, $state['answers'][(string)$q['qkey']] ?? null)) {
+            return $fail(import_key_stale_message($keyHash));      // checked again under the row lock below
+        }
         if ($a['key'] === '_skip') {
             // "Skip this row/item": stored as skipped rows (the resolver leaves them out), not as an answer to the question
             $r = import_job_skip_question($pdo, $jobId, $state, $q, $userId);
-            return $r['ok'] ? ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => false] : $fail((string)$r['error']);
+            return $r['ok'] ? ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => false,
+                'key_hash' => import_key_hash($state['answers'][(string)$q['qkey']] ?? null)] : $fail((string)$r['error']);
         }
         $keep = ['key' => $a['key']];
         if (($q['type'] ?? '') === 'case-price' && $a['key'] === 'per-case') {
@@ -490,13 +520,16 @@ if (!function_exists('import_job_analyse')) {
         }
         $keep['by'] = $userId > 0 ? $userId : null;
         $keep['at'] = date('Y-m-d H:i:s');
-        $answers = $state['answers'];
+        // the answers this question was checked against; the save below is refused when somebody changed them meanwhile (2026-11-25)
+        $answersHash = md5((string)($state['job']['answers_json'] ?? ''));
         $reanalyse = false;
+        $learn = null;           // [header, field] learned only after the answer is saved
+        $fieldNot = null;        // [header, fields] "not this", remembered only after the answer is saved
+        $addOv = [];             // structural additions: [path key, field|null, value]
         // structural answers
         $type = (string)($q['type'] ?? '');
-        $ov = (array)($answers['_overrides'] ?? []);
         if ($type === 'sheet-unknown' && $a['key'] === 'import') {
-            $ov['force_sheets'] = array_values(array_unique(array_merge((array)($ov['force_sheets'] ?? []), [(string)$q['sheet']])));
+            $addOv[] = ['force_sheets', null, (string)$q['sheet']];
             $reanalyse = true;
         } elseif ($type === 'mapping-unsure' && strpos($a['key'], 'use:') === 0) {
             $field = substr($a['key'], 4);
@@ -508,9 +541,9 @@ if (!function_exists('import_job_analyse')) {
             if (!empty($col['clash']) || !empty($col['shape_fail'])) {
                 return $fail('This column cannot be switched on from here (the values under it do not fit, or two columns compete). Fix the heading in the sheet and upload it again, or choose "ignore this column".');
             }
-            $ov['aliases'][$field] = array_values(array_unique(array_merge((array)($ov['aliases'][$field] ?? []), [$col['header']])));
+            $addOv[] = ['aliases', $field, (string)$col['header']];
             $reanalyse = true;
-            import_job_learn_column($pdo, (string)$col['header'], $field, $userId);       // #10: the next import reads this heading by itself
+            $learn = [(string)$col['header'], $field];       // #10: the next import reads this heading by itself
         } elseif ($type === 'mapping-unsure' && $a['key'] === 'ignore') {
             // #10: "not this" for a "how many / how big" heading is remembered too, so it is not asked again for those fields
             $col = import_job_column_of($state['analysis'], (string)$q['sheet'], (string)($q['cells'][0] ?? ''));
@@ -521,29 +554,55 @@ if (!function_exists('import_job_analyse')) {
                 }
             }
             if ($col && ($col['header'] ?? '') !== '' && !empty($col['hg_alts']) && function_exists('import_save_field_not')) {
-                import_save_field_not($pdo, (string)$col['header'], array_values(array_intersect($offered, import_hg_fields())), $userId > 0 ? $userId : null);
+                $fieldNot = [(string)$col['header'], array_values(array_intersect($offered, import_hg_fields()))];
             }
         } elseif ($type === 'no-item-column' && strpos($a['key'], 'col:') === 0) {
             $col = import_job_column_of($state['analysis'], (string)$q['sheet'], '', substr($a['key'], 4));
             if (!$col || $col['header'] === '') {
                 return $fail('That column cannot be used.');
             }
-            $ov['aliases']['item_name'] = array_values(array_unique(array_merge((array)($ov['aliases']['item_name'] ?? []), [$col['header']])));
+            $addOv[] = ['aliases', 'item_name', (string)$col['header']];
             $reanalyse = true;
         }
-        $answers[$q['qkey']] = $keep;
-        if ($ov) {
-            $answers['_overrides'] = $ov;
+        if ($afterPlan) {
+            $afterPlan();                  // tests only: lets another person change the answers between the checks above and the save below
         }
-        $pdo->prepare("UPDATE import_jobs SET answers_json = ?, status = 'reviewing' WHERE id = ? AND status IN ('analysed','reviewing')")
-            ->execute([import_json($answers), $jobId]);
+        $qkey = (string)$q['qkey'];
+        // saved under the job row lock, against the answers as they are now (import_cont_save refuses when they changed since the read above)
+        $sv = import_cont_save($pdo, $jobId, $answersHash, function (array &$answers) use ($qkey, $keep, $addOv, $keyHash) {
+            if (!import_key_hash_ok($keyHash, $answers[$qkey] ?? null)) {
+                throw new RuntimeException(import_key_stale_message($keyHash));
+            }
+            if ($addOv) {
+                $ov = (array)($answers['_overrides'] ?? []);
+                foreach ($addOv as [$k, $f, $v]) {
+                    if ($f === null) {
+                        $ov[$k] = array_values(array_unique(array_merge((array)($ov[$k] ?? []), [$v])));
+                    } else {
+                        $ov[$k][$f] = array_values(array_unique(array_merge((array)($ov[$k][$f] ?? []), [$v])));
+                    }
+                }
+                $answers['_overrides'] = $ov;
+            }
+            $answers[$qkey] = $keep;
+            return ['key_hash' => import_key_hash($keep)];
+        });
+        if (empty($sv['ok'])) {
+            return $fail((string)$sv['error']);
+        }
+        if ($learn) {
+            import_job_learn_column($pdo, $learn[0], $learn[1], $userId);
+        }
+        if ($fieldNot) {
+            import_save_field_not($pdo, $fieldNot[0], $fieldNot[1], $userId > 0 ? $userId : null);
+        }
         if ($reanalyse) {
             $r = import_job_analyse($pdo, $jobId);
             if (!$r['ok']) {
                 return $fail($r['error']);
             }
         }
-        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => $reanalyse];
+        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => $reanalyse, 'key_hash' => (string)$sv['key_hash']];
     }
 
     /**
@@ -584,7 +643,7 @@ if (!function_exists('import_job_analyse')) {
      * (the file is read again) and learned for the next one. Only a suggestion stored for that very column and field (answers _cols_ai, checked
      * when it was made) can be used; a column already read, two columns competing or values that do not fit are refused.
      */
-    function import_job_column_use(PDO $pdo, int $jobId, string $ref, string $field, int $userId = 0): array
+    function import_job_column_use(PDO $pdo, int $jobId, string $ref, string $field, int $userId = 0, ?callable $afterPlan = null, ?string $keyHash = null): array
     {
         $fail = function (string $m) {
             return ['ok' => false, 'error' => $m, 'can_confirm' => false, 'reanalysed' => false];
@@ -593,8 +652,12 @@ if (!function_exists('import_job_analyse')) {
         if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
             return $fail('This import cannot be changed.');
         }
+        $answersHash = md5((string)($state['job']['answers_json'] ?? ''));     // 2026-11-25: the save is refused when the answers changed after this read
         $answers = $state['answers'];
         $sug = $answers['_cols_ai'][$ref] ?? null;
+        if (!import_key_hash_ok($keyHash, $sug)) {
+            return $fail(import_key_stale_message($keyHash));      // checked again under the row lock below
+        }
         if (!is_array($sug) || ($sug['field'] ?? '') !== $field || !in_array($field, import_hg_fields(), true)) {
             return $fail('There is no such suggestion for this column.');
         }
@@ -605,24 +668,50 @@ if (!function_exists('import_job_analyse')) {
         if (!empty($col['clash']) || !empty($col['shape_fail'])) {
             return $fail('This column cannot be switched on from here (the values under it do not fit, or two columns compete).');
         }
-        $ov = (array)($answers['_overrides'] ?? []);
-        $ov['aliases'][$field] = array_values(array_unique(array_merge((array)($ov['aliases'][$field] ?? []), [(string)$col['header']])));
-        $answers['_overrides'] = $ov;
-        $answers['_cols_ai'][$ref]['used'] = ['by' => $userId > 0 ? $userId : null, 'at' => date('Y-m-d H:i:s')];
+        $header = (string)$col['header'];
         // the column's own question (if it was asked) is answered by the same click
+        $qkeys = [];
         foreach (array_merge((array)$state['res']['questions'], (array)$state['res']['extra_questions']) as $q) {
             if (($q['type'] ?? '') === 'mapping-unsure' && (string)($q['cells'][0] ?? '') === $ref && ($q['answer'] ?? null) === null) {
-                $answers[$q['qkey']] = ['key' => 'use:' . $field, 'by' => $userId > 0 ? $userId : null, 'at' => date('Y-m-d H:i:s'), 'from' => 'suggestion'];
+                $qkeys[] = (string)$q['qkey'];
             }
         }
-        $pdo->prepare("UPDATE import_jobs SET answers_json = ?, status = 'reviewing' WHERE id = ? AND status IN ('analysed','reviewing')")
-            ->execute([import_json($answers), $jobId]);
-        import_job_learn_column($pdo, (string)$col['header'], $field, $userId);
+        unset($answers);
+        if ($afterPlan) {
+            $afterPlan();                  // tests only: lets another person change the answers between the checks above and the save below
+        }
+        $by = $userId > 0 ? $userId : null;
+        $now = date('Y-m-d H:i:s');
+        // saved under the job row lock (import_cont_save refuses when the answers changed since the read above); the suggestion is checked
+        // again there, on the answers as they are now
+        $sv = import_cont_save($pdo, $jobId, $answersHash, function (array &$answers) use ($ref, $field, $header, $qkeys, $by, $now, $keyHash) {
+            $s = $answers['_cols_ai'][$ref] ?? null;
+            if (!import_key_hash_ok($keyHash, $s)) {
+                throw new RuntimeException(import_key_stale_message($keyHash));
+            }
+            if (!is_array($s) || ($s['field'] ?? '') !== $field) {
+                throw new RuntimeException('There is no such suggestion for this column.');
+            }
+            $ov = (array)($answers['_overrides'] ?? []);
+            $ov['aliases'][$field] = array_values(array_unique(array_merge((array)($ov['aliases'][$field] ?? []), [$header])));
+            $answers['_overrides'] = $ov;
+            $answers['_cols_ai'][$ref]['used'] = ['by' => $by, 'at' => $now];
+            foreach ($qkeys as $qk) {
+                if (!isset($answers[$qk])) {
+                    $answers[$qk] = ['key' => 'use:' . $field, 'by' => $by, 'at' => $now, 'from' => 'suggestion'];
+                }
+            }
+            return ['key_hash' => import_key_hash($answers['_cols_ai'][$ref])];
+        });
+        if (empty($sv['ok'])) {
+            return $fail((string)$sv['error']);
+        }
+        import_job_learn_column($pdo, $header, $field, $userId);      // learned only once the answer is saved
         $r = import_job_analyse($pdo, $jobId);
         if (!$r['ok']) {
             return $fail($r['error']);
         }
-        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => true];
+        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => true, 'key_hash' => (string)$sv['key_hash']];
     }
 
     /**
@@ -676,7 +765,7 @@ if (!function_exists('import_job_analyse')) {
      * 'measure' (in the measure it is sold by), '' = back to the group's answer. Stored as answers['_count_in'][uid]; the row must belong to that
      * question. Returns the same shape as import_job_answer().
      */
-    function import_job_count_row(PDO $pdo, int $jobId, string $questionId, string $uid, string $key, int $userId = 0): array
+    function import_job_count_row(PDO $pdo, int $jobId, string $questionId, string $uid, string $key, int $userId = 0, ?callable $afterPlan = null, ?string $keyHash = null): array
     {
         $fail = function (string $m) {
             return ['ok' => false, 'error' => $m, 'can_confirm' => false, 'reanalysed' => false];
@@ -695,27 +784,44 @@ if (!function_exists('import_job_analyse')) {
         if (!$q || ($q['type'] ?? '') !== 'count-in' || !in_array($uid, array_map('strval', (array)$q['row_uids']), true)) {
             return $fail('That item does not belong to this question.');
         }
-        $answers = $state['answers'];
-        if ($key === '') {
-            unset($answers['_count_in'][$uid]);
-            if (empty($answers['_count_in'])) {
-                unset($answers['_count_in']);
-            }
-        } else {
-            $answers['_count_in'][$uid] = ['key' => $key, 'by' => $userId > 0 ? $userId : null, 'at' => date('Y-m-d H:i:s')];
+        if (!import_key_hash_ok($keyHash, $state['answers']['_count_in'][$uid] ?? null)) {
+            return $fail(import_key_stale_message($keyHash));      // checked again under the row lock below
         }
-        $pdo->prepare("UPDATE import_jobs SET answers_json = ?, status = 'reviewing' WHERE id = ? AND status IN ('analysed','reviewing')")
-            ->execute([import_json($answers), $jobId]);
-        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => false];
+        // 2026-11-25: saved under the job row lock, refused when the answers changed after the read above (the row was checked against them)
+        $answersHash = md5((string)($state['job']['answers_json'] ?? ''));
+        if ($afterPlan) {
+            $afterPlan();                  // tests only: lets another person change the answers between the checks above and the save below
+        }
+        $by = $userId > 0 ? $userId : null;
+        $now = date('Y-m-d H:i:s');
+        $sv = import_cont_save($pdo, $jobId, $answersHash, function (array &$answers) use ($uid, $key, $by, $now, $keyHash) {
+            if (!import_key_hash_ok($keyHash, $answers['_count_in'][$uid] ?? null)) {
+                throw new RuntimeException(import_key_stale_message($keyHash));
+            }
+            if ($key === '') {
+                unset($answers['_count_in'][$uid]);
+                if (empty($answers['_count_in'])) {
+                    unset($answers['_count_in']);
+                }
+            } else {
+                $answers['_count_in'][$uid] = ['key' => $key, 'by' => $by, 'at' => $now];
+            }
+            return ['key_hash' => import_key_hash($answers['_count_in'][$uid] ?? null)];
+        });
+        if (empty($sv['ok'])) {
+            return $fail((string)$sv['error']);
+        }
+        return ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => false, 'key_hash' => (string)$sv['key_hash']];
     }
 
     /** Tick which fields of a matched, existing ingredient the file may change ($key = rh_ssi_key of the stock name). Default: none. */
-    function import_job_set_update_fields(PDO $pdo, int $jobId, string $key, array $fields, int $userId = 0): array
+    function import_job_set_update_fields(PDO $pdo, int $jobId, string $key, array $fields, int $userId = 0, ?callable $afterPlan = null, ?string $keyHash = null): array
     {
         $state = import_job_state($pdo, $jobId);
         if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
             return ['ok' => false, 'error' => 'That import cannot be changed.'];
         }
+        $answersHash = md5((string)($state['job']['answers_json'] ?? ''));     // 2026-11-25: the save is refused when the answers changed after this read
         $item = null;
         foreach ($state['res']['items'] as $it) {
             if ($it['match'] && rh_ssi_key($it['match']['name']) === $key) {
@@ -724,6 +830,9 @@ if (!function_exists('import_job_analyse')) {
         }
         if (!$item) {
             return ['ok' => false, 'error' => 'That ingredient is not matched by this import.'];
+        }
+        if (!import_key_hash_ok($keyHash, $state['answers']['_updates'][$key] ?? null)) {
+            return ['ok' => false, 'error' => import_key_stale_message($keyHash)];      // checked again under the row lock below
         }
         $clean = [];
         foreach ($fields as $f) {
@@ -736,13 +845,24 @@ if (!function_exists('import_job_analyse')) {
             }
             $clean[$f] = true;
         }
-        $answers = $state['answers'];
-        $answers['_updates'][$key] = array_keys($clean);
-        if (!$clean) {
-            unset($answers['_updates'][$key]);
+        if ($afterPlan) {
+            $afterPlan();                  // tests only: lets another person change the answers between the checks above and the save below
         }
-        $pdo->prepare("UPDATE import_jobs SET answers_json = ?, status = 'reviewing' WHERE id = ? AND status IN ('analysed','reviewing')")->execute([import_json($answers), $jobId]);
-        return ['ok' => true, 'error' => ''];
+        $pick = array_keys($clean);
+        $sv = import_cont_save($pdo, $jobId, $answersHash, function (array &$answers) use ($key, $pick, $keyHash) {
+            if (!import_key_hash_ok($keyHash, $answers['_updates'][$key] ?? null)) {
+                throw new RuntimeException(import_key_stale_message($keyHash));
+            }
+            $answers['_updates'][$key] = $pick;
+            if (!$pick) {
+                unset($answers['_updates'][$key]);
+            }
+            return ['key_hash' => import_key_hash($answers['_updates'][$key] ?? null)];
+        });
+        if (empty($sv['ok'])) {
+            return ['ok' => false, 'error' => (string)$sv['error']];
+        }
+        return ['ok' => true, 'error' => '', 'key_hash' => (string)$sv['key_hash']];
     }
 
     /** The value-column check of a job's state (see value-check.php): counts, sums, the disagreeing rows and the items with no unit cost. */
@@ -890,7 +1010,11 @@ if (!function_exists('import_job_analyse')) {
                 'conflict_field' => $conflictByQ[$q['id']]['field'] ?? ($q['conflict_field'] ?? null),
                 // the count-unit question: its drinks (name, count cell, number, the row's own answer), the evidence-based suggestion (one click still
                 // needed) and the two answer words for the per-drink choice
-                'count_rows' => $q['count_rows'] ?? null, 'count_rows_n' => $q['count_rows_n'] ?? null, 'suggest' => $q['suggest'] ?? null,
+                'count_rows' => isset($q['count_rows']) ? array_map(function ($r) use ($state) {      // each drink's own count-unit answer, as shown (khash)
+                    return (array)$r + ['khash' => import_key_hash($state['answers']['_count_in'][(string)($r['uid'] ?? '')] ?? null)];
+                }, (array)$q['count_rows']) : null,
+                'count_rows_n' => $q['count_rows_n'] ?? null, 'suggest' => $q['suggest'] ?? null,
+                'khash' => import_key_hash($state['answers'][(string)$q['qkey']] ?? null),      // this question's stored answer as shown: sent back with the click
                 'count_words' => $q['count_words'] ?? null,
                 'count_kind' => !empty($q['pack_count']) ? 'pack' : (($q['type'] ?? '') === 'count-in' ? 'measure' : null),   // pack = crates or bottles (rows), measure = shots / glasses (drinks)
             ];
@@ -899,7 +1023,7 @@ if (!function_exists('import_job_analyse')) {
                 $sg = $state['answers']['_cols_ai'][(string)($q['cells'][0] ?? '')] ?? null;
                 if (is_array($sg) && empty($sg['used'])) {
                     $qs[count($qs) - 1]['col_suggest'] = ['field' => (string)$sg['field'], 'measure' => (string)($sg['measure'] ?? ''), 'unit' => (string)($sg['unit'] ?? ''),
-                        'label' => (string)($sg['label'] ?? ''), 'ref' => (string)($q['cells'][0] ?? '')];
+                        'label' => (string)($sg['label'] ?? ''), 'ref' => (string)($q['cells'][0] ?? ''), 'khash' => import_key_hash($sg)];
                 }
             }
         }
@@ -907,7 +1031,7 @@ if (!function_exists('import_job_analyse')) {
     }
 
     /** One item with the extras the screen shows (source cells, update key, stock on hand and the cost-on-stock warning). */
-    function import_review_enrich_item(array $it, array $rowSrc, array $existingById, array $batchTotals): array
+    function import_review_enrich_item(array $it, array $rowSrc, array $existingById, array $batchTotals, array $answers = []): array
     {
         $bal = [];
         $max = null;
@@ -923,6 +1047,10 @@ if (!function_exists('import_job_analyse')) {
         $it['max_source'] = $max;
         $it['min_source'] = $min;
         $it['update_key'] = $it['match'] ? rh_ssi_key((string)$it['match']['name']) : null;    // the key import_job_set_update_fields wants
+        // its stored ticks as shown (sent back with a tick, refused when somebody else changed them since)
+        if ($it['update_key'] !== null) {          // only matched items have ticks (a new item gets no extra key: large files stay small)
+            $it['upd_khash'] = import_key_hash($answers['_updates'][$it['update_key']] ?? null);
+        }
         $it['on_hand'] = null;
         $it['cost_stock_warning'] = null;
         if ($it['match'] && isset($it['diff']['cost'])) {
@@ -960,7 +1088,8 @@ if (!function_exists('import_job_analyse')) {
                     }
                     $sg = $aiCols[(string)$c['header_ref']] ?? null;
                     if (is_array($sg) && empty($sg['used']) && in_array($c['state'] ?? '', ['unmapped', 'question'], true) && empty($c['clash']) && empty($c['shape_fail'])) {
-                        $o['suggest'] = ['field' => (string)$sg['field'], 'measure' => (string)($sg['measure'] ?? ''), 'unit' => (string)($sg['unit'] ?? ''), 'label' => (string)($sg['label'] ?? '')];
+                        $o['suggest'] = ['field' => (string)$sg['field'], 'measure' => (string)($sg['measure'] ?? ''), 'unit' => (string)($sg['unit'] ?? ''), 'label' => (string)($sg['label'] ?? ''),
+                            'khash' => import_key_hash($sg)];
                     }
                     return $o;
                 }, $sh['columns'] ?? []),
@@ -994,7 +1123,7 @@ if (!function_exists('import_job_analyse')) {
         $batchTotals = import_batch_totals($pdo, $costIds);
         $items = [];
         foreach ($res['items'] as $it) {
-            $items[] = import_review_enrich_item($it, $rowSrc, $existingById, $batchTotals);
+            $items[] = import_review_enrich_item($it, $rowSrc, $existingById, $batchTotals, (array)$state['answers']);
         }
         $qs = import_review_question_payloads($state);
         return [

@@ -9,6 +9,7 @@
  * - rh_presence_clear():      sign-out removes the row.
  * - rh_presence_rows():       who is online now (seen within 30 min) for the panel / JSON.
  * - rh_presence_bucket():     active (<= 2 min) / idle (<= 30 min) / offline.
+ * - rh_presence_edit_*():     "someone else has this record open" note (warning only, never blocks).
  *
  * current_page is kept per user (basename only) so a later "someone else is booking" banner can
  * read what each person has open.
@@ -335,6 +336,107 @@ if (!function_exists('rh_presence_can_view')) {
                 $text = $who . ' (' . $roleLabel . ') ' . "\u{2014}" . ' started ' . $started;
             }
             $out[] = ['name' => $who, 'role_label' => $roleLabel, 'started' => $started, 'overlap' => $overlap, 'text' => $text];
+        }
+        return $out;
+    }
+
+    /**
+     * Pages that warn "someone else has this record open" (warning only, never blocks): the key the
+     * page sends -> the page file whose permission the caller needs. Anything else is refused.
+     *
+     * @return array<string,string>
+     */
+    function rh_presence_edit_pages(): array
+    {
+        return [
+            'edit-booking' => 'edit-booking.php',
+            'stock-count' => 'stock-count.php',
+            'data-import' => 'data-import.php',
+            'stock-ingredients' => 'stock-ingredients.php',
+        ];
+    }
+
+    /**
+     * Note on the person's own presence row which record they have open ({"k":key,"id":n,"since":t}
+     * in booking_context, current_page = the page file). "since" is kept while the same record stays
+     * open on the same page, so it says when it was opened, not the last poll. Unknown key or a bad
+     * id writes nothing. Cheap: one read + one upsert; silent when the table or column is missing.
+     */
+    function rh_presence_edit_write(PDO $pdo, int $userId, string $key, int $id): void
+    {
+        $pages = rh_presence_edit_pages();
+        if ($userId <= 0 || $id <= 0 || !isset($pages[$key])) {
+            return;
+        }
+        $file = $pages[$key];
+        try {
+            $since = time();
+            $cur = $pdo->prepare("SELECT current_page, booking_context FROM admin_presence WHERE user_id = ?");
+            $cur->execute([$userId]);
+            $mine = $cur->fetch(PDO::FETCH_ASSOC);
+            if ($mine && (string)$mine['current_page'] === $file) {
+                $c = json_decode((string)$mine['booking_context'], true);
+                if (is_array($c) && ($c['k'] ?? null) === $key && (int)($c['id'] ?? 0) === $id && (int)($c['since'] ?? 0) > 0) {
+                    $since = min((int)$c['since'], time());
+                }
+            }
+            $started = (int)($_SESSION['rh_presence_started'] ?? time());
+            $ip = substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45);
+            $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 120);
+            $json = json_encode(['k' => $key, 'id' => $id, 'since' => $since]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO admin_presence (user_id, last_seen_at, current_page, session_started_at, ip, user_agent_short, booking_context)
+                 VALUES (?, NOW(), ?, FROM_UNIXTIME(?), ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE last_seen_at = NOW(), current_page = VALUES(current_page), booking_context = VALUES(booking_context)"
+            );
+            $stmt->execute([$userId, $file, $started, $ip !== '' ? $ip : null, $ua !== '' ? $ua : null, $json]);
+            $_SESSION['rh_presence_ts'] = time();
+            $_SESSION['rh_presence_page'] = $file;
+        } catch (Throwable $e) {
+            // best effort
+        }
+    }
+
+    /**
+     * Other staff who have the same record open right now (seen within 2 min, still on that page,
+     * same key AND id). Never includes the viewer. Plain text: the page puts it in with textContent.
+     *
+     * @return array<int,array{name:string,role_label:string,since:string,text:string}>
+     */
+    function rh_presence_edit_others(PDO $pdo, int $viewerId, string $key, int $id): array
+    {
+        $pages = rh_presence_edit_pages();
+        if ($id <= 0 || !isset($pages[$key])) {
+            return [];
+        }
+        try {
+            $stmt = $pdo->prepare(
+                "SELECT p.user_id, p.booking_context, u.full_name, u.username, u.role
+                 FROM admin_presence p
+                 JOIN admin_users u ON u.id = p.user_id
+                 WHERE u.is_active = 1 AND p.user_id <> ? AND p.current_page = ?
+                   AND p.last_seen_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+                 ORDER BY p.last_seen_at DESC
+                 LIMIT 50"
+            );
+            $stmt->execute([$viewerId, $pages[$key], RH_PRESENCE_ACTIVE_SECONDS]);
+            $found = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            return [];
+        }
+        $roles = $found && function_exists('getAllRoles') ? getAllRoles() : [];
+        $out = [];
+        foreach ($found as $r) {
+            $c = json_decode((string)$r['booking_context'], true);
+            if (!is_array($c) || ($c['k'] ?? null) !== $key || (int)($c['id'] ?? 0) !== $id) {
+                continue;
+            }
+            $who = (string)($r['full_name'] !== '' ? $r['full_name'] : $r['username']);
+            $roleLabel = (string)($roles[$r['role']]['label'] ?? ucfirst((string)$r['role']));
+            $sinceTs = (int)($c['since'] ?? 0);
+            $ago = rh_presence_ago($sinceTs > 0 ? max(0, time() - $sinceTs) : 0);
+            $out[] = ['name' => $who, 'role_label' => $roleLabel, 'since' => $ago,
+                'text' => $who . ' (' . $roleLabel . ') also has this open, since ' . $ago];
         }
         return $out;
     }

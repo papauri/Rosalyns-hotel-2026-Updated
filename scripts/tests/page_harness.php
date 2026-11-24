@@ -10,7 +10,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.
  */
 $root = getcwd();
 $page = $argv[1];
-$cfg = json_decode(base64_decode($argv[2]), true);
+$cfg = json_decode(base64_decode(strpos((string)($argv[2] ?? ''), '@') === 0 && is_file(substr($argv[2], 1)) ? (string)file_get_contents(substr($argv[2], 1)) : (string)($argv[2] ?? '')), true); // "@<file>": the base64 read from a file (too long for the Windows command line)
 $GLOBALS['__h_out'] = '';
 $GLOBALS['__h_cfg'] = $cfg;
 

@@ -112,6 +112,13 @@ function di_result_lean(array $res): array
     return $res;
 }
 
+/** The stored answer a review click was made on (khash from the screen; import_key_hash). Missing = '' = refused as an old page. */
+function di_key_hash(): string
+{
+    $h = $_POST['key_hash'] ?? '';
+    return is_string($h) ? substr($h, 0, 40) : '';
+}
+
 /** The filter values a request carries (validated again in import_rv_params; nothing here is trusted). */
 function di_filter_post(): array
 {
@@ -412,7 +419,17 @@ if ($isAjax) {
         import_purge_staged($pdo);       // rate-limited housekeeping: expired / finished files
         $r = import_job_create($pdo, (string)$f['tmp_name'], (string)$f['name'], $uid, ['allow_reimport' => !empty($_POST['allow_reimport'])]);
         if (empty($r['ok'])) {
-            di_json(['ok' => false, 'error' => (string)$r['error'], 'duplicate' => $r['duplicate'] ?? null]);
+            $dup = $r['duplicate'] ?? null;
+            $err = (string)$r['error'];
+            if (is_array($dup) && !empty($dup['open'])) {
+                // the "Open that import" link only for someone who may open that job (its starter or an administrator, as di_job checks)
+                $dup['can_open'] = $isAdmin || (int)($dup['created_by'] ?? 0) === $uid;
+                unset($dup['created_by']);
+                if (!$dup['can_open']) {
+                    $err = str_replace('Open it to carry on.', 'Ask them to finish it, or ask an administrator to open it.', $err);
+                }
+            }
+            di_json(['ok' => false, 'error' => $err, 'duplicate' => $dup]);
         }
         $a = import_job_analyse($pdo, (int)$r['job_id']);
         if (empty($a['ok'])) {
@@ -526,7 +543,7 @@ if ($isAjax) {
         if (isset($_POST['pack_size']) && $_POST['pack_size'] !== '') {
             $answer = ['key' => $key, 'pack_size' => trim((string)$_POST['pack_size'])];
         }
-        $r = import_job_answer($pdo, $jobId, $qid, $answer, $uid);
+        $r = import_job_answer($pdo, $jobId, $qid, $answer, $uid, null, di_key_hash());
         if (!empty($r['ok'])) {          // the fresh picture comes back with the answer (one round trip, not two)
             $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
@@ -536,7 +553,7 @@ if ($isAjax) {
 
     if ($action === 'col_use') {
         // #10: "Use this" on a suggested reading of a column = the same as the person answering it (read now, learned for the next import)
-        $r = import_job_column_use($pdo, $jobId, mb_substr((string)($_POST['ref'] ?? ''), 0, 300), (string)($_POST['field'] ?? ''), $uid);
+        $r = import_job_column_use($pdo, $jobId, mb_substr((string)($_POST['ref'] ?? ''), 0, 300), (string)($_POST['field'] ?? ''), $uid, null, di_key_hash());
         if (!empty($r['ok'])) {
             $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
@@ -546,7 +563,7 @@ if ($isAjax) {
 
     if ($action === 'count_row') {
         // one drink's own answer to "is the count in bottles or in shots?" ('' = back to the group's answer)
-        $r = import_job_count_row($pdo, $jobId, (string)($_POST['question'] ?? ''), (string)($_POST['uid'] ?? ''), (string)($_POST['answer'] ?? ''), $uid);
+        $r = import_job_count_row($pdo, $jobId, (string)($_POST['question'] ?? ''), (string)($_POST['uid'] ?? ''), (string)($_POST['answer'] ?? ''), $uid, null, di_key_hash());
         if (!empty($r['ok'])) {
             $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
@@ -557,7 +574,7 @@ if ($isAjax) {
     if ($action === 'fields') {
         $fields = $_POST['fields'] ?? [];
         $fields = is_array($fields) ? array_values(array_map('strval', $fields)) : [];
-        $r = import_job_set_update_fields($pdo, $jobId, (string)($_POST['key'] ?? ''), $fields, $uid);
+        $r = import_job_set_update_fields($pdo, $jobId, (string)($_POST['key'] ?? ''), $fields, $uid, null, di_key_hash());
         if (!empty($r['ok'])) {
             $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
@@ -777,6 +794,13 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
              data-can-stock-reports="<?php echo (function_exists('rhCanLinkTo') && rhCanLinkTo($uid, 'stock-reports.php')) ? '1' : '0'; ?>"
              data-stock-page="<?php echo htmlspecialchars(import_stock_page_name(), ENT_QUOTES); ?>"
              data-page="data-import.php">
+
+            <?php /* "Also open right now" warning, filled by js/edit-presence.js (admin/api/presence.php?editing=data-import). data-id is set by setUrl() in data-import.js once an import is open. Never blocks anything. */ ?>
+            <div class="cb-presence" data-edit-presence data-key="data-import" data-id="0" data-endpoint="api/presence.php" role="status" aria-live="polite" hidden>
+                <strong class="cb-presence__title">Also open right now</strong>
+                <ul class="cb-presence__list"></ul>
+            </div>
+            <script src="js/edit-presence.js?v=<?php echo (int)@filemtime(__DIR__ . '/js/edit-presence.js'); ?>"></script>
 
             <p class="di-intro">Bring a stock list in from Excel or CSV in four steps. Nothing is saved to your stock until you press Confirm and import on the last step.</p>
 

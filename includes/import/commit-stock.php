@@ -212,6 +212,20 @@ if (!function_exists('import_commit_stock')) {
                 $pdo->rollBack();
                 return import_commit_fail('This import can no longer be imported.');
             }
+            // One open import per file (2026-11-25): another job for the same file that committed while this one was open wins; this one
+            // imports nothing. A commit from before this job existed is the admin's "import again" and still allowed. Read inside the
+            // commit lock, so the other commit is visible here.
+            $other = $pdo->prepare("SELECT j.id, j.committed_at, COALESCE(NULLIF(u.full_name, ''), u.username, 'someone') AS by_name
+                                    FROM import_jobs j LEFT JOIN admin_users u ON u.id = j.committed_by
+                                    WHERE j.sha256 = ? AND j.id <> ? AND j.status = 'committed' AND j.committed_at >= ?
+                                    ORDER BY j.committed_at DESC, j.id DESC LIMIT 1");
+            $other->execute([(string)$cur['sha256'], $jobId, (string)$cur['created_at']]);
+            if ($o = $other->fetch(PDO::FETCH_ASSOC)) {
+                $pdo->rollBack();
+                return import_commit_fail('This file was already imported by ' . $o['by_name'] . ' on ' . substr((string)$o['committed_at'], 0, 16)
+                    . ' (Import #' . (int)$o['id'] . '), while this import was open. Nothing was imported, so the stock is not counted twice.',
+                    ['duplicate' => ['job_id' => (int)$o['id'], 'committed_at' => (string)$o['committed_at'], 'by' => (string)$o['by_name']]]);
+            }
             $v = import_job_revalidate($pdo, $job);
             if (!$v['ok']) {
                 $pdo->rollBack();
