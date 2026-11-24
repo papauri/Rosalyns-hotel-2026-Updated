@@ -124,7 +124,18 @@
         function isRegular() { return cT() === 'stock count'; }
 
         // ---------- plumbing ----------
+        // at most 2 requests at once: the host answers a burst of parallel requests with 508 (resource limit reached)
+        var postQ = [], postBusy = 0;
+        function postNext() {
+            while (postBusy < 2 && postQ.length) {
+                var job = postQ.shift(); postBusy++;
+                postSend(job.a, job.d, job.x).then(function (r) { postBusy--; postNext(); return r; }).then(job.ok);
+            }
+        }
         function post(action, data, extra) {
+            return new Promise(function (ok) { postQ.push({ a: action, d: data, x: extra, ok: ok }); postNext(); });
+        }
+        function postSend(action, data, extra) {
             var fd = new FormData();
             fd.append('csrf_token', csrf);
             fd.append('action', action);
@@ -2373,7 +2384,8 @@
                 var n = c.ticked || 0;
                 line.textContent = n ? num(n, 0) + ' item' + (n === 1 ? '' : 's') + ' will go on the menu: ' + num(c.ticked_drink || 0, 0) + ' drink' + (c.ticked_drink === 1 ? '' : 's') + ', '
                     + num(c.ticked_food || 0, 0) + ' food; ' + num(c.add || 0, 0) + ' new, ' + num(c.update || 0, 0) + ' price change' + (c.update === 1 ? '' : 's') + ', ' + num(c.below || 0, 0) + ' below cost.'
-                    : 'Nothing is ticked, so nothing goes on the menu. ' + num(c.listed || 0, 0) + ' item' + (c.listed === 1 ? '' : 's') + ' could.';
+                    : 'Nothing is ticked, so nothing goes on the menu.' + (c.tickable ? ' ' + num(c.tickable, 0) + ' item' + (c.tickable === 1 ? '' : 's') + ' could.' : '');
+                if (c.same) { line.textContent += ' ' + num(c.same, 0) + ' already on the menu at this price.'; }
                 box.classList.toggle('is-warn', !!c.below);
                 if (planRef) { planRef.set(1, n ? num(n, 0) + ' on the menu' : 'Nothing on the menu', true); }
                 menuLi.textContent = n ? 'Nothing is deleted. ' + num(n, 0) + ' ticked item' + (n === 1 ? '' : 's') + ' go' + (n === 1 ? 'es' : '') + ' on the menu and the till (' + num(c.add || 0, 0) + ' new, ' + num(c.update || 0, 0) + ' price change' + (c.update === 1 ? '' : 's') + '); a new item gets a stock link of one sale, an existing stock link is never replaced. Other recipes are not touched. Stock quantities only change once the ' + cT() + ' is approved.'
@@ -2488,7 +2500,10 @@
                 return post('menu_list', d).then(function (r) {
                     if (!r.ok) { msg(r.error || 'The menu list could not be loaded.'); return; }
                     last = r; drawTop(); drawGroups();
-                    Object.keys(G).forEach(function (k) { if (G[k].fp.el.open && G[k].loaded) { loadGroup(k); } else if (!G[k].fp.el.open) { G[k].loaded = false; } });
+                    // open groups reload one after another, not all at once
+                    var chain = Promise.resolve();
+                    Object.keys(G).forEach(function (k) { if (G[k].fp.el.open && G[k].loaded) { chain = chain.then(function () { return loadGroup(k); }); } else if (!G[k].fp.el.open) { G[k].loaded = false; } });
+                    return chain;
                 });
             };
             var loadGroup = function (k) {
@@ -2522,7 +2537,8 @@
             var drawTop = function () {
                 var c = last.counts || {};
                 fp.el.hidden = !(c.listed || last.waiting);
-                var bits = [num(c.ticked || 0, 0) + ' of ' + num(c.listed || 0, 0) + ' on the menu'];
+                var bits = [num(c.ticked || 0, 0) + ' ticked to add or change'];
+                if (c.same) { bits.push(num(c.same, 0) + ' already on the menu at this price'); }
                 if (c.need_menu) { bits.push(num(c.need_menu, 0) + ' need Drinks or Food'); }
                 if (c.need_size) { bits.push(num(c.need_size, 0) + ' need a size'); }
                 if (c.need_price) { bits.push(num(c.need_price, 0) + ' need a price'); }
@@ -2535,7 +2551,7 @@
                 clrBtn.disabled = !canEdit() || !(last.ticked_shown || 0);
                 perm.hidden = !!last.can_menu;
                 fp.set({ badge: c.todo ? 'optional' : (c.ticked ? 'done' : 'optional'), summary: bits.join(' · ') + (c.below ? ' · ' + num(c.below, 0) + ' ticked sell below cost' : ''), warn: !!c.below });
-                if (planRef) { planRef.set(1, num(c.ticked || 0, 0) + ' of ' + num(c.listed || 0, 0) + ' on the menu', !c.todo || !!c.ticked); }
+                if (planRef) { planRef.set(1, num(c.ticked || 0, 0) + ' to add or change' + (c.same ? ', ' + num(c.same, 0) + ' already on the menu' : ''), !c.todo || !!c.ticked); }
                 [[dlD, last.cats || []], [dlF, last.fcats || []]].forEach(function (x) { clear(x[0]); x[1].forEach(function (v) { var op = document.createElement('option'); op.value = v; x[0].appendChild(op); }); });
                 // the Sold as choices of the several-at-once bar
                 var bv = bSold.value; clear(bSold);
@@ -2587,13 +2603,14 @@
             // ---- the groups (the file's category headings): one fold each
             var groupHead = function (g) {
                 var t = h('span', 'di-mgrp-t');
-                add(t, h('strong', null, g.label), h('span', 'di-mgrp-n', ' · ' + itemsWordN(g.count) + ' · ' + num(g.ticked, 0) + ' on the menu'));
+                add(t, h('strong', null, g.label), h('span', 'di-mgrp-n', ' · ' + itemsWordN(g.count) + ' · ' + num(g.ticked, 0) + ' ticked' + (g.same ? ' · ' + num(g.same, 0) + ' already on the menu' : '')));
                 return t;
             };
             var groupSummary = function (g) {
                 if (g.need_menu) { return 'Choose Drinks or Food for ' + (g.need_menu === g.count ? 'this group' : num(g.need_menu, 0) + ' of them'); }
                 var parts = [];
                 if (g.menu === 'drink' || g.menu === 'food') { parts.push(MENU_WORD[g.menu] + (g.category ? ' · ' + g.category : '')); } else if (g.menu === 'mixed') { parts.push('Drinks and food'); }
+                if (g.same) { parts.push(num(g.same, 0) + ' already on the menu'); }
                 if (g.todo) { parts.push(num(g.todo, 0) + ' still need something'); }
                 return parts.join(' · ');
             };
@@ -2634,7 +2651,7 @@
                 ci.value = g.cat_answer || g.category || ''; ci.placeholder = 'Menu category';
                 ci.setAttribute('list', (cur0 === 'food' ? dlF : dlD).id); ci.setAttribute('aria-label', 'Menu category for every new item of ' + g.label);
                 ci.addEventListener('change', function () { var v = ci.value.trim(); if (v === (g.cat_answer || g.category || '')) { return; } save({ mode: 'group_cat', group: g.key, value: v }, ci); });
-                var put = h('button', 'btn-secondary di-btn', g.tickable - g.ticked > 0 ? 'Put all ' + num(g.tickable - g.ticked, 0) + ' in this group on the menu' : (g.ticked ? 'All that can go are ticked' : 'None ready yet')); put.type = 'button';
+                var put = h('button', 'btn-secondary di-btn', g.tickable - g.ticked > 0 ? 'Put all ' + num(g.tickable - g.ticked, 0) + ' in this group on the menu' : (g.ticked ? 'All that can go are ticked' : (g.same && g.same === g.count ? 'All already on the menu' : 'None ready yet'))); put.type = 'button';
                 put.disabled = !edit || !(g.tickable - g.ticked > 0);
                 put.addEventListener('click', function () { save({ mode: 'tick_all', on: '1', mgroup: g.key }, put); });
                 var un = h('button', 'btn-secondary di-btn di-btn--quiet', 'Clear'); un.type = 'button'; un.disabled = !edit || !g.ticked; un.title = 'Untick every item of this group';

@@ -1113,9 +1113,10 @@ if (!function_exists('import_drinks_build')) {
     function import_menu_counts(array $all): array
     {
         $c = ['listed' => count($all), 'ticked' => 0, 'ticked_drink' => 0, 'ticked_food' => 0, 'add' => 0, 'update' => 0, 'below' => 0, 'below_all' => 0,
-            'tickable' => 0, 'need_size' => 0, 'need_price' => 0, 'need_menu' => 0, 'need_cat' => 0, 'todo' => 0, 'drink' => 0, 'food' => 0];
+            'tickable' => 0, 'need_size' => 0, 'need_price' => 0, 'need_menu' => 0, 'need_cat' => 0, 'todo' => 0, 'drink' => 0, 'food' => 0, 'same' => 0];
         foreach ($all as $r) {
             $t = !empty($r['ticked']);
+            $c['same'] += ($r['action'] ?? '') === 'same' ? 1 : 0;
             $c['ticked'] += $t ? 1 : 0;
             $c['ticked_drink'] += ($t && $r['menu'] === 'drink') ? 1 : 0;
             $c['ticked_food'] += ($t && $r['menu'] === 'food') ? 1 : 0;
@@ -1190,7 +1191,7 @@ if (!function_exists('import_drinks_build')) {
             $g = $r['group'];
             if (!isset($groups[$g])) {
                 $groups[$g] = ['key' => $g, 'label' => $r['group_label'], 'count' => 0, 'shown' => 0, 'ticked' => 0, 'tickable' => 0, 'tickable_shown' => 0,
-                    'todo' => 0, 'need_menu' => 0, 'need_cat' => 0, 'drink' => 0, 'food' => 0, 'add' => 0, 'menu_answer' => $r['group_menu'], 'cat_answer' => $r['group_cat'],
+                    'todo' => 0, 'need_menu' => 0, 'need_cat' => 0, 'drink' => 0, 'food' => 0, 'add' => 0, 'same' => 0, 'menu_answer' => $r['group_menu'], 'cat_answer' => $r['group_cat'],
                     'cats' => [], 'sugs' => [], 'weight' => 0];
             }
             $G = &$groups[$g];
@@ -1204,6 +1205,7 @@ if (!function_exists('import_drinks_build')) {
             $G['need_menu'] += $r['need_menu'] ? 1 : 0;
             $G['need_cat'] += $r['need_cat'] ? 1 : 0;
             $G['add'] += $r['action'] === 'add' ? 1 : 0;
+            $G['same'] += $r['action'] === 'same' ? 1 : 0;
             $G['weight'] += !empty($r['weight']) ? 1 : 0;
             if (in_array($r['menu'], ['drink', 'food'], true)) {
                 $G[$r['menu']]++;
