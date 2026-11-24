@@ -63,6 +63,29 @@ if (!function_exists('import_pack_vocab')) {
         return in_array($k, ['each', 'ea', 'pcs', 'pc', 'piece', 'unit'], true) ? 'pcs' : $k;
     }
 
+    /**
+     * The ONE unit / container word a served-by cell names ("Bottle", "Can", "Each", "Bottle (330ml)" -> "Bottle"), as written in the cell; null for
+     * anything else (a portion, two words, a bare size, an unknown word). Used only to ask "in crates or in bottles?", never to set a unit on its own.
+     */
+    function import_pack_served_word(string $served, array $vocab): ?string
+    {
+        $t = import_norm_ws($served);
+        $vol = import_served_volume_in($t);
+        if ($vol !== null) {
+            $t = $vol[1];
+        }
+        $t = trim((string)preg_replace('/[\s()\[\]\/,.\-:]+/u', ' ', $t));
+        if ($t === '' || strpos($t, ' ') !== false || preg_match('/\d/u', $t)) {
+            return null;
+        }
+        $n = import_norm_text($t);
+        $sizeWords = function_exists('import_infer_measure_units') ? import_infer_measure_units() : ['ml', 'l', 'litre', 'litres', 'kg', 'g'];
+        if (isset($vocab['portion'][$n]) || in_array($n, $sizeWords, true)) {
+            return null;            // a portion, or a weight / volume ("Kg"): not a thing that is counted
+        }
+        return (isset($vocab['unit'][$n]) || isset($vocab['container'][$n])) ? $t : null;
+    }
+
     /** container | portion | '' for a cell / word as written */
     function import_pack_word_kind(string $w, array $vocab): string
     {
@@ -267,6 +290,21 @@ if (!function_exists('import_pack_vocab')) {
         $out = ['decided' => false, 'unit' => $unit !== '' ? $unit : null, 'unit_src' => $unitSrc, 'unit_how' => $unitHow, 'pack' => null, 'pack_src' => null,
             'pack_name' => $bought !== '' ? $bought : null, 'pack_name_src' => $boughtSrc, 'info_pack' => null, 'cost' => $price, 'reason' => '', 'ask' => '',
             'served_portion' => $servedKind === 'portion'];
+        // owner 2026-11-25 (Bar Nov 3): Unit "Crate", 20 to a crate, served by the "Bottle", with no bought-as column: the count (94) may be in crates
+        // or in bottles, and the row alone cannot tell. Never guessed: asked once per sheet (resolve.php, the 'count-in' question with pack_count).
+        // Only a whole served unit / container word that is not the Unit cell's own word; 20 to a pack between 2 and 1000. A row with a bought-as
+        // word keeps the rules below (that column says what it is bought in), so does a "Can / 24 / Can" row (information only).
+        if ($unitHow === 'unit' && $packName === '' && $from === '' && $size !== null && abs($size - round($size)) < 1e-9 && $size >= 2 && $size <= 1000
+            && import_pack_word_kind($unitCol, $vocab) === 'container' && $served !== '' && $servedKind !== 'portion') {
+            $sw = import_pack_served_word($served, $vocab);
+            if ($sw !== null && import_pack_canon($sw, $vocab) !== import_pack_canon($unitCol, $vocab)) {
+                $out['ask'] = 'count-pack';
+                $out['info_pack'] = (int)round($size);
+                $out['count_pack'] = ['size' => (int)round($size), 'size_src' => $sizeSrc, 'word' => $unitCol, 'word_src' => $in['unit_src'] ?? null,
+                    'served' => $sw, 'served_src' => $in['served_src'] ?? null];
+                return $out;
+            }
+        }
         if ($unit === '' || $price === null || $price <= 0) {
             // nothing to divide: the unit (if any) is still read from the row
             $out['decided'] = $unit !== '' && ($price === null || $price <= 0);

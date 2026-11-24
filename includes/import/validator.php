@@ -30,6 +30,29 @@ if (!function_exists('import_validate_sheet')) {
     }
 
     /**
+     * A unit cell that holds a unit word and ONE size: "Bottle(750ML)", "Bottle (750 ml)", "Btl 75cl", "Carton (1000ML)" -> [the word as written
+     * in the cell, ml]. Null for anything else (no size, two sizes, two words, a number left over, a word that is not a unit / container word,
+     * a portion or a size word such as "ml").
+     */
+    function import_validate_unit_size(string $t, array $packVocab): ?array
+    {
+        $vol = import_served_volume_in(import_norm_ws($t));
+        if ($vol === null || (float)$vol[0] <= 0) {
+            return null;
+        }
+        $w = trim((string)preg_replace('/[\s()\[\]\/,.\-:]+/u', ' ', (string)$vol[1]));
+        if ($w === '' || strpos($w, ' ') !== false || preg_match('/\d/u', $w)) {
+            return null;
+        }
+        $n = import_norm_text($w);
+        $sizeWords = function_exists('import_infer_measure_units') ? import_infer_measure_units() : ['ml', 'l', 'litre', 'litres', 'kg', 'g'];
+        if (isset($packVocab['portion'][$n]) || in_array($n, $sizeWords, true) || (!isset($packVocab['unit'][$n]) && !isset($packVocab['container'][$n]))) {
+            return null;
+        }
+        return [$w, (float)$vol[0]];
+    }
+
+    /**
      * v11 (owner 2026-11-23): the "Shots per bottle" / "Bottle size (ml)" / "Shot size" cells of one row, read as written. A cell that is not a
      * plain number / one size (text, 0, negative, more than 4 decimals, out of range, a formula never calculated) is NOT read: a warning on the
      * row says why, never a guess, never a question. Returns [fields to add, warnings].
@@ -146,11 +169,17 @@ if (!function_exists('import_validate_sheet')) {
             $d['reason'] = $d['ask'] === '' ? 'The price per ' . mb_strtolower((string)$d['unit']) . ' (' . $f['unit_price']['source'] . ') is used; the price per pack ('
                 . $f['pack_price']['source'] . ') agrees with it: ' . import_pack_num($f['pack_price']['value']) . ' / ' . $d['info_pack'] . '.' : '';
         }
+        if ($d['ask'] === 'count-pack' && is_array($d['count_pack'] ?? null) && $hasPackPrice && $hasOne
+            && is_numeric($f['pack_price']['value']) && is_numeric($f['unit_price']['value'])) {
+            // a price per crate AND a price per bottle on the row (QA 2026-11-25): each answer uses its own price as written, nothing is divided
+            $d['count_pack']['two_price'] = ['pack' => (float)$f['pack_price']['value'], 'pack_src' => (string)$f['pack_price']['source'],
+                'one' => (float)$f['unit_price']['value'], 'one_src' => (string)$f['unit_price']['source']];
+        }
         $row['pack_rule'] = ['decided' => $d['decided'] && $d['ask'] === '', 'unit_how' => $d['unit_how'], 'pack' => $d['pack'], 'pack_src' => $d['pack_src'],
             'pack_name' => $d['pack_name'], 'pack_name_src' => $d['pack_name_src'], 'info_pack' => $d['info_pack'], 'reason' => $d['reason'], 'ask' => $d['ask'],
-            'cost' => $d['cost'], 'sell' => $sell, 'sell_src' => $sellSrc, 'served_portion' => $d['served_portion']];
-        if ($d['ask'] === '') {
-            return;
+            'cost' => $d['cost'], 'sell' => $sell, 'sell_src' => $sellSrc, 'served_portion' => $d['served_portion'], 'count_pack' => $d['count_pack'] ?? null];
+        if ($d['ask'] === '' || $d['ask'] === 'count-pack') {
+            return;         // count-pack: "in crates or in bottles?" is asked once per sheet by the resolver (owner 2026-11-25), never per row
         }
         $nm = $f['item_name']['value'];
         $u = $d['unit'] !== null ? mb_strtolower((string)$d['unit']) : 'unit';
@@ -596,6 +625,26 @@ if (!function_exists('import_validate_sheet')) {
                     continue;
                 }
                 $row['fields'][$f] = ['value' => $t, 'source' => import_cell_source($name, $cell), 'how' => 'as-written'];
+            }
+
+            // ---- a unit cell with its size ("Bottle(750ML)", "Carton (1000 ml)", owner 2026-11-25): the unit is the word, the size is the bottle size,
+            // both from that one cell. A size column on the row that says otherwise: neither size is used (a warning; step 3 asks), never a pick.
+            if (isset($row['fields']['unit']) && ($row['fields']['unit']['how'] ?? '') === 'as-written') {
+                $us = import_validate_unit_size((string)$row['fields']['unit']['value'], $packVocab);
+                if ($us !== null) {
+                    $uSrc = (string)$row['fields']['unit']['source'];
+                    $uCol = (array)($struct['columns'][$by['unit']] ?? []);
+                    $row['fields']['unit'] = ['value' => $us[0], 'source' => $uSrc, 'how' => 'stock-unit:size-cell'];
+                    if (!isset($row['fields']['unit_ml'])) {
+                        $row['fields']['unit_ml'] = ['value' => $us[1], 'source' => $uSrc, 'how' => 'unit-cell-size', 'ml_mul' => null,
+                            'header' => (string)($uCol['header'] ?? 'Unit'), 'header_ref' => (string)($uCol['header_ref'] ?? ''), 'measure' => ''];
+                    } elseif (abs((float)$row['fields']['unit_ml']['value'] - $us[1]) >= 0.005) {
+                        $um = $row['fields']['unit_ml'];
+                        unset($row['fields']['unit_ml']);
+                        $row['warnings'][] = ['code' => 'measure-col', 'text' => 'The unit cell ' . $uSrc . ' says ' . import_measure_fmt($us[1]) . ' ml but "' . (string)($um['header'] ?? '')
+                            . '" (' . (string)$um['source'] . ') says ' . import_measure_fmt((float)$um['value']) . ' ml, so neither size is used.'];
+                    }
+                }
             }
 
             // ---- healed "12 pcs" cells: the unit word must agree with the unit column and with the other healed cells of this row ----

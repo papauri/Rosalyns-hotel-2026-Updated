@@ -552,7 +552,7 @@
             if (q.type === 'count-in') {
                 // "is the count in bottles or in shots?" (owner 2026-11-22): a suggestion from the file's own figures still needs a click
                 if (q.suggest && !answered && q.count_words) { c.appendChild(h('p', 'di-q-note', 'Suggested answer: ' + (q.count_words[q.suggest.key] || '') + '. ' + q.suggest.text + ' Choose it below to use it.')); }
-                if (q.answer === 'per-row') { c.appendChild(h('p', 'di-q-note', 'Every drink below has its own answer.')); }
+                if (q.answer === 'per-row') { c.appendChild(h('p', 'di-q-note', 'Every row below has its own answer.')); }
             }
             var cv = {};
             (q.conflict_values || []).forEach(function (v) { cv[v.key] = v; });
@@ -1208,7 +1208,7 @@
         var TYPE_LABEL = {
             'possible-typo': 'Did you mean (possible typo)', 'duplicate-no-batch': 'Same name twice, no batch', 'duplicate-batch-clash': 'Same name twice, same batch',
             'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit', 'pack-price-check': 'Price per unit and per pack disagree', 'count-unit': 'Counted in packs or single units',
-            'measure-n': 'How many in one bottle', 'measure-file': 'File columns disagree', 'measure-change': 'Count measure differs from stock', 'price-per-measure': 'Price per shot or glass', 'count-in': 'Count in bottles or in shots',
+            'measure-n': 'How many in one bottle', 'measure-file': 'File columns disagree', 'measure-change': 'Count measure differs from stock', 'price-per-measure': 'Price per shot or glass', 'count-in': 'What the count is in',
             'price-check': 'Price looks unusual', 'same-item-two-sheets': 'Same item on two sheets', 'unit-clash': 'Unit differs from stock',
             'archived-match': 'Matches an archived item', 'ambiguous-match': 'Several possible matches', 'cost-too-large': 'Price too large to store',
             'value-too-long': 'Text too long to store', 'bad-value': 'Value is not a number', 'formula-name': 'Name looks like a formula', 'section-or-item': 'Heading or item?'

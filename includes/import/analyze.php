@@ -325,11 +325,17 @@ if (!function_exists('import_analyze_file')) {
                         if ($hv === null || $hv['unit'] !== $fd['value']) {
                             $bad[] = $where . ': unit "' . $fd['value'] . '" is not the unit word written in ' . $fd['source'];
                         }
-                    } elseif ($f === 'unit' && ($fd['how'] ?? '') === 'stock-unit:pack-cell') {
+                    } elseif ($f === 'unit' && in_array($fd['how'] ?? '', ['stock-unit:pack-cell', 'stock-unit:size-cell'], true)) {
                         // "Case of 24" read as the unit "Case": the word must be written, as a whole word, in that very cell
                         $cv = is_string($cell['v']) ? import_norm_ws($cell['v']) : '';
                         if (!is_string($fd['value']) || $fd['value'] === '' || !preg_match('/(?<![\p{L}])' . preg_quote($fd['value'], '/') . '(?![\p{L}])/u', $cv)) {
                             $bad[] = $where . ': unit "' . $fd['value'] . '" is not a word written in ' . $fd['source'];
+                        }
+                    } elseif ($f === 'unit_ml' && ($fd['how'] ?? '') === 'unit-cell-size') {
+                        // a unit cell with its size ("Bottle(750ML)"): the ONE size written in that very cell must give the same ml
+                        $vol = is_string($cell['v']) ? import_served_volume_in(import_norm_ws($cell['v'])) : null;
+                        if ($vol === null || abs((float)$vol[0] - (float)$fd['value']) > 1e-9) {
+                            $bad[] = $where . ': ' . $f . ' ' . json_encode($fd['value']) . ' is not the size written in ' . $fd['source'];
                         }
                     } elseif ($f === 'unit_ml' || $f === 'measure_ml') {
                         // v11: a size cell ("750", "0.75 L"): read again from that very cell with the unit its heading names, it must give the same ml

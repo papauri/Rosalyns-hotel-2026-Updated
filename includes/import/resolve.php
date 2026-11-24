@@ -171,6 +171,110 @@ if (!function_exists('import_resolve')) {
         return array_merge($q, $o);
     }
 
+    /**
+     * The "in crates or in bottles?" question of one sheet (owner 2026-11-25): rows whose Unit cell is a crate / case / pack with a pack size and a
+     * served-by bottle / can (pack-rule.php 'count-pack'). Type 'count-in' (the same per-row answers as the shots question: answers['_count_in']),
+     * options stock = in crates as written, measure = in bottles (price / pack). A suggestion needs a click: the value column, or a count with decimals.
+     */
+    function import_count_pack_question(string $key, array $g, array $analysis, callable $ans): array
+    {
+        $n = count($g['rows']);
+        $plural = function (array $set): string {
+            return implode('/', array_map(function ($w) {
+                return in_array((string)$w, ['each', 'ea'], true) ? (string)$w : import_measure_plural((string)$w, 2);
+            }, array_keys($set)));
+        };
+        $packs = $plural($g['words']);
+        $singles = $plural($g['served']);
+        $ex0 = $g['rows'][0];
+        foreach ($g['rows'] as $r0) {
+            if ($r0['qty'] > 0 && $r0['price'] !== null) {
+                $ex0 = $r0;
+                break;
+            }
+        }
+        $colOf = function (string $src): string {
+            return (string)preg_replace('/\d+$/', '', import_split_source($src)[1]);
+        };
+        $headOf = function (string $letter) use ($analysis, $g): string {
+            foreach ($analysis['sheets'] as $sh0) {
+                if ($sh0['name'] === $g['sheet']) {
+                    foreach ((array)($sh0['columns'] ?? []) as $c0) {
+                        if (($c0['letter'] ?? '') === $letter) {
+                            return (string)$c0['header'];
+                        }
+                    }
+                }
+            }
+            return '';
+        };
+        $colTxt = function (string $src) use ($colOf, $headOf): string {
+            $l = $colOf($src);
+            $h = $l !== '' ? $headOf($l) : '';
+            return 'column ' . $l . ($h !== '' ? ' "' . $h . '"' : '');
+        };
+        $pw = mb_strtolower($ex0['word']);
+        $sw = mb_strtolower($ex0['served']);
+        $q0 = import_measure_fmt($ex0['qty']);
+        $text = 'Your count for ' . ($n === 1 ? 'this item' : 'these ' . $n . ' items') . ' (' . $colTxt($ex0['cell']) . '): is it in ' . $packs . ' or in ' . $singles . '? '
+            . ($g['unit_src'] !== '' ? 'The unit (' . $colTxt($g['unit_src']) . ') says ' . $pw : 'The unit says ' . $pw)
+            . ($g['size_src'] !== '' ? ', ' . $colTxt($g['size_src']) . ' says how many are in one ("' . $ex0['name'] . '": ' . $ex0['size'] . ')' : '')
+            . ($g['served_src'] !== '' ? ' and ' . $colTxt($g['served_src']) . ' says ' . $sw : '')
+            . ', but the row does not say which one the count is in. The answer also sets the stock unit and the cost. Answer once for the sheet; an item below can have its own answer.';
+        $priceTxt = function (bool $one) use ($ex0): string {
+            if ($ex0['price'] === null) {
+                return '';
+            }
+            if ($one && ($ex0['one'] ?? null) !== null) {
+                return ' at ' . import_pack_num($ex0['one']) . ' each (the price per one, as written)';
+            }
+            return $one ? ' at ' . import_pack_num(round($ex0['price'] / $ex0['size'], 4)) . ' each (' . import_pack_num($ex0['price']) . ' / ' . $ex0['size'] . ')'
+                : ' at ' . import_pack_num($ex0['price']) . ' each';
+        };
+        $opts = [['key' => 'stock', 'label' => 'In ' . $packs . ': "' . $ex0['name'] . '" ' . $q0 . ' means ' . $q0 . ' ' . import_measure_plural($pw, (float)$ex0['qty']) . $priceTxt(false)],
+            ['key' => 'measure', 'label' => 'In ' . $singles . ': "' . $ex0['name'] . '" ' . $q0 . ' means ' . $q0 . ' ' . import_measure_plural($sw, (float)$ex0['qty']) . $priceTxt(true)]];
+        $fmtM = function ($x): string {
+            return rtrim(rtrim(number_format((float)$x, 4, '.', ','), '0'), '.');
+        };
+        $vcol = $g['value_head'] !== '' ? '"' . $g['value_head'] . '" column' . ($g['value_letter'] !== '' ? ' (' . $g['value_letter'] . ')' : '') : 'value column';
+        $sug = null;
+        if ($g['compared'] > 0 && $g['fit_m'] > 0 && $g['fit_s'] === 0 && $g['fit_m'] * 10 >= $g['compared'] * 8) {
+            [$en, $eq, $ep, $ev, $ew] = $g['ex_m'];
+            $sug = ['key' => 'measure', 'text' => 'Your ' . $vcol . ' is the count x the price of one ' . $ew . ' on ' . $g['fit_m'] . ' of ' . $g['compared']
+                . ' row' . ($g['compared'] === 1 ? '' : 's') . ' ("' . $en . '": ' . $fmtM($eq) . ' x ' . $fmtM($ep) . ' = ' . $fmtM($ev) . '), so these look like ' . $singles . '.'];
+        } elseif ($g['compared'] > 0 && $g['fit_s'] > 0 && $g['fit_m'] === 0 && $g['fit_s'] * 10 >= $g['compared'] * 8) {
+            [$en, $eq, $ep, $ev, $ew] = $g['ex_s'];
+            $sug = ['key' => 'stock', 'text' => 'Your ' . $vcol . ' is the count x the price of one ' . $ew . ' on ' . $g['fit_s'] . ' of ' . $g['compared']
+                . ' row' . ($g['compared'] === 1 ? '' : 's') . ' ("' . $en . '": ' . $fmtM($eq) . ' x ' . $fmtM($ep) . ' = ' . $fmtM($ev) . '), so these look like ' . $packs . '.'];
+        }
+        if ($g['frac'] !== null) {
+            // 2.5 is not a count of bottles (owner 2026-11-25): suggested only when the value column is not there or agrees; pointing at bottles = no suggestion
+            if ($sug !== null && $sug['key'] === 'measure') {
+                $sug = null;
+            } elseif ($sug === null && $g['compared'] === 0) {
+                $sug = ['key' => 'stock', 'text' => '"' . $g['frac'][0] . '" ' . import_measure_fmt((float)$g['frac'][1]) . ' cannot be a count of ' . import_measure_plural((string)$g['frac'][2], 2)
+                    . ', so these look like ' . import_measure_plural((string)$g['frac'][3], 2) . '.'];
+            }
+        }
+        if ($sug !== null) {
+            foreach ($opts as &$o0) {
+                if ($o0['key'] === $sug['key']) {
+                    $o0['label'] .= ' (suggested)';
+                }
+            }
+            unset($o0);
+        }
+        $xq = $ans(import_xq('count-in', $key, $text, $opts, ['sheet' => $g['sheet'], 'cells' => array_slice(array_column($g['rows'], 'cell'), 0, 3),
+            'row_uids' => array_column($g['rows'], 'uid'), 'count_rows' => array_slice(array_map(function ($r) {
+                return ['uid' => $r['uid'], 'name' => $r['name'], 'cell' => $r['cell'], 'qty' => $r['qty'], 'answer' => $r['answer']];
+            }, $g['rows']), 0, 500), 'count_rows_n' => $n, 'suggest' => $sug, 'pack_count' => true,
+            'count_words' => ['stock' => 'In ' . $packs, 'measure' => 'In ' . $singles]]));
+        if ($xq['answer'] === null && !in_array('', array_column($g['rows'], 'answer'), true)) {
+            $xq['answer'] = 'per-row';      // every item has its own answer: nothing left to ask
+        }
+        return $xq;
+    }
+
     /** v11: a row's own "Shots per bottle" / "Bottle size" / "Shot size" cells (validator fields), or null when it has none. */
     function import_file_meas_of(array $f): ?array
     {
@@ -1270,6 +1374,131 @@ if (!function_exists('import_resolve')) {
                         $hasCountUnitQ = true;
                     }
                 }
+                // ---- count in crates or in bottles? (owner 2026-11-25, Bar Nov 3): Unit "Crate", 20 to a crate, served by the "Bottle", no bought-as
+                // column (pack-rule.php 'count-pack'). The count, the stock unit and the cost all follow the answer, so it is never guessed: ONE
+                // question per sheet (a row may differ), every such row waits for it, a 0 count too (its unit and cost still depend on it).
+                // "In bottles" = the file-1 path (unit = the served-by cell, price / pack from the same row); "in crates" = the row as written.
+                $cpk = ($pr && (string)($pr['ask'] ?? '') === 'count-pack' && is_array($pr['count_pack'] ?? null)) ? $pr['count_pack'] : null;
+                if ($cpk !== null) {
+                    $hasCountUnitQ = true;          // the shots / glasses question below is not asked for these rows
+                    $cpKey = 'pack|' . $sh['name'];
+                    $cpQ = import_xq('count-in', $cpKey, '', []);
+                    $rowAns = (string)($countIn[$row['uid']]['key'] ?? '');
+                    $rowAns = in_array($rowAns, ['stock', 'measure'], true) ? $rowAns : '';
+                    $grpAns = (string)($answers[$cpQ['qkey']]['key'] ?? '');
+                    $eff = $rowAns !== '' ? $rowAns : (in_array($grpAns, ['stock', 'measure'], true) ? $grpAns : '');
+                    $qSrcs = (array)($row['computed']['qty_total']['sources'] ?? []);
+                    $cpN = (int)$cpk['size'];
+                    $cpW = mb_strtolower((string)$cpk['word']);
+                    $cpS = mb_strtolower((string)$cpk['served']);
+                    $cpQty = (!$fin['qty_unknown'] && is_numeric($fin['qty'])) ? (float)$fin['qty'] : null;
+                    if (!isset($countGroups[$cpKey])) {
+                        $countGroups[$cpKey] = ['pack' => true, 'sheet' => $sh['name'], 'rows' => [], 'words' => [], 'served' => [], 'fit_m' => 0, 'fit_s' => 0, 'compared' => 0,
+                            'ex_m' => null, 'ex_s' => null, 'value_head' => '', 'value_letter' => '', 'frac' => null, 'unit_src' => (string)($cpk['word_src'] ?? ''),
+                            'size_src' => (string)($cpk['size_src'] ?? ''), 'served_src' => (string)($cpk['served_src'] ?? '')];
+                    }
+                    $cg = &$countGroups[$cpKey];
+                    $cg['rows'][] = ['uid' => (string)$row['uid'], 'name' => (string)$fin['name'], 'cell' => (string)($qSrcs[0] ?? $row['ref']), 'qty' => $cpQty ?? 0.0, 'answer' => $rowAns,
+                        'word' => (string)$cpk['word'], 'served' => (string)$cpk['served'], 'size' => $cpN, 'price' => is_numeric($fin['price']) ? (float)$fin['price'] : null];
+                    $cg['words'][$cpW] = true;
+                    $cg['served'][$cpS] = true;
+                    if ($cpQty !== null && $cg['frac'] === null && abs($cpQty - round($cpQty)) > 0.001) {
+                        $cg['frac'] = [(string)$fin['name'], $cpQty, $cpS, $cpW];
+                    }
+                    // evidence (a suggestion only): the sheet's value column = count x the price as written (crates), or = count x price / pack or
+                    // count x the selling price of one bottle (bottles)
+                    $vv = null;
+                    $ss = null;
+                    foreach ((array)($row['ignored'] ?? []) as $ig) {
+                        if (!empty($ig['unknown']) || ($ig['value'] ?? null) === null) {
+                            continue;
+                        }
+                        $pn = import_parse_number($ig['value']);
+                        if ($pn['status'] !== 'ok') {
+                            continue;
+                        }
+                        if (($ig['field'] ?? '') === 'total_cost' && $vv === null) {
+                            $vv = (float)$pn['value'];
+                            if ($cg['value_head'] === '') {
+                                $cg['value_head'] = (string)($ig['header'] ?? '');
+                                $cg['value_letter'] = preg_replace('/\d+$/', '', import_split_source((string)$ig['source'])[1]);
+                            }
+                        } elseif (($ig['field'] ?? '') === 'sell_price' && $ss === null) {
+                            $ss = (float)$pn['value'];
+                        }
+                    }
+                    $cpPrice = is_numeric($fin['price']) && (float)$fin['price'] > 0 ? (float)$fin['price'] : null;
+                    // a row with a price per crate AND a price per bottle (QA 2026-11-25): each is used as written for its own answer, never divided
+                    $cpTwo = (is_array($cpk['two_price'] ?? null) && $cpk['two_price']['pack'] > 0 && $cpk['two_price']['one'] > 0) ? $cpk['two_price'] : null;
+                    $cpCrateP = $cpTwo !== null ? (float)$cpTwo['pack'] : $cpPrice;
+                    $cpOneP = $cpTwo !== null ? (float)$cpTwo['one'] : ($cpPrice !== null ? round($cpPrice / $cpN, 4) : null);
+                    if ($cpTwo !== null) {
+                        $cg['rows'][count($cg['rows']) - 1]['price'] = $cpCrateP;      // the question's example: the crate price and the bottle price as written
+                        $cg['rows'][count($cg['rows']) - 1]['one'] = $cpOneP;
+                    }
+                    if ($vv !== null && $vv > 0 && $cpQty !== null && $cpQty > 0 && $cpCrateP !== null && $cpOneP !== null) {
+                        $tol = function (float $x): float {
+                            return max(0.5, 0.005 * abs($x));
+                        };
+                        $fs = abs($vv - $cpQty * $cpCrateP) <= $tol($cpQty * $cpCrateP);
+                        $fmP = abs($vv - $cpQty * $cpOneP) <= $tol($cpQty * $cpOneP);
+                        $fmS = $ss !== null && $ss > 0 && abs($vv - $cpQty * $ss) <= $tol($cpQty * $ss);
+                        $cg['compared']++;
+                        if (($fmP || $fmS) && !$fs) {
+                            $cg['fit_m']++;
+                            $cg['ex_m'] = $cg['ex_m'] ?? [(string)$fin['name'], $cpQty, $fmP ? $cpOneP : $ss, $vv, $cpS];
+                        } elseif ($fs && !$fmP && !$fmS) {
+                            $cg['fit_s']++;
+                            $cg['ex_s'] = $cg['ex_s'] ?? [(string)$fin['name'], $cpQty, $cpCrateP, $vv, $cpW];
+                        }
+                    }
+                    unset($cg);
+                    if ($eff === 'measure') {
+                        $fin['unit_raw'] = (string)$cpk['served'];
+                        $fin['unit_source'] = (string)($cpk['served_src'] ?? '');
+                        $fin['pack_name'] = (string)$cpk['word'];
+                        $fin['pack_info'] = null;
+                        if ($cpTwo !== null) {
+                            // the price per bottle is already per one: used exactly as written, never divided again (QA 2026-11-25)
+                            $fin['price'] = $cpTwo['one'];
+                            $fin['price_source'] = $cpTwo['one_src'];
+                            $fin['pack_info'] = $cpN;
+                            $cpAgree = abs($cpTwo['pack'] / $cpN - $cpTwo['one']) <= max(0.5, 0.005 * $cpTwo['one']);
+                            $fin['pack_reason'] = 'Counted by the ' . $cpS . ' (your answer): the price per ' . $cpS . ' (' . $cpTwo['one_src'] . ') ' . import_pack_num($cpTwo['one'])
+                                . ' is used as written; the price per ' . $cpW . ' (' . $cpTwo['pack_src'] . ') ' . import_pack_num($cpTwo['pack']) . ' / ' . $cpN . ' = '
+                                . import_pack_num(round($cpTwo['pack'] / $cpN, 4)) . ($cpAgree ? ', which agrees.' : ', which does NOT agree: check both cells.');
+                        } elseif ($cpPrice !== null && $origPriceSource !== null) {
+                            $fin['pack'] = $cpN;
+                            $fin['pack_source'] = $origPriceSource;
+                            $fin['pack_cell'] = $cpk['size_src'] ?? null;
+                            $fin['pack_auto'] = true;
+                            $fin['pack_row'] = true;
+                            $fin['pack_reason'] = 'Bought by the ' . $cpW . ' of ' . $cpN . ' and counted by the ' . $cpS . ' (your answer): ' . import_pack_num($cpPrice) . ' / ' . $cpN
+                                . ' = ' . import_pack_num(round($cpPrice / $cpN, 4)) . ' per ' . $cpS . '.';
+                        } else {
+                            $fin['pack_reason'] = 'Counted by the ' . $cpS . ' (your answer), ' . $cpN . ' to a ' . $cpW . '.';
+                        }
+                    } elseif ($eff === 'stock' && $cpTwo !== null) {
+                        // the price per crate as written is the cost of one crate; the price per bottle is information only
+                        $fin['price'] = $cpTwo['pack'];
+                        $fin['price_source'] = $cpTwo['pack_src'];
+                        $fin['price_how'] = 'chosen-pack-price';
+                        $fin['price_raw'] = null;
+                        $fin['pack_info'] = $cpN;
+                        $fin['price_row'] = $cpTwo['pack'];
+                        $cpAgree = abs($cpTwo['pack'] / $cpN - $cpTwo['one']) <= max(0.5, 0.005 * $cpTwo['one']);
+                        $fin['pack_reason'] = 'Counted in ' . import_measure_plural($cpW, 2) . ' (your answer): the price per ' . $cpW . ' (' . $cpTwo['pack_src'] . ') '
+                            . import_pack_num($cpTwo['pack']) . ' is used as written; the price per ' . $cpS . ' (' . $cpTwo['one_src'] . ') ' . import_pack_num($cpTwo['one'])
+                            . ($cpAgree ? ' agrees with it.' : ' does NOT agree with it (' . import_pack_num($cpTwo['one']) . ' x ' . $cpN . ' = '
+                            . import_pack_num(round($cpTwo['one'] * $cpN, 4)) . '): check both cells.');
+                    } elseif ($eff === 'stock') {
+                        $fin['pack_info'] = $cpN;
+                        $fin['pack_reason'] = 'Counted in ' . import_measure_plural($cpW, 2) . ' (your answer): the price is per ' . $cpW . ' (' . $cpN . ' '
+                            . import_measure_plural($cpS, 2) . ' to a ' . $cpW . ', information only).';
+                    } else {
+                        $fin['count_in_q'] = $cpQ['id'];          // waits for the answer (the item stays "needs an answer")
+                    }
+                }
                 if (!$hasCountUnitQ && empty($fin['qty_meas']) && !$fin['qty_unknown'] && is_numeric($fin['qty']) && (float)$fin['qty'] > 0
                     && trim((string)($fin['served_by'] ?? '')) !== '') {
                     $ciUnit = trim((string)($fin['unit_raw'] ?? ''));
@@ -1295,6 +1524,9 @@ if (!function_exists('import_resolve')) {
                         }
                         $cg = &$countGroups[$cuKey];
                         $cg['rows'][] = ['uid' => (string)$row['uid'], 'name' => (string)$fin['name'], 'cell' => (string)($qSrcs[0] ?? $row['ref']), 'qty' => (float)$fin['qty'], 'answer' => $rowAns];
+                        if (!isset($cg['frac']) && abs((float)$fin['qty'] - round((float)$fin['qty'])) > 0.001) {
+                            $cg['frac'] = [(string)$fin['name'], (float)$fin['qty']];      // 2.28 cannot be a count of shots (owner 2026-11-25)
+                        }
                         // evidence (a suggestion only, one click still needed): the sheet's value column = count x the price of ONE SALE (the selling
                         // price of one shot) on these rows, or = count x the price of one stock unit (the unit price)
                         $vv = null;
@@ -1363,6 +1595,11 @@ if (!function_exists('import_resolve')) {
         }
         unset($sh, $f, $rec, $fin);
         foreach ($countGroups as $cuKey => $g) {
+            if (!empty($g['pack'])) {
+                $xq = import_count_pack_question($cuKey, $g, $analysis, $ans);
+                $extra[$xq['qkey']] = $xq;
+                continue;
+            }
             $rd = $g['rd'];
             $n = count($g['rows']);
             $unitW = $g['unit'] !== '' ? mb_strtolower($g['unit']) : 'stock unit';
@@ -1401,6 +1638,15 @@ if (!function_exists('import_resolve')) {
                 [$en, $eq, $ep, $ev] = $g['ex_s'];
                 $sug = ['key' => 'stock', 'text' => 'Your ' . $vcol . ' is the count x the price of one ' . $unitW . ' on ' . $g['fit_s'] . ' of ' . $g['compared']
                     . ' row' . ($g['compared'] === 1 ? '' : 's') . ' ("' . $en . '": ' . $fmtM($eq) . ' x ' . $fmtM($ep) . ' = ' . $fmtM($ev) . '), so these look like ' . $units . '.'];
+            }
+            if (isset($g['frac'])) {
+                // a count with decimals (2.28) is not a count of shots / glasses (owner 2026-11-25). Suggested only when the value column is not there or
+                // agrees; a value column that points at shots is a conflict: no suggestion, the person decides.
+                if ($sug !== null && $sug['key'] === 'measure') {
+                    $sug = null;
+                } elseif ($sug === null && $g['compared'] === 0) {
+                    $sug = ['key' => 'stock', 'text' => '"' . $g['frac'][0] . '" ' . import_measure_fmt((float)$g['frac'][1]) . ' cannot be a count of ' . $meas . ', so these look like ' . $units . '.'];
+                }
             }
             if ($sug !== null) {
                 foreach ($opts as &$o0) {
@@ -1769,6 +2015,16 @@ if (!function_exists('import_resolve')) {
             $dBy = [];              // measure word => import_measure_decide() result (mode n), so a certain N can be saved
             $countN = null;        // N of the measure the count was in (display: "57 shots = 2 bottles + 7 shots")
             $countRows = [];        // sheet \x1f row => the count in the stock unit, for rows answered "in shots" (the value check compares these)
+            $packRows = [];         // sheet \x1f row => the pack its price is divided by after "in bottles" (count-pack, owner 2026-11-25): the value check uses it
+            $priceRows = [];        // sheet \x1f row => the price per crate used after "in crates" on a two-price row (the value check compares at it)
+            foreach ($ms as $mm) {
+                if (!empty($mm['fin']['pack_row']) && $pack && $mm['fin']['pack_source'] === $first['price_source']) {
+                    $packRows[$mm['sheet'] . "\x1f" . (int)$mm['rec']['row']] = (int)$pack;
+                }
+                if (isset($mm['fin']['price_row'])) {
+                    $priceRows[$mm['sheet'] . "\x1f" . (int)$mm['rec']['row']] = (float)$mm['fin']['price_row'];
+                }
+            }
             $qtyConv = [];          // each converted count: its cells, as the file wrote it, the stock-unit result (the "Differences from the uploaded file" report)
             $measWords = [];
             $ciRd = null;           // a count answered "in shots": the step 3 sizes give N (import_count_in_step3)
@@ -2334,7 +2590,7 @@ if (!function_exists('import_resolve')) {
                 'balance' => $balance, 'max' => $max, 'min' => $min, 'remarks' => $remarks, 'batches' => $batches,
                 'qty_how' => $qtyHow, 'measure_save' => $measureSave, 'measure_not' => $measureNot,
                 // counted in a measure with a known N (display only, owner 2026-11-22): "57 shots = 2 bottles + 7 shots", the exact figure on hover
-                'count_n' => $countN, 'count_rows' => $countRows, 'count_in_wait' => $ciWait, 'qty_conv' => $qtyConv,
+                'count_n' => $countN, 'count_rows' => $countRows, 'pack_rows' => $packRows, 'price_rows' => $priceRows, 'count_in_wait' => $ciWait, 'qty_conv' => $qtyConv,
                 'qty_words' => ($countN !== null && $balance !== null) ? import_qty_words((float)$balance, $countN, (string)$countN['big']) : null,
                 'rows' => $rowRefs, 'uids' => $uidList, 'sheet' => $ms[0]['sheet'], 'clean_sheet' => $ms[0]['cleanSheet'],
                 'match' => $ex ? ['id' => (int)$ex['id'], 'name' => (string)$ex['name'], 'how' => $first['match_name'] !== null ? (!empty($first['match_auto']) ? 'learned' : 'chosen') : $matchHow, 'archived' => (int)$ex['is_archived'] === 1] : null,

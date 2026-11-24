@@ -236,13 +236,33 @@ if (!function_exists('import_vc_collect')) {
         // a count the person said is in shots / glasses (the count-unit question, owner 2026-11-22): compared in the stock unit the cost is for
         // (57 shots = 2.28 bottles x the bottle cost), never 57 bottles. Only those rows; the selling-price test keeps the sheet's own number.
         $conv = [];
+        $priceAt = [];
         foreach ($items as $it) {
+            foreach ((array)($it['pack_rows'] ?? []) as $k => $p) {
+                // a count answered "in bottles" (Unit "Crate", 20 to a crate, owner 2026-11-25): its price is divided by that pack, like a case-price answer
+                if ((int)$p >= 2 && !isset($packAt[(string)$k]) && !isset($perUnitAt[(string)$k])) {
+                    $packAt[(string)$k] = (int)$p;
+                }
+            }
             foreach ((array)($it['count_rows'] ?? []) as $k => $q) {
                 $conv[(string)$k] = ['q' => (float)$q, 'cn' => $it['count_n'] ?? null];
+            }
+            foreach ((array)($it['price_rows'] ?? []) as $k => $pp) {
+                // a row with a price per crate and a price per bottle, answered "in crates": compared at the crate price as written (never divided)
+                $priceAt[(string)$k] = (float)$pp;
             }
         }
         $sheetsOut = [];
         foreach ((array)($col['sheets'] ?? []) as $si => $sh) {
+            if ($priceAt) {
+                foreach ($sh['rows'] as $ri => $r) {
+                    $at = (string)$sh['name'] . "\x1f" . (int)$r[1];
+                    if (isset($priceAt[$at])) {
+                        $sh['rows'][$ri][6] = $priceAt[$at];
+                        $sh['rows'][$ri][11] = null;
+                    }
+                }
+            }
             $sheetsOut[] = ['name' => $sh['name'], 'header_row' => $sh['header_row'], 'qty_cols' => $sh['qty_cols'], 'qty_heads' => $sh['qty_heads'],
                 'price_col' => $sh['price_col'], 'price_head' => $sh['price_head'], 'value_cols' => $sh['value_cols']];
             $valOf = function (array $r, string $letter) {
