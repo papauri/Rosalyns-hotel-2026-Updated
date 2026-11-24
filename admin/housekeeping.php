@@ -1605,6 +1605,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/ops-pages.css?v=<?php echo @filemtime(__DIR__ . '/css/ops-pages.css'); ?>">
     <link rel="stylesheet" href="css/housekeeping.css?v=<?php echo @filemtime(__DIR__ . '/css/housekeeping.css'); ?>">
     <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
     <link rel="stylesheet" href="css/room-timeline.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline.css'); ?>">
@@ -1620,7 +1621,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                 <form method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="auto_create_checkout">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <button class="btn btn-warning" type="button" data-help="Create Checkout Cleanup|Generate cleaning assignments for every room that has a guest checking out and needs housekeeping." onclick="hkConfirm(this.closest('form'), 'Create checkout cleanup assignments for all rooms that need it?', 'Create', 'btn-warning')">
+                    <button class="btn btn-secondary" type="button" data-help="Create Checkout Cleanup|Generate cleaning assignments for every room that has a guest checking out and needs housekeeping." onclick="hkConfirm(this.closest('form'), 'Create checkout cleanup assignments for all rooms that need it?', 'Create', 'btn-primary')">
                         <i class="fas fa-broom"></i> Create Checkout Cleanup
                     </button>
                 </form>
@@ -1645,20 +1646,19 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
         /* Same five cards and counts as the Calendar's Housekeeping tab (rh_cal_hk_tab). A click filters the timeline
            and the list to those rooms and scrolls to them (room-timeline-ops.js); click again to show all. */
         $opsCards = [
-            'dirty' => ['Dirty', 'fa-exclamation', 'Rooms with a cleaning task due and not started, or marked as cleaning. Active rooms, now.'],
-            'cleaning' => ['Cleaning', 'fa-ellipsis', 'Rooms with a cleaning task in progress right now.'],
-            'inspection' => ['Inspection', 'fa-eye', 'Rooms whose last cleaning task is done but not yet checked (verified).'],
-            'clean' => ['Clean', 'fa-check', 'Rooms with no cleaning due, in progress or waiting for inspection.'],
-            'unassigned' => ['Unassigned tasks', 'fa-user-slash', 'Rooms whose current open cleaning task has nobody assigned.'],
+            'dirty' => ['Dirty', 'bad', 'Rooms with a cleaning task due and not started, or marked as cleaning. Active rooms, now.'],
+            'cleaning' => ['Cleaning', 'warn', 'Rooms with a cleaning task in progress right now.'],
+            'inspection' => ['Inspection', 'info', 'Rooms whose last cleaning task is done but not yet checked (verified).'],
+            'clean' => ['Clean', 'good', 'Rooms with no cleaning due, in progress or waiting for inspection.'],
+            'unassigned' => ['Unassigned tasks', 'plain', 'Rooms whose current open cleaning task has nobody assigned.'],
         ];
         ?>
-        <div class="ck-kpis tl-cards tl-ops-cards" id="hkStatsDashboard">
-            <?php foreach ($opsCards as $opsKey => [$opsLabel, $opsIcon, $opsHelp]): ?>
-                <button type="button" class="ck-kpi tl-card" data-ops-card="<?php echo $opsKey; ?>" data-ops-count="<?php echo $opsKey; ?>" data-ops-sub="Show these rooms" aria-pressed="false">
-                    <span class="ck-kpi__icon"><i class="fas <?php echo $opsIcon; ?>" aria-hidden="true"></i></span>
-                    <span class="ck-kpi__label"><?php echo htmlspecialchars($opsLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($opsHelp); ?>">?</i></span>
-                    <span class="ck-kpi__value"><?php echo (int)($opsPayload['counts'][$opsKey] ?? 0); ?></span>
-                    <span class="ck-kpi__sub">Show these rooms</span>
+        <?php /* Shared page strip: one row of compact chips (.ops-page-strip > .ops-chip). room-timeline-ops.js fills .ck-kpi__value and sets is-active / aria-pressed. */ ?>
+        <div class="ops-page-strip" id="hkStatsDashboard" role="group" aria-label="Housekeeping room counts. Click one to show only those rooms.">
+            <?php foreach ($opsCards as $opsKey => [$opsLabel, $opsTone, $opsHelp]): ?>
+                <button type="button" class="ops-chip ops-chip--<?php echo $opsTone; ?>" data-ops-card="<?php echo $opsKey; ?>" data-ops-count="<?php echo $opsKey; ?>" data-ops-sub="Show these rooms" aria-pressed="false" title="Show these rooms. Click again to show all.">
+                    <span class="ck-kpi__value ops-chip__value"><?php echo (int)($opsPayload['counts'][$opsKey] ?? 0); ?></span>
+                    <span class="ops-chip__label"><?php echo htmlspecialchars($opsLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($opsHelp); ?>">?</i></span>
                 </button>
             <?php endforeach; ?>
         </div>
@@ -1715,85 +1715,144 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
             }, $assignments), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?: '[]'; ?>
         </script>
 
-        <!-- Occupied Rooms Section -->
-        <?php if (!empty($occupiedRooms)): ?>
-            <div class="hk-section">
-                <h3><i class="fas fa-bed"></i> Occupied Rooms (<?php echo count($occupiedRooms); ?>)</h3>
-                <form method="POST" id="bulkAssignForm">
+        <?php /* Grid first (owner 2026-11-24): the timeline sits directly under the strip, in the first screen. */ ?>
+        <?php if ($opsPayload) { require __DIR__ . '/includes/ops-timeline-view.php'; } ?>
+
+        <!-- Needs action (shared layout: .ops-needs-list; the Maintenance page uses the same markup) -->
+        <?php
+        // Open cleaning task per room (pending / in progress), for the Assigned to column and the row Assign
+        // (reassigns that task via bulk_assignments; bulk_assign_occupied itself skips a room that already has one).
+        $hkOpenByRoom = [];
+        foreach ($assignments as $hkOpenRow) {
+            if (!in_array((string)($hkOpenRow['status'] ?? ''), ['pending', 'in_progress'], true)) {
+                continue;
+            }
+            $hkOpenRid = (int)($hkOpenRow['individual_room_id'] ?? 0);
+            if ($hkOpenRid > 0 && !isset($hkOpenByRoom[$hkOpenRid])) {
+                $hkOpenByRoom[$hkOpenRid] = $hkOpenRow;
+            }
+        }
+        $hkNeedCols = [
+            'room' => ['Room', 'The room number and name. Every room with a guest checked in, from current bookings, now.'],
+            'status' => ['Status', 'Checkout today, Overdue (past the checkout date) or Occupied. A second pill shows when the guest has left and the departure clean has started.'],
+            'guest' => ['Guest / checkout', 'The booking guest (and the room guest if different) and the booking checkout date.'],
+            'assigned' => ['Assigned to', 'Who has the room\'s open cleaning task (pending or in progress). A dash means the room has no open task.'],
+            'assign' => ['Assign', 'Pick a staff member for this room. With no open task, it adds a cleaning task for today; with an open task, it gives that task to the person picked (or Unassigned).'],
+            'left' => ['Guest has left', 'For a room due out: use it once the guest has gone, so the departure clean can start. The room cannot be sold until the desk checks the guest out.'],
+        ];
+        ?>
+        <section class="ops-panel ops-needs-list" id="hkNeedsAction" aria-labelledby="hkNeedsTitle">
+            <div class="ops-panel__head">
+                <h3 class="ops-panel__title" id="hkNeedsTitle"><i class="fas fa-bed" aria-hidden="true"></i> Needs action (<?php echo count($occupiedRooms); ?>) <i class="help" data-tip="Rooms with a guest checked in right now, from current bookings. Tick rooms to give them all a cleaning task at once, or use the Assign box on a row.">?</i></h3>
+            </div>
+            <?php if (empty($occupiedRooms)): ?>
+                <p class="ops-empty">No occupied rooms need action right now.</p>
+            <?php else: ?>
+                <form method="POST" id="bulkAssignForm" class="ops-needs-list__form">
                     <input type="hidden" name="action" value="bulk_assign_occupied">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                     <input type="hidden" name="room_ids" id="selectedRoomIds">
-                    <div class="bulk-actions">
-                        <select name="assigned_to" id="bulkAssignTo" class="hk-inline-control">
+                    <div class="ops-needs-list__table" role="table" aria-label="Occupied rooms that need action">
+                        <div class="ops-needs-list__cols" role="row">
+                            <span class="ops-cell ops-cell--tick" role="columnheader"><input type="checkbox" id="hkSelectAllRooms" class="room-checkbox-all admin-bulk-check" aria-label="Select all rooms shown on this page" onchange="hkSelectVisibleRooms(this.checked)"></span>
+                            <?php foreach ($hkNeedCols as $hkColKey => [$hkColLabel, $hkColHelp]): ?>
+                                <span class="ops-cell ops-cell--<?php echo $hkColKey; ?>" role="columnheader"><?php echo htmlspecialchars($hkColLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($hkColHelp); ?>">?</i></span>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php /* A list so the shared pager (admin-section-pagination.js, ul.ck-rows) shows 10 rows per page with the "Show" picker. */ ?>
+                        <ul class="occupied-rooms-list ck-rows" role="rowgroup">
+                            <?php foreach ($occupiedRooms as $room): ?>
+                                <?php
+                                $hkOccType = (string)$room['occupancy_type'];
+                                $hkDueOut = in_array($hkOccType, ['checkout_today', 'overdue_checkout'], true);
+                                $hkOccPill = $hkOccType === 'checkout_today' ? 'in_progress' : ($hkOccType === 'overdue_checkout' ? 'blocked' : 'occupied');
+                                $hkOccLabel = $hkOccType === 'checkout_today' ? 'Checkout today' : ($hkOccType === 'overdue_checkout' ? 'Overdue' : 'Occupied');
+                                $hkRoomLabel = trim($room['room_number'] . ' ' . ($room['room_name'] ?? ''));
+                                $hkEarly = (string)($room['early_task_status'] ?? '');
+                                $hkOpen = $hkOpenByRoom[(int)$room['id']] ?? null;
+                                ?>
+                                <li class="ops-needs-row" role="row" data-room-id="<?php echo (int)$room['id']; ?>">
+                                    <span class="ops-cell ops-cell--tick" role="cell">
+                                        <input type="checkbox" class="room-checkbox admin-bulk-check" value="<?php echo (int)$room['id']; ?>" aria-label="Select room <?php echo htmlspecialchars($hkRoomLabel); ?>" onchange="hkRoomTick(this)">
+                                    </span>
+                                    <span class="ops-cell ops-cell--room" role="rowheader"><strong><?php echo htmlspecialchars($hkRoomLabel); ?></strong></span>
+                                    <span class="ops-cell ops-cell--status" role="cell">
+                                        <span class="status-pill <?php echo $hkOccPill; ?>"><?php echo $hkOccLabel; ?></span>
+                                        <?php if ($hkDueOut && $hkEarly === 'completed'): ?>
+                                            <span class="status-pill completed">Cleaned &middot; waiting for checkout</span>
+                                        <?php elseif ($hkDueOut && $hkEarly !== ''): ?>
+                                            <span class="status-pill <?php echo $hkEarly === 'blocked' ? 'blocked' : 'in_progress'; ?>">Guest left &middot; <?php echo $hkEarly === 'blocked' ? 'cleaning on hold' : 'cleaning before checkout'; ?></span>
+                                        <?php endif; ?>
+                                    </span>
+                                    <span class="ops-cell ops-cell--guest" role="cell">
+                                        <span class="ops-cell__main"><?php echo htmlspecialchars($room['guest_name'] ?? 'Guest'); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <small class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></small><?php endif; ?></span>
+                                        <small class="ops-cell__sub">Checkout <?php echo htmlspecialchars(date('M j, Y', strtotime($room['check_out_date']))); ?></small>
+                                    </span>
+                                    <span class="ops-cell ops-cell--assigned" role="cell">
+                                        <?php if ($hkOpen): ?>
+                                            <span class="ops-cell__main"><?php echo htmlspecialchars((string)($hkOpen['assigned_to_name'] ?? '') !== '' ? (string)$hkOpen['assigned_to_name'] : 'Unassigned'); ?></span>
+                                            <small class="ops-cell__sub"><?php echo $hkOpen['status'] === 'in_progress' ? 'In progress' : 'Pending'; ?></small>
+                                        <?php else: ?>
+                                            <span class="ops-cell__none" aria-label="No open task">&ndash;</span>
+                                        <?php endif; ?>
+                                    </span>
+                                    <span class="ops-cell ops-cell--assign" role="cell">
+                                        <?php if ($hkOpen): $hkOpenTo = (int)($hkOpen['assigned_to'] ?? 0); ?>
+                                            <select class="hk-inline-control ops-assign-select" aria-label="Assign the open task for room <?php echo htmlspecialchars($hkRoomLabel); ?> to" onchange="hkRowReassign(this, <?php echo (int)$hkOpen['id']; ?>, <?php echo htmlspecialchars((string)json_encode($hkRoomLabel, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES); ?>)" data-current="<?php echo $hkOpenTo; ?>">
+                                                <option value=""<?php echo $hkOpenTo === 0 ? ' selected' : ''; ?>><?php echo $hkOpenTo === 0 ? 'Assign to...' : 'Unassigned'; ?></option>
+                                                <?php foreach ($users as $u): ?>
+                                                    <option value="<?php echo (int)$u['id']; ?>"<?php echo (int)$u['id'] === $hkOpenTo ? ' selected' : ''; ?>><?php echo htmlspecialchars($u['username']); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        <?php else: ?>
+                                            <select class="hk-inline-control ops-assign-select" aria-label="Assign room <?php echo htmlspecialchars($hkRoomLabel); ?> to" onchange="hkRowAssign(this, <?php echo (int)$room['id']; ?>, <?php echo htmlspecialchars((string)json_encode($hkRoomLabel, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES); ?>)">
+                                                <option value="">Assign to...</option>
+                                                <?php foreach ($users as $u): ?>
+                                                    <option value="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        <?php endif; ?>
+                                    </span>
+                                    <span class="ops-cell ops-cell--left" role="cell">
+                                        <?php if ($hkDueOut && $hkEarly === ''): ?>
+                                            <button type="button" class="btn btn-secondary btn-sm ops-row-btn" onclick="hkGuestLeft(<?php echo (int)$room['id']; ?>, <?php echo (int)$room['booking_id']; ?>, <?php echo htmlspecialchars((string)json_encode($hkRoomLabel, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES); ?>)" title="The guest has physically gone: start the departure clean now">
+                                                <i class="fas fa-door-open" aria-hidden="true"></i> Guest has left
+                                            </button>
+                                        <?php endif; ?>
+                                    </span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                    <details class="rh-col-help ops-col-help">
+                        <summary>What the columns mean</summary>
+                        <dl>
+                            <?php foreach ($hkNeedCols as [$hkColLabel, $hkColHelp]): ?>
+                                <dt><?php echo htmlspecialchars($hkColLabel); ?></dt>
+                                <dd><?php echo htmlspecialchars($hkColHelp); ?></dd>
+                            <?php endforeach; ?>
+                        </dl>
+                    </details>
+                    <?php /* Appears when a room is ticked; sticks to the bottom of the screen while the list is in view. */ ?>
+                    <div class="ops-bulk-bar" id="hkBulkBar" hidden>
+                        <span class="ops-bulk-bar__count"><span id="hkBulkCount">0</span> selected</span>
+                        <select name="assigned_to" id="bulkAssignTo" class="hk-inline-control" aria-label="Assign selected rooms to">
                             <option value="">Unassigned</option>
                             <?php foreach ($users as $u): ?>
-                                <option value="<?php echo $u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
+                                <option value="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <select name="priority" class="hk-inline-control">
+                        <select name="priority" class="hk-inline-control" aria-label="Priority for the new tasks">
                             <option value="medium">Medium Priority</option>
                             <option value="high">High Priority</option>
                             <option value="low">Low Priority</option>
                         </select>
-                        <button type="button" class="btn-quick" onclick="selectAllOccupied()">
-                            <i class="fas fa-check-square"></i> Select All
-                        </button>
                         <button type="submit" class="btn btn-primary hk-bulk-assign-btn" id="bulkAssignBtn" disabled>
-                            <i class="fas fa-plus"></i> Assign Selected (<span id="selectedCount">0</span>)
+                            <i class="fas fa-plus" aria-hidden="true"></i> Assign Selected (<span id="selectedCount">0</span>)
                         </button>
+                        <button type="button" class="btn btn-secondary hk-bulk-assign-btn" onclick="hkClearRoomTicks()">Clear</button>
                     </div>
-                    <p class="hk-bulk-helper">
-                        <i class="fas fa-hand-pointer"></i> Click a room card to select it, then choose a staff member and click Assign Selected.
-                    </p>
-                    <?php /* A list so the shared pager (admin-section-pagination.js, ul.ck-rows) shows 10 cards per page with the "Show" picker. */ ?>
-                    <ul class="occupied-rooms-list ck-rows">
-                        <?php foreach ($occupiedRooms as $room): ?>
-                            <?php $hkOccClass = $room['occupancy_type'] === 'checkout_today' ? 'checkout-today' : ($room['occupancy_type'] === 'overdue_checkout' ? 'overdue-checkout' : ''); ?>
-                            <li class="occupied-room-item">
-                            <div class="occupied-room-card <?php echo $hkOccClass; ?>"
-                                data-room-id="<?php echo $room['id']; ?>"
-                                onclick="toggleRoomCard(this)"
-                                role="button"
-                                tabindex="0"
-                                onkeydown="if(event.key==='Enter'||event.key===' ')toggleRoomCard(this)">
-                                <div class="room-header">
-                                    <span class="room-number"><?php echo htmlspecialchars($room['room_number'] . ' ' . ($room['room_name'] ?? '')); ?></span>
-                                    <span class="occupancy-badge"><?php echo $room['occupancy_type'] === 'checkout_today' ? '<i class="fas fa-sign-out-alt"></i> Checkout Today' : ($room['occupancy_type'] === 'overdue_checkout' ? '<i class="fas fa-clock"></i> Overdue' : '<i class="fas fa-bed"></i> Occupied'); ?></span>
-                                </div>
-                                <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name'] ?? 'Guest'); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <small class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></small><?php endif; ?></div>
-                                <div class="date-info"><i class="fas fa-calendar-alt"></i> Checkout: <strong><?php echo htmlspecialchars(date('M j, Y', strtotime($room['check_out_date']))); ?></strong></div>
-                                <?php if (in_array($room['occupancy_type'], ['checkout_today', 'overdue_checkout'], true)): ?>
-                                    <?php $hkEarly = (string)($room['early_task_status'] ?? ''); ?>
-                                    <?php if ($hkEarly === 'completed'): ?>
-                                        <div class="date-info"><span class="status-pill completed">Cleaned &middot; waiting for checkout</span></div>
-                                    <?php elseif ($hkEarly !== ''): ?>
-                                        <div class="date-info"><span class="status-pill <?php echo $hkEarly === 'blocked' ? 'blocked' : 'in_progress'; ?>">Guest left &middot; <?php echo $hkEarly === 'blocked' ? 'cleaning on hold' : 'cleaning before checkout'; ?></span></div>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-                                <div class="card-select-indicator">
-                                    <input type="checkbox" class="room-checkbox" value="<?php echo $room['id']; ?>" tabindex="-1" onclick="event.stopPropagation()">
-                                    <span class="select-label"><i class="fas fa-circle-check"></i> Selected</span>
-                                    <span class="unselect-label"><i class="far fa-circle"></i> Click to select</span>
-                                </div>
-                                <button type="button" class="btn-quick-assign" onclick="event.stopPropagation(); quickAssignRoom(<?php echo $room['id']; ?>)" title="Assign this room individually">
-                                    <i class="fas fa-bolt"></i> Quick Assign
-                                </button>
-                                <?php if (in_array($room['occupancy_type'], ['checkout_today', 'overdue_checkout'], true) && (string)($room['early_task_status'] ?? '') === ''): ?>
-                                    <?php $hkGlLabel = trim($room['room_number'] . ' ' . ($room['room_name'] ?? '')); ?>
-                                    <button type="button" class="btn-quick-assign" onclick="event.stopPropagation(); hkGuestLeft(<?php echo (int)$room['id']; ?>, <?php echo (int)$room['booking_id']; ?>, <?php echo htmlspecialchars((string)json_encode($hkGlLabel, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES); ?>)" title="The guest has physically gone: start the departure clean now">
-                                        <i class="fas fa-door-open"></i> Guest has left
-                                    </button>
-                                <?php endif; ?>
-                            </div>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
                 </form>
-                <?php if (array_filter($occupiedRooms, static function ($r) { return in_array($r['occupancy_type'], ['checkout_today', 'overdue_checkout'], true); })): ?>
-                    <p class="hk-bulk-helper">
-                        <i class="fas fa-door-open"></i> Guest has left: use it on a room due out once the guest has gone, so the departure clean can start. The room can't be sold until the desk checks the guest out.
-                    </p>
-                <?php endif; ?>
                 <!-- Separate from bulkAssignForm (a form inside a form is dropped by the browser). -->
                 <form method="POST" id="hkGuestLeftForm">
                     <input type="hidden" name="action" value="guest_left">
@@ -1801,43 +1860,39 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                     <input type="hidden" name="individual_room_id" id="hkGuestLeftRoom" value="">
                     <input type="hidden" name="booking_id" id="hkGuestLeftBooking" value="">
                 </form>
-            </div>
-        <?php endif; ?>
+                <?php /* Per-row Assign: the same bulk_assign_occupied action with one room and the bulk defaults (medium priority). */ ?>
+                <form method="POST" id="hkRowAssignForm">
+                    <input type="hidden" name="action" value="bulk_assign_occupied">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="room_ids" id="hkRowAssignRooms" value="">
+                    <input type="hidden" name="assigned_to" id="hkRowAssignTo" value="">
+                    <input type="hidden" name="priority" value="medium">
+                </form>
+                <?php /* Per-row Assign on a room that already has an open task: the assignments bulk bar's own assign (audit-logged). */ ?>
+                <form method="POST" id="hkRowReassignForm">
+                    <input type="hidden" name="action" value="bulk_assignments">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="bulk_op" value="assign">
+                    <input type="hidden" name="bulk_ids[]" id="hkRowReassignId" value="">
+                    <input type="hidden" name="assigned_to" id="hkRowReassignTo" value="">
+                </form>
+            <?php endif; ?>
+        </section>
 
-        <!-- Staff Workload Section -->
         <?php if (!empty($staffWorkload)): ?>
-            <div class="hk-section">
-                <h3><i class="fas fa-users"></i> Staff Workload</h3>
-                <table class="staff-workload-table">
-                    <thead>
-                        <tr>
-                            <th data-help="Staff Member|An active staff account that can be given housekeeping tasks.">Staff Member</th>
-                            <th data-help="Active Tasks|Tasks assigned to this person that are pending or in progress right now.">Active Tasks</th>
-                            <th data-help="High Priority Pending|Of those, tasks marked High priority that have not been started yet.">High Priority Pending</th>
-                            <th data-help="Completed Today|Tasks this person marked done today (hotel time).">Completed Today</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($staffWorkload as $staff): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($staff['username']); ?></td>
-                                <td><span style="font-weight:700;"><?php echo $staff['active_tasks']; ?></span></td>
-                                <td>
-                                    <?php if ($staff['high_priority_pending'] > 0): ?>
-                                        <span style="color:#dc2626; font-weight:700;"><?php echo $staff['high_priority_pending']; ?></span>
-                                    <?php else: ?>
-                                        <span style="color:#9ca3af;">0</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td><span style="color:#1f7a45; font-weight:600;"><?php echo $staff['completed_today']; ?></span></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+            <?php /* Staff workload: one slim chip row (same data as the old table). */ ?>
+            <div class="ops-workload-chips" role="list" aria-label="Staff workload">
+                <span class="ops-workload-chips__label">Workload <i class="help" data-tip="Open tasks (pending or in progress) per staff member right now, with high-priority tasks not yet started and tasks finished today. Staff with no housekeeping work today are left out.">?</i></span>
+                <?php foreach ($staffWorkload as $staff): ?>
+                    <?php
+                    $hkWlOpen = (int)$staff['active_tasks'];
+                    $hkWlHigh = (int)$staff['high_priority_pending'];
+                    $hkWlDone = (int)$staff['completed_today'];
+                    ?>
+                    <span class="ops-workload-chip" role="listitem"><strong><?php echo htmlspecialchars($staff['username']); ?></strong> <?php echo $hkWlOpen; ?> open<?php if ($hkWlHigh > 0): ?> <span class="ops-workload-chip__high">&middot; <?php echo $hkWlHigh; ?> high priority</span><?php endif; ?><?php if ($hkWlDone > 0): ?> &middot; <?php echo $hkWlDone; ?> done today<?php endif; ?></span>
+                <?php endforeach; ?>
             </div>
         <?php endif; ?>
-
-        <?php if ($opsPayload) { require __DIR__ . '/includes/ops-timeline-view.php'; } ?>
 
         <!-- Assignments Table -->
         <div class="table-card" id="hkAssignmentsCard" data-rh-results>
@@ -2510,26 +2565,30 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
             openAdminModal('assignmentModal');
         }
 
-        function selectAllOccupied() {
-            // Only the room cards on screen (the list is paged): what you see is what gets selected.
-            const checkboxes = Array.from(document.querySelectorAll('.room-checkbox')).filter(cb => {
-                const item = cb.closest('.occupied-room-item');
-                return !item || !item.hidden;
-            });
-            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-            checkboxes.forEach(cb => {
-                cb.checked = !allChecked;
-                const card = cb.closest('.occupied-room-card');
-                if (card) card.classList.toggle('selected', !allChecked);
+        // Needs action list: only the rows on screen (the list is paged) are ticked by the header box.
+        function hkSelectVisibleRooms(checked) {
+            document.querySelectorAll('.ops-needs-row').forEach(function (row) {
+                if (row.hidden) return;
+                var cb = row.querySelector('.room-checkbox');
+                if (!cb) return;
+                cb.checked = checked;
+                row.classList.toggle('selected', checked);
             });
             updateSelectedCount();
         }
 
-        function toggleRoomCard(card) {
-            const cb = card.querySelector('.room-checkbox');
-            if (!cb) return;
-            cb.checked = !cb.checked;
-            card.classList.toggle('selected', cb.checked);
+        function hkRoomTick(cb) {
+            var row = cb.closest('.ops-needs-row');
+            if (row) row.classList.toggle('selected', cb.checked);
+            updateSelectedCount();
+        }
+
+        function hkClearRoomTicks() {
+            document.querySelectorAll('.room-checkbox:checked').forEach(function (cb) {
+                cb.checked = false;
+                var row = cb.closest('.ops-needs-row');
+                if (row) row.classList.remove('selected');
+            });
             updateSelectedCount();
         }
 
@@ -2537,8 +2596,47 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
             const count = document.querySelectorAll('.room-checkbox:checked').length;
             const countEl = document.getElementById('selectedCount');
             const btn = document.getElementById('bulkAssignBtn');
+            const bar = document.getElementById('hkBulkBar');
+            const barCount = document.getElementById('hkBulkCount');
+            const all = document.getElementById('hkSelectAllRooms');
             if (countEl) countEl.textContent = count;
+            if (barCount) barCount.textContent = count;
             if (btn) btn.disabled = count === 0;
+            if (bar) bar.hidden = count === 0;
+            if (all) {
+                const shown = Array.from(document.querySelectorAll('.ops-needs-row')).filter(function (r) { return !r.hidden; })
+                    .map(function (r) { return r.querySelector('.room-checkbox'); }).filter(Boolean);
+                const on = shown.filter(function (c) { return c.checked; }).length;
+                all.checked = shown.length > 0 && on === shown.length;
+                all.indeterminate = on > 0 && on < shown.length;
+            }
+        }
+
+        // Per-row Assign: the same bulk_assign_occupied action as the bulk bar, with this one room and the default priority.
+        function hkRowAssign(select, roomId, roomLabel) {
+            var staffId = select.value;
+            if (!staffId) return;
+            var staffName = select.options[select.selectedIndex].text;
+            select.value = '';
+            var form = document.getElementById('hkRowAssignForm');
+            if (!form) return;
+            document.getElementById('hkRowAssignRooms').value = JSON.stringify([roomId]);
+            document.getElementById('hkRowAssignTo').value = staffId;
+            hkConfirm(form, 'Give room ' + roomLabel + ' a cleaning task for today and assign it to ' + staffName + '?', 'Assign', 'btn-primary');
+        }
+
+        // Per-row Assign when the room already has an open task: hands that task to someone else (or Unassigned).
+        function hkRowReassign(select, taskId, roomLabel) {
+            var staffId = select.value || '0';
+            var current = select.getAttribute('data-current') || '0';
+            if (staffId === current) return;
+            var staffName = staffId === '0' ? 'nobody (Unassigned)' : select.options[select.selectedIndex].text;
+            select.value = current === '0' ? '' : current;
+            var form = document.getElementById('hkRowReassignForm');
+            if (!form) return;
+            document.getElementById('hkRowReassignId').value = taskId;
+            document.getElementById('hkRowReassignTo').value = staffId;
+            hkConfirm(form, 'Assign the open cleaning task for room ' + roomLabel + ' to ' + staffName + '?', 'Assign', 'btn-primary');
         }
 
         function quickAssignRoom(roomId) {

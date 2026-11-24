@@ -30,11 +30,6 @@
     color: #1e40af;
 }
 
-.status-pill.blocked {
-    background: #fdeced;
-    color: #a8373f;
-}
-
 /* Priority Badges */
 .priority-badge {
     display: inline-flex;
@@ -301,180 +296,6 @@
     gap: 8px;
 }
 
-/* Occupied Rooms List */
-.occupied-rooms-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-}
-
-.occupied-room-card {
-    border: 2px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 14px;
-    background: #fafafa;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    position: relative;
-    user-select: none;
-}
-
-.occupied-room-card:hover {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    border-color: #6b7280;
-    transform: translateY(-1px);
-}
-
-.occupied-room-card.selected {
-    border-color: #3747a5;
-    background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
-    box-shadow: 0 0 0 3px rgba(55, 71, 165, 0.15);
-}
-
-.occupied-room-card.checkout-today {
-    border-color: #f59e0b;
-    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-}
-
-.occupied-room-card.checkout-today.selected {
-    border-color: #d97706;
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.2);
-}
-
-.occupied-room-card .room-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-}
-
-.occupied-room-card .room-number {
-    font-weight: 700;
-    font-size: 16px;
-    color: var(--navy, #1f2d3d);
-}
-
-.occupied-room-card .occupancy-badge {
-    font-size: 11px;
-    padding: 3px 9px;
-    border-radius: 99px;
-    background: #e5e7eb;
-    color: #4b5563;
-    font-weight: 600;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.occupied-room-card.checkout-today .occupancy-badge {
-    background: linear-gradient(135deg, #fcd34d 0%, #fbbf24 100%);
-    color: #92400e;
-}
-
-.occupied-room-card .guest-info {
-    font-size: 13px;
-    color: #4b5563;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.occupied-room-card .date-info {
-    font-size: 12px;
-    color: #9ca3af;
-    margin-bottom: 10px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.card-select-indicator {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    margin-top: 8px;
-}
-
-.card-select-indicator input[type="checkbox"] {
-    display: none;
-}
-
-.card-select-indicator .select-label {
-    display: none;
-    color: #3747a5;
-    align-items: center;
-    gap: 4px;
-}
-
-.card-select-indicator .unselect-label {
-    display: inline-flex;
-    color: #9ca3af;
-    align-items: center;
-    gap: 4px;
-}
-
-.occupied-room-card.selected .card-select-indicator .select-label {
-    display: inline-flex;
-}
-
-.occupied-room-card.selected .card-select-indicator .unselect-label {
-    display: none;
-}
-
-.btn-quick-assign {
-    display: block;
-    width: 100%;
-    margin-top: 10px;
-    padding: 7px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    border-radius: 6px;
-    border: 1px solid #d1d5db;
-    background: white;
-    cursor: pointer;
-    text-align: center;
-    transition: all 0.2s ease;
-    color: #374151;
-}
-
-.btn-quick-assign:hover {
-    background: #3747a5;
-    border-color: #3747a5;
-    color: white;
-}
-
-.btn-quick-assign i {
-    margin-right: 4px;
-}
-
-/* Staff Workload Table */
-.staff-workload-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.staff-workload-table th,
-.staff-workload-table td {
-    padding: 10px;
-    text-align: left;
-    border-bottom: 1px solid #e5e7eb;
-}
-
-.staff-workload-table th {
-    font-size: 12px;
-    text-transform: uppercase;
-    color: #6b7280;
-    font-weight: 600;
-}
-
-.staff-workload-table tbody tr:hover {
-    background: #f9fafb;
-}
-
 /* Bulk Actions */
 .bulk-actions {
     display: flex;
@@ -544,10 +365,6 @@
         width: 100%;
     }
 
-    .occupied-rooms-list {
-        grid-template-columns: 1fr;
-    }
-
     .bulk-actions {
         flex-direction: column;
     }
@@ -569,10 +386,6 @@
         opacity: 1;
         transform: translateY(0);
     }
-}
-
-.occupied-room-card {
-    animation: slideIn 0.3s ease;
 }
 
 /* Checkbox styling */
@@ -618,10 +431,6 @@
         min-height: 44px;
     }
 
-    .btn-quick-assign {
-        min-height: 44px;
-    }
-
     .bulk-actions .btn {
         min-height: 44px;
     }
@@ -641,40 +450,6 @@
     }
 }
 
-/* Step 12a: occupied room cards are list items so the shared pager pages them (10 per page + "Show" picker).
-   The grid stays even where .ck-rows (admin-cockpit.css) is loaded. */
-ul.occupied-rooms-list.ck-rows {
-    display: grid;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-
-.occupied-room-item {
-    display: flex;
-    min-width: 0;
-}
-
-.occupied-room-item[hidden] {
-    display: none;
-}
-
-.occupied-room-item > .occupied-room-card {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-/* A guest past their checkout date reads "Overdue", not "Occupied". */
-.occupied-room-card.overdue-checkout {
-    border-color: #fecaca;
-    background: linear-gradient(135deg, #fff5f5 0%, #fee2e2 100%);
-}
-
-.occupied-room-card.overdue-checkout .occupancy-badge {
-    background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-    color: #991b1b;
-}
-
 /* Clear button next to the assignments search: a full touch target. */
 .hk-filter-clear {
     min-height: 44px;
@@ -683,45 +458,6 @@ ul.occupied-rooms-list.ck-rows {
 
 /* 12a: .btn is inline-flex, so honour [hidden] on the filter Clear button */
 .hk-filter-clear[hidden]{display:none !important;}
-
-/* Phone + tablet (owner 2026-11-22): occupied-room cards as compact list rows, the two actions side by side at 40px */
-@media (max-width: 1024px) {
-    ul.occupied-rooms-list.ck-rows {
-        gap: 8px;
-    }
-
-    .occupied-room-card {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        column-gap: 8px;
-        padding: 10px 12px;
-        border-width: 1px;
-    }
-
-    .occupied-room-card > * {
-        flex: 1 1 100%;
-        min-width: 0;
-    }
-
-    .occupied-room-card .date-info {
-        margin-bottom: 0;
-    }
-
-    .occupied-room-card .card-select-indicator {
-        margin-top: 2px;
-    }
-
-    .occupied-room-card > .btn-quick-assign {
-        flex: 1 1 calc(50% - 4px);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: auto;
-        min-height: 40px;
-        margin-top: 8px;
-    }
-}
 
 /* Phone + tablet (owner 2026-11-22): the assign bar is a tidy 2-column grid of 40px controls, not a stack of full-width ones */
 @media (max-width: 1024px) {

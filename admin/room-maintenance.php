@@ -218,42 +218,81 @@ function validateMaintenanceDueDate(string $dueDate): bool
 }
 
 /**
- * Get rooms that need maintenance (based on reported issues or status)
+ * Rooms that need work (owner 2026-11-24, HK_MAINT_LAYOUT_PLAN Q2): one row per active room that is out of
+ * service (rh_fd_out_of_service_statuses: maintenance / out of order) OR has an open maintenance job (stored
+ * status not completed / cancelled / verified, the rule of checkIndividualRoomAvailability and
+ * rh_maint_status_is_open; '' and NULL count as open). An occupied room is NOT listed for being occupied; when a
+ * listed room has a checked-in guest (primary room pointer or a held booking_rooms row) the guest is shown as info.
+ * open_job_id = the oldest open job (open_job_count says how many), with its title / status / assignee, so the
+ * list can reassign that job (bulk_schedules assign) instead of creating a second one.
  */
 function getRoomsNeedingMaintenance(PDO $pdo): array
 {
+    $oos = rh_fd_out_of_service_statuses();
+    $oosPh = implode(', ', array_fill(0, count($oos), '?'));
+    $openJob = "COALESCE(rms.status, '') NOT IN ('completed', 'cancelled', 'verified')";
+    $joinedArm = bookingAvailabilityTableExists('booking_rooms')
+        ? " OR EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ir.id AND br.released_at IS NULL)"
+        : '';
     $sql = "
-        SELECT DISTINCT
-            ir.id,
-            ir.room_number,
-            ir.room_name,
-            ir.status as room_status,
-            b.id as booking_id,
+        SELECT
+            x.id,
+            x.room_number,
+            x.room_name,
+            x.room_status,
+            x.open_job_count,
+            x.open_job_id,
+            j.title AS open_job_title,
+            j.status AS open_job_status,
+            j.assigned_to AS open_job_assigned_to,
+            u.username AS open_job_assigned_name,
+            x.booking_id,
             b.guest_name,
             b.room_guest_name,
             b.check_out_date,
-            b.status as booking_status,
+            b.status AS booking_status,
             CASE
-                WHEN ir.status = 'out_of_order' THEN 'out_of_order'
-                WHEN b.status = 'checked-in' THEN 'occupied'
-                ELSE 'available'
-            END as room_condition
-        FROM individual_rooms ir
-        LEFT JOIN bookings b ON b.individual_room_id = ir.id
-            AND b.status IN ('checked-in', 'checked-out')
-            AND (b.check_out_date >= CURDATE() OR b.status = 'checked-in')
-        WHERE ir.is_active = 1
-          AND (
-              ir.status = 'out_of_order'
-              OR ir.status = 'maintenance'
-              OR b.status = 'checked-in'
-          )
+                WHEN x.room_status = 'out_of_order' THEN 'out_of_order'
+                WHEN x.room_status = 'maintenance' THEN 'maintenance'
+                ELSE 'open_job'
+            END AS room_condition
+        FROM (
+            SELECT
+                ir.id,
+                ir.room_number,
+                ir.room_name,
+                ir.status AS room_status,
+                (SELECT COUNT(*) FROM room_maintenance_schedules rms WHERE rms.individual_room_id = ir.id AND {$openJob}) AS open_job_count,
+                (SELECT MIN(rms.id) FROM room_maintenance_schedules rms WHERE rms.individual_room_id = ir.id AND {$openJob}) AS open_job_id,
+                (SELECT b.id FROM bookings b
+                  WHERE b.status = 'checked-in' AND (b.individual_room_id = ir.id{$joinedArm})
+                  ORDER BY b.check_in_date DESC, b.id DESC LIMIT 1) AS booking_id
+            FROM individual_rooms ir
+            WHERE ir.is_active = 1
+              AND (
+                  ir.status IN ({$oosPh})
+                  OR EXISTS (SELECT 1 FROM room_maintenance_schedules rms WHERE rms.individual_room_id = ir.id AND {$openJob})
+              )
+        ) x
+        LEFT JOIN room_maintenance_schedules j ON j.id = x.open_job_id
+        LEFT JOIN admin_users u ON u.id = j.assigned_to
+        LEFT JOIN bookings b ON b.id = x.booking_id
         ORDER BY
-            CASE ir.status WHEN 'out_of_order' THEN 1 WHEN 'maintenance' THEN 2 ELSE 3 END,
-            ir.room_number ASC
+            CASE x.room_status WHEN 'out_of_order' THEN 1 WHEN 'maintenance' THEN 2 ELSE 3 END,
+            x.room_number ASC
     ";
-    $stmt = $pdo->query($sql);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(array_values($oos));
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$row) {
+        $row['open_job_count'] = (int)($row['open_job_count'] ?? 0);
+        $row['open_job_id'] = $row['open_job_id'] !== null ? (int)$row['open_job_id'] : null;
+        if ($row['open_job_id'] !== null) {
+            $row['open_job_status'] = rh_maint_status_from_db($row['open_job_status'] ?? ''); // planned / '' read as pending
+        }
+    }
+    unset($row);
+    return $rows;
 }
 
 /**
@@ -1329,22 +1368,12 @@ $bookingsStmt = $pdo->query("
 ");
 $bookings = $bookingsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get rooms needing maintenance
-// One card per room: the query joins bookings, so a room with two matching bookings came back twice
-// and the "(N)" heading counted bookings, not rooms.
-$roomsNeedingMaintenance = [];
-foreach (getRoomsNeedingMaintenance($pdo) as $rnmRow) {
-    $rnmId = (int)$rnmRow['id'];
-    // keep the checked-in guest's row if there is one (not a departed guest's)
-    if (!isset($roomsNeedingMaintenance[$rnmId])
-        || (($roomsNeedingMaintenance[$rnmId]['booking_status'] ?? '') !== 'checked-in' && ($rnmRow['booking_status'] ?? '') === 'checked-in')) {
-        $roomsNeedingMaintenance[$rnmId] = $rnmRow;
-    }
-}
-$roomsNeedingMaintenance = array_values($roomsNeedingMaintenance);
+// Rooms needing work: out of service or with an open job, one row per room (the query picks at most one
+// checked-in guest per room, so the "(N)" heading counts rooms).
+$roomsNeedingMaintenance = getRoomsNeedingMaintenance($pdo);
 
 // ?status=out_of_service (Dashboard "Rooms out of service"): only rooms in maintenance or out of order, not the
-// occupied rooms this list also shows. Whitelisted; notice + Clear above the list.
+// rooms this list also shows for an open job alone. Whitelisted; notice + Clear above the list.
 $rmFilterStatus = (is_scalar($_GET['status'] ?? null) && (string)$_GET['status'] === 'out_of_service') ? 'out_of_service' : '';
 $rmOutOfServiceUnits = 0;
 if ($rmFilterStatus !== '') {
@@ -1507,6 +1536,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/ops-pages.css?v=<?php echo @filemtime(__DIR__ . '/css/ops-pages.css'); ?>">
     <link rel="stylesheet" href="css/room-maintenance.css?v=<?php echo @filemtime(__DIR__ . '/css/room-maintenance.css'); ?>">
     <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
     <link rel="stylesheet" href="css/room-timeline.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline.css'); ?>">
@@ -1522,7 +1552,7 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
                 <form method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="auto_create_tasks">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <button class="btn btn-warning" type="button" onclick="rmConfirm(this.closest('form'), 'Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped.', 'Create tasks', 'btn-warning')">
+                    <button class="btn btn-secondary" type="button" onclick="rmConfirm(this.closest('form'), 'Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped.', 'Create tasks', 'btn-warning')">
                         <i class="fas fa-list-check"></i> Create Tasks for Rooms
                     </button>
                 </form>
@@ -1547,19 +1577,18 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
         /* Same four cards and counts as the Calendar's Maintenance tab (rh_cal_maint_tab). A click filters the timeline
            and the list to those jobs (or rooms) and scrolls to them (room-timeline-ops.js); click again to show all. */
         $opsCards = [
-            'open' => ['Open', 'fa-screwdriver-wrench', 'Maintenance jobs not yet completed or cancelled (planned and in progress), all rooms.', 'open', 'Show these jobs'],
-            'progress' => ['In progress', 'fa-person-digging', 'Maintenance jobs being worked on now.', 'progress', 'Show these jobs'],
-            'out' => ['Out of order now', 'fa-ban', 'Rooms in maintenance or out of order right now (as the Dashboard counts them).', 'out_now', 'Show these rooms'],
-            'due' => ['Due this week', 'fa-calendar-week', 'Open jobs due (or starting, when no due date) by 6 days from today, including overdue ones.', 'due', 'Show these jobs'],
+            'open' => ['Open', 'info', 'Maintenance jobs not yet completed or cancelled (planned and in progress), all rooms.', 'open', 'Show these jobs'],
+            'progress' => ['In progress', 'warn', 'Maintenance jobs being worked on now.', 'progress', 'Show these jobs'],
+            'out' => ['Out of order now', 'bad', 'Rooms in maintenance or out of order right now (as the Dashboard counts them).', 'out_now', 'Show these rooms'],
+            'due' => ['Due this week', 'plain', 'Open jobs due (or starting, when no due date) by 6 days from today, including overdue ones.', 'due', 'Show these jobs'],
         ];
         ?>
-        <div class="ck-kpis tl-cards tl-ops-cards" id="rmStatsDashboard">
-            <?php foreach ($opsCards as $opsKey => [$opsLabel, $opsIcon, $opsHelp, $opsCount, $opsSub]): ?>
-                <button type="button" class="ck-kpi tl-card" data-ops-card="<?php echo $opsKey; ?>" data-ops-count="<?php echo $opsCount; ?>" data-ops-sub="<?php echo $opsSub; ?>" aria-pressed="false">
-                    <span class="ck-kpi__icon"><i class="fas <?php echo $opsIcon; ?>" aria-hidden="true"></i></span>
-                    <span class="ck-kpi__label"><?php echo htmlspecialchars($opsLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($opsHelp); ?>">?</i></span>
-                    <span class="ck-kpi__value"><?php echo (int)($opsPayload['counts'][$opsCount] ?? 0); ?></span>
-                    <span class="ck-kpi__sub"><?php echo $opsSub; ?></span>
+        <?php /* Shared page strip (same markup as housekeeping.php): one row of compact chips. room-timeline-ops.js fills .ck-kpi__value and sets is-active / aria-pressed. */ ?>
+        <div class="ops-page-strip" id="rmStatsDashboard" role="group" aria-label="Maintenance counts. Click one to show only those jobs or rooms.">
+            <?php foreach ($opsCards as $opsKey => [$opsLabel, $opsTone, $opsHelp, $opsCount, $opsSub]): ?>
+                <button type="button" class="ops-chip ops-chip--<?php echo $opsTone; ?>" data-ops-card="<?php echo $opsKey; ?>" data-ops-count="<?php echo $opsCount; ?>" data-ops-sub="<?php echo $opsSub; ?>" aria-pressed="false" title="<?php echo htmlspecialchars($opsSub); ?>. Click again to show all.">
+                    <span class="ck-kpi__value ops-chip__value"><?php echo (int)($opsPayload['counts'][$opsCount] ?? 0); ?></span>
+                    <span class="ops-chip__label"><?php echo htmlspecialchars($opsLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($opsHelp); ?>">?</i></span>
                 </button>
             <?php endforeach; ?>
         </div>
@@ -1630,6 +1659,9 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
             }, $schedules), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?: '[]'; ?>
         </script>
 
+        <?php /* Grid first (same order as housekeeping.php): the timeline sits directly under the strip, in the first screen. */ ?>
+        <?php if ($opsPayload) { require __DIR__ . '/includes/ops-timeline-view.php'; } ?>
+
         <?php if ($rmFilterStatus !== ''): ?>
             <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
@@ -1643,94 +1675,163 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
             </div>
         <?php endif; ?>
 
-        <!-- Rooms Needing Maintenance Section -->
-        <?php if (!empty($roomsNeedingMaintenance)): ?>
-            <div class="rm-section">
-                <h3><i class="fas fa-exclamation-circle"></i> Rooms Needing Maintenance (<?php echo count($roomsNeedingMaintenance); ?>)</h3>
-                <form method="POST" id="bulkAssignForm">
+        <!-- Rooms needing work (shared layout: .ops-needs-list, the same markup as housekeeping.php) -->
+        <?php
+        $rmNeedCols = [
+            'room' => ['Room', 'The room number and name. Rooms in Maintenance or Out of order, or with an open maintenance job, now.'],
+            'status' => ['Room status', 'Out of order or Maintenance (the room is closed for sale), or Open job (the room is still in use but has a job waiting). A guest name shows when a guest is checked in.'],
+            'job' => ['Open job', 'The oldest open maintenance job on the room (planned or in progress), and how many more there are. A dash means the room has no open job.'],
+            'assigned' => ['Assigned', 'Who has that open job. A dash means the room has no open job.'],
+            'assign' => ['Assign', 'Pick a staff member. A room with an open job gives that job to them; a room with no job gets a new inspection job (medium priority) for them.'],
+            'open' => ['Open', 'Opens the room\'s open job. Shown only when the room has one.'],
+        ];
+        ?>
+        <section class="ops-panel ops-needs-list" id="rmNeedsAction" aria-labelledby="rmNeedsTitle">
+            <div class="ops-panel__head">
+                <h3 class="ops-panel__title" id="rmNeedsTitle"><i class="fas fa-exclamation-circle" aria-hidden="true"></i> Rooms needing work (<?php echo count($roomsNeedingMaintenance); ?>) <i class="help" data-tip="Rooms in Maintenance or Out of order, or with an open maintenance job, now. Tick rooms to give them all a job at once, or use the Assign box on a row.">?</i></h3>
+            </div>
+            <?php if (empty($roomsNeedingMaintenance)): ?>
+                <p class="ops-empty">No rooms need work right now.</p>
+            <?php else: ?>
+                <form method="POST" id="bulkAssignForm" class="ops-needs-list__form">
                     <input type="hidden" name="action" value="bulk_assign_rooms">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                     <input type="hidden" name="room_ids" id="selectedRoomIds">
-                    <div class="bulk-actions">
-                        <select name="assigned_to" id="bulkAssignTo" class="rm-inline-control">
+                    <div class="ops-needs-list__table" role="table" aria-label="Rooms needing work">
+                        <div class="ops-needs-list__cols" role="row">
+                            <span class="ops-cell ops-cell--tick" role="columnheader"><input type="checkbox" id="rmSelectAllRooms" class="room-checkbox-all admin-bulk-check" aria-label="Select all rooms shown on this page" onchange="rmSelectVisibleRooms(this.checked)"></span>
+                            <?php foreach ($rmNeedCols as $rmColKey => [$rmColLabel, $rmColHelp]): ?>
+                                <span class="ops-cell ops-cell--<?php echo $rmColKey; ?>" role="columnheader"><?php echo htmlspecialchars($rmColLabel); ?> <i class="help" data-tip="<?php echo htmlspecialchars($rmColHelp); ?>">?</i></span>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php /* A list so the shared pager (admin-section-pagination.js, ul.ck-rows) shows 10 rows per page with the "Show" picker. */ ?>
+                        <ul class="occupied-rooms-list ck-rows" role="rowgroup">
+                            <?php foreach ($roomsNeedingMaintenance as $room): ?>
+                                <?php
+                                $rmCond = (string)($room['room_condition'] ?? 'open_job');
+                                $rmCondPill = $rmCond === 'out_of_order' ? 'blocked' : ($rmCond === 'maintenance' ? 'in_progress' : 'pending');
+                                $rmCondLabel = $rmCond === 'out_of_order' ? 'Out of order' : ($rmCond === 'maintenance' ? 'Maintenance' : 'Open job');
+                                $rmRoomLabel = trim($room['room_number'] . ' ' . ($room['room_name'] ?? ''));
+                                $rmJobId = (int)($room['open_job_id'] ?? 0);
+                                $rmJobCount = (int)($room['open_job_count'] ?? 0);
+                                $rmJobTitle = trim((string)($room['open_job_title'] ?? ''));
+                                $rmJobAssignee = trim((string)($room['open_job_assigned_name'] ?? ''));
+                                $rmJsLabel = htmlspecialchars((string)json_encode($rmRoomLabel, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES);
+                                ?>
+                                <li class="ops-needs-row" role="row" data-room-id="<?php echo (int)$room['id']; ?>">
+                                    <span class="ops-cell ops-cell--tick" role="cell">
+                                        <input type="checkbox" class="room-checkbox admin-bulk-check" value="<?php echo (int)$room['id']; ?>" aria-label="Select room <?php echo htmlspecialchars($rmRoomLabel); ?>" onchange="rmRoomTick(this)">
+                                    </span>
+                                    <span class="ops-cell ops-cell--room" role="rowheader"><strong><?php echo htmlspecialchars($rmRoomLabel); ?></strong></span>
+                                    <span class="ops-cell ops-cell--status" role="cell">
+                                        <span class="status-pill <?php echo $rmCondPill; ?>"><?php echo $rmCondLabel; ?></span>
+                                        <?php if (!empty($room['guest_name'])): ?>
+                                            <small class="ops-cell__sub">Guest: <?php echo htmlspecialchars((string)$room['guest_name']); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <span class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></span><?php endif; ?></small>
+                                        <?php endif; ?>
+                                    </span>
+                                    <span class="ops-cell ops-cell--job" role="cell">
+                                        <?php if ($rmJobId > 0): ?>
+                                            <span class="ops-cell__main"><?php echo htmlspecialchars($rmJobTitle !== '' ? $rmJobTitle : 'Maintenance job'); ?></span>
+                                            <small class="ops-cell__sub"><?php echo (string)($room['open_job_status'] ?? '') === 'in_progress' ? 'In progress' : 'Planned'; ?><?php if ($rmJobCount > 1): ?> &middot; <?php echo $rmJobCount - 1; ?> more open<?php endif; ?></small>
+                                        <?php else: ?>
+                                            <span class="ops-cell__none" aria-label="No open job">&ndash;</span>
+                                        <?php endif; ?>
+                                    </span>
+                                    <span class="ops-cell ops-cell--assigned" role="cell">
+                                        <?php if ($rmJobId > 0): ?>
+                                            <span class="ops-cell__main"><?php echo htmlspecialchars($rmJobAssignee !== '' ? $rmJobAssignee : 'Unassigned'); ?></span>
+                                        <?php else: ?>
+                                            <span class="ops-cell__none" aria-label="No open job">&ndash;</span>
+                                        <?php endif; ?>
+                                    </span>
+                                    <span class="ops-cell ops-cell--assign" role="cell">
+                                        <select class="rm-inline-control ops-assign-select" aria-label="Assign room <?php echo htmlspecialchars($rmRoomLabel); ?> to" onchange="rmRowAssign(this, <?php echo (int)$room['id']; ?>, <?php echo $rmJobId; ?>, <?php echo $rmJsLabel; ?>)">
+                                            <option value="">Assign to...</option>
+                                            <?php foreach ($users as $u): ?>
+                                                <option value="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </span>
+                                    <span class="ops-cell ops-cell--open" role="cell">
+                                        <?php if ($rmJobId > 0): ?>
+                                            <a class="btn btn-secondary btn-sm ops-row-btn" href="room-maintenance.php?id=<?php echo $rmJobId; ?>" title="Open this room's job"><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i> Open</a>
+                                        <?php endif; ?>
+                                    </span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                    <details class="rh-col-help ops-col-help">
+                        <summary>What the columns mean</summary>
+                        <dl>
+                            <?php foreach ($rmNeedCols as [$rmColLabel, $rmColHelp]): ?>
+                                <dt><?php echo htmlspecialchars($rmColLabel); ?></dt>
+                                <dd><?php echo htmlspecialchars($rmColHelp); ?></dd>
+                            <?php endforeach; ?>
+                        </dl>
+                    </details>
+                    <?php /* Appears when a room is ticked; sticks to the bottom of the screen while the list is in view. */ ?>
+                    <div class="ops-bulk-bar" id="rmBulkBar" hidden>
+                        <span class="ops-bulk-bar__count"><span id="rmBulkCount">0</span> selected</span>
+                        <select name="assigned_to" id="bulkAssignTo" class="rm-inline-control" aria-label="Assign selected rooms to">
                             <option value="">Unassigned</option>
                             <?php foreach ($users as $u): ?>
-                                <option value="<?php echo $u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
+                                <option value="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <select name="maintenance_type" class="rm-inline-control">
+                        <select name="maintenance_type" class="rm-inline-control" aria-label="Type for the new jobs">
                             <option value="inspection">Inspection</option>
                             <option value="repair">Repair</option>
                             <option value="replacement">Replacement</option>
                             <option value="upgrade">Upgrade</option>
                             <option value="emergency">Emergency</option>
                         </select>
-                        <select name="priority" class="rm-inline-control">
+                        <select name="priority" class="rm-inline-control" aria-label="Priority for the new jobs">
                             <option value="medium">Medium Priority</option>
                             <option value="high">High Priority</option>
                             <option value="urgent">Urgent Priority</option>
                             <option value="low">Low Priority</option>
                         </select>
-                        <button type="button" class="btn-quick" onclick="selectAllRooms()">
-                            <i class="fas fa-check-square"></i> Select All
-                        </button>
                         <button type="submit" class="btn btn-primary rm-bulk-assign-btn" id="bulkAssignBtn" disabled>
-                            <i class="fas fa-plus"></i> Assign Selected (<span id="selectedCount">0</span>)
+                            <i class="fas fa-plus" aria-hidden="true"></i> Assign Selected (<span id="selectedCount">0</span>)
                         </button>
-                    </div>
-                    <p class="rm-bulk-helper">
-                        <i class="fas fa-hand-pointer"></i> Tap a room card to select it, then assign type/priority in one action.
-                    </p>
-                    <div class="rooms-needing-list">
-                        <?php foreach ($roomsNeedingMaintenance as $room): ?>
-                            <div class="room-needs-card <?php echo $room['room_status'] === 'out_of_order' ? 'out-of-order' : ($room['room_status'] === 'maintenance' ? 'maintenance' : ''); ?>" data-room-id="<?php echo $room['id']; ?>" onclick="toggleRoomCard(this)" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')toggleRoomCard(this)">
-                                <div class="room-header">
-                                    <span class="room-number"><?php echo htmlspecialchars($room['room_number'] . ' ' . ($room['room_name'] ?? '')); ?></span>
-                                    <span class="room-condition"><?php echo ucfirst(str_replace('_', ' ', $room['room_status'] ?? 'available')); ?></span>
-                                </div>
-                                <?php if (!empty($room['guest_name'])): ?>
-                                    <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name']); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <small class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></small><?php endif; ?></div>
-                                <?php endif; ?>
-                                <div class="rm-room-select-indicator">
-                                    <input type="checkbox" class="room-checkbox" value="<?php echo $room['id']; ?>" tabindex="-1" onclick="event.stopPropagation()">
-                                    <span class="select-label"><i class="fas fa-circle-check"></i> Selected</span>
-                                    <span class="unselect-label"><i class="far fa-circle"></i> Click to select</span>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
+                        <button type="button" class="btn btn-secondary rm-bulk-assign-btn" onclick="rmClearRoomTicks()">Clear</button>
                     </div>
                 </form>
-            </div>
-        <?php endif; ?>
+                <?php /* Per-row Assign: separate forms (a form inside a form is dropped by the browser). Room with no open job: the same bulk_assign_rooms action with one room and the bulk defaults. */ ?>
+                <form method="POST" id="rmRowAssignRoomForm">
+                    <input type="hidden" name="action" value="bulk_assign_rooms">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="room_ids" id="rmRowAssignRooms" value="">
+                    <input type="hidden" name="assigned_to" id="rmRowAssignRoomTo" value="">
+                    <input type="hidden" name="priority" value="medium">
+                    <input type="hidden" name="maintenance_type" value="inspection">
+                </form>
+                <?php /* Room with an open job: the same bulk_schedules assign the maintenance table's bulk bar posts, for that one job. */ ?>
+                <form method="POST" id="rmRowAssignJobForm">
+                    <input type="hidden" name="action" value="bulk_schedules">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="bulk_op" value="assign">
+                    <input type="hidden" name="bulk_ids[]" id="rmRowAssignJobId" value="">
+                    <input type="hidden" name="assigned_to" id="rmRowAssignJobTo" value="">
+                </form>
+            <?php endif; ?>
+        </section>
 
-        <!-- Staff Workload Section -->
         <?php if (!empty($staffWorkload)): ?>
-            <div class="rm-section">
-                <h3><i class="fas fa-users"></i> Staff Workload</h3>
-                <table class="staff-workload-table">
-                    <thead>
-                        <tr>
-                            <th data-help="Staff Member|An active staff account that can be given maintenance jobs.">Staff Member</th>
-                            <th data-help="Active Tasks|Jobs assigned to this person that are pending or in progress right now.">Active Tasks</th>
-                            <th data-help="High Priority Pending|Of those, Urgent or High priority jobs not started yet.">High Priority Pending</th>
-                            <th data-help="Completed Today|Jobs this person marked done today that are still waiting to be verified.">Completed Today</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($staffWorkload as $staff): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($staff['username']); ?></td>
-                                <td><?php echo $staff['active_tasks']; ?></td>
-                                <td><?php echo $staff['high_priority_pending']; ?></td>
-                                <td><?php echo $staff['completed_today']; ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+            <?php /* Staff workload: one slim chip row (same data as the old table). */ ?>
+            <div class="ops-workload-chips" role="list" aria-label="Staff workload">
+                <span class="ops-workload-chips__label">Workload <i class="help" data-tip="Open maintenance jobs (planned or in progress) per active staff member right now, with urgent or high-priority jobs not started yet and jobs marked done today that wait to be verified.">?</i></span>
+                <?php foreach ($staffWorkload as $staff): ?>
+                    <?php
+                    $rmWlOpen = (int)$staff['active_tasks'];
+                    $rmWlHigh = (int)$staff['high_priority_pending'];
+                    $rmWlDone = (int)$staff['completed_today'];
+                    ?>
+                    <span class="ops-workload-chip" role="listitem"><strong><?php echo htmlspecialchars($staff['username']); ?></strong> <?php echo $rmWlOpen; ?> open<?php if ($rmWlHigh > 0): ?> <span class="ops-workload-chip__high">&middot; <?php echo $rmWlHigh; ?> high priority</span><?php endif; ?><?php if ($rmWlDone > 0): ?> &middot; <?php echo $rmWlDone; ?> done today<?php endif; ?></span>
+                <?php endforeach; ?>
             </div>
         <?php endif; ?>
-
-        <?php if ($opsPayload) { require __DIR__ . '/includes/ops-timeline-view.php'; } ?>
 
         <!-- Maintenance Schedules Table -->
         <?php
@@ -2486,22 +2587,30 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
             openAdminModal('scheduleModal');
         }
 
-        function selectAllRooms() {
-            const checkboxes = document.querySelectorAll('.room-checkbox');
-            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-            checkboxes.forEach(cb => {
-                cb.checked = !allChecked;
-                const card = cb.closest('.room-needs-card');
-                if (card) card.classList.toggle('selected', !allChecked);
+        // Rooms needing work list: only the rows on screen (the list is paged) are ticked by the header box.
+        function rmSelectVisibleRooms(checked) {
+            document.querySelectorAll('.ops-needs-row').forEach(function (row) {
+                if (row.hidden) return;
+                var cb = row.querySelector('.room-checkbox');
+                if (!cb) return;
+                cb.checked = checked;
+                row.classList.toggle('selected', checked);
             });
             updateSelectedCount();
         }
 
-        function toggleRoomCard(card) {
-            const cb = card.querySelector('.room-checkbox');
-            if (!cb) return;
-            cb.checked = !cb.checked;
-            card.classList.toggle('selected', cb.checked);
+        function rmRoomTick(cb) {
+            var row = cb.closest('.ops-needs-row');
+            if (row) row.classList.toggle('selected', cb.checked);
+            updateSelectedCount();
+        }
+
+        function rmClearRoomTicks() {
+            document.querySelectorAll('.room-checkbox:checked').forEach(function (cb) {
+                cb.checked = false;
+                var row = cb.closest('.ops-needs-row');
+                if (row) row.classList.remove('selected');
+            });
             updateSelectedCount();
         }
 
@@ -2509,8 +2618,42 @@ $opsPage = ['list' => '#maintenanceSchedulesContainer', 'table' => '#maintenance
             const count = document.querySelectorAll('.room-checkbox:checked').length;
             const countEl = document.getElementById('selectedCount');
             const btn = document.getElementById('bulkAssignBtn');
+            const bar = document.getElementById('rmBulkBar');
+            const barCount = document.getElementById('rmBulkCount');
+            const all = document.getElementById('rmSelectAllRooms');
             if (countEl) countEl.textContent = count;
+            if (barCount) barCount.textContent = count;
             if (btn) btn.disabled = count === 0;
+            if (bar) bar.hidden = count === 0;
+            if (all) {
+                const shown = Array.from(document.querySelectorAll('.ops-needs-row')).filter(function (r) { return !r.hidden; })
+                    .map(function (r) { return r.querySelector('.room-checkbox'); }).filter(Boolean);
+                const on = shown.filter(function (c) { return c.checked; }).length;
+                all.checked = shown.length > 0 && on === shown.length;
+                all.indeterminate = on > 0 && on < shown.length;
+            }
+        }
+
+        // Per-row Assign. A room with an open job gives that job to the person (bulk_schedules assign, one id);
+        // a room with no job gets a new one (bulk_assign_rooms, one room, inspection, medium priority).
+        function rmRowAssign(select, roomId, jobId, roomLabel) {
+            var staffId = select.value;
+            if (!staffId) return;
+            var staffName = select.options[select.selectedIndex].text;
+            select.value = '';
+            if (jobId > 0) {
+                var jf = document.getElementById('rmRowAssignJobForm');
+                if (!jf) return;
+                document.getElementById('rmRowAssignJobId').value = jobId;
+                document.getElementById('rmRowAssignJobTo').value = staffId;
+                rmConfirm(jf, 'Give the open job on room ' + roomLabel + ' to ' + staffName + '?', 'Assign', 'btn-primary');
+                return;
+            }
+            var rf = document.getElementById('rmRowAssignRoomForm');
+            if (!rf) return;
+            document.getElementById('rmRowAssignRooms').value = JSON.stringify([roomId]);
+            document.getElementById('rmRowAssignRoomTo').value = staffId;
+            rmConfirm(rf, 'Create an inspection job for room ' + roomLabel + ' and assign it to ' + staffName + '?', 'Assign', 'btn-primary');
         }
 
         // Update selected room IDs when form is submitted

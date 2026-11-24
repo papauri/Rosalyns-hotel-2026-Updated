@@ -1,0 +1,352 @@
+/* ==========================================================================
+   Loaded by housekeeping.php AND room-maintenance.php (keep both pages the same shape).
+   Shared ops-page layout (owner 2026-11-24): one strip of count chips, a dense
+   "Needs action" list, one slim workload row. Generic .ops-* names so the
+   Maintenance page uses the same markup. Colours: admin tokens (admin-kpi.css
+   :root) and the same hues the timeline uses for Dirty / Cleaning / Inspection.
+   ========================================================================== */
+.status-pill.blocked {
+    background: #fdeced;
+    color: #a8373f;
+}
+
+.status-pill.occupied {
+    background: var(--ck-soft, #f7f3ee);
+    color: var(--ck-muted, #786d62);
+}
+
+/* Strip: one row of compact chips; scrolls sideways inside itself on a phone */
+.ops-page-strip {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(150px, 1fr);
+    gap: 8px;
+    min-width: 0;
+    margin: 0 0 12px;
+    padding-bottom: 2px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+}
+
+.ops-chip {
+    --ops-tone: var(--ck-muted, #786d62);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 6px 12px;
+    font: inherit;
+    text-align: left;
+    color: var(--ck-text, #1f2a37);
+    background: var(--ck-surface, #fffdfb);
+    border: 1px solid var(--ck-line, #ebe4da);
+    border-left: 3px solid var(--ops-tone);
+    border-radius: var(--ck-radius-sm, 12px);
+    cursor: pointer;
+    scroll-snap-align: start;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ops-chip--bad { --ops-tone: #b91c1c; }
+.ops-chip--warn { --ops-tone: #9a4a08; }
+.ops-chip--info { --ops-tone: #1d4ed8; }
+.ops-chip--good { --ops-tone: var(--ck-good, #3f8f5a); }
+.ops-chip--plain { --ops-tone: var(--ck-muted, #786d62); }
+
+.ops-chip:hover {
+    background: var(--ck-softer, #fbf8f4);
+    border-color: var(--ck-line-strong, #ddd3c6);
+    border-left-color: var(--ops-tone);
+}
+
+.ops-chip:focus-visible {
+    outline: 2px solid var(--ck-gold, #8f6a35);
+    outline-offset: 2px;
+}
+
+.ops-chip.is-active {
+    background: var(--ck-soft, #f7f3ee);
+    border-color: var(--ck-ink, #231f1c);
+    border-left-color: var(--ops-tone);
+}
+
+.ops-page-strip .ops-chip .ops-chip__value {
+    margin: 0;
+    padding: 0;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--ops-tone);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.ops-chip__label {
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--ck-muted, #786d62);
+}
+
+.ops-chip__label .help {
+    width: 16px;
+    height: 16px;
+    margin: -3px 0 -3px 4px;
+    font-size: 10px;
+}
+
+/* Panel */
+.ops-panel {
+    margin: 0 0 12px;
+    padding: 14px 16px;
+    background: var(--ck-surface, #fffdfb);
+    border: 1px solid var(--ck-line, #ebe4da);
+    border-radius: var(--ck-radius-sm, 12px);
+}
+
+.ops-panel__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    font-size: 16px;
+    color: var(--ck-ink, #231f1c);
+}
+
+.ops-empty {
+    margin: 0;
+    padding: 12px 0;
+    color: var(--ck-muted, #786d62);
+}
+
+/* Needs-action list (a ul of rows so the shared pager gives 10 / 25 / 50 / All) */
+.ops-needs-list__table {
+    min-width: 0;
+}
+
+.ops-needs-list__cols,
+.ops-needs-row {
+    display: grid;
+    grid-template-columns: 44px minmax(90px, .8fr) minmax(130px, 1.3fr) minmax(140px, 1.6fr) minmax(100px, .9fr) minmax(130px, 1fr) minmax(120px, .9fr);
+    gap: 0 8px;
+    align-items: center;
+}
+
+.ops-needs-list__cols {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--ck-line-strong, #ddd3c6);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--ck-muted, #786d62);
+}
+
+.ops-needs-list ul.occupied-rooms-list.ck-rows {
+    display: block;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ops-needs-row {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--ck-line, #ebe4da);
+    font-size: 13px;
+}
+
+.ops-needs-row[hidden] {
+    display: none;
+}
+
+.ops-needs-row.selected {
+    background: var(--ck-soft, #f7f3ee);
+}
+
+.ops-cell {
+    min-width: 0;
+}
+
+.ops-cell--status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.ops-cell--status .ops-cell__sub {
+    flex-basis: 100%;
+}
+
+.ops-needs-list__cols .ops-cell--status {
+    display: block;
+}
+
+.ops-cell__main,
+.ops-cell__sub {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.ops-cell__sub {
+    font-size: 12px;
+    color: var(--ck-muted, #786d62);
+}
+
+.ops-cell__none {
+    color: var(--ck-muted, #786d62);
+}
+
+.ops-assign-select {
+    width: 100%;
+    min-width: 0;
+}
+
+.ops-row-btn {
+    white-space: nowrap;
+}
+
+.room-guest-line {
+    color: var(--ck-muted, #786d62);
+}
+
+/* "What the columns mean": the header row's "?" text, shown only where the header row is hidden */
+.ops-col-help {
+    display: none;
+}
+
+/* Sticky bulk bar: appears when a room is ticked */
+.ops-bulk-bar {
+    position: sticky;
+    bottom: 12px;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--ck-surface, #fffdfb);
+    border: 2px solid var(--ck-ink, #231f1c);
+    border-radius: var(--ck-radius-sm, 12px);
+}
+
+.ops-bulk-bar[hidden] {
+    display: none;
+}
+
+.ops-bulk-bar__count {
+    margin-right: auto;
+    font-weight: 600;
+}
+
+/* Workload: one slim row of chips */
+.ops-workload-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    margin: 0 0 16px;
+    font-size: 12.5px;
+}
+
+.ops-workload-chips__label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--ck-muted, #786d62);
+}
+
+.ops-workload-chips__label .help {
+    width: 16px;
+    height: 16px;
+    margin: -3px 0 -3px 4px;
+    font-size: 10px;
+}
+
+.ops-workload-chip {
+    padding: 4px 10px;
+    background: var(--ck-surface, #fffdfb);
+    border: 1px solid var(--ck-line, #ebe4da);
+    border-radius: 999px;
+    color: var(--ck-text, #1f2a37);
+}
+
+.ops-workload-chip__high {
+    font-weight: 600;
+    color: var(--ck-bad, #a63d32);
+}
+
+/* Phone + tablet: list rows stack (header row hidden, its "?" text moves to the disclosure) */
+@media (max-width: 1024px) {
+    .ops-needs-list__cols {
+        display: none;
+    }
+
+    .ops-col-help {
+        display: block;
+        margin: 10px 0 0;
+    }
+
+    .ops-needs-row {
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        grid-template-areas:
+            "tick room room"
+            "tick status status"
+            "tick guest guest"
+            "tick assigned assigned"
+            "tick assign left";
+        gap: 4px 8px;
+        padding: 10px 0;
+    }
+
+    .ops-needs-row > .ops-cell--tick { grid-area: tick; align-self: start; }
+    .ops-needs-row > .ops-cell--room { grid-area: room; }
+    .ops-needs-row > .ops-cell--status { grid-area: status; }
+    .ops-needs-row > .ops-cell--guest,
+    .ops-needs-row > .ops-cell--job { grid-area: guest; }
+    .ops-needs-row > .ops-cell--assigned { grid-area: assigned; display: flex; gap: 6px; align-items: baseline; }
+    .ops-needs-row > .ops-cell--assign { grid-area: assign; }
+    .ops-needs-row > .ops-cell--left,
+    .ops-needs-row > .ops-cell--open { grid-area: left; }
+
+    .ops-needs-row > .ops-cell--assigned::before {
+        content: "Assigned to";
+        font-size: 12px;
+        color: var(--ck-muted, #786d62);
+    }
+
+    .ops-row-btn,
+    .ops-assign-select {
+        min-height: 44px;
+    }
+
+    .ops-bulk-bar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ops-bulk-bar[hidden] {
+        display: none;
+    }
+
+    .ops-bulk-bar__count {
+        grid-column: 1 / -1;
+    }
+
+    .ops-bulk-bar > :is(select, button) {
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+    }
+}
+
+@media (max-width: 480px) {
+    .ops-panel {
+        padding: 12px;
+    }
+}
