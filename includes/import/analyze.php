@@ -325,11 +325,12 @@ if (!function_exists('import_analyze_file')) {
                         if ($hv === null || $hv['unit'] !== $fd['value']) {
                             $bad[] = $where . ': unit "' . $fd['value'] . '" is not the unit word written in ' . $fd['source'];
                         }
-                    } elseif ($f === 'unit' && in_array($fd['how'] ?? '', ['stock-unit:pack-cell', 'stock-unit:size-cell'], true)) {
+                    } elseif (($f === 'unit' && in_array($fd['how'] ?? '', ['stock-unit:pack-cell', 'stock-unit:size-cell'], true))
+                        || ($f === 'pack_name' && ($fd['how'] ?? '') === 'pack-name:size-cell')) {
                         // "Case of 24" read as the unit "Case": the word must be written, as a whole word, in that very cell
                         $cv = is_string($cell['v']) ? import_norm_ws($cell['v']) : '';
                         if (!is_string($fd['value']) || $fd['value'] === '' || !preg_match('/(?<![\p{L}])' . preg_quote($fd['value'], '/') . '(?![\p{L}])/u', $cv)) {
-                            $bad[] = $where . ': unit "' . $fd['value'] . '" is not a word written in ' . $fd['source'];
+                            $bad[] = $where . ': ' . $f . ' "' . $fd['value'] . '" is not a word written in ' . $fd['source'];
                         }
                     } elseif ($f === 'unit_ml' && ($fd['how'] ?? '') === 'unit-cell-size') {
                         // a unit cell with its size ("Bottle(750ML)"): the ONE size written in that very cell must give the same ml
@@ -352,6 +353,19 @@ if (!function_exists('import_analyze_file')) {
                         $txt = is_bool($cell['v']) ? '' : import_norm_ws(($cell['raw'] !== null && is_numeric($cell['v'])) ? $cell['raw'] : (string)$cell['v']);
                         if ($txt !== $fd['value']) {
                             $bad[] = $where . ': ' . $f . ' "' . $fd['value'] . '" does not match ' . $fd['source'];
+                        }
+                    }
+                }
+                // the crates-or-bottles words (owner 2026-11-25): "in bottles" makes the served-by word the stock unit, so it and the crate word must
+                // each be a whole word written in the cell they name
+                $cpk = $row['pack_rule']['count_pack'] ?? null;
+                if (is_array($cpk)) {
+                    foreach ([['served', 'served_src'], ['word', 'word_src']] as [$wk, $sk]) {
+                        $cell = import_source_cell($bySheet, (string)($cpk[$sk] ?? ''));
+                        $cv = ($cell !== null && is_string($cell['v'])) ? import_norm_ws($cell['v']) : '';
+                        $w = (string)($cpk[$wk] ?? '');
+                        if ($w === '' || !preg_match('/(?<![\p{L}])' . preg_quote($w, '/') . '(?![\p{L}])/iu', $cv)) {
+                            $bad[] = $where . ': the ' . ($wk === 'served' ? 'served-by' : 'unit') . ' word "' . $w . '" is not written in ' . (string)($cpk[$sk] ?? '(no cell)');
                         }
                     }
                 }

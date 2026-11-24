@@ -47,6 +47,15 @@ if (!function_exists('import_pack_vocab')) {
     }
 
     /** One unit word in the stock's spelling, lower case ("Bottles" -> "bottle", "ctn" -> "carton", "Each" -> "pcs"). */
+    /**
+     * A price per one and a price per pack of n agree when one x n is within max(1, 2% of the pack price) of it: a per-bottle price
+     * written rounded (4,791.67 for 115,000 / 24) still agrees. Never a raw float equality.
+     */
+    function import_pack_prices_agree(float $one, int $n, float $packPrice): bool
+    {
+        return $n > 0 && abs($one * $n - $packPrice) <= max(1.0, 0.02 * $packPrice);
+    }
+
     function import_pack_canon(string $w, array $vocab): string
     {
         $k = mb_strtolower(import_norm_ws($w));
@@ -361,7 +370,7 @@ if (!function_exists('import_pack_vocab')) {
         // the per-one price column next to a per-pack one: the per-one price is used, the pack price only checks it
         if (isset($in['unit_price']) && is_numeric($in['unit_price']) && (float)$in['unit_price'] > 0 && $out['pack']) {
             $one = (float)$in['unit_price'];
-            if (abs($one * $out['pack'] - $price) > max(1.0, 0.02 * $price)) {
+            if (!import_pack_prices_agree($one, (int)$out['pack'], (float)$price)) {
                 $out['ask'] = 'pack-price-differs';
             }
         }

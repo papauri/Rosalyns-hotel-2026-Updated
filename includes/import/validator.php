@@ -154,7 +154,13 @@ if (!function_exists('import_validate_sheet')) {
             return;
         }
         if ($d['unit'] !== null && $d['unit_how'] !== 'unit') {
-            $row['fields']['unit'] = ['value' => $d['unit'], 'source' => (string)$d['unit_src'], 'how' => 'stock-unit:' . $d['unit_how']];
+            // a bought-as cell with its size ("Bottle(750ML)"): the unit is the word in that cell, checked as a whole word (not the whole cell)
+            $uHow = ($d['unit_how'] === 'bought' && ($f['pack_name']['how'] ?? '') === 'pack-name:size-cell' && (string)$d['unit_src'] === (string)$f['pack_name']['source'])
+                ? 'size-cell' : $d['unit_how'];
+            $row['fields']['unit'] = ['value' => $d['unit'], 'source' => (string)$d['unit_src'], 'how' => 'stock-unit:' . $uHow];
+            if ($uHow === 'size-cell') {
+                $row['fields']['unit']['written'] = (string)($f['pack_name']['written'] ?? '');
+            }
         }
         if ($hasPackPrice && !$hasOne) {
             // the per-pack price is the row's price (the same cell); its pack is divided below (resolve) only as decided here
@@ -178,6 +184,27 @@ if (!function_exists('import_validate_sheet')) {
         $row['pack_rule'] = ['decided' => $d['decided'] && $d['ask'] === '', 'unit_how' => $d['unit_how'], 'pack' => $d['pack'], 'pack_src' => $d['pack_src'],
             'pack_name' => $d['pack_name'], 'pack_name_src' => $d['pack_name_src'], 'info_pack' => $d['info_pack'], 'reason' => $d['reason'], 'ask' => $d['ask'],
             'cost' => $d['cost'], 'sell' => $sell, 'sell_src' => $sellSrc, 'served_portion' => $d['served_portion'], 'count_pack' => $d['count_pack'] ?? null];
+        $tp = $d['count_pack']['two_price'] ?? null;
+        if ($d['ask'] === 'count-pack' && is_array($tp) && $tp['one'] > 0 && $tp['pack'] > 0
+            && !import_pack_prices_agree((float)$tp['one'], (int)$d['count_pack']['size'], (float)$tp['pack'])) {
+            // the price per bottle and the price per crate disagree (owner 2026-11-25): never a silent pick, this row asks which price is right.
+            // Each choice shows what one bottle and one crate then cost; the crates-or-bottles answer then says which of the two is the stock unit.
+            $pk = (int)$d['count_pack']['size'];
+            $ow = mb_strtolower((string)$d['count_pack']['served']);
+            $cw = mb_strtolower((string)$d['count_pack']['word']);
+            $one = (float)$tp['one'];
+            $pp = (float)$tp['pack'];
+            $rowQs[] = import_q('pack-price-check', 'Row ' . $r . ' "' . $f['item_name']['value'] . '": the price per ' . $ow . ' is ' . import_fmt_money($one) . ' (' . $tp['one_src']
+                . '), but the price per ' . $cw . ' is ' . import_fmt_money($pp) . ' (' . $tp['pack_src'] . ') for ' . $pk . ', which is ' . import_fmt_money(round($pp / $pk, 4))
+                . ' per ' . $ow . '. They do not agree. Which is right?', [
+                'sheet' => $sheetName, 'row' => $r, 'cells' => [$tp['one_src'], $tp['pack_src']], 'count_pack' => true,
+                'options' => [['key' => 'unit', 'label' => 'The price per ' . $ow . ': ' . import_fmt_money($one) . ' per ' . $ow . ' (one ' . $cw . ' = ' . import_fmt_money($one) . ' x ' . $pk
+                    . ' = ' . import_fmt_money(round($one * $pk, 4)) . ')'],
+                    ['key' => 'pack', 'label' => 'The price per ' . $cw . ' divided by ' . $pk . ': ' . import_fmt_money(round($pp / $pk, 4)) . ' per ' . $ow . ' (one ' . $cw . ' = '
+                    . import_fmt_money($pp) . ')']],
+            ]);
+            return;
+        }
         if ($d['ask'] === '' || $d['ask'] === 'count-pack') {
             return;         // count-pack: "in crates or in bottles?" is asked once per sheet by the resolver (owner 2026-11-25), never per row
         }
@@ -629,21 +656,40 @@ if (!function_exists('import_validate_sheet')) {
 
             // ---- a unit cell with its size ("Bottle(750ML)", "Carton (1000 ml)", owner 2026-11-25): the unit is the word, the size is the bottle size,
             // both from that one cell. A size column on the row that says otherwise: neither size is used (a warning; step 3 asks), never a pick.
-            if (isset($row['fields']['unit']) && ($row['fields']['unit']['how'] ?? '') === 'as-written') {
-                $us = import_validate_unit_size((string)$row['fields']['unit']['value'], $packVocab);
-                if ($us !== null) {
-                    $uSrc = (string)$row['fields']['unit']['source'];
-                    $uCol = (array)($struct['columns'][$by['unit']] ?? []);
-                    $row['fields']['unit'] = ['value' => $us[0], 'source' => $uSrc, 'how' => 'stock-unit:size-cell'];
-                    if (!isset($row['fields']['unit_ml'])) {
-                        $row['fields']['unit_ml'] = ['value' => $us[1], 'source' => $uSrc, 'how' => 'unit-cell-size', 'ml_mul' => null,
-                            'header' => (string)($uCol['header'] ?? 'Unit'), 'header_ref' => (string)($uCol['header_ref'] ?? ''), 'measure' => ''];
-                    } elseif (abs((float)$row['fields']['unit_ml']['value'] - $us[1]) >= 0.005) {
-                        $um = $row['fields']['unit_ml'];
-                        unset($row['fields']['unit_ml']);
-                        $row['warnings'][] = ['code' => 'measure-col', 'text' => 'The unit cell ' . $uSrc . ' says ' . import_measure_fmt($us[1]) . ' ml but "' . (string)($um['header'] ?? '')
-                            . '" (' . (string)$um['source'] . ') says ' . import_measure_fmt((float)$um['value']) . ' ml, so neither size is used.'];
+            // The same for a "Unit Bought As" cell ("Bottle(750ML)", owner 2026-11-25): the word is what it is bought as; its size is the stock unit's
+            // size only when one is bought and counted as the same thing (no pack size above 1, no other Unit word). Otherwise the size is not used.
+            $mlClash = false;
+            foreach (['unit' => 'stock-unit:size-cell', 'pack_name' => 'pack-name:size-cell'] as $sf => $sHow) {
+                if (!isset($row['fields'][$sf]) || ($row['fields'][$sf]['how'] ?? '') !== 'as-written') {
+                    continue;
+                }
+                $us = import_validate_unit_size((string)$row['fields'][$sf]['value'], $packVocab);
+                if ($us === null) {
+                    continue;
+                }
+                $uSrc = (string)$row['fields'][$sf]['source'];
+                $uCol = (array)($struct['columns'][$by[$sf]] ?? []);
+                $row['fields'][$sf] = ['value' => $us[0], 'source' => $uSrc, 'how' => $sHow, 'written' => (string)$row['fields'][$sf]['value']];   // written: the cell as typed (older saved answers were keyed on it)
+                if ($sf === 'pack_name') {
+                    $ps = $row['fields']['pack_size']['value'] ?? null;
+                    $uw = isset($row['fields']['unit']) ? (string)$row['fields']['unit']['value'] : '';
+                    if (($ps !== null && (!is_numeric($ps) || abs((float)$ps - 1) > 1e-9))
+                        || ($uw !== '' && import_pack_canon($uw, $packVocab) !== import_pack_canon($us[0], $packVocab))) {
+                        continue;       // "Crate (330ML)" with 24 to a crate: 330 ml is not the size of a crate, so it is not used
                     }
+                }
+                if ($mlClash) {
+                    continue;
+                }
+                if (!isset($row['fields']['unit_ml'])) {
+                    $row['fields']['unit_ml'] = ['value' => $us[1], 'source' => $uSrc, 'how' => 'unit-cell-size', 'ml_mul' => null,
+                        'header' => (string)($uCol['header'] ?? ($sf === 'unit' ? 'Unit' : 'Bought as')), 'header_ref' => (string)($uCol['header_ref'] ?? ''), 'measure' => ''];
+                } elseif (abs((float)$row['fields']['unit_ml']['value'] - $us[1]) >= 0.005) {
+                    $um = $row['fields']['unit_ml'];
+                    unset($row['fields']['unit_ml']);
+                    $mlClash = true;
+                    $row['warnings'][] = ['code' => 'measure-col', 'text' => 'The ' . ($sf === 'unit' ? 'unit' : 'bought-as') . ' cell ' . $uSrc . ' says ' . import_measure_fmt($us[1]) . ' ml but "'
+                        . (string)($um['header'] ?? '') . '" (' . (string)$um['source'] . ') says ' . import_measure_fmt((float)$um['value']) . ' ml, so neither size is used.'];
                 }
             }
 

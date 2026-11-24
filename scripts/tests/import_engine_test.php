@@ -2328,6 +2328,125 @@ $frBQ = array_values(array_filter($frB['ci'], function ($q) { return strpos($q['
 $t($frBQ !== [] && $frBQ['suggest'] === null && strpos(json_encode($frBQ['options']), '(suggested)') === false,
     'count unit: decimals and a value column that points at shots disagree = no suggestion, the person decides ' . json_encode($frBQ['suggest'] ?? null));
 
+// ---- leftovers of the crates-or-bottles patch (owner 2026-11-25) ----
+// 1: the per-row list under the question names its rows from a server field, never by matching the question text
+$pl6 = import_review_question_payloads(['res' => $cp0['res'], 'analysis' => $cp0['an'], 'answers' => []]);
+$pl6k = [];
+foreach ($pl6 as $pq) { $pl6k[$pq['key']] = $pq['count_kind']; }
+$t(($pl6k[$cpQ[0]['qkey']] ?? '') === 'pack' && ($pl6k[$cpShot[0]['qkey']] ?? '') === 'measure' && ($pl6k[$cpGl[0]['qkey']] ?? '') === 'measure'
+    && !in_array('pack', array_values(array_diff_key($pl6k, [$cpQ[0]['qkey'] => 1])), true)
+    && count(array_filter($pl6, function ($pq) { return $pq['type'] !== 'count-in' && $pq['count_kind'] !== null; })) === 0,
+    'leftover 1: the crates-or-bottles question says count_kind "pack" (its list says items), shots / glasses say "measure" (drinks), other questions none ' . json_encode($pl6k));
+// 2: a size in the "Unit Bought As" cell is read like the unit cell (word + size from that one cell); never the size of a crate of 24
+$bh6 = ['Item Name', 'Categories', 'Total Balance', 'Unit Price (MWK)', 'Selling price', 'Stock Value', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'];
+$bR6 = [$bh6, ['Kudu Brandy', 'BRANDYS', '57', '30000', '4000', '68400', 'Bottle(750ML)', '1', 'Shot'],
+    ['Nyala Juice', 'MINERALS', '4', '16000', '8000', '64000', 'Carton (1000ML)', '1', 'Glass'],
+    ['Zebra Lager', 'LOCAL BEERS', '40', '48000', '6000', '96000', 'Crate (330ML)', '20', 'Bottle']];
+$b6 = $ciRun([], $bR6);
+$b6r = [];
+foreach ($b6['an']['sheets'][0]['rows'] as $rw) { $b6r[$rw['fields']['item_name']['value']] = $rw['fields']; }
+$t(($b6r['Kudu Brandy']['pack_name']['value'] ?? '') === 'Bottle' && ($b6r['Kudu Brandy']['pack_name']['how'] ?? '') === 'pack-name:size-cell'
+    && ($b6r['Kudu Brandy']['unit_ml']['value'] ?? null) == 750 && ($b6r['Kudu Brandy']['unit_ml']['source'] ?? '') === ($b6r['Kudu Brandy']['pack_name']['source'] ?? 'x')
+    && mb_strtolower((string)($b6r['Kudu Brandy']['unit']['value'] ?? '')) === 'bottle'
+    && ($b6r['Nyala Juice']['pack_name']['value'] ?? '') === 'Carton' && ($b6r['Nyala Juice']['unit_ml']['value'] ?? null) == 1000
+    && !isset($b6r['Zebra Lager']['unit_ml']) && ($b6r['Zebra Lager']['pack_name']['value'] ?? '') === 'Crate' && $b6['inv'] === []
+    && mb_strtolower((string)$b6['items']['Kudu Brandy']['unit_raw']) === 'bottle' && mb_strtolower((string)$b6['items']['Nyala Juice']['unit_raw']) === 'carton',
+    'leftover 2: "Unit Bought As" = "Bottle(750ML)" / "Carton (1000ML)" = unit Bottle / Carton + 750 / 1,000 ml from that cell; "Crate (330ML)" with 20 to a crate = no size; nothing invented '
+    . json_encode([$b6r['Kudu Brandy']['unit'] ?? null, $b6r['Kudu Brandy']['unit_ml'] ?? null, $b6r['Zebra Lager']['unit_ml'] ?? null, $b6['inv']]));
+$b6s = array_values(array_filter($b6['ci'], function ($q) { return strpos($q['text'], 'in bottles or in shots') !== false; }))[0] ?? [];
+$b6m = $ciRun([($b6s['qkey'] ?? 'x') => ['key' => 'measure']], $bR6);
+$t($b6s !== [] && abs((float)$b6m['items']['Kudu Brandy']['balance'] - 1.9) < 1e-9 && $b6m['inv'] === []
+    && count(array_filter($b6m['open'], function ($q) { return $q['type'] === 'measure-n' && strpos($q['text'], 'Kudu Brandy') !== false; })) === 0,
+    'leftover 2: "in shots" uses the 750 ml from the bought-as cell (25 ml shot: 57 shots = 1.9 bottles), no "how many shots" question '
+    . json_encode([$b6m['items']['Kudu Brandy']['balance'] ?? null, $b6m['items']['Kudu Brandy']['qty_how'] ?? null]));
+// 3: a price per crate and a price per bottle that disagree: asked on the row (the item waits); each choice uses its own cell
+$dh6 = ['Item Name', 'Total Balance', 'Case Price', 'Unit Price', 'Stock Value', 'Unit', 'Total Per Unit', 'Served by'];
+$dR6 = [$dh6, ['Zebra Lager', '40', '50000', '2400', '100000', 'Crate', '20', 'Bottle'], ['Kob Lager', '30', '40000', '2000', '60000', 'Crate', '20', 'Bottle']];
+$d60 = $cpRun([], $dR6);
+$d6q = $cpPackQ($d60)[0] ?? [];
+$d6p = array_values(array_filter($d60['open'], function ($q) { return $q['type'] === 'pack-price-check' && !empty($q['count_pack']); }));
+$d6run = function (string $count, string $pick) use ($cpRun, $dR6, $d6q, $d6p) {
+    $a = [($d6q['qkey'] ?? 'x') => ['key' => $count]];
+    if ($pick !== '') { $a[$d6p[0]['qkey'] ?? 'y'] = ['key' => $pick]; }
+    return $cpRun($a, $dR6);
+};
+$d6w = $d6run('measure', '');
+$t(count($d6p) === 1 && strpos((string)$d6p[0]['text'], '"Zebra Lager": the price per bottle is 2,400') !== false && strpos((string)$d6p[0]['text'], 'which is 2,500 per bottle. They do not agree.') !== false
+    && array_column($d6p[0]['options'], 'key') === ['unit', 'pack'] && strpos($d6p[0]['options'][0]['label'], 'one crate = 2,400 x 20 = 48,000') !== false
+    && strpos($d6p[0]['options'][1]['label'], '2,500 per bottle (one crate = 50,000)') !== false
+    && $d6w['items']['Zebra Lager']['status'] === 'needs-answer' && $d6w['items']['Kob Lager']['status'] === 'ready' && $d6w['res']['can_confirm'] === false
+    && count(array_filter($cpPackQ($cpRun([], $cp2b))[0]['count_rows'] ?? [], 'is_array')) === 2
+    && count(array_filter($cpRun([], $cp2b)['open'], function ($q) { return $q['type'] === 'pack-price-check'; })) === 0,
+    'leftover 3: 2,400 a bottle vs 50,000 a crate of 20 (2,500) = a question on the row, never a silent pick; the item waits even after "in bottles"; prices that agree are not asked '
+    . json_encode([$d6p[0]['text'] ?? null, array_column($d6p[0]['options'] ?? [], 'label')]));
+$d6mu = $d6run('measure', 'unit');
+$d6mp = $d6run('measure', 'pack');
+$d6su = $d6run('stock', 'unit');
+$d6sp = $d6run('stock', 'pack');
+$d6v = function (array $x) { return import_vc_finish(import_vc_collect($x['an']), $x['res']['questions'], $x['res']['items']); };
+$zmu = $d6mu['items']['Zebra Lager'];
+$zmp = $d6mp['items']['Zebra Lager'];
+$zsu = $d6su['items']['Zebra Lager'];
+$zsp = $d6sp['items']['Zebra Lager'];
+$t($zmu['status'] === 'ready' && abs((float)$zmu['cost'] - 2400) < 1e-9 && $zmu['unit_raw'] === 'Bottle' && abs((float)$zmu['balance'] - 40) < 1e-9
+    && $zmp['status'] === 'ready' && abs((float)$zmp['cost'] - 2500) < 1e-9 && $zmp['unit_raw'] === 'Bottle' && $zmp['pack'] === 20
+    && $zsu['status'] === 'ready' && abs((float)$zsu['cost'] - 48000) < 1e-9 && $zsu['unit_raw'] === 'Crate'
+    && $zsp['status'] === 'ready' && abs((float)$zsp['cost'] - 50000) < 1e-9 && $zsp['unit_raw'] === 'Crate'
+    && $d6mu['inv'] === [] && $d6mp['inv'] === [] && $d6su['inv'] === [] && $d6sp['inv'] === [] && $d6mu['res']['can_confirm'] && $d6sp['res']['can_confirm'],
+    'leftover 3: bottles + per-bottle price = 2,400; bottles + crate price = 50,000 / 20 = 2,500; crates + per-bottle price = 2,400 x 20 = 48,000; crates + crate price = 50,000 '
+    . json_encode([$zmu['cost'], $zmp['cost'], $zsu['cost'], $zsp['cost'], $zmp['cost_how'], $zsu['cost_how']]));
+$v6mu = $d6v($d6mu);
+$v6mp = $d6v($d6mp);
+$t($v6mp['differ'] === 0 && $v6mu['differ'] === 1 && strpos((string)$zmp['cost_how'], '50,000 (') !== false && strpos((string)$zmp['cost_how'], ') / 20 = 2,500 per bottle.') !== false
+    && strpos((string)$zsu['cost_how'], '2,400 (') !== false && strpos((string)$zsu['cost_how'], ') x 20 = 48,000 per crate.') !== false,
+    'leftover 3: the value check follows the chosen price (Stock Value 100,000 = 40 x 2,500: the crate price agrees, the bottle price is one row off); the note says the sum and its cell '
+    . json_encode([$v6mp['differ'], $v6mu['differ'], $zmp['cost_how'], $zsu['cost_how']]));
+// 4: the "in crates" cost note is a plain reason with its cell, never the code "chosen-pack-price"
+$t(strpos((string)$z2s['cost_how'], 'chosen-pack-price') === false && strpos((string)$z2s['cost_how'], 'Counted by the crate (your answer): 48,000 per crate from ') === 0
+    && strpos((string)$zsp['cost_how'], 'chosen-pack-price') === false && strpos((string)$zsu['cost_how'], 'chosen-pack-price') === false && strpos((string)$zmp['cost_how'], 'chosen-pack-price') === false,
+    'leftover 4: "in crates" says "Counted by the crate (your answer): 48,000 per crate from <cell>", never a code ' . json_encode([$z2s['cost_how'] ?? null, $zsp['cost_how']]));
+// 5: an answer saved before "Bottle(750ML)" was split (its group key was the cell as typed) still counts: never asked again
+$sh6 = (string)$cpShot[0]['sheet'];
+$t(import_xq('count-in', $sh6 . '|shot|shot|bottle', '', [])['qkey'] === $cpShot[0]['qkey'], 'leftover 5 (set-up): the shots group key is sheet|shot|shot|bottle');
+$old6 = function (string $written) use ($sh6) { return import_xq('count-in', $sh6 . '|shot|shot|' . import_measure_singular(mb_strtolower($written)), '', [])['qkey']; };
+$lgA = [$cpQ[0]['qkey'] => ['key' => 'measure'], $cpGl[0]['qkey'] => ['key' => 'stock'],
+    $old6('Bottle(750ML)') => ['key' => 'measure'], $old6('Bottle (750 ml)') => ['key' => 'measure'], $old6('Bottle(1000ML)') => ['key' => 'measure']];
+$lg1 = $cpRun($lgA);
+$lg1q = array_values(array_filter($lg1['ci'], function ($q) { return strpos($q['text'], 'in bottles or in shots') !== false; }))[0] ?? [];
+$t($old6('Bottle(750ML)') !== $cpShot[0]['qkey'] && ($lg1q['answer'] ?? null) === 'measure' && $lg1['open'] === [] && $lg1['res']['can_confirm']
+    && abs($lg1['items']['Kudu Brandy']['balance'] - 2.28) < 1e-9 && abs($lg1['items']['Eland Gin']['balance'] - 2) < 1e-9,
+    'leftover 5: old "in shots" answers saved under "Bottle(750ML)" / "Bottle (750 ml)" / "Bottle(1000ML)" answer the new group: nothing asked again, 57 shots = 2.28 bottles '
+    . json_encode([$lg1q['answer'] ?? null, array_column($lg1['open'], 'type')]));
+$lgB = $lgA;
+$lgB[$old6('Bottle (750 ml)')] = ['key' => 'stock'];
+$lg2 = $cpRun($lgB);
+$lg2q = array_values(array_filter($lg2['ci'], function ($q) { return strpos($q['text'], 'in bottles or in shots') !== false; }))[0] ?? [];
+$lgC = $lgA;
+unset($lgC[$old6('Bottle(1000ML)')]);
+$lg3 = $cpRun($lgC);
+$lgD = $lgA + [$cpShot[0]['qkey'] => ['key' => 'stock']];
+$lg4 = $cpRun($lgD);
+$t(($lg2q['answer'] ?? null) === 'per-row' && $lg2['open'] === [] && abs($lg2['items']['Eland Gin']['balance'] - 50) < 1e-9 && abs($lg2['items']['Kudu Brandy']['balance'] - 2.28) < 1e-9
+    && $lg3['items']['Sable Whisky']['status'] === 'needs-answer' && $lg3['items']['Kudu Brandy']['status'] === 'ready' && $lg3['res']['can_confirm'] === false
+    && abs($lg4['items']['Kudu Brandy']['balance'] - 57) < 1e-9,
+    'leftover 5: mixed old answers = each drink its own (Eland Gin in bottles: 50); a drink with no old answer still waits; a new group answer wins over the old ones');
+// 6: the invariant checks the served-by and unit words of a crates-or-bottles row against their own cells
+$p6 = $csvRows($cpRows, 'bar_nov.csv');
+$an6 = import_analyze_file($p6, 'bar_nov.csv', $al);
+$cv6 = import_csv_read($p6, 'bar_nov.csv');
+$zi6 = null;
+foreach ($an6['sheets'][0]['rows'] as $i6 => $rw) { if ($rw['fields']['item_name']['value'] === 'Zebra Lager') { $zi6 = $i6; } }
+$ok6 = import_assert_no_invented_values($an6, $cv6);
+$an6a = $an6;
+$an6a['sheets'][0]['rows'][$zi6]['pack_rule']['count_pack']['served'] = 'Glass';
+$an6b = $an6;
+$an6b['sheets'][0]['rows'][$zi6]['pack_rule']['count_pack']['word'] = 'Pallet';
+$bad6a = import_assert_no_invented_values($an6a, $cv6);
+$bad6b = import_assert_no_invented_values($an6b, $cv6);
+$t($zi6 !== null && is_array($an6['sheets'][0]['rows'][$zi6]['pack_rule']['count_pack'] ?? null) && $ok6 === []
+    && count($bad6a) === 1 && strpos(json_encode($bad6a), 'Glass') !== false && count($bad6b) === 1 && strpos(json_encode($bad6b), 'Pallet') !== false,
+    'leftover 6: a served-by word ("Glass") or a unit word ("Pallet") not written in its own cell is caught by the invariant ' . json_encode([$bad6a, $bad6b]));
+
 echo "-- count measure saved on the item (owner 2026-11-22: \"No guess work\") --\n";
 $rbw = $ciG['items']['Red Box Wine'];
 $t(($rbw['measure_save']['big'] ?? '') === 'casket' && ($rbw['measure_save']['small'] ?? '') === 'glass' && ($rbw['measure_save']['n'] ?? null) === 20.0 && abs((float)$rbw['cost'] - 60000) < 1e-9,

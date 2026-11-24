@@ -521,7 +521,9 @@ if (!function_exists('import_match_header')) {
                     $pv = $pv ?? import_pack_vocab($aliases);
                     $wn = import_norm_text((string)$v);
                     $wk = $info['field'] === 'served_by' ? import_served_kind((string)$v, $pv) : import_pack_word_kind((string)$v, $pv);   // "Per shot", "Tot 25ml" (owner 2026-11-20)
-                    if ($wk !== '' || isset($pv['unit'][$wn]) || (is_string($v) && import_pack_parse_text($v, $pv) !== null)) {
+                    // a bought-as word with its size ("Bottle(750ML)", owner 2026-11-25) is a unit word too: the validator splits it (word + size, one cell)
+                    $wSized = $info['field'] === 'pack_name' && is_string($v) && function_exists('import_validate_unit_size') && import_validate_unit_size($v, $pv) !== null;
+                    if ($wk !== '' || isset($pv['unit'][$wn]) || $wSized || (is_string($v) && import_pack_parse_text($v, $pv) !== null)) {
                         $good++;
                     }
                 } else {

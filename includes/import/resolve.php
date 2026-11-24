@@ -1204,6 +1204,7 @@ if (!function_exists('import_resolve')) {
                         $fin['pack_auto'] = true;
                     }
                 }
+                $cpPick = null;         // a crates-or-bottles row whose two prices disagree: 'unit' | 'pack' as answered (pack-price-check)
                 foreach ($row['question_ids'] as $qid) {
                     $q = $qById[$qid] ?? null;
                     if (!$q) {
@@ -1296,7 +1297,13 @@ if (!function_exists('import_resolve')) {
                             break;
                         case 'pack-price-check':
                             // both a per-unit and a per-pack price, and they disagree: the person picks one (the per-unit price is the default reading)
-                            if ($a === 'pack' && isset($f['pack_price']) && !empty($pr['info_pack'])) {
+                            if (!empty($q['count_pack'])) {
+                                // a crates-or-bottles row (owner 2026-11-25): the price picked here is applied with that answer below
+                                $cpPick = in_array($a, ['unit', 'pack'], true) ? $a : null;
+                                if ($a === 'skip') {
+                                    $skip = 'Skipped by you.';
+                                }
+                            } elseif ($a === 'pack' && isset($f['pack_price']) && !empty($pr['info_pack'])) {
                                 $fin['price'] = $f['pack_price']['value'];
                                 $fin['price_source'] = $f['pack_price']['source'];
                                 $fin['price_how'] = 'chosen-pack-price';
@@ -1459,14 +1466,31 @@ if (!function_exists('import_resolve')) {
                         $fin['pack_name'] = (string)$cpk['word'];
                         $fin['pack_info'] = null;
                         if ($cpTwo !== null) {
-                            // the price per bottle is already per one: used exactly as written, never divided again (QA 2026-11-25)
-                            $fin['price'] = $cpTwo['one'];
-                            $fin['price_source'] = $cpTwo['one_src'];
+                            // the price per bottle is already per one: used exactly as written, never divided again (QA 2026-11-25). Two prices that
+                            // disagree are asked first (pack-price-check on the row): "the price per crate" = that price / N, from its own cell.
+                            $cpAgree = import_pack_prices_agree((float)$cpTwo['one'], $cpN, (float)$cpTwo['pack']);
                             $fin['pack_info'] = $cpN;
-                            $cpAgree = abs($cpTwo['pack'] / $cpN - $cpTwo['one']) <= max(0.5, 0.005 * $cpTwo['one']);
-                            $fin['pack_reason'] = 'Counted by the ' . $cpS . ' (your answer): the price per ' . $cpS . ' (' . $cpTwo['one_src'] . ') ' . import_pack_num($cpTwo['one'])
-                                . ' is used as written; the price per ' . $cpW . ' (' . $cpTwo['pack_src'] . ') ' . import_pack_num($cpTwo['pack']) . ' / ' . $cpN . ' = '
-                                . import_pack_num(round($cpTwo['pack'] / $cpN, 4)) . ($cpAgree ? ', which agrees.' : ', which does NOT agree: check both cells.');
+                            if (!$cpAgree && $cpPick === 'pack') {
+                                $fin['price'] = $cpTwo['pack'];
+                                $fin['price_source'] = $cpTwo['pack_src'];
+                                $fin['price_how'] = 'chosen-pack-price';
+                                $fin['price_raw'] = null;
+                                $fin['pack'] = $cpN;
+                                $fin['pack_source'] = $cpTwo['pack_src'];
+                                $fin['pack_cell'] = $cpk['size_src'] ?? null;
+                                $fin['pack_auto'] = true;
+                                $fin['pack_info'] = null;
+                                $fin['price_row'] = round($cpTwo['pack'] / $cpN, 4);
+                                $fin['pack_reason'] = 'Counted by the ' . $cpS . ' (your answer), at the price per ' . $cpW . ' (your answer): ' . import_pack_num($cpTwo['pack'])
+                                    . ' (' . $cpTwo['pack_src'] . ') / ' . $cpN . ' = ' . import_pack_num(round($cpTwo['pack'] / $cpN, 4)) . ' per ' . $cpS . '.';
+                            } else {
+                                $fin['price'] = $cpTwo['one'];
+                                $fin['price_source'] = $cpTwo['one_src'];
+                                $fin['price_row'] = $cpTwo['one'];
+                                $fin['pack_reason'] = 'Counted by the ' . $cpS . ' (your answer): ' . import_pack_num($cpTwo['one']) . ' per ' . $cpS . ' from ' . $cpTwo['one_src']
+                                    . ($cpAgree ? ', as written (the price per ' . $cpW . ' in ' . $cpTwo['pack_src'] . ' agrees with it).'
+                                        : ', as written (your answer: the price per ' . $cpS . ' is right, not ' . import_pack_num($cpTwo['pack']) . ' per ' . $cpW . ').');
+                            }
                         } elseif ($cpPrice !== null && $origPriceSource !== null) {
                             $fin['pack'] = $cpN;
                             $fin['pack_source'] = $origPriceSource;
@@ -1479,18 +1503,25 @@ if (!function_exists('import_resolve')) {
                             $fin['pack_reason'] = 'Counted by the ' . $cpS . ' (your answer), ' . $cpN . ' to a ' . $cpW . '.';
                         }
                     } elseif ($eff === 'stock' && $cpTwo !== null) {
-                        // the price per crate as written is the cost of one crate; the price per bottle is information only
-                        $fin['price'] = $cpTwo['pack'];
-                        $fin['price_source'] = $cpTwo['pack_src'];
+                        // counted in crates: the price per crate as written is the cost of one crate. Two prices that disagree are asked first; "the
+                        // price per bottle" then gives one crate = that price x N, from its own cell (the person's answer, shown in the note).
+                        $cpAgree = import_pack_prices_agree((float)$cpTwo['one'], $cpN, (float)$cpTwo['pack']);
                         $fin['price_how'] = 'chosen-pack-price';
                         $fin['price_raw'] = null;
                         $fin['pack_info'] = $cpN;
-                        $fin['price_row'] = $cpTwo['pack'];
-                        $cpAgree = abs($cpTwo['pack'] / $cpN - $cpTwo['one']) <= max(0.5, 0.005 * $cpTwo['one']);
-                        $fin['pack_reason'] = 'Counted in ' . import_measure_plural($cpW, 2) . ' (your answer): the price per ' . $cpW . ' (' . $cpTwo['pack_src'] . ') '
-                            . import_pack_num($cpTwo['pack']) . ' is used as written; the price per ' . $cpS . ' (' . $cpTwo['one_src'] . ') ' . import_pack_num($cpTwo['one'])
-                            . ($cpAgree ? ' agrees with it.' : ' does NOT agree with it (' . import_pack_num($cpTwo['one']) . ' x ' . $cpN . ' = '
-                            . import_pack_num(round($cpTwo['one'] * $cpN, 4)) . '): check both cells.');
+                        if (!$cpAgree && $cpPick === 'unit') {
+                            $fin['price'] = round($cpTwo['one'] * $cpN, 4);
+                            $fin['price_source'] = $cpTwo['one_src'];
+                            $fin['pack_reason'] = 'Counted by the ' . $cpW . ' (your answer), at the price per ' . $cpS . ' (your answer): ' . import_pack_num($cpTwo['one'])
+                                . ' (' . $cpTwo['one_src'] . ') x ' . $cpN . ' = ' . import_pack_num(round($cpTwo['one'] * $cpN, 4)) . ' per ' . $cpW . '.';
+                        } else {
+                            $fin['price'] = $cpTwo['pack'];
+                            $fin['price_source'] = $cpTwo['pack_src'];
+                            $fin['pack_reason'] = 'Counted by the ' . $cpW . ' (your answer): ' . import_pack_num($cpTwo['pack']) . ' per ' . $cpW . ' from ' . $cpTwo['pack_src']
+                                . ($cpAgree ? ', as written (the price per ' . $cpS . ' in ' . $cpTwo['one_src'] . ' agrees with it).'
+                                    : ', as written (your answer: the price per ' . $cpW . ' is right, not ' . import_pack_num($cpTwo['one']) . ' per ' . $cpS . ').');
+                        }
+                        $fin['price_row'] = (float)$fin['price'];
                     } elseif ($eff === 'stock') {
                         $fin['pack_info'] = $cpN;
                         $fin['pack_reason'] = 'Counted in ' . import_measure_plural($cpW, 2) . ' (your answer): the price is per ' . $cpW . ' (' . $cpN . ' '
@@ -1515,7 +1546,19 @@ if (!function_exists('import_resolve')) {
                         $rowAns = (string)($countIn[$row['uid']]['key'] ?? '');
                         $rowAns = in_array($rowAns, ['stock', 'measure'], true) ? $rowAns : '';
                         $grpAns = (string)($answers[$cuQ['qkey']]['key'] ?? '');
-                        $eff = $rowAns !== '' ? $rowAns : (in_array($grpAns, ['stock', 'measure'], true) ? $grpAns : '');
+                        $grpAns = in_array($grpAns, ['stock', 'measure'], true) ? $grpAns : '';
+                        // an import answered before unit cells with a size were split ("Bottle(750ML)" -> Bottle, owner 2026-11-25) kept its answer
+                        // under the group key of the cell as typed: that answer still counts for these rows, never asked again
+                        $legAns = '';
+                        $ufW = (string)($row['fields']['unit']['written'] ?? '');
+                        if ($grpAns === '' && $ufW !== '' && mb_strtolower($ufW) !== mb_strtolower($ciUnit)
+                            && mb_strtolower((string)($row['fields']['unit']['value'] ?? '')) === mb_strtolower($ciUnit)) {
+                            $legS = import_measure_singular(mb_strtolower((string)($synonyms[mb_strtolower($ufW)] ?? $ufW)));
+                            $legQ = import_xq('count-in', $sh['name'] . '|' . $rd['kind'] . '|' . $rd['word'] . '|' . $legS, '', []);
+                            $legAns = (string)($answers[$legQ['qkey']]['key'] ?? '');
+                            $legAns = in_array($legAns, ['stock', 'measure'], true) ? $legAns : '';
+                        }
+                        $eff = $rowAns !== '' ? $rowAns : ($grpAns !== '' ? $grpAns : $legAns);
                         $qSrcs = (array)($row['computed']['qty_total']['sources'] ?? []);
                         if (!isset($countGroups[$cuKey])) {
                             $countGroups[$cuKey] = ['rd' => $rd, 'sheet' => $sh['name'], 'unit' => $ciUnit, 'served' => trim((string)$fin['served_by']),
@@ -1523,7 +1566,7 @@ if (!function_exists('import_resolve')) {
                                 'value_head' => '', 'value_letter' => ''];
                         }
                         $cg = &$countGroups[$cuKey];
-                        $cg['rows'][] = ['uid' => (string)$row['uid'], 'name' => (string)$fin['name'], 'cell' => (string)($qSrcs[0] ?? $row['ref']), 'qty' => (float)$fin['qty'], 'answer' => $rowAns];
+                        $cg['rows'][] = ['uid' => (string)$row['uid'], 'name' => (string)$fin['name'], 'cell' => (string)($qSrcs[0] ?? $row['ref']), 'qty' => (float)$fin['qty'], 'answer' => $rowAns, 'legacy' => $legAns];
                         if (!isset($cg['frac']) && abs((float)$fin['qty'] - round((float)$fin['qty'])) > 0.001) {
                             $cg['frac'] = [(string)$fin['name'], (float)$fin['qty']];      // 2.28 cannot be a count of shots (owner 2026-11-25)
                         }
@@ -1659,6 +1702,32 @@ if (!function_exists('import_resolve')) {
             $xq = $ans(import_xq('count-in', $cuKey, $text, $opts, ['sheet' => $g['sheet'], 'cells' => array_slice(array_column($g['rows'], 'cell'), 0, 3),
                 'row_uids' => array_column($g['rows'], 'uid'), 'count_rows' => array_slice($g['rows'], 0, 500), 'count_rows_n' => $n, 'suggest' => $sug,
                 'count_words' => ['stock' => 'In ' . $units, 'measure' => 'In ' . $meas]]));
+            if ($xq['answer'] === null) {
+                // older saved answers (the cell as typed, see above): one answer for every row = the group's answer; mixed = each row's own
+                $legSet = [];
+                $legAll = true;
+                foreach ($g['rows'] as $lr) {
+                    if (($lr['answer'] ?? '') !== '') {
+                        continue;
+                    }
+                    if (($lr['legacy'] ?? '') === '') {
+                        $legAll = false;
+                        break;
+                    }
+                    $legSet[$lr['legacy']] = true;
+                }
+                if ($legAll && count($legSet) === 1) {
+                    $xq['answer'] = (string)array_key_first($legSet);
+                    $xq['answer_detail'] = ['key' => $xq['answer'], 'legacy' => true];
+                } elseif ($legAll && $legSet) {
+                    foreach ($g['rows'] as $li => $lr) {
+                        if (($lr['answer'] ?? '') === '') {
+                            $g['rows'][$li]['answer'] = $lr['legacy'];
+                        }
+                    }
+                    $xq['count_rows'] = array_slice($g['rows'], 0, 500);
+                }
+            }
             if ($xq['answer'] === null && !in_array('', array_column($g['rows'], 'answer'), true)) {
                 $xq['answer'] = 'per-row';      // every drink has its own answer: nothing left to ask
             }
@@ -1934,7 +2003,8 @@ if (!function_exists('import_resolve')) {
                     $costHow = $packAuto && $packReason !== '' ? $packReason : 'case price / pack size ' . $pack;
                 } else {
                     $cost = round((float)$first['price'], 4);
-                    $costHow = ($packReason !== '' && ($first['price_how'] ?? 'as-written') === 'as-written') ? $packReason : ($first['price_how'] ?? 'as-written');
+                    $costHow = ($packReason !== '' && in_array($first['price_how'] ?? 'as-written', ['as-written', 'chosen-pack-price'], true)) ? $packReason
+                        : (($first['price_how'] ?? '') === 'chosen-pack-price' ? 'The price per pack as written (' . $first['price_source'] . '), your answer.' : ($first['price_how'] ?? 'as-written'));
                 }
             }
             // ---- a price column headed "per tot": the price of ONE measure. Never multiplied by N into a stock-unit cost; asked (Step U2 d, accounting gate) ----

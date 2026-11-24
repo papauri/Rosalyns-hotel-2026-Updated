@@ -681,7 +681,7 @@ if (!function_exists('import_job_analyse')) {
             return ['ok' => false, 'error' => $m, 'can_confirm' => false, 'reanalysed' => false];
         };
         if (!in_array($key, ['stock', 'measure', ''], true)) {
-            return $fail('That is not one of the choices for this drink.');
+            return $fail('That is not one of the choices for this item.');
         }
         $state = import_job_state($pdo, $jobId);
         if (!$state) {
@@ -692,7 +692,7 @@ if (!function_exists('import_job_analyse')) {
         }
         $q = import_job_find_question($state, $questionId);
         if (!$q || ($q['type'] ?? '') !== 'count-in' || !in_array($uid, array_map('strval', (array)$q['row_uids']), true)) {
-            return $fail('That drink does not belong to this question.');
+            return $fail('That item does not belong to this question.');
         }
         $answers = $state['answers'];
         if ($key === '') {
@@ -891,6 +891,7 @@ if (!function_exists('import_job_analyse')) {
                 // needed) and the two answer words for the per-drink choice
                 'count_rows' => $q['count_rows'] ?? null, 'count_rows_n' => $q['count_rows_n'] ?? null, 'suggest' => $q['suggest'] ?? null,
                 'count_words' => $q['count_words'] ?? null,
+                'count_kind' => !empty($q['pack_count']) ? 'pack' : (($q['type'] ?? '') === 'count-in' ? 'measure' : null),   // pack = crates or bottles (rows), measure = shots / glasses (drinks)
             ];
             // #10: a suggested reading of this column ("Suggested: Shots per bottle (measure: shot, unit: bottle)"); applied only by "Use this"
             if ($q['type'] === 'mapping-unsure' && ($q['answer'] ?? null) === null) {

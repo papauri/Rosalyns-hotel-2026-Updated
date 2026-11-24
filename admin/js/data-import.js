@@ -887,17 +887,18 @@
             var rows = q.count_rows || [], words = q.count_words || {};
             var total = q.count_rows_n || rows.length;
             var own = rows.filter(function (x) { return !!x.answer; }).length;
+            var nn = q.count_kind === 'pack' ? 'item' : 'drink';      // crates or bottles = any item (server field), shots / glasses = drinks
             var box = h('div', 'di-unitbox di-countbox');
             var redraw = function () { var nb = countRowsBlock(q); if (box.parentNode) { box.parentNode.replaceChild(nb, box); } };
-            var tog = h('button', 'btn-secondary di-btn', ui.open ? 'Hide the drinks' : 'Show the ' + num(total, 0) + ' drink' + (total === 1 ? '' : 's') + (own ? ' (' + num(own, 0) + ' with their own answer)' : ''));
+            var tog = h('button', 'btn-secondary di-btn', ui.open ? 'Hide the ' + nn + 's' : 'Show the ' + num(total, 0) + ' ' + nn + (total === 1 ? '' : 's') + (own ? ' (' + num(own, 0) + ' with their own answer)' : ''));
             tog.type = 'button';
             tog.setAttribute('aria-expanded', ui.open ? 'true' : 'false');
             tog.addEventListener('click', function () { ui.open = !ui.open; redraw(); });
             box.appendChild(tog);
             if (!ui.open) { return box; }
-            box.appendChild(helpLine('Each drink follows the answer above unless you choose its own here. The number is the count cell of your file.'));
-            var search = document.createElement('input'); search.type = 'search'; search.className = 'di-select di-count-search'; search.placeholder = 'Find a drink'; search.value = ui.q;
-            search.setAttribute('aria-label', 'Find a drink in this group');
+            box.appendChild(helpLine('Each ' + nn + ' follows the answer above unless you choose its own here. The number is the count cell of your file.'));
+            var search = document.createElement('input'); search.type = 'search'; search.className = 'di-select di-count-search'; search.placeholder = 'Find ' + (nn === 'item' ? 'an item' : 'a drink'); search.value = ui.q;
+            search.setAttribute('aria-label', 'Find ' + (nn === 'item' ? 'an item' : 'a drink') + ' in this group');
             box.appendChild(search);
             var list = h('div', 'di-unitlist');
             box.appendChild(list);
@@ -930,7 +931,7 @@
                     r.appendChild(sel);
                     list.appendChild(r);
                 });
-                if (!hit.length) { list.appendChild(h('p', 'di-small', 'No drink matches.')); }
+                if (!hit.length) { list.appendChild(h('p', 'di-small', 'No ' + nn + ' matches.')); }
                 if (hit.length > 10) { pgBox.appendChild(pagerEl({ page: ui.page, pages: pages, size: ui.size, total: hit.length }, function (p) { ui.page = p; draw(); }, function (s) { ui.size = s; ui.page = 1; draw(); })); }
                 if (rows.length < total) { pgBox.appendChild(h('p', 'di-small', 'Showing the first ' + num(rows.length, 0) + ' of ' + num(total, 0) + '; the rest follow the answer above.')); }
             };
