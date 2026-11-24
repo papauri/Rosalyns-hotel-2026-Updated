@@ -3227,28 +3227,143 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 '{{hotel_address}}',
             ];
             ?>
+            <?php
+            // ---- Template picker data (layout only: no saving or permission logic here) ----
+            // Group by purpose, derived from the template key; unknown keys fall into "Other".
+            $tplGroupOrder = ['Bookings', 'Quotes', 'Payments & receipts', 'Conference & events', 'Reminders & other', 'PDF documents', 'Other'];
+            $tplGroupOf = static function (string $key) use ($booking_document_template_keys): string {
+                if (in_array($key, $booking_document_template_keys, true)) {
+                    return 'PDF documents';
+                }
+                if (strpos($key, 'payment_reminder_') === 0 || $key === 'quotation_expiry_reminder') {
+                    return 'Reminders & other';
+                }
+                if (strpos($key, 'conference_') === 0 || strpos($key, 'event_') === 0) {
+                    return 'Conference & events';
+                }
+                if (strpos($key, 'quotation') !== false) {
+                    return 'Quotes';
+                }
+                if (strpos($key, 'payment_') === 0 || strpos($key, 'credit_') === 0 || strpos($key, 'refund_') === 0) {
+                    return 'Payments & receipts';
+                }
+                if (strpos($key, 'booking_') === 0 || strpos($key, 'tentative_booking_') === 0) {
+                    return 'Bookings';
+                }
+                return 'Other';
+            };
+            // One plain sentence on when each template is used (empty for a key not listed).
+            $tplDescriptions = [
+                'booking_received' => 'Sent to the guest when their booking request is received.',
+                'booking_confirmed' => 'Sent to the guest when their booking is confirmed.',
+                'booking_reminder' => 'Sent to the guest as a reminder before they check in.',
+                'booking_cancelled' => 'Sent to the guest when their booking is cancelled.',
+                'payment_invoice' => 'Sent with the invoice for a room booking.',
+                'payment_invoice_document' => 'The invoice PDF for a room booking.',
+                'conference_invoice' => 'Sent with the invoice for a conference booking.',
+                'conference_invoice_document' => 'The invoice PDF for a conference booking.',
+                'tentative_booking_created' => 'Sent when a tentative (held) booking is created.',
+                'tentative_booking_reminder' => 'Sent to remind the guest that a held booking is about to expire.',
+                'tentative_booking_expired' => 'Sent when a held booking expires.',
+                'tentative_booking_converted' => 'Sent when a held booking is confirmed.',
+                'tentative_quotation' => 'Sent with a quotation for a room booking.',
+                'tentative_quotation_document' => 'The quotation PDF for a room booking.',
+                'conference_quotation' => 'Sent with a quotation for a conference.',
+                'conference_quotation_document' => 'The quotation PDF for a conference.',
+                'event_quotation' => 'Sent with a quotation for an event.',
+                'event_quotation_document' => 'The quotation PDF for an event.',
+                'credit_note' => 'Sent when a credit note is issued.',
+                'credit_note_document' => 'The credit note PDF.',
+                'refund_notification' => 'Sent when a refund is made.',
+                'payment_receipt' => 'Sent with the receipt when a payment is recorded.',
+                'payment_receipt_document' => 'The receipt PDF for a payment.',
+                'payment_reminder_1' => 'First reminder about an unpaid balance, in friendly wording.',
+                'payment_reminder_2' => 'Second reminder about an unpaid balance, in firmer wording.',
+                'payment_reminder_3' => 'Final reminder about an unpaid balance.',
+                'quotation_expiry_reminder' => 'Sent to remind a client that their quotation is about to expire.',
+            ];
+            $tplStatusLabels = ['active' => 'Active', 'off' => 'Off', 'unset' => 'Not set up'];
+            $tplGroups = [];
+            $tplMeta = [];
+            foreach ($booking_template_defs as $tkey => $tname) {
+                $tCfg = $booking_templates[$tkey];
+                $tState = trim((string)($tCfg['html_body'] ?? '')) === ''
+                    ? 'unset'
+                    : (((int)($tCfg['is_active'] ?? 1) === 1) ? 'active' : 'off');
+                $tIsDoc = in_array($tkey, $booking_document_template_keys, true);
+                $tShort = trim((string)preg_replace('/\s+(Email|PDF)$/', '', (string)$tname));
+                $tplMeta[$tkey] = [
+                    'name' => (string)$tname,
+                    'short' => $tShort !== '' ? $tShort : (string)$tname,
+                    'kind' => $tIsDoc ? 'PDF' : 'Email',
+                    'state' => $tState,
+                ];
+                $tplGroups[$tplGroupOf((string)$tkey)][] = $tkey;
+            }
+            $tplGroupsSorted = [];
+            foreach ($tplGroupOrder as $gName) {
+                if (!empty($tplGroups[$gName])) {
+                    $tplGroupsSorted[$gName] = $tplGroups[$gName];
+                }
+            }
+            $tplJsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE;
+            // "Suggest wording" (owner 2026-11-25): only while the Assistant is connected and this person may use it and edit templates.
+            $tplAssistOn = false;
+            if ($canEditTemplates && is_file(__DIR__ . '/../includes/ai/ai-template-suggest.php')) {
+                try {
+                    require_once __DIR__ . '/../includes/ai/ai-template-suggest.php';
+                    $tplAssistUid = (int)($user['id'] ?? 0);
+                    $tplAssistOn = rh_ai_ts_gate($pdo, $tplAssistUid, rh_ai_ts_can_for($tplAssistUid));
+                } catch (Throwable $e) {
+                    $tplAssistOn = false;
+                }
+            }
+            ?>
             <div class="rh-panel settings-card tpl-editor-card" id="email-templates">
                 <div class="rh-panel__head"><h2 class="rh-panel__title"><?php echo $mod_bookings ? 'Booking Email &amp; PDF Templates' : 'Email &amp; PDF Templates'; ?></h2></div>
-                <p class="help-text">Email tabs preview wrapped emails. PDF tabs preview document HTML and the test-send action emails a real PDF attachment generated from the preview.</p>
+                <p class="help-text">Pick a template from the list. Emails preview as the wrapped email; PDFs preview the document, and Send as test emails a real PDF made from the preview.</p>
 
-                <!-- Tab bar -->
-                <div class="tpl-tabs" role="tablist">
-                    <?php foreach ($booking_template_defs as $tkey => $tname):
-                        $tBadge = $booking_templates[$tkey];
-                        $tIsActive  = (int)($tBadge['is_active'] ?? 1) === 1;
-                        $tHasContent = !empty($tBadge['html_body']);
-                    ?>
-                        <button class="tpl-tab <?php echo $tkey === $activeTabKey ? 'active' : ''; ?>"
-                            type="button" data-tpl="<?php echo $tkey; ?>" role="tab"
-                            aria-selected="<?php echo $tkey === $activeTabKey ? 'true' : 'false'; ?>">
-                            <?php echo htmlspecialchars($booking_template_short_names[$tkey] ?? $tname); ?>
-                            <span class="tpl-dot <?php echo $tIsActive ? 'dot-active' : 'dot-inactive'; ?>"
-                                title="<?php echo $tIsActive ? 'Active' : 'Inactive'; ?>"></span>
-                            <?php if (!$tHasContent): ?><span class="tpl-dot dot-warn" title="Not configured"></span><?php endif; ?>
-                        </button>
-                    <?php endforeach; ?>
-                </div>
+                <div class="tpl-shell">
+                    <!-- Template picker: grouped list on wide screens, a drop-down on small ones. Outside the form: nothing here is saved. -->
+                    <aside class="tpl-picker" aria-label="Templates">
+                        <h3 class="tpl-picker__title">Templates <i class="help" data-tip="Every email and PDF this system sends, grouped by purpose. Active means it is in use. Off means the built-in wording is used instead. Not set up means no wording has been saved yet.">?</i></h3>
+                        <input type="search" id="tpl-search" class="form-control tpl-picker__search" placeholder="Search templates" aria-label="Search templates" autocomplete="off">
+                        <div class="tpl-picker__list">
+                            <?php foreach ($tplGroupsSorted as $gName => $gKeys): ?>
+                                <div class="tpl-picker__group">
+                                    <p class="tpl-picker__group-title"><?php echo htmlspecialchars($gName); ?></p>
+                                    <?php foreach ($gKeys as $tkey):
+                                        $tm = $tplMeta[$tkey];
+                                    ?>
+                                        <button class="tpl-tab<?php echo $tkey === $activeTabKey ? ' active' : ''; ?>"
+                                            type="button" data-tpl="<?php echo htmlspecialchars((string)$tkey); ?>"
+                                            data-name="<?php echo htmlspecialchars(strtolower($tm['name'] . ' ' . $tm['kind'])); ?>"
+                                            <?php echo $tkey === $activeTabKey ? 'aria-current="true"' : ''; ?>>
+                                            <span class="tpl-tab__name"><?php echo htmlspecialchars($tm['short']); ?></span>
+                                            <span class="tpl-tab__meta">
+                                                <span class="tpl-kind"><?php echo htmlspecialchars($tm['kind']); ?></span>
+                                                <span class="tpl-pill tpl-pill--<?php echo $tm['state']; ?>" data-tpl-status="<?php echo htmlspecialchars((string)$tkey); ?>"><?php echo htmlspecialchars($tplStatusLabels[$tm['state']]); ?></span>
+                                            </span>
+                                        </button>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endforeach; ?>
+                            <p class="help-text tpl-picker__empty" id="tpl-picker-empty" hidden>No template matches that search.</p>
+                        </div>
+                        <select id="tpl-picker-select" class="form-control tpl-picker__select" aria-label="Choose a template">
+                            <?php foreach ($tplGroupsSorted as $gName => $gKeys): ?>
+                                <optgroup label="<?php echo htmlspecialchars($gName); ?>">
+                                    <?php foreach ($gKeys as $tkey):
+                                        $tm = $tplMeta[$tkey];
+                                    ?>
+                                        <option value="<?php echo htmlspecialchars((string)$tkey); ?>" data-name="<?php echo htmlspecialchars($tm['name']); ?>"<?php echo $tkey === $activeTabKey ? ' selected' : ''; ?>><?php echo htmlspecialchars($tm['name'] . ' (' . $tplStatusLabels[$tm['state']] . ')'); ?></option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                            <?php endforeach; ?>
+                        </select>
+                    </aside>
 
+                    <div class="tpl-stage">
                 <form method="POST" id="tpl-main-form" action="<?php echo $rh_self; ?>">
                     <input type="hidden" name="booking_email_templates" value="1">
 
@@ -3259,28 +3374,51 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         $tIsDocument = in_array($tkey, $booking_document_template_keys, true);
                         $tTagGroups  = rh_email_template_tags((string)$tkey);
                         $tTagNote    = rh_email_template_tag_note((string)$tkey);
+                        $tm          = $tplMeta[$tkey];
                     ?>
-                        <div class="tpl-panel" id="panel-<?php echo $tkey; ?>" <?php echo $isShown ? '' : 'hidden'; ?> role="tabpanel">
+                        <div class="tpl-panel" id="panel-<?php echo $tkey; ?>" <?php echo $isShown ? '' : 'hidden'; ?>>
+
+                            <!-- ====== HEADER: what this is, when it is sent, is it on ====== -->
+                            <div class="tpl-head">
+                                <div class="tpl-head__main">
+                                    <h3 class="tpl-head__title"><?php echo htmlspecialchars($tm['name']); ?> <span class="tpl-kind"><?php echo htmlspecialchars($tm['kind']); ?></span></h3>
+                                    <?php if (!empty($tplDescriptions[$tkey])): ?>
+                                        <p class="tpl-head__desc"><?php echo htmlspecialchars($tplDescriptions[$tkey]); ?></p>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="tpl-head__status">
+                                    <span class="tpl-pill tpl-pill--<?php echo $tm['state']; ?>" data-tpl-status="<?php echo htmlspecialchars((string)$tkey); ?>"><?php echo htmlspecialchars($tplStatusLabels[$tm['state']]); ?></span>
+                                    <?php if ($canEditTemplates): ?>
+                                    <label class="tpl-active-toggle" title="Toggle template active">
+                                        <input type="checkbox" name="<?php echo $tkey; ?>_is_active" value="1" <?php echo $isActive ? 'checked' : ''; ?>>
+                                        <span>Active</span>
+                                    </label>
+                                    <i class="help" data-tip="When off, this template is not used and the built-in wording is sent instead.">?</i>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+
+                            <?php if ($canEditTemplates): ?>
+                            <div class="tpl-toolbar" role="toolbar" aria-label="Template actions">
+                                <button type="button" class="btn-load-default" data-tpl="<?php echo $tkey; ?>" title="Replace the wording with the built-in default">
+                                    <i class="fas fa-undo"></i> Load Default
+                                </button>
+                                <button type="button" class="btn-format-html" data-tpl="<?php echo $tkey; ?>" title="Auto-indent the HTML">
+                                    <i class="fas fa-indent"></i> Format HTML
+                                </button>
+                                <?php if (!$tIsDocument): ?>
+                                <div class="tpl-assist" data-tpl="<?php echo htmlspecialchars((string)$tkey); ?>"><?php if ($tplAssistOn) { echo rh_ai_ts_button((string)$tkey, true); } ?></div>
+                                <?php endif; ?>
+                            </div>
+                            <?php endif; ?>
+
                             <div class="tpl-split<?php echo $canEditTemplates ? '' : ' tpl-split--locked'; ?>">
 
                                 <!-- ====== EDITOR ====== -->
                                 <?php if ($canEditTemplates): ?>
                                 <div class="tpl-editor">
-                                    <div class="tpl-editor-header">
-                                        <span class="tpl-badge <?php echo $isActive ? 'tpl-badge-active' : 'tpl-badge-inactive'; ?>">
-                                            <?php echo $isActive ? 'Active' : 'Inactive'; ?>
-                                        </span>
-                                        <?php if (empty($tpl['html_body'])): ?>
-                                            <span class="tpl-badge" style="background:#fef3c7;color:#92400e;">Not configured</span>
-                                        <?php endif; ?>
-                                        <label class="tpl-active-toggle" title="Toggle template active">
-                                            <input type="checkbox" name="<?php echo $tkey; ?>_is_active" value="1" <?php echo $isActive ? 'checked' : ''; ?>>
-                                            <span>Active</span>
-                                        </label>
-                                    </div>
-
-                                    <div class="form-group" style="margin-top:10px;">
-                                        <label for="<?php echo $tkey; ?>_subject">Subject line</label>
+                                    <div class="form-group">
+                                        <label for="<?php echo $tkey; ?>_subject"><?php echo 'Subject line'; ?></label>
                                         <input type="text"
                                             id="<?php echo $tkey; ?>_subject"
                                             name="<?php echo $tkey; ?>_subject"
@@ -3290,17 +3428,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                     </div>
 
                                     <div class="form-group">
-                                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;flex-wrap:wrap;gap:6px;">
-                                            <label for="<?php echo $tkey; ?>_html_body" style="margin:0;">HTML body</label>
-                                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                                                <button type="button" class="btn-load-default" data-tpl="<?php echo $tkey; ?>">
-                                                    <i class="fas fa-undo"></i> Load Default
-                                                </button>
-                                                <button type="button" class="btn-format-html" data-tpl="<?php echo $tkey; ?>" title="Auto-indent the HTML">
-                                                    <i class="fas fa-indent"></i> Format
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <label for="<?php echo $tkey; ?>_html_body">HTML body</label>
                                         <textarea id="<?php echo $tkey; ?>_html_body"
                                             name="<?php echo $tkey; ?>_html_body"
                                             class="form-control tpl-html-editor"
@@ -3309,25 +3437,9 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                             autocomplete="off"><?php echo htmlspecialchars($tpl['html_body'] ?? ''); ?></textarea>
                                     </div>
 
-                                    <?php if ($tIsDocument): ?>
-                                    <?php /* PDF documents have no plain text part: the saved value is kept as it is. */ ?>
-                                    <input type="hidden" id="<?php echo $tkey; ?>_text_body" name="<?php echo $tkey; ?>_text_body" value="<?php echo htmlspecialchars($tpl['text_body'] ?? ''); ?>">
-                                    <?php else: ?>
-                                    <details class="tpl-textbody-toggle">
-                                        <summary>Plain text version <span style="font-weight:400;font-size:10.5px;color:#6b7280;">(optional). Leave empty and it is made from the HTML automatically.</span></summary>
-                                        <div style="margin-top:8px;">
-                                            <textarea id="<?php echo $tkey; ?>_text_body"
-                                                name="<?php echo $tkey; ?>_text_body"
-                                                class="form-control"
-                                                rows="5"
-                                                placeholder="Leave empty to use the text made from the HTML. Click Preview to see it."><?php echo htmlspecialchars($tpl['text_body'] ?? ''); ?></textarea>
-                                        </div>
-                                    </details>
-                                    <?php endif; ?>
-
                                     <!-- Tags this template fills (includes/email-template-tags.php) -->
-                                    <details class="tips-box tpl-placeholders" style="margin-top:10px;">
-                                        <summary><i class="fas fa-code"></i> Tags you can use in this template <i class="help" data-tip="Tags are replaced with the real details when the email or PDF is sent. Only the tags listed here work in this template.">?</i> <em style="font-weight:400;font-size:10px;margin-left:4px;">Click a tag to put it where the cursor is.</em></summary>
+                                    <details class="tips-box tpl-placeholders">
+                                        <summary><i class="fas fa-code"></i> Tags you can use <i class="help" data-tip="Tags are replaced with the real details when the email or PDF is sent. Only the tags listed here work in this template.">?</i> <em class="tpl-placeholders__hint">Click a tag to put it where the cursor is.</em></summary>
                                         <div class="tips-body">
                                             <?php if ($tTagNote !== ''): ?>
                                                 <p class="help-text tpl-tag-note"><?php echo htmlspecialchars($tTagNote); ?></p>
@@ -3353,12 +3465,28 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                             </div>
                                         </div>
                                     </details>
+
+                                    <?php if ($tIsDocument): ?>
+                                    <?php /* PDF documents have no plain text part: the saved value is kept as it is. */ ?>
+                                    <input type="hidden" id="<?php echo $tkey; ?>_text_body" name="<?php echo $tkey; ?>_text_body" value="<?php echo htmlspecialchars($tpl['text_body'] ?? ''); ?>">
+                                    <?php else: ?>
+                                    <details class="tpl-textbody-toggle">
+                                        <summary>Plain text version <span class="tpl-textbody-toggle__hint">(optional). Leave empty and it is made from the HTML automatically.</span></summary>
+                                        <div>
+                                            <textarea id="<?php echo $tkey; ?>_text_body"
+                                                name="<?php echo $tkey; ?>_text_body"
+                                                class="form-control"
+                                                rows="5"
+                                                placeholder="Leave empty to use the text made from the HTML. Click Preview to see it."><?php echo htmlspecialchars($tpl['text_body'] ?? ''); ?></textarea>
+                                        </div>
+                                    </details>
+                                    <?php endif; ?>
                                 </div><!-- /tpl-editor -->
                                 <?php else: ?>
                                 <?php /* No fields to read, so the preview endpoint falls back to the
                                          saved template for this key — see the _ajax_preview handler. */ ?>
                                 <div class="tpl-editor tpl-editor--locked">
-                                    <p class="help-text" style="margin:0;">
+                                    <p class="help-text">
                                         <i class="fas fa-lock" aria-hidden="true"></i>
                                         This is the template guests receive. Editing it needs the
                                         &ldquo;Edit message templates&rdquo; permission &mdash;
@@ -3378,20 +3506,20 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
                                     <div class="tpl-preview-wrapper" id="preview-wrapper-<?php echo $tkey; ?>">
                                         <div class="tpl-preview-empty">
-                                            <i class="fas fa-envelope-open" style="font-size:36px;color:#D6CDBF;"></i>
-                                            <p>Click <strong>Preview</strong> to render this email with sample guest data</p>
+                                            <i class="fas fa-envelope-open tpl-preview-empty__icon"></i>
+                                            <p>Click <strong>Preview</strong> to render this <?php echo $tIsDocument ? 'PDF' : 'email'; ?> with sample guest data</p>
                                         </div>
                                     </div>
 
                                     <?php if (!$tIsDocument): ?>
                                     <details class="tpl-textbody-toggle tpl-plain-preview" id="plain-preview-<?php echo $tkey; ?>" hidden>
-                                        <summary>Plain text the guest gets <span style="font-weight:400;font-size:10.5px;color:#6b7280;">(shown by mail apps that cannot show the designed email)</span></summary>
+                                        <summary>Plain text the guest gets <span class="tpl-textbody-toggle__hint">(shown by mail apps that cannot show the designed email)</span></summary>
                                         <div><pre class="tpl-plain-preview__text" id="plain-preview-text-<?php echo $tkey; ?>"></pre></div>
                                     </details>
                                     <?php endif; ?>
 
-                                    <div class="tpl-send-test" id="send-test-area-<?php echo $tkey; ?>" style="display:none;">
-                                        <p class="tpl-send-test-label"><i class="fas fa-paper-plane"></i> Send as Test Email</p>
+                                    <div class="tpl-send-test" id="send-test-area-<?php echo $tkey; ?>" hidden>
+                                        <p class="tpl-send-test-label"><i class="fas fa-paper-plane"></i> Send as Test Email <i class="help" data-tip="Sends the preview above to the address you type, so you can see it in a real inbox. Nothing is sent to guests.">?</i></p>
                                         <div class="tpl-send-test-row">
                                             <input type="email"
                                                 id="test-email-addr-<?php echo $tkey; ?>"
@@ -3400,12 +3528,11 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                                 value="<?php echo htmlspecialchars((string)getEmailSetting('email_admin_email', '')); ?>">
                                             <button type="button"
                                                 class="btn-submit btn-send-test"
-                                                data-tpl="<?php echo $tkey; ?>"
-                                                style="white-space:nowrap;background:#5C4A32;">
+                                                data-tpl="<?php echo $tkey; ?>">
                                                 <i class="fas fa-paper-plane"></i> Send
                                             </button>
                                         </div>
-                                        <p class="tpl-send-feedback" id="send-feedback-<?php echo $tkey; ?>" style="display:none;"></p>
+                                        <p class="tpl-send-feedback" id="send-feedback-<?php echo $tkey; ?>" hidden></p>
                                     </div>
                                 </div><!-- /tpl-preview-pane -->
 
@@ -3414,7 +3541,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <?php endforeach; ?>
 
                     <?php if ($canEditTemplates): ?>
-                    <div style="padding-top:14px;border-top:1px solid #e8e3d7;margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                    <div class="tpl-savebar">
                         <button type="submit" class="btn-submit">
                             <i class="fas fa-save"></i> Save All Templates
                         </button>
@@ -3422,15 +3549,16 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             type="submit"
                             name="reset_all_booking_templates_to_defaults"
                             value="1"
-                            class="btn-submit"
-                            style="background:#6b7280;"
+                            class="btn-submit tpl-savebar__reset"
                             onclick="return confirm('Reset all booking email and PDF templates to the current built-in defaults? This will overwrite all subject lines and HTML bodies.');">
                             <i class="fas fa-rotate-left"></i> Reset All to Defaults
                         </button>
-                        <span class="help-text" style="margin:0;color:#6b7280;">Uses the same canonical defaults that power runtime seeding and per-template Load Default.</span>
+                        <span class="help-text tpl-savebar__note">Save All saves every template at once, not only the open one. Reset All uses the same built-in defaults as each template&rsquo;s Load Default.</span>
                     </div>
                     <?php endif; ?>
                 </form>
+                    </div><!-- /tpl-stage -->
+                </div><!-- /tpl-shell -->
             </div><!-- /tpl-editor-card -->
 
             <?php
@@ -3457,7 +3585,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             ?>
             <div class="rh-panel settings-card" id="receipt-whatsapp">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Receipt WhatsApp message</h2></div>
-                <p class="help-text">The message pre-filled when staff share a receipt on WhatsApp from the Receipts page. The receipt <em>email</em> is the &ldquo;Receipt Email&rdquo; tab above.</p>
+                <p class="help-text">The message pre-filled when staff share a receipt on WhatsApp from the Receipts page. The receipt <em>email</em> is the &ldquo;Payment Receipt&rdquo; template above.</p>
                 <p class="help-text">Placeholders: <?php echo htmlspecialchars(implode(', ', array_keys($rcptWaPreview)), ENT_QUOTES, 'UTF-8'); ?>.</p>
                 <form method="POST" action="<?php echo $rh_self; ?>" id="receipt-whatsapp-form">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
@@ -3496,530 +3624,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 <p style="margin:0;font-size:12.5px;"><i class="fas fa-lock"></i> <strong>SMTP passwords are encrypted in the database.</strong> No credentials are stored in config files.</p>
             </div>
 
-            <script>
-                (function() {
-                    // Seeded defaults for "Load Default" button
-                    var tplDefaults = <?php echo json_encode($tplDefaults, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE); ?>;
-                    var placeholderTokens = <?php echo json_encode($allPlaceholders, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE); ?>;
-
-                    var previewSectionTarget = document.getElementById('email-templates');
-                    if (previewSectionTarget) {
-                        var previewSectionParams = new URLSearchParams(window.location.search);
-                        if (window.location.hash === '#email-templates' || previewSectionParams.get('section') === 'email-templates') {
-                            window.requestAnimationFrame(function() {
-                                previewSectionTarget.scrollIntoView({
-                                    behavior: 'smooth',
-                                    block: 'start'
-                                });
-                            });
-                        }
-                    }
-
-                    var autocompleteState = {
-                        field: null,
-                        tokenStart: -1,
-                        filtered: [],
-                        activeIndex: 0
-                    };
-                    var autocompleteMenu = document.createElement('div');
-                    autocompleteMenu.className = 'tpl-autocomplete';
-                    autocompleteMenu.style.display = 'none';
-                    document.body.appendChild(autocompleteMenu);
-
-                    function hideAutocomplete() {
-                        autocompleteMenu.style.display = 'none';
-                        autocompleteMenu.innerHTML = '';
-                        autocompleteState.field = null;
-                        autocompleteState.tokenStart = -1;
-                        autocompleteState.filtered = [];
-                        autocompleteState.activeIndex = 0;
-                    }
-
-                    function positionAutocomplete(field) {
-                        var rect = field.getBoundingClientRect();
-                        autocompleteMenu.style.left = (window.scrollX + rect.left) + 'px';
-                        autocompleteMenu.style.top = (window.scrollY + rect.bottom + 4) + 'px';
-                        autocompleteMenu.style.width = Math.min(rect.width, 420) + 'px';
-                    }
-
-                    function updateAutocompleteActiveItem() {
-                        var items = autocompleteMenu.querySelectorAll('.tpl-autocomplete__item');
-                        items.forEach(function(item, index) {
-                            if (index === autocompleteState.activeIndex) {
-                                item.classList.add('is-active');
-                            } else {
-                                item.classList.remove('is-active');
-                            }
-                        });
-                    }
-
-                    function applyAutocompleteSelection(index) {
-                        var field = autocompleteState.field;
-                        if (!field) {
-                            hideAutocomplete();
-                            return;
-                        }
-
-                        var token = autocompleteState.filtered[index] || autocompleteState.filtered[0];
-                        if (!token) {
-                            hideAutocomplete();
-                            return;
-                        }
-
-                        var caret = field.selectionStart;
-                        var before = field.value.substring(0, autocompleteState.tokenStart);
-                        var after = field.value.substring(caret);
-                        field.value = before + token + after;
-                        var newPos = before.length + token.length;
-                        field.selectionStart = newPos;
-                        field.selectionEnd = newPos;
-                        field.focus();
-                        hideAutocomplete();
-                    }
-
-                    function renderAutocomplete(field, filtered, tokenStart) {
-                        autocompleteState.field = field;
-                        autocompleteState.filtered = filtered;
-                        autocompleteState.tokenStart = tokenStart;
-                        autocompleteState.activeIndex = 0;
-
-                        autocompleteMenu.innerHTML = '';
-                        filtered.forEach(function(token, index) {
-                            var btn = document.createElement('button');
-                            btn.type = 'button';
-                            btn.className = 'tpl-autocomplete__item';
-                            if (index === 0) {
-                                btn.classList.add('is-active');
-                            }
-                            btn.textContent = token;
-                            btn.addEventListener('mousedown', function(event) {
-                                event.preventDefault();
-                                applyAutocompleteSelection(index);
-                            });
-                            autocompleteMenu.appendChild(btn);
-                        });
-
-                        positionAutocomplete(field);
-                        autocompleteMenu.style.display = 'block';
-                    }
-
-                    function refreshAutocomplete(field) {
-                        if (!field || typeof field.selectionStart !== 'number') {
-                            hideAutocomplete();
-                            return;
-                        }
-
-                        var caret = field.selectionStart;
-                        var beforeCaret = field.value.slice(0, caret);
-                        var match = beforeCaret.match(/\{\{[a-zA-Z0-9_]*$/);
-                        if (!match) {
-                            hideAutocomplete();
-                            return;
-                        }
-
-                        var partialToken = match[0];
-                        var query = partialToken.slice(2).toLowerCase();
-                        var tokenStart = caret - partialToken.length;
-                        var filtered = placeholderTokens.filter(function(token) {
-                            var cleanToken = token.slice(2, -2).toLowerCase();
-                            return cleanToken.indexOf(query) !== -1;
-                        }).slice(0, 10);
-
-                        if (!filtered.length) {
-                            hideAutocomplete();
-                            return;
-                        }
-
-                        renderAutocomplete(field, filtered, tokenStart);
-                    }
-
-                    function bindAutocomplete(field) {
-                        field.addEventListener('input', function() {
-                            refreshAutocomplete(field);
-                        });
-                        field.addEventListener('click', function() {
-                            refreshAutocomplete(field);
-                        });
-                        field.addEventListener('keyup', function(event) {
-                            if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === 'Tab' || event.key === 'Escape') {
-                                return;
-                            }
-                            refreshAutocomplete(field);
-                        });
-                        field.addEventListener('keydown', function(event) {
-                            if (autocompleteMenu.style.display !== 'block' || autocompleteState.field !== field) {
-                                return;
-                            }
-
-                            if (event.key === 'ArrowDown') {
-                                event.preventDefault();
-                                autocompleteState.activeIndex = (autocompleteState.activeIndex + 1) % autocompleteState.filtered.length;
-                                updateAutocompleteActiveItem();
-                                return;
-                            }
-                            if (event.key === 'ArrowUp') {
-                                event.preventDefault();
-                                autocompleteState.activeIndex = (autocompleteState.activeIndex - 1 + autocompleteState.filtered.length) % autocompleteState.filtered.length;
-                                updateAutocompleteActiveItem();
-                                return;
-                            }
-                            if (event.key === 'Enter' || event.key === 'Tab') {
-                                event.preventDefault();
-                                applyAutocompleteSelection(autocompleteState.activeIndex);
-                                return;
-                            }
-                            if (event.key === 'Escape') {
-                                event.preventDefault();
-                                hideAutocomplete();
-                            }
-                        });
-                        field.addEventListener('blur', function() {
-                            setTimeout(hideAutocomplete, 120);
-                        });
-                    }
-
-                    document.querySelectorAll('input[id$="_subject"], textarea[id$="_html_body"], textarea[id$="_text_body"]').forEach(function(field) {
-                        bindAutocomplete(field);
-                    });
-                    window.addEventListener('resize', function() {
-                        if (autocompleteState.field) {
-                            positionAutocomplete(autocompleteState.field);
-                        }
-                    });
-                    window.addEventListener('scroll', function() {
-                        if (autocompleteState.field) {
-                            positionAutocomplete(autocompleteState.field);
-                        }
-                    }, true);
-
-                    // ---- Tab switching ----
-                    var tabs = document.querySelectorAll('.tpl-tab');
-                    var panels = document.querySelectorAll('.tpl-panel');
-                    tabs.forEach(function(tab) {
-                        tab.addEventListener('click', function() {
-                            tabs.forEach(function(t) {
-                                t.classList.remove('active');
-                                t.setAttribute('aria-selected', 'false');
-                            });
-                            panels.forEach(function(p) {
-                                p.hidden = true;
-                            });
-                            this.classList.add('active');
-                            this.setAttribute('aria-selected', 'true');
-                            var panel = document.getElementById('panel-' + this.dataset.tpl);
-                            if (panel) {
-                                panel.hidden = false;
-                                scheduleTemplatePreview(this.dataset.tpl);
-                            }
-                        });
-                    });
-
-                    // ---- Placeholder click-to-insert ----
-                    document.querySelectorAll('.tpl-chip').forEach(function(chip) {
-                        chip.title = 'Click to insert at cursor';
-                        chip.style.cursor = 'pointer';
-                        chip.addEventListener('keydown', function(ev) {
-                            if (ev.key === 'Enter' || ev.key === ' ') {
-                                ev.preventDefault();
-                                this.click();
-                            }
-                        });
-                        chip.addEventListener('click', function() {
-                            var key = this.dataset.tpl;
-                            var ta = document.getElementById(key + '_html_body');
-                            if (ta) {
-                                var s = ta.selectionStart,
-                                    e = ta.selectionEnd,
-                                    txt = this.textContent;
-                                ta.value = ta.value.substring(0, s) + txt + ta.value.substring(e);
-                                ta.selectionStart = ta.selectionEnd = s + txt.length;
-                                ta.focus();
-                                scheduleTemplatePreview(key);
-                            }
-                            var orig = this.style.background;
-                            this.style.background = '#d1fae5';
-                            setTimeout(function() {
-                                chip.style.background = orig;
-                            }, 500);
-                        });
-                    });
-
-                    // ---- Build FormData for the current template ----
-                    function buildPreviewFd(key) {
-                        var fd = new FormData();
-                        fd.set('booking_email_template_preview', key);
-                        fd.set('_ajax_preview', '1');
-                        // Include all template fields so the server has full context
-                        document.querySelectorAll('.tpl-panel').forEach(function(panel) {
-                            panel.querySelectorAll('input, textarea, select').forEach(function(el) {
-                                if (el.name) {
-                                    if (el.type === 'checkbox') {
-                                        if (el.checked) fd.set(el.name, el.value);
-                                    } else fd.set(el.name, el.value);
-                                }
-                            });
-                        });
-                        return fd;
-                    }
-
-                    function parseJsonResponse(response) {
-                        return response.text().then(function(text) {
-                            var normalized = String(text || '').replace(/^\uFEFF/, '').trim();
-                            var firstBrace = normalized.search(/[\[{]/);
-                            if (firstBrace > 0) {
-                                normalized = normalized.slice(firstBrace);
-                            }
-                            return JSON.parse(normalized);
-                        });
-                    }
-
-                    // ---- AJAX Preview (manual + live typing refresh) ----
-                    var previewTimers = {};
-                    var previewInFlight = {};
-                    var previewPending = {};
-
-                    function renderPreviewResult(key, data) {
-                        var wrapper = document.getElementById('preview-wrapper-' + key);
-                        var subjectLbl = document.getElementById('preview-subject-' + key);
-                        var sendArea = document.getElementById('send-test-area-' + key);
-                        var feedback = document.getElementById('send-feedback-' + key);
-                        if (!wrapper) return;
-
-                        if (data.success) {
-                            wrapper.innerHTML = '';
-
-                            // Show warning banner if preview contains unsaved changes
-                            if (data.has_unsaved_changes) {
-                                var warningBanner = document.createElement('div');
-                                warningBanner.style.cssText = 'background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:12px 16px;margin-bottom:12px;border-radius:6px;font-size:13px;line-height:1.5;';
-                                warningBanner.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#F59E0B;margin-right:8px;"></i><strong>Unsaved Changes:</strong> This preview shows your current edits. Click <strong>Save Template</strong> below to apply these changes to actual emails/PDFs sent to guests.';
-                                wrapper.appendChild(warningBanner);
-                            }
-
-                            var iframe = document.createElement('iframe');
-                            iframe.style.cssText = 'width:100%;min-height:500px;border:none;border-radius:0 0 8px 8px;display:block;';
-                            iframe.setAttribute('frameborder', '0');
-                            iframe.setAttribute('title', 'Email Preview');
-                            wrapper.appendChild(iframe);
-                            iframe.contentDocument.open();
-                            iframe.contentDocument.write(data.full_html);
-                            iframe.contentDocument.close();
-
-                            if (subjectLbl) subjectLbl.textContent = data.subject;
-                            if (sendArea) {
-                                sendArea.style.display = 'block';
-                                sendArea._previewHtml = data.html_body || '';
-                                sendArea._previewSubject = data.subject;
-                                sendArea._previewTextBody = data.text_body || '';
-                                sendArea._previewIsDocument = !!data.is_document;
-                                if (feedback) feedback.style.display = 'none';
-                            }
-                            // Plain text part: the typed one, or the one made from the HTML when none is typed.
-                            var plainBox = document.getElementById('plain-preview-' + key);
-                            var plainText = document.getElementById('plain-preview-text-' + key);
-                            if (plainBox && plainText) {
-                                plainText.textContent = data.text_body || '';
-                                plainBox.hidden = !!data.is_document || !(data.text_body || '');
-                            }
-                        } else {
-                            wrapper.innerHTML = '<p style="color:#dc2626;padding:24px;text-align:center;">' +
-                                '<i class="fas fa-exclamation-triangle"></i> ' +
-                                (data.error || 'Preview failed') + '</p>';
-                        }
-                    }
-
-                    function requestTemplatePreview(key, triggerBtn) {
-                        var btn = triggerBtn || document.querySelector('.btn-ajax-preview[data-tpl="' + key + '"]');
-                        if (previewInFlight[key]) {
-                            previewPending[key] = true;
-                            return;
-                        }
-
-                        previewInFlight[key] = true;
-                        if (btn) {
-                            btn.disabled = true;
-                            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading…';
-                        }
-
-                        fetch(<?php echo json_encode($rh_self); ?>, {
-                                method: 'POST',
-                                body: buildPreviewFd(key)
-                            })
-                            .then(function(r) {
-                                return parseJsonResponse(r);
-                            })
-                            .then(function(data) {
-                                renderPreviewResult(key, data || {
-                                    success: false,
-                                    error: 'Preview failed'
-                                });
-                            })
-                            .catch(function() {
-                                renderPreviewResult(key, {
-                                    success: false,
-                                    error: 'Request failed — check your connection.'
-                                });
-                            })
-                            .finally(function() {
-                                previewInFlight[key] = false;
-                                if (btn) {
-                                    btn.disabled = false;
-                                    btn.innerHTML = '<i class="fas fa-eye"></i> Preview';
-                                }
-
-                                if (previewPending[key]) {
-                                    previewPending[key] = false;
-                                    requestTemplatePreview(key, null);
-                                }
-                            });
-                    }
-
-                    function scheduleTemplatePreview(key) {
-                        if (previewTimers[key]) {
-                            clearTimeout(previewTimers[key]);
-                        }
-                        previewTimers[key] = setTimeout(function() {
-                            requestTemplatePreview(key, null);
-                        }, 320);
-                    }
-
-                    document.querySelectorAll('.btn-ajax-preview').forEach(function(btn) {
-                        btn.addEventListener('click', function() {
-                            requestTemplatePreview(this.dataset.tpl, this);
-                        });
-                    });
-
-                    document.querySelectorAll('.tpl-panel').forEach(function(panel) {
-                        var key = (panel.id || '').replace('panel-', '');
-                        if (!key) return;
-                        panel.querySelectorAll('input[id$="_subject"], textarea[id$="_html_body"], textarea[id$="_text_body"]').forEach(function(field) {
-                            field.addEventListener('input', function() {
-                                if (!panel.hidden) {
-                                    scheduleTemplatePreview(key);
-                                }
-                            });
-                        });
-                    });
-
-                    // ---- Send Test Email ----
-                    document.querySelectorAll('.btn-send-test').forEach(function(btn) {
-                        btn.addEventListener('click', function() {
-                            var key = this.dataset.tpl;
-                            var sendArea = document.getElementById('send-test-area-' + key);
-                            var emailIn = document.getElementById('test-email-addr-' + key);
-                            var feedback = document.getElementById('send-feedback-' + key);
-                            var csrfField = document.querySelector('#tpl-main-form [name="csrf_token"]');
-                            var csrfToken = String(window._bsCsrf || (csrfField ? csrfField.value : '') || '').trim();
-                            var email = emailIn ? emailIn.value.trim() : '';
-
-                            if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                                if (feedback) {
-                                    feedback.textContent = 'Enter a valid email address.';
-                                    feedback.className = 'tpl-send-feedback tpl-feedback-err';
-                                    feedback.style.display = 'block';
-                                }
-                                return;
-                            }
-                            if (!csrfToken) {
-                                if (feedback) {
-                                    feedback.textContent = 'Security token missing. Refresh the page and try again.';
-                                    feedback.className = 'tpl-send-feedback tpl-feedback-err';
-                                    feedback.style.display = 'block';
-                                }
-                                return;
-                            }
-                            var html = sendArea ? sendArea._previewHtml : null;
-                            var subject = sendArea ? sendArea._previewSubject : 'Test Email';
-                            var textBody = sendArea ? (sendArea._previewTextBody || '') : '';
-                            var isDocument = sendArea ? !!sendArea._previewIsDocument : false;
-                            if (!html) {
-                                if (feedback) {
-                                    feedback.textContent = 'Generate a preview first.';
-                                    feedback.className = 'tpl-send-feedback tpl-feedback-err';
-                                    feedback.style.display = 'block';
-                                }
-                                return;
-                            }
-
-                            var fd = new FormData();
-                            fd.set('send_test_email', '1');
-                            fd.set('_ajax_send_test', '1');
-                            fd.set('csrf_token', csrfToken);
-                            fd.set('test_email_address', email);
-                            fd.set('test_subject', subject);
-                            fd.set('test_html', html);
-                            fd.set('test_text_body', textBody);
-                            fd.set('test_template_key', key);
-                            fd.set('test_is_document', isDocument ? '1' : '0');
-
-                            btn.disabled = true;
-                            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-                            fetch(<?php echo json_encode($rh_self); ?>, {
-                                    method: 'POST',
-                                    body: fd
-                                })
-                                .then(function(r) {
-                                    return parseJsonResponse(r);
-                                })
-                                .then(function(data) {
-                                    if (feedback) {
-                                        feedback.textContent = data.success ? ('Sent to ' + email + '!') : ('Error: ' + (data.error || 'failed'));
-                                        feedback.className = 'tpl-send-feedback ' + (data.success ? 'tpl-feedback-ok' : 'tpl-feedback-err');
-                                        feedback.style.display = 'block';
-                                    }
-                                })
-                                .catch(function() {
-                                    if (feedback) {
-                                        feedback.textContent = 'Network error.';
-                                        feedback.className = 'tpl-send-feedback tpl-feedback-err';
-                                        feedback.style.display = 'block';
-                                    }
-                                })
-                                .finally(function() {
-                                    btn.disabled = false;
-                                    btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
-                                });
-                        });
-                    });
-
-                    // ---- Load Default ----
-                    document.querySelectorAll('.btn-load-default').forEach(function(btn) {
-                        btn.addEventListener('click', function() {
-                            var key = this.dataset.tpl;
-                            var def = tplDefaults[key];
-                            if (!def) return;
-                            if (!confirm('Reset "' + key.replace(/_/g, ' ') + '" to the built-in default? Current content will be replaced.')) return;
-                            var subjectEl = document.getElementById(key + '_subject');
-                            var htmlBodyEl = document.getElementById(key + '_html_body');
-                            if (subjectEl) subjectEl.value = def.subject;
-                            if (htmlBodyEl) htmlBodyEl.value = def.html;
-                            scheduleTemplatePreview(key);
-                        });
-                    });
-
-                    // ---- Basic HTML format (wrap long lines at tags) ----
-                    document.querySelectorAll('.btn-format-html').forEach(function(btn) {
-                        btn.addEventListener('click', function() {
-                            var key = this.dataset.tpl;
-                            var ta = document.getElementById(key + '_html_body');
-                            if (!ta || !ta.value.trim()) return;
-                            // Simple: add newline after each closing tag
-                            var formatted = ta.value
-                                .replace(/>\s*</g, '>\n<')
-                                .replace(/\n{3,}/g, '\n\n')
-                                .trim();
-                            ta.value = formatted;
-                            scheduleTemplatePreview(key);
-                        });
-                    });
-
-                    if (tabs.length > 0) {
-                        scheduleTemplatePreview(tabs[0].dataset.tpl);
-                    }
-
-                })();
-            </script>
+            <script type="application/json" id="tpl-config"><?php echo json_encode(['defaults' => $tplDefaults, 'tokens' => $allPlaceholders, 'self' => $rh_self, 'csrf' => (string)$csrf_token] + ($tplAssistOn ? ['assist' => ['url' => 'api/ai-template-suggest.php']] : []), $tplJsonFlags) ?: '{}'; ?></script>
+            <script src="js/email-templates.js?v=<?php echo @filemtime(__DIR__ . '/js/email-templates.js'); ?>"></script>
             <?php endif; /* $rh_templates_only: template editor */ ?>
 
             </div><!-- /.content -->
