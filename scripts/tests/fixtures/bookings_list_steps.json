@@ -1,0 +1,1261 @@
+[
+ {
+  "init": "\nwindow.__until = (fn, ms) => new Promise(res => { const t0 = Date.now(); (function tick() { let v = false; try { v = fn(); } catch (e) { v = false; } if (v) return res(true); if (Date.now() - t0 > (ms || 12000)) return res(false); setTimeout(tick, 120); })(); });\nwindow.__idle = () => { const c = document.getElementById('booking-results'); return !!c && c.style.opacity === '' && c.style.pointerEvents === ''; };\nwindow.__vis = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'; };\nwindow.__tap = (sel, min) => { const els = Array.from(document.querySelectorAll(sel)).filter(window.__vis); if (!els.length) return 'none:' + sel; const bad = els.filter(e => { const r = e.getBoundingClientRect(); return r.height < (min || 40) || r.width < (min || 40); }); return bad.length ? 'small:' + sel + ':' + bad.map(e => Math.round(e.getBoundingClientRect().width) + 'x' + Math.round(e.getBoundingClientRect().height)).join(',') : true; };\nwindow.__noH = () => document.documentElement.scrollWidth <= window.innerWidth + 1;\nwindow.__hdr = () => { const h = document.querySelector('.admin-header'); if (!h) return 0; const b = h.getBoundingClientRect().bottom; return b > 0 && b < innerHeight / 2 ? b : 0; };\nwindow.__inView = (el) => { if (!window.__vis(el)) return false; const r = el.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && r.top >= window.__hdr() - 1; };\nwindow.__listCount = () => { const p = (document.querySelector('#booking-results .pg-summary') || {}).textContent || ''; const m = p.replace(/,/g, '').match(/of\\s+(\\d+)/); return m ? +m[1] : document.querySelectorAll('#booking-results tr[data-focus]').length; };\nwindow.__q = (k) => new URLSearchParams(location.search).get(k);\ndocument.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style'); s.textContent = '#rhAiNotice, #admin-pwa-banner { display: none !important; }'; document.head.appendChild(s); });\n"
+ },
+ {
+  "viewport": [
+   1920,
+   1080
+  ]
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { try { localStorage.clear(); } catch (e) {} return true; })()",
+  "label": "1920 reset device memory"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const f = document.querySelector('[data-live-search-form=\"room-bookings\"]'); if (!f) return 'no form'; const names = ['filter_status','pay','room_type','room','source','group','created_by','kind','date_type']; const miss = names.filter(n => !f.querySelector('select[name=\"' + n + '\"]')); if (miss.length) return 'missing ' + miss; if (f.querySelectorAll('[data-bk-preset]').length !== 5) return 'presets'; if (!f.querySelector('input[name=\"date_from\"]') || !f.querySelector('input[name=\"date_to\"]')) return 'dates'; if (window.__vis(f.querySelector('[data-bk-clear]'))) return 'clear shown with no filters'; return window.__noH() || 'page scrolls sideways'; })()); })()",
+  "label": "1920 step1 bar has every control"
+ },
+ {
+  "eval": "(async () => { return (!window.__vis(document.querySelector('[data-bk-filters-toggle]')) && window.__vis(document.querySelector('select[name=\"source\"]'))); })()",
+  "label": "1920 step1 drop-downs show in the bar"
+ },
+ {
+  "shot": "tmp/b1-1920-bar.png"
+ },
+ {
+  "clickSel": "[data-bk-preset=\"today\"]",
+  "label": "1920 Today"
+ },
+ {
+  "eval": "(async () => { const today = (document.querySelector('table[data-hotel-today]') || {}).dataset ? document.querySelector('table[data-hotel-today]').dataset.hotelToday : ''; const hotel = today || ''; const got = await window.__until(() => window.__idle() && window.__q('date_from') && window.__q('date_from') === window.__q('date_to') && document.querySelector('[data-bk-chip=\"dates\"]')); const t2 = (document.querySelector('table[data-hotel-today]') || {dataset:{}}).dataset.hotelToday || hotel; return got && (!t2 || window.__q('date_from') === t2) && document.querySelector('[data-bk-preset=\"today\"]').classList.contains('is-active') && window.__vis(document.querySelector('[data-bk-clear]')); })()",
+  "label": "1920 step2 Today = hotel date, chip shown"
+ },
+ {
+  "eval": "(async () => { const s = document.querySelector('select[name=\"source\"]'); s.value = 'staff'; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value === 'staff'; })()",
+  "label": "1920 step3 pick Source = Staff"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "1920 Filter",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('[data-bk-chip=\"dates\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && window.__listCount() >= 0; })()",
+  "label": "1920 step3 Filter applies source, keeps dates"
+ },
+ {
+  "shot": "tmp/b1-1920-chips.png"
+ },
+ {
+  "clickSel": "[data-bk-chip=\"source\"] .bk-chip__x",
+  "label": "1920 remove source chip"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === '' && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "1920 step4 chip removed, drop-down follows"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "1920 Filter again",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !!document.querySelector('[data-bk-chip=\"dates\"]')); return okk && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === ''; })()",
+  "label": "1920 step5 removed filter stays removed"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => history.back(), 50); return true; })()",
+  "label": "1920 step6 Back"
+ },
+ {
+  "wait": 4000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => document.getElementById('booking-results') && window.__idle() && !window.__q('source') && window.__q('date_from'), 20000); return okk && !document.querySelector('[data-bk-chip=\"source\"]'); })()",
+  "label": "1920 step6 Back (to the removed state)"
+ },
+ {
+  "eval": "(async () => { history.back(); const okk = await window.__until(() => window.__idle() && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === 'staff', 15000); return okk && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "1920 step6 Back restores chip + drop-down"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "clickSel": ".tabs-header > [data-tab=\"checked-in\"]",
+  "label": "1920 In house tab"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'checked-in' && (document.querySelector('#booking-results').dataset.activeTab === 'checked-in')); const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); const btn = document.querySelector('.tabs-header > [data-tab=\"checked-in\"]'); return okk && btn.classList.contains('active') && rows.length > 0 && rows.every(r => r.dataset.status === 'checked-in') && +btn.dataset.count === window.__listCount(); })()",
+  "label": "1920 step7 In house tab lands on its rows"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "1920 open More"
+ },
+ {
+  "eval": "(async () => { const m = document.getElementById('bkTabsMoreMenu'); const okk = await window.__until(() => window.__vis(m)); const items = m.querySelectorAll('.tab-button[data-tab]'); return okk && window.__inView(m) && items.length >= 5 && m.contains(document.activeElement) && ['tentative','checked-out','cancelled','no-show','group-bookings'].every(t => m.querySelector('[data-tab=\"' + t + '\"]')) && (false ? window.__tap('#bkTabsMoreMenu .tab-button') === true : true); })()",
+  "label": "1920 step8 More menu opens in view, focus inside"
+ },
+ {
+  "shot": "tmp/b1-1920-more.png"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "eval": "(async () => { return (!window.__vis(document.getElementById('bkTabsMoreMenu')) && document.activeElement === document.querySelector('[data-bk-more-toggle]')); })()",
+  "label": "1920 step8 Escape closes More, focus back on it"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "1920 open More again"
+ },
+ {
+  "clickSel": "#bkTabsMoreMenu [data-tab=\"cancelled\"]",
+  "label": "1920 Cancelled"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled' && document.querySelector('#booking-results').dataset.activeTab === 'cancelled'); const t = document.querySelector('[data-bk-more-toggle]'); const item = document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]'); return okk && t.classList.contains('is-active') && t.querySelector('[data-bk-more-label]').textContent.trim() === 'More: Cancelled' && t.querySelector('[data-bk-more-count]').textContent.trim() === item.dataset.count && !window.__vis(document.getElementById('bkTabsMoreMenu')); })()",
+  "label": "1920 step8 More shows the open hidden tab"
+ },
+ {
+  "eval": "(async () => { return (Array.from(document.querySelectorAll('.tabs-header .tab-button[data-tab]')).every(b => (b.querySelector('.tab-count') || {}).textContent.trim() === b.dataset.count) && +document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').dataset.count === window.__listCount() && Array.from(document.querySelectorAll('#booking-results tr[data-focus]')).every(r => r.dataset.status === 'cancelled')); })()",
+  "label": "1920 step9 badge counts = list"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?size=50",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); if (!rows.length) return 'no rows'; let owing = 0; const has = (el, v) => window.__vis(el) && el.textContent.replace(/,/g, '').indexOf(v.toFixed(2)) !== -1; for (const r of rows) { const cell = r.querySelector('td.bk-col-balance'); if (!cell) return 'no cell'; const v = cell.dataset.balance === '' ? 0 : parseFloat(cell.dataset.balance); const amt = cell.querySelector('.bk-balance-due'); const twin = r.querySelector('.bk-ph-left'); if (v > 0.005) { owing++; const n = (has(amt, v) ? 1 : 0) + (has(twin, v) ? 1 : 0); if (n !== 1) return 'row ' + r.id + ' balance ' + v + ' shown ' + n + ' times'; } else { if (amt || twin) return 'amount shown for nothing due ' + r.id; } const pay = r.querySelector('td[data-label=\"Payment\"]'); if (pay && /left to pay/i.test(pay.textContent)) return 'left to pay still in Payment ' + r.id; } return owing > 0 || 'no owing rows on Liwonde'; })()); })()",
+  "label": "1920 step10 Balance due shown once per row, Payment cell clean"
+ },
+ {
+  "eval": "(async () => { return (['room','nights','total','status','payment','balance','created'].every(k => { const th = document.querySelector('th[data-sort-key=\"' + k + '\"]'); return th && th.querySelector('.help[data-tip]') && th.querySelector('.help').getAttribute('data-tip').length > 20; })); })()",
+  "label": "1920 step10 \"?\" helpers on Room, Nights, Total, Status, Payment, Balance due, Created"
+ },
+ {
+  "eval": "(async () => { return ((() => { const b = document.querySelector('#booking-results .table-responsive'); if (!b) return 'no box'; if (b.scrollWidth <= b.clientWidth + 1) return true; const cols = document.querySelectorAll('.bk-col-balance'); cols.forEach(c => c.style.display = 'none'); const w = b.scrollWidth, cw = b.clientWidth; cols.forEach(c => c.style.display = ''); return 'overflow ' + b.scrollWidth + '>' + b.clientWidth + (w <= cw + 1 ? ' (caused by Balance due)' : ' (also without Balance due: older)'); })()); })()",
+  "label": "1920 step10 table fits its box (no sideways scroll)"
+ },
+ {
+  "eval": "(async () => { return (Array.from(document.querySelector('select[data-bk-page-size]').options).map(x => x.value).join(',') === '10,25,50,all'); })()",
+  "label": "1920 pager picker offers 10/25/50/All"
+ },
+ {
+  "shot": "tmp/b1-1920-rows.png"
+ },
+ {
+  "eval": "(async () => { document.querySelector('th[data-sort-key=\"balance\"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); const th = document.querySelector('th[data-sort-key=\"balance\"]'); return okk && th.getAttribute('aria-sort') !== 'none' && getComputedStyle(th.querySelector('.admin-sort-icon')).opacity === '1'; })()",
+  "label": "1920 step10 sort by Balance due (header)"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); let stored = ''; try { stored = localStorage.getItem('rh-bk-sort:v1:u' + document.getElementById('booking-results').dataset.userId) || ''; } catch (e) {} return okk && /\"balance\"/.test(stored) && document.querySelector('th[data-sort-key=\"balance\"]').getAttribute('aria-sort') !== 'none'; })()",
+  "label": "1920 step11 remembered sort applied"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?sort=guest&dir=asc",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); return window.__q('sort') === 'guest' && document.querySelector('th[data-sort-key=\"guest\"]').getAttribute('aria-sort') === 'ascending'; })()",
+  "label": "1920 step12 ?sort in the URL wins"
+ },
+ {
+  "eval": "(async () => { document.querySelector('[data-bk-more-toggle]').click(); document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').click(); const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled'); return okk && !window.__q('sort'); })()",
+  "label": "1920 step12 history tab drops the upcoming sort"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php&as=test.staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); const uid = document.getElementById('booking-results').dataset.userId; let mine = ''; try { mine = localStorage.getItem('rh-bk-sort:v1:u1') || ''; } catch (e) {} return uid !== '1' && !window.__q('sort') && /balance/.test(mine); })()",
+  "label": "1920 step12 another user sees the default order"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?filter=unpaid&source=staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "1920 Saved filters"
+ },
+ {
+  "eval": "(async () => { return (window.__inView(document.getElementById('bkSavedMenu')) && window.__noH()); })()",
+  "label": "1920 step13 Saved filters menu opens in view"
+ },
+ {
+  "clickSel": "[data-bk-saved-open]",
+  "label": "1920 Save current filters"
+ },
+ {
+  "eval": "(async () => { const d = document.getElementById('bkSavedDialog'); const okk = await window.__until(() => d && d.open); return okk && window.__inView(d) && document.activeElement === d.querySelector('#bkSavedName') && (false ? [window.__tap('#bkSavedName'), window.__tap('.bk-saved-dialog__actions .btn')].every(x => x === true) : true); })()",
+  "label": "1920 step13 dialog opens in view"
+ },
+ {
+  "shot": "tmp/b1-1920-save.png"
+ },
+ {
+  "type": "B1 test 1920"
+ },
+ {
+  "clickSel": "[data-bk-saved-submit]",
+  "label": "1920 Save"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 1920')); return okk && !document.getElementById('bkSavedDialog').open; })()",
+  "label": "1920 step13 saved and listed"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "1920 Saved filters"
+ },
+ {
+  "eval": "(async () => { const a = Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).find(x => x.textContent === 'B1 test 1920'); if (!a) return 'not listed'; if (false && window.__tap('#bkSavedMenu .bk-saved__open') !== true) return window.__tap('#bkSavedMenu .bk-saved__open'); a.click(); const okk = await window.__until(() => window.__idle() && window.__q('filter') === 'unpaid' && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && document.querySelector('#booking-results').dataset.activeTab === 'unpaid'; })()",
+  "label": "1920 step14 set listed after reload; opening it reproduces the list"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "1920 Saved filters"
+ },
+ {
+  "clickSel": "[data-bk-saved-del][data-name=\"B1 test 1920\"]",
+  "label": "1920 delete set"
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__vis(document.querySelector('[data-admin-confirm-ok]'))); })()",
+  "label": "1920 step15 confirm asked"
+ },
+ {
+  "clickSel": "[data-admin-confirm-ok]",
+  "label": "1920 confirm delete"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 1920')); return okk && window.__noH(); })()",
+  "label": "1920 step15 deleted"
+ },
+ {
+  "viewport": [
+   1280,
+   900
+  ]
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { try { localStorage.clear(); } catch (e) {} return true; })()",
+  "label": "1280 reset device memory"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const f = document.querySelector('[data-live-search-form=\"room-bookings\"]'); if (!f) return 'no form'; const names = ['filter_status','pay','room_type','room','source','group','created_by','kind','date_type']; const miss = names.filter(n => !f.querySelector('select[name=\"' + n + '\"]')); if (miss.length) return 'missing ' + miss; if (f.querySelectorAll('[data-bk-preset]').length !== 5) return 'presets'; if (!f.querySelector('input[name=\"date_from\"]') || !f.querySelector('input[name=\"date_to\"]')) return 'dates'; if (window.__vis(f.querySelector('[data-bk-clear]'))) return 'clear shown with no filters'; return window.__noH() || 'page scrolls sideways'; })()); })()",
+  "label": "1280 step1 bar has every control"
+ },
+ {
+  "eval": "(async () => { return (!window.__vis(document.querySelector('[data-bk-filters-toggle]')) && window.__vis(document.querySelector('select[name=\"source\"]'))); })()",
+  "label": "1280 step1 drop-downs show in the bar"
+ },
+ {
+  "shot": "tmp/b1-1280-bar.png"
+ },
+ {
+  "clickSel": "[data-bk-preset=\"today\"]",
+  "label": "1280 Today"
+ },
+ {
+  "eval": "(async () => { const today = (document.querySelector('table[data-hotel-today]') || {}).dataset ? document.querySelector('table[data-hotel-today]').dataset.hotelToday : ''; const hotel = today || ''; const got = await window.__until(() => window.__idle() && window.__q('date_from') && window.__q('date_from') === window.__q('date_to') && document.querySelector('[data-bk-chip=\"dates\"]')); const t2 = (document.querySelector('table[data-hotel-today]') || {dataset:{}}).dataset.hotelToday || hotel; return got && (!t2 || window.__q('date_from') === t2) && document.querySelector('[data-bk-preset=\"today\"]').classList.contains('is-active') && window.__vis(document.querySelector('[data-bk-clear]')); })()",
+  "label": "1280 step2 Today = hotel date, chip shown"
+ },
+ {
+  "eval": "(async () => { const s = document.querySelector('select[name=\"source\"]'); s.value = 'staff'; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value === 'staff'; })()",
+  "label": "1280 step3 pick Source = Staff"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "1280 Filter",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('[data-bk-chip=\"dates\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && window.__listCount() >= 0; })()",
+  "label": "1280 step3 Filter applies source, keeps dates"
+ },
+ {
+  "shot": "tmp/b1-1280-chips.png"
+ },
+ {
+  "clickSel": "[data-bk-chip=\"source\"] .bk-chip__x",
+  "label": "1280 remove source chip"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === '' && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "1280 step4 chip removed, drop-down follows"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "1280 Filter again",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !!document.querySelector('[data-bk-chip=\"dates\"]')); return okk && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === ''; })()",
+  "label": "1280 step5 removed filter stays removed"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => history.back(), 50); return true; })()",
+  "label": "1280 step6 Back"
+ },
+ {
+  "wait": 4000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => document.getElementById('booking-results') && window.__idle() && !window.__q('source') && window.__q('date_from'), 20000); return okk && !document.querySelector('[data-bk-chip=\"source\"]'); })()",
+  "label": "1280 step6 Back (to the removed state)"
+ },
+ {
+  "eval": "(async () => { history.back(); const okk = await window.__until(() => window.__idle() && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === 'staff', 15000); return okk && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "1280 step6 Back restores chip + drop-down"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "clickSel": ".tabs-header > [data-tab=\"checked-in\"]",
+  "label": "1280 In house tab"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'checked-in' && (document.querySelector('#booking-results').dataset.activeTab === 'checked-in')); const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); const btn = document.querySelector('.tabs-header > [data-tab=\"checked-in\"]'); return okk && btn.classList.contains('active') && rows.length > 0 && rows.every(r => r.dataset.status === 'checked-in') && +btn.dataset.count === window.__listCount(); })()",
+  "label": "1280 step7 In house tab lands on its rows"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "1280 open More"
+ },
+ {
+  "eval": "(async () => { const m = document.getElementById('bkTabsMoreMenu'); const okk = await window.__until(() => window.__vis(m)); const items = m.querySelectorAll('.tab-button[data-tab]'); return okk && window.__inView(m) && items.length >= 5 && m.contains(document.activeElement) && ['tentative','checked-out','cancelled','no-show','group-bookings'].every(t => m.querySelector('[data-tab=\"' + t + '\"]')) && (false ? window.__tap('#bkTabsMoreMenu .tab-button') === true : true); })()",
+  "label": "1280 step8 More menu opens in view, focus inside"
+ },
+ {
+  "shot": "tmp/b1-1280-more.png"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "eval": "(async () => { return (!window.__vis(document.getElementById('bkTabsMoreMenu')) && document.activeElement === document.querySelector('[data-bk-more-toggle]')); })()",
+  "label": "1280 step8 Escape closes More, focus back on it"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "1280 open More again"
+ },
+ {
+  "clickSel": "#bkTabsMoreMenu [data-tab=\"cancelled\"]",
+  "label": "1280 Cancelled"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled' && document.querySelector('#booking-results').dataset.activeTab === 'cancelled'); const t = document.querySelector('[data-bk-more-toggle]'); const item = document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]'); return okk && t.classList.contains('is-active') && t.querySelector('[data-bk-more-label]').textContent.trim() === 'More: Cancelled' && t.querySelector('[data-bk-more-count]').textContent.trim() === item.dataset.count && !window.__vis(document.getElementById('bkTabsMoreMenu')); })()",
+  "label": "1280 step8 More shows the open hidden tab"
+ },
+ {
+  "eval": "(async () => { return (Array.from(document.querySelectorAll('.tabs-header .tab-button[data-tab]')).every(b => (b.querySelector('.tab-count') || {}).textContent.trim() === b.dataset.count) && +document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').dataset.count === window.__listCount() && Array.from(document.querySelectorAll('#booking-results tr[data-focus]')).every(r => r.dataset.status === 'cancelled')); })()",
+  "label": "1280 step9 badge counts = list"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?size=50",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); if (!rows.length) return 'no rows'; let owing = 0; const has = (el, v) => window.__vis(el) && el.textContent.replace(/,/g, '').indexOf(v.toFixed(2)) !== -1; for (const r of rows) { const cell = r.querySelector('td.bk-col-balance'); if (!cell) return 'no cell'; const v = cell.dataset.balance === '' ? 0 : parseFloat(cell.dataset.balance); const amt = cell.querySelector('.bk-balance-due'); const twin = r.querySelector('.bk-ph-left'); if (v > 0.005) { owing++; const n = (has(amt, v) ? 1 : 0) + (has(twin, v) ? 1 : 0); if (n !== 1) return 'row ' + r.id + ' balance ' + v + ' shown ' + n + ' times'; } else { if (amt || twin) return 'amount shown for nothing due ' + r.id; } const pay = r.querySelector('td[data-label=\"Payment\"]'); if (pay && /left to pay/i.test(pay.textContent)) return 'left to pay still in Payment ' + r.id; } return owing > 0 || 'no owing rows on Liwonde'; })()); })()",
+  "label": "1280 step10 Balance due shown once per row, Payment cell clean"
+ },
+ {
+  "eval": "(async () => { return (['room','nights','total','status','payment','balance','created'].every(k => { const th = document.querySelector('th[data-sort-key=\"' + k + '\"]'); return th && th.querySelector('.help[data-tip]') && th.querySelector('.help').getAttribute('data-tip').length > 20; })); })()",
+  "label": "1280 step10 \"?\" helpers on Room, Nights, Total, Status, Payment, Balance due, Created"
+ },
+ {
+  "eval": "(async () => { return ((() => { if (!window.__noH()) return 'page scrolls sideways'; if (window.__vis(document.querySelector('#booking-results thead th.bk-col-balance'))) return 'Balance due column shown in a box too narrow for it'; for (const r of document.querySelectorAll('#booking-results tr[data-focus]')) { const c = r.querySelector('td.bk-col-balance'); const v = c && c.dataset.balance !== '' ? parseFloat(c.dataset.balance) : 0; if (v > 0.005) { const n = (window.__vis(c.querySelector('.bk-balance-due')) ? 1 : 0) + (window.__vis(r.querySelector('.bk-ph-left')) ? 1 : 0); if (n !== 1) return 'row ' + r.id + ' balance shown ' + n + ' times'; } } return true; })()); })()",
+  "label": "1280 step10 no page scroll, Balance due shown once (the table may scroll inside its own box: older 7-column overflow, LATER for the owner)"
+ },
+ {
+  "eval": "(async () => { return (Array.from(document.querySelector('select[data-bk-page-size]').options).map(x => x.value).join(',') === '10,25,50,all'); })()",
+  "label": "1280 pager picker offers 10/25/50/All"
+ },
+ {
+  "shot": "tmp/b1-1280-rows.png"
+ },
+ {
+  "eval": "(async () => { document.querySelector('th[data-sort-key=\"balance\"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); const th = document.querySelector('th[data-sort-key=\"balance\"]'); return okk && th.getAttribute('aria-sort') !== 'none' && getComputedStyle(th.querySelector('.admin-sort-icon')).opacity === '1'; })()",
+  "label": "1280 step10 sort by Balance due (header)"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); let stored = ''; try { stored = localStorage.getItem('rh-bk-sort:v1:u' + document.getElementById('booking-results').dataset.userId) || ''; } catch (e) {} return okk && /\"balance\"/.test(stored) && document.querySelector('th[data-sort-key=\"balance\"]').getAttribute('aria-sort') !== 'none'; })()",
+  "label": "1280 step11 remembered sort applied"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?sort=guest&dir=asc",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); return window.__q('sort') === 'guest' && document.querySelector('th[data-sort-key=\"guest\"]').getAttribute('aria-sort') === 'ascending'; })()",
+  "label": "1280 step12 ?sort in the URL wins"
+ },
+ {
+  "eval": "(async () => { document.querySelector('[data-bk-more-toggle]').click(); document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').click(); const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled'); return okk && !window.__q('sort'); })()",
+  "label": "1280 step12 history tab drops the upcoming sort"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php&as=test.staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); const uid = document.getElementById('booking-results').dataset.userId; let mine = ''; try { mine = localStorage.getItem('rh-bk-sort:v1:u1') || ''; } catch (e) {} return uid !== '1' && !window.__q('sort') && /balance/.test(mine); })()",
+  "label": "1280 step12 another user sees the default order"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?filter=unpaid&source=staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "1280 Saved filters"
+ },
+ {
+  "eval": "(async () => { return (window.__inView(document.getElementById('bkSavedMenu')) && window.__noH()); })()",
+  "label": "1280 step13 Saved filters menu opens in view"
+ },
+ {
+  "clickSel": "[data-bk-saved-open]",
+  "label": "1280 Save current filters"
+ },
+ {
+  "eval": "(async () => { const d = document.getElementById('bkSavedDialog'); const okk = await window.__until(() => d && d.open); return okk && window.__inView(d) && document.activeElement === d.querySelector('#bkSavedName') && (false ? [window.__tap('#bkSavedName'), window.__tap('.bk-saved-dialog__actions .btn')].every(x => x === true) : true); })()",
+  "label": "1280 step13 dialog opens in view"
+ },
+ {
+  "shot": "tmp/b1-1280-save.png"
+ },
+ {
+  "type": "B1 test 1280"
+ },
+ {
+  "clickSel": "[data-bk-saved-submit]",
+  "label": "1280 Save"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 1280')); return okk && !document.getElementById('bkSavedDialog').open; })()",
+  "label": "1280 step13 saved and listed"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "1280 Saved filters"
+ },
+ {
+  "eval": "(async () => { const a = Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).find(x => x.textContent === 'B1 test 1280'); if (!a) return 'not listed'; if (false && window.__tap('#bkSavedMenu .bk-saved__open') !== true) return window.__tap('#bkSavedMenu .bk-saved__open'); a.click(); const okk = await window.__until(() => window.__idle() && window.__q('filter') === 'unpaid' && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && document.querySelector('#booking-results').dataset.activeTab === 'unpaid'; })()",
+  "label": "1280 step14 set listed after reload; opening it reproduces the list"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "1280 Saved filters"
+ },
+ {
+  "clickSel": "[data-bk-saved-del][data-name=\"B1 test 1280\"]",
+  "label": "1280 delete set"
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__vis(document.querySelector('[data-admin-confirm-ok]'))); })()",
+  "label": "1280 step15 confirm asked"
+ },
+ {
+  "clickSel": "[data-admin-confirm-ok]",
+  "label": "1280 confirm delete"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 1280')); return okk && window.__noH(); })()",
+  "label": "1280 step15 deleted"
+ },
+ {
+  "viewport": [
+   768,
+   1024
+  ]
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { try { localStorage.clear(); } catch (e) {} return true; })()",
+  "label": "768 reset device memory"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const f = document.querySelector('[data-live-search-form=\"room-bookings\"]'); if (!f) return 'no form'; const names = ['filter_status','pay','room_type','room','source','group','created_by','kind','date_type']; const miss = names.filter(n => !f.querySelector('select[name=\"' + n + '\"]')); if (miss.length) return 'missing ' + miss; if (f.querySelectorAll('[data-bk-preset]').length !== 5) return 'presets'; if (!f.querySelector('input[name=\"date_from\"]') || !f.querySelector('input[name=\"date_to\"]')) return 'dates'; if (window.__vis(f.querySelector('[data-bk-clear]'))) return 'clear shown with no filters'; return window.__noH() || 'page scrolls sideways'; })()); })()",
+  "label": "768 step1 bar has every control"
+ },
+ {
+  "eval": "(async () => { return (!window.__vis(document.querySelector('[data-bk-filters-toggle]')) && window.__vis(document.querySelector('select[name=\"source\"]'))); })()",
+  "label": "768 step1 drop-downs show in the bar"
+ },
+ {
+  "eval": "(async () => { return ([window.__tap('[data-bk-filters-toggle]'), window.__tap('.bk-preset'), window.__tap('.bk-drop select'), window.__tap('.bookings-toolbar__button--filter'), window.__tap('.bookings-toolbar input[type=date]'), window.__tap('[data-bk-saved-toggle]')].filter(x => x !== true && !(String(x).startsWith('none:[data-bk-filters-toggle]'))).join(' | ') || true); })()",
+  "label": "768 touch: bar controls >= 40px"
+ },
+ {
+  "shot": "tmp/b1-768-bar.png"
+ },
+ {
+  "clickSel": "[data-bk-preset=\"today\"]",
+  "label": "768 Today"
+ },
+ {
+  "eval": "(async () => { const today = (document.querySelector('table[data-hotel-today]') || {}).dataset ? document.querySelector('table[data-hotel-today]').dataset.hotelToday : ''; const hotel = today || ''; const got = await window.__until(() => window.__idle() && window.__q('date_from') && window.__q('date_from') === window.__q('date_to') && document.querySelector('[data-bk-chip=\"dates\"]')); const t2 = (document.querySelector('table[data-hotel-today]') || {dataset:{}}).dataset.hotelToday || hotel; return got && (!t2 || window.__q('date_from') === t2) && document.querySelector('[data-bk-preset=\"today\"]').classList.contains('is-active') && window.__vis(document.querySelector('[data-bk-clear]')); })()",
+  "label": "768 step2 Today = hotel date, chip shown"
+ },
+ {
+  "eval": "(async () => { const s = document.querySelector('select[name=\"source\"]'); s.value = 'staff'; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value === 'staff'; })()",
+  "label": "768 step3 pick Source = Staff"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "768 Filter",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('[data-bk-chip=\"dates\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && window.__listCount() >= 0; })()",
+  "label": "768 step3 Filter applies source, keeps dates"
+ },
+ {
+  "eval": "(async () => { return ([window.__tap('.bk-chip__x'), window.__tap('.bk-chips__clear')].filter(x => x !== true).join(' | ') || true); })()",
+  "label": "768 touch: chip x and Clear all >= 40px"
+ },
+ {
+  "shot": "tmp/b1-768-chips.png"
+ },
+ {
+  "clickSel": "[data-bk-chip=\"source\"] .bk-chip__x",
+  "label": "768 remove source chip"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === '' && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "768 step4 chip removed, drop-down follows"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "768 Filter again",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !!document.querySelector('[data-bk-chip=\"dates\"]')); return okk && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === ''; })()",
+  "label": "768 step5 removed filter stays removed"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => history.back(), 50); return true; })()",
+  "label": "768 step6 Back"
+ },
+ {
+  "wait": 4000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => document.getElementById('booking-results') && window.__idle() && !window.__q('source') && window.__q('date_from'), 20000); return okk && !document.querySelector('[data-bk-chip=\"source\"]'); })()",
+  "label": "768 step6 Back (to the removed state)"
+ },
+ {
+  "eval": "(async () => { history.back(); const okk = await window.__until(() => window.__idle() && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === 'staff', 15000); return okk && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "768 step6 Back restores chip + drop-down"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "clickSel": ".tabs-header > [data-tab=\"checked-in\"]",
+  "label": "768 In house tab"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'checked-in' && (document.querySelector('#booking-results').dataset.activeTab === 'checked-in')); const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); const btn = document.querySelector('.tabs-header > [data-tab=\"checked-in\"]'); return okk && btn.classList.contains('active') && rows.length > 0 && rows.every(r => r.dataset.status === 'checked-in') && +btn.dataset.count === window.__listCount(); })()",
+  "label": "768 step7 In house tab lands on its rows"
+ },
+ {
+  "eval": "(async () => { return ([window.__tap('.tabs-header > .tab-button'), window.__tap('[data-bk-more-toggle]')].filter(x => x !== true).join(' | ') || true); })()",
+  "label": "768 touch: tabs and More >= 40px"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "768 open More"
+ },
+ {
+  "eval": "(async () => { const m = document.getElementById('bkTabsMoreMenu'); const okk = await window.__until(() => window.__vis(m)); const items = m.querySelectorAll('.tab-button[data-tab]'); return okk && window.__inView(m) && items.length >= 5 && m.contains(document.activeElement) && ['tentative','checked-out','cancelled','no-show','group-bookings'].every(t => m.querySelector('[data-tab=\"' + t + '\"]')) && (true ? window.__tap('#bkTabsMoreMenu .tab-button') === true : true); })()",
+  "label": "768 step8 More menu opens in view, focus inside"
+ },
+ {
+  "shot": "tmp/b1-768-more.png"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "eval": "(async () => { return (!window.__vis(document.getElementById('bkTabsMoreMenu')) && document.activeElement === document.querySelector('[data-bk-more-toggle]')); })()",
+  "label": "768 step8 Escape closes More, focus back on it"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "768 open More again"
+ },
+ {
+  "clickSel": "#bkTabsMoreMenu [data-tab=\"cancelled\"]",
+  "label": "768 Cancelled"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled' && document.querySelector('#booking-results').dataset.activeTab === 'cancelled'); const t = document.querySelector('[data-bk-more-toggle]'); const item = document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]'); return okk && t.classList.contains('is-active') && t.querySelector('[data-bk-more-label]').textContent.trim() === 'More: Cancelled' && t.querySelector('[data-bk-more-count]').textContent.trim() === item.dataset.count && !window.__vis(document.getElementById('bkTabsMoreMenu')); })()",
+  "label": "768 step8 More shows the open hidden tab"
+ },
+ {
+  "eval": "(async () => { return (Array.from(document.querySelectorAll('.tabs-header .tab-button[data-tab]')).every(b => (b.querySelector('.tab-count') || {}).textContent.trim() === b.dataset.count) && +document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').dataset.count === window.__listCount() && Array.from(document.querySelectorAll('#booking-results tr[data-focus]')).every(r => r.dataset.status === 'cancelled')); })()",
+  "label": "768 step9 badge counts = list"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?size=50",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); if (!rows.length) return 'no rows'; let owing = 0; const has = (el, v) => window.__vis(el) && el.textContent.replace(/,/g, '').indexOf(v.toFixed(2)) !== -1; for (const r of rows) { const cell = r.querySelector('td.bk-col-balance'); if (!cell) return 'no cell'; const v = cell.dataset.balance === '' ? 0 : parseFloat(cell.dataset.balance); const amt = cell.querySelector('.bk-balance-due'); const twin = r.querySelector('.bk-ph-left'); if (v > 0.005) { owing++; const n = (has(amt, v) ? 1 : 0) + (has(twin, v) ? 1 : 0); if (n !== 1) return 'row ' + r.id + ' balance ' + v + ' shown ' + n + ' times'; } else { if (amt || twin) return 'amount shown for nothing due ' + r.id; } const pay = r.querySelector('td[data-label=\"Payment\"]'); if (pay && /left to pay/i.test(pay.textContent)) return 'left to pay still in Payment ' + r.id; } return owing > 0 || 'no owing rows on Liwonde'; })()); })()",
+  "label": "768 step10 Balance due shown once per row, Payment cell clean"
+ },
+ {
+  "eval": "(async () => { return (['room','nights','total','status','payment','balance','created'].every(k => { const th = document.querySelector('th[data-sort-key=\"' + k + '\"]'); return th && th.querySelector('.help[data-tip]') && th.querySelector('.help').getAttribute('data-tip').length > 20; })); })()",
+  "label": "768 step10 \"?\" helpers on Room, Nights, Total, Status, Payment, Balance due, Created"
+ },
+ {
+  "eval": "(async () => { return ((() => { const s = document.querySelector('select[data-bk-page-size]'); if (!s) return 'no pager'; const o = Array.from(s.options).map(x => x.value).join(','); return (o === '10,25,50,all' || 'options ' + o) && (window.__tap('select[data-bk-page-size]') === true || window.__tap('select[data-bk-page-size]')); })()); })()",
+  "label": "768 touch: pager picker >= 40px, offers 10/25/50/All"
+ },
+ {
+  "shot": "tmp/b1-768-rows.png"
+ },
+ {
+  "eval": "(async () => { document.querySelector('th[data-sort-key=\"balance\"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); const th = document.querySelector('th[data-sort-key=\"balance\"]'); return okk && th.getAttribute('aria-sort') !== 'none' && getComputedStyle(th.querySelector('.admin-sort-icon')).opacity === '1'; })()",
+  "label": "768 step10 sort by Balance due (header)"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); let stored = ''; try { stored = localStorage.getItem('rh-bk-sort:v1:u' + document.getElementById('booking-results').dataset.userId) || ''; } catch (e) {} return okk && /\"balance\"/.test(stored) && document.querySelector('th[data-sort-key=\"balance\"]').getAttribute('aria-sort') !== 'none'; })()",
+  "label": "768 step11 remembered sort applied"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?sort=guest&dir=asc",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); return window.__q('sort') === 'guest' && document.querySelector('th[data-sort-key=\"guest\"]').getAttribute('aria-sort') === 'ascending'; })()",
+  "label": "768 step12 ?sort in the URL wins"
+ },
+ {
+  "eval": "(async () => { document.querySelector('[data-bk-more-toggle]').click(); document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').click(); const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled'); return okk && !window.__q('sort'); })()",
+  "label": "768 step12 history tab drops the upcoming sort"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php&as=test.staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); const uid = document.getElementById('booking-results').dataset.userId; let mine = ''; try { mine = localStorage.getItem('rh-bk-sort:v1:u1') || ''; } catch (e) {} return uid !== '1' && !window.__q('sort') && /balance/.test(mine); })()",
+  "label": "768 step12 another user sees the default order"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?filter=unpaid&source=staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "768 Saved filters"
+ },
+ {
+  "eval": "(async () => { return (window.__inView(document.getElementById('bkSavedMenu')) && window.__noH()); })()",
+  "label": "768 step13 Saved filters menu opens in view"
+ },
+ {
+  "clickSel": "[data-bk-saved-open]",
+  "label": "768 Save current filters"
+ },
+ {
+  "eval": "(async () => { const d = document.getElementById('bkSavedDialog'); const okk = await window.__until(() => d && d.open); return okk && window.__inView(d) && document.activeElement === d.querySelector('#bkSavedName') && (true ? [window.__tap('#bkSavedName'), window.__tap('.bk-saved-dialog__actions .btn')].every(x => x === true) : true); })()",
+  "label": "768 step13 dialog opens in view"
+ },
+ {
+  "shot": "tmp/b1-768-save.png"
+ },
+ {
+  "type": "B1 test 768"
+ },
+ {
+  "clickSel": "[data-bk-saved-submit]",
+  "label": "768 Save"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 768')); return okk && !document.getElementById('bkSavedDialog').open; })()",
+  "label": "768 step13 saved and listed"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "768 Saved filters"
+ },
+ {
+  "eval": "(async () => { const a = Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).find(x => x.textContent === 'B1 test 768'); if (!a) return 'not listed'; if (true && window.__tap('#bkSavedMenu .bk-saved__open') !== true) return window.__tap('#bkSavedMenu .bk-saved__open'); a.click(); const okk = await window.__until(() => window.__idle() && window.__q('filter') === 'unpaid' && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && document.querySelector('#booking-results').dataset.activeTab === 'unpaid'; })()",
+  "label": "768 step14 set listed after reload; opening it reproduces the list"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "768 Saved filters"
+ },
+ {
+  "clickSel": "[data-bk-saved-del][data-name=\"B1 test 768\"]",
+  "label": "768 delete set"
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__vis(document.querySelector('[data-admin-confirm-ok]'))); })()",
+  "label": "768 step15 confirm asked"
+ },
+ {
+  "clickSel": "[data-admin-confirm-ok]",
+  "label": "768 confirm delete"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 768')); return okk && window.__noH(); })()",
+  "label": "768 step15 deleted"
+ },
+ {
+  "viewport": [
+   390,
+   844
+  ]
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { try { localStorage.clear(); } catch (e) {} return true; })()",
+  "label": "390 reset device memory"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const f = document.querySelector('[data-live-search-form=\"room-bookings\"]'); if (!f) return 'no form'; const names = ['filter_status','pay','room_type','room','source','group','created_by','kind','date_type']; const miss = names.filter(n => !f.querySelector('select[name=\"' + n + '\"]')); if (miss.length) return 'missing ' + miss; if (f.querySelectorAll('[data-bk-preset]').length !== 5) return 'presets'; if (!f.querySelector('input[name=\"date_from\"]') || !f.querySelector('input[name=\"date_to\"]')) return 'dates'; if (window.__vis(f.querySelector('[data-bk-clear]'))) return 'clear shown with no filters'; return window.__noH() || 'page scrolls sideways'; })()); })()",
+  "label": "390 step1 bar has every control"
+ },
+ {
+  "eval": "(async () => { return (window.__vis(document.querySelector('[data-bk-filters-toggle]')) && !window.__vis(document.querySelector('select[name=\"source\"]'))); })()",
+  "label": "390 step1 drop-downs fold under Filters"
+ },
+ {
+  "clickSel": "[data-bk-filters-toggle]",
+  "label": "390 open Filters"
+ },
+ {
+  "eval": "(async () => { return (window.__vis(document.querySelector('select[name=\"source\"]')) && document.querySelector('[data-bk-filters-toggle]').getAttribute('aria-expanded') === 'true' && window.__noH()); })()",
+  "label": "390 step1 Filters opens the drop-downs"
+ },
+ {
+  "eval": "(async () => { return ([window.__tap('[data-bk-filters-toggle]'), window.__tap('.bk-preset'), window.__tap('.bk-drop select'), window.__tap('.bookings-toolbar__button--filter'), window.__tap('.bookings-toolbar input[type=date]'), window.__tap('[data-bk-saved-toggle]')].filter(x => x !== true && !(String(x).startsWith('none:[data-bk-filters-toggle]'))).join(' | ') || true); })()",
+  "label": "390 touch: bar controls >= 40px"
+ },
+ {
+  "shot": "tmp/b1-390-bar.png"
+ },
+ {
+  "clickSel": "[data-bk-preset=\"today\"]",
+  "label": "390 Today"
+ },
+ {
+  "eval": "(async () => { const today = (document.querySelector('table[data-hotel-today]') || {}).dataset ? document.querySelector('table[data-hotel-today]').dataset.hotelToday : ''; const hotel = today || ''; const got = await window.__until(() => window.__idle() && window.__q('date_from') && window.__q('date_from') === window.__q('date_to') && document.querySelector('[data-bk-chip=\"dates\"]')); const t2 = (document.querySelector('table[data-hotel-today]') || {dataset:{}}).dataset.hotelToday || hotel; return got && (!t2 || window.__q('date_from') === t2) && document.querySelector('[data-bk-preset=\"today\"]').classList.contains('is-active') && window.__vis(document.querySelector('[data-bk-clear]')); })()",
+  "label": "390 step2 Today = hotel date, chip shown"
+ },
+ {
+  "eval": "(async () => { const s = document.querySelector('select[name=\"source\"]'); s.value = 'staff'; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value === 'staff'; })()",
+  "label": "390 step3 pick Source = Staff"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "390 Filter",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('[data-bk-chip=\"dates\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && window.__listCount() >= 0; })()",
+  "label": "390 step3 Filter applies source, keeps dates"
+ },
+ {
+  "eval": "(async () => { return ([window.__tap('.bk-chip__x'), window.__tap('.bk-chips__clear')].filter(x => x !== true).join(' | ') || true); })()",
+  "label": "390 touch: chip x and Clear all >= 40px"
+ },
+ {
+  "shot": "tmp/b1-390-chips.png"
+ },
+ {
+  "clickSel": "[data-bk-chip=\"source\"] .bk-chip__x",
+  "label": "390 remove source chip"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === '' && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "390 step4 chip removed, drop-down follows"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "label": "390 Filter again",
+  "after": 7000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !!document.querySelector('[data-bk-chip=\"dates\"]')); return okk && !window.__q('source') && !document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === ''; })()",
+  "label": "390 step5 removed filter stays removed"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => history.back(), 50); return true; })()",
+  "label": "390 step6 Back"
+ },
+ {
+  "wait": 4000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => document.getElementById('booking-results') && window.__idle() && !window.__q('source') && window.__q('date_from'), 20000); return okk && !document.querySelector('[data-bk-chip=\"source\"]'); })()",
+  "label": "390 step6 Back (to the removed state)"
+ },
+ {
+  "eval": "(async () => { history.back(); const okk = await window.__until(() => window.__idle() && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]') && document.querySelector('select[name=\"source\"]').value === 'staff', 15000); return okk && !!document.querySelector('[data-bk-chip=\"dates\"]'); })()",
+  "label": "390 step6 Back restores chip + drop-down"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "clickSel": ".tabs-header > [data-tab=\"checked-in\"]",
+  "label": "390 In house tab"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'checked-in' && (document.querySelector('#booking-results').dataset.activeTab === 'checked-in')); const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); const btn = document.querySelector('.tabs-header > [data-tab=\"checked-in\"]'); return okk && btn.classList.contains('active') && rows.length > 0 && rows.every(r => r.dataset.status === 'checked-in') && +btn.dataset.count === window.__listCount(); })()",
+  "label": "390 step7 In house tab lands on its rows"
+ },
+ {
+  "eval": "(async () => { return ([window.__tap('.tabs-header > .tab-button'), window.__tap('[data-bk-more-toggle]')].filter(x => x !== true).join(' | ') || true); })()",
+  "label": "390 touch: tabs and More >= 40px"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "390 open More"
+ },
+ {
+  "eval": "(async () => { const m = document.getElementById('bkTabsMoreMenu'); const okk = await window.__until(() => window.__vis(m)); const items = m.querySelectorAll('.tab-button[data-tab]'); return okk && window.__inView(m) && items.length >= 5 && m.contains(document.activeElement) && ['tentative','checked-out','cancelled','no-show','group-bookings'].every(t => m.querySelector('[data-tab=\"' + t + '\"]')) && (true ? window.__tap('#bkTabsMoreMenu .tab-button') === true : true); })()",
+  "label": "390 step8 More menu opens in view, focus inside"
+ },
+ {
+  "shot": "tmp/b1-390-more.png"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "eval": "(async () => { return (!window.__vis(document.getElementById('bkTabsMoreMenu')) && document.activeElement === document.querySelector('[data-bk-more-toggle]')); })()",
+  "label": "390 step8 Escape closes More, focus back on it"
+ },
+ {
+  "clickSel": "[data-bk-more-toggle]",
+  "label": "390 open More again"
+ },
+ {
+  "clickSel": "#bkTabsMoreMenu [data-tab=\"cancelled\"]",
+  "label": "390 Cancelled"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled' && document.querySelector('#booking-results').dataset.activeTab === 'cancelled'); const t = document.querySelector('[data-bk-more-toggle]'); const item = document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]'); return okk && t.classList.contains('is-active') && t.querySelector('[data-bk-more-label]').textContent.trim() === 'More: Cancelled' && t.querySelector('[data-bk-more-count]').textContent.trim() === item.dataset.count && !window.__vis(document.getElementById('bkTabsMoreMenu')); })()",
+  "label": "390 step8 More shows the open hidden tab"
+ },
+ {
+  "eval": "(async () => { return (Array.from(document.querySelectorAll('.tabs-header .tab-button[data-tab]')).every(b => (b.querySelector('.tab-count') || {}).textContent.trim() === b.dataset.count) && +document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').dataset.count === window.__listCount() && Array.from(document.querySelectorAll('#booking-results tr[data-focus]')).every(r => r.dataset.status === 'cancelled')); })()",
+  "label": "390 step9 badge counts = list"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?size=50",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { return ((() => { const rows = Array.from(document.querySelectorAll('#booking-results tr[data-focus]')); if (!rows.length) return 'no rows'; let owing = 0; const has = (el, v) => window.__vis(el) && el.textContent.replace(/,/g, '').indexOf(v.toFixed(2)) !== -1; for (const r of rows) { const cell = r.querySelector('td.bk-col-balance'); if (!cell) return 'no cell'; const v = cell.dataset.balance === '' ? 0 : parseFloat(cell.dataset.balance); const amt = cell.querySelector('.bk-balance-due'); const twin = r.querySelector('.bk-ph-left'); if (v > 0.005) { owing++; const n = (has(amt, v) ? 1 : 0) + (has(twin, v) ? 1 : 0); if (n !== 1) return 'row ' + r.id + ' balance ' + v + ' shown ' + n + ' times'; } else { if (amt || twin) return 'amount shown for nothing due ' + r.id; } const pay = r.querySelector('td[data-label=\"Payment\"]'); if (pay && /left to pay/i.test(pay.textContent)) return 'left to pay still in Payment ' + r.id; } return owing > 0 || 'no owing rows on Liwonde'; })()); })()",
+  "label": "390 step10 Balance due shown once per row, Payment cell clean"
+ },
+ {
+  "eval": "(async () => { return (['room','nights','total','status','payment','balance','created'].every(k => { const th = document.querySelector('th[data-sort-key=\"' + k + '\"]'); return th && th.querySelector('.help[data-tip]') && th.querySelector('.help').getAttribute('data-tip').length > 20; })); })()",
+  "label": "390 step10 \"?\" helpers on Room, Nights, Total, Status, Payment, Balance due, Created"
+ },
+ {
+  "eval": "(async () => { return ((() => { const s = document.querySelector('select[data-bk-page-size]'); if (!s) return 'no pager'; const o = Array.from(s.options).map(x => x.value).join(','); return (o === '10,25,50,all' || 'options ' + o) && (window.__tap('select[data-bk-page-size]') === true || window.__tap('select[data-bk-page-size]')); })()); })()",
+  "label": "390 touch: pager picker >= 40px, offers 10/25/50/All"
+ },
+ {
+  "shot": "tmp/b1-390-rows.png"
+ },
+ {
+  "eval": "(async () => { document.querySelector('th[data-sort-key=\"balance\"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); const th = document.querySelector('th[data-sort-key=\"balance\"]'); return okk && th.getAttribute('aria-sort') !== 'none' && getComputedStyle(th.querySelector('.admin-sort-icon')).opacity === '1'; })()",
+  "label": "390 step10 sort by Balance due (header)"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => window.__idle() && window.__q('sort') === 'balance', 30000); let stored = ''; try { stored = localStorage.getItem('rh-bk-sort:v1:u' + document.getElementById('booking-results').dataset.userId) || ''; } catch (e) {} return okk && /\"balance\"/.test(stored) && document.querySelector('th[data-sort-key=\"balance\"]').getAttribute('aria-sort') !== 'none'; })()",
+  "label": "390 step11 remembered sort applied"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?sort=guest&dir=asc",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); return window.__q('sort') === 'guest' && document.querySelector('th[data-sort-key=\"guest\"]').getAttribute('aria-sort') === 'ascending'; })()",
+  "label": "390 step12 ?sort in the URL wins"
+ },
+ {
+  "eval": "(async () => { document.querySelector('[data-bk-more-toggle]').click(); document.querySelector('#bkTabsMoreMenu [data-tab=\"cancelled\"]').click(); const okk = await window.__until(() => window.__idle() && window.__q('filter_status') === 'cancelled'); return okk && !window.__q('sort'); })()",
+  "label": "390 step12 history tab drops the upcoming sort"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php&as=test.staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { await new Promise(r => setTimeout(r, 1500)); const uid = document.getElementById('booking-results').dataset.userId; let mine = ''; try { mine = localStorage.getItem('rh-bk-sort:v1:u1') || ''; } catch (e) {} return uid !== '1' && !window.__q('sort') && /balance/.test(mine); })()",
+  "label": "390 step12 another user sees the default order"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?filter=unpaid&source=staff",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "390 Saved filters"
+ },
+ {
+  "eval": "(async () => { return (window.__inView(document.getElementById('bkSavedMenu')) && window.__noH()); })()",
+  "label": "390 step13 Saved filters menu opens in view"
+ },
+ {
+  "clickSel": "[data-bk-saved-open]",
+  "label": "390 Save current filters"
+ },
+ {
+  "eval": "(async () => { const d = document.getElementById('bkSavedDialog'); const okk = await window.__until(() => d && d.open); return okk && window.__inView(d) && document.activeElement === d.querySelector('#bkSavedName') && (true ? [window.__tap('#bkSavedName'), window.__tap('.bk-saved-dialog__actions .btn')].every(x => x === true) : true); })()",
+  "label": "390 step13 dialog opens in view"
+ },
+ {
+  "shot": "tmp/b1-390-save.png"
+ },
+ {
+  "type": "B1 test 390"
+ },
+ {
+  "clickSel": "[data-bk-saved-submit]",
+  "label": "390 Save"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 390')); return okk && !document.getElementById('bkSavedDialog').open; })()",
+  "label": "390 step13 saved and listed"
+ },
+ {
+  "nav": "{base}/admin/bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle(), 30000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "390 Saved filters"
+ },
+ {
+  "eval": "(async () => { const a = Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).find(x => x.textContent === 'B1 test 390'); if (!a) return 'not listed'; if (true && window.__tap('#bkSavedMenu .bk-saved__open') !== true) return window.__tap('#bkSavedMenu .bk-saved__open'); a.click(); const okk = await window.__until(() => window.__idle() && window.__q('filter') === 'unpaid' && window.__q('source') === 'staff' && document.querySelector('[data-bk-chip=\"source\"]')); return okk && document.querySelector('select[name=\"source\"]').value === 'staff' && document.querySelector('#booking-results').dataset.activeTab === 'unpaid'; })()",
+  "label": "390 step14 set listed after reload; opening it reproduces the list"
+ },
+ {
+  "clickSel": "[data-bk-saved-toggle]",
+  "label": "390 Saved filters"
+ },
+ {
+  "clickSel": "[data-bk-saved-del][data-name=\"B1 test 390\"]",
+  "label": "390 delete set"
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__vis(document.querySelector('[data-admin-confirm-ok]'))); })()",
+  "label": "390 step15 confirm asked"
+ },
+ {
+  "clickSel": "[data-admin-confirm-ok]",
+  "label": "390 confirm delete"
+ },
+ {
+  "eval": "(async () => { const okk = await window.__until(() => !Array.from(document.querySelectorAll('[data-bk-saved-list] .bk-saved__open')).some(a => a.textContent === 'B1 test 390')); return okk && window.__noH(); })()",
+  "label": "390 step15 deleted"
+ }
+]

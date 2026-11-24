@@ -185,6 +185,15 @@ $readList = function (string $q) use ($req, $listUrl, $canon): array {
     $keep = [];
     foreach ($k as $kk) { $keep[$kk[1]] = html_entity_decode($kk[2], ENT_QUOTES); }
     ksort($keep);
+    // Ship B: the drop-down filters are fields of the bar; their selected option is what Filter keeps.
+    $sel = [];
+    if (preg_match_all('/<select name="([a-z_]+)"[^>]*>(.*?)<\/select>/s', $html, $sm, PREG_SET_ORDER)) {
+        foreach ($sm as $ss) {
+            if (preg_match('/<option value="([^"]*)" selected>/', $ss[2], $so)) { $sel[$ss[1]] = html_entity_decode($so[1], ENT_QUOTES); }
+        }
+    }
+    // Ship B: Balance due on screen per row (data-balance on the Balance due cell), in row order.
+    preg_match_all('/data-label="Balance due" data-balance="([^"]*)"/', $html, $bal);
     preg_match_all('/<a href="(bookings\.php\?[^"]*)" class="pg-btn"/', $html, $pg);
     $pager = array_values(array_unique(array_map($canon, $pg[1])));
     sort($pager);
@@ -192,7 +201,7 @@ $readList = function (string $q) use ($req, $listUrl, $canon): array {
     $insight = array_values(array_unique(array_map(static function ($h) use ($canon) { return $canon((string)json_decode('"' . $h . '"')); }, $ins[1])));
     sort($insight);
     return ['ok' => $ok, 'code' => $code, 'ids' => array_map('intval', $m[1]), 'count' => $count, 'matching' => ($c[3] ?? '') === 'matching',
-        'keep' => $keep, 'pager' => $pager, 'insight' => $insight];
+        'keep' => $keep, 'pager' => $pager, 'insight' => $insight, 'selected' => $sel, 'balance' => $bal[1]];
 };
 $readCsv = function (string $q) use ($req, $csvUrl): array {
     [$code, $body] = $req($csvUrl($q));
@@ -225,7 +234,7 @@ try {
         check($csv['code'] === 200 && ($csv['head'][0] ?? '') === 'Reference', "$label: CSV export answers", 'HTTP ' . $csv['code']);
         $csvRefs = array_map(static function ($r) { return (string)$r[0]; }, $csv['rows']);
         $record[$label] = ['q' => $q, 'ids' => $l['ids'], 'count' => $l['count'], 'keep' => $l['keep'], 'pager' => $l['pager'],
-            'insight' => $l['insight'], 'csv' => $csvRefs];
+            'insight' => $l['insight'], 'csv' => $csvRefs, 'selected' => $l['selected']];
         if (!$t3) { continue; }
 
         // T3: export rows = list count, export order = screen order (size=all; page 2 of 10 is one page of it).
@@ -249,6 +258,11 @@ try {
         if ($bi !== false && $csv['rows']) {
             $bad = bklh_balance_mismatches($pdo, $csv['rows'], (int)$bi);
             check($bad === [], "$label: CSV Balance due = rh_bk_balance_due() on every row", implode('; ', array_slice($bad, 0, 5)));
+            // Ship B (T7): the Balance due cell on screen = the CSV figure, row for row (same order).
+            if ($q !== 'page=2&size=10') {
+                $csvBal = array_map(static function ($r) use ($bi) { return (string)$r[$bi]; }, $csv['rows']);
+                check($l['balance'] === $csvBal, "$label: screen Balance due = CSV Balance due on every row", json_encode(['screen' => array_slice($l['balance'], 0, 6), 'csv' => array_slice($csvBal, 0, 6)]));
+            }
         }
     }
 
@@ -283,7 +297,8 @@ try {
         foreach (['room', 'group', 'source staff', 'created_by'] as $lb) {
             check($record[$lb]['count'] > 0, "$lb: finds rows on Liwonde", (string)$record[$lb]['count']);
             check($record[$lb]['count'] < $record['all']['count'], "$lb: narrows the list");
-            check(($record[$lb]['keep'][explode('=', $record[$lb]['q'])[0]] ?? '') !== '', "$lb: kept by the search form (hidden input)");
+            $fk = explode('=', $record[$lb]['q'])[0];
+            check(($record[$lb]['keep'][$fk] ?? '') !== '' || ($record[$lb]['selected'][$fk] ?? '') !== '', "$lb: kept by the search form (hidden input or its selected drop-down)");
         }
         // Export order follows the screen across size=10 pages too.
         foreach (['', 'filter=unpaid', 'sort=check_in&dir=asc', 'sort=balance&dir=desc'] as $q) {

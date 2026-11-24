@@ -24,6 +24,7 @@ require_once 'includes/finance-account-sync.php';
 require_once 'includes/account-receipt-send.php';
 require_once __DIR__ . '/../includes/booked-rate-change.php'; // booked rate × nights lines (also loads includes/booked-rate.php)
 require_once __DIR__ . '/includes/bookings-list-filters.php'; // tab/date/payment filter rules shared by badges, list and export
+require_once __DIR__ . '/includes/bookings-saved-filters.php'; // the person's saved filter sets (plan T10), read while the page renders
 require_once __DIR__ . '/../includes/booking-created-by.php'; // "by …" under the Created date in the list
 require_once __DIR__ . '/../includes/late-stay.php'; // late check-in / leave-date choices: one quote for assess and settle
 require_once __DIR__ . '/../includes/stay-nights.php'; // add / take off nights: one quote for the review card and the save
@@ -3063,12 +3064,20 @@ try {
 }
 $bk_group_ids = array_keys($bk_group_names);
 $bk_group_raw = rh_bk_id_filter($_GET['group'] ?? '');
+$bk_group_names_all = $bk_group_names; // + an older lead from a link / saved set, so its chip and drop-down entry name it
 if ($bk_group_raw > 0 && !isset($bk_group_names[$bk_group_raw])) {
     try {
         $bk_g_st = $pdo->prepare("SELECT 1 FROM bookings WHERE primary_booking_id = ? LIMIT 1");
         $bk_g_st->execute([$bk_group_raw]);
         if ($bk_g_st->fetchColumn()) {
             $bk_group_ids[] = $bk_group_raw;
+            $bk_g_st = $pdo->prepare("SELECT booking_reference, guest_name, check_in_date FROM bookings WHERE id = ?");
+            $bk_g_st->execute([$bk_group_raw]);
+            $bk_g_row = $bk_g_st->fetch(PDO::FETCH_ASSOC) ?: [];
+            $bk_group_names_all[$bk_group_raw] = $bk_g_row
+                ? (string)$bk_g_row['booking_reference'] . ' - ' . (string)$bk_g_row['guest_name']
+                    . (!empty($bk_g_row['check_in_date']) ? ', ' . date('j M Y', strtotime((string)$bk_g_row['check_in_date'])) : '')
+                : 'Group #' . $bk_group_raw;
         }
     } catch (Throwable $e) {
         error_log('Bookings group filter check: ' . $e->getMessage());
@@ -3784,13 +3793,21 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             </div>
         <?php endif; ?>
 
-        <!-- Search & Tools Bar -->
-        <div class="bookings-toolbar">
+        <!-- Search & Tools Bar: one filter bar (plan BOOKINGS_LIST_PLAN T4, T10). Every filter is a field of this GET form
+             (the URL holds them all); the active ones show as chips inside #booking-results. -->
+        <?php
+        $bk_view_only = function_exists('rh_view_only_reason') && rh_view_only_reason() !== ''; // view only: saved sets open, never saved / deleted
+        $bk_presets = rh_bk_date_presets(date('Y-m-d')); // hotel date (Decision 8), never the device clock
+        $bk_drop_count = (int)($filter_status !== '') + (int)($filter_pay !== '') + (int)($filter_room_type > 0) + (int)($bk_f['room'] > 0)
+            + (int)($bk_f['group'] > 0) + (int)($bk_f['source'] !== '') + (int)($bk_f['created_by'] > 0) + (int)($filter_kind !== '');
+        $bk_saved_sets = rh_bk_saved_links(rh_bk_saved_list($pdo, (int)($user['id'] ?? 0))); // the person's own row only
+        ?>
+        <div class="bookings-toolbar" data-bk-toolbar>
             <form method="GET" data-live-search-form="room-bookings" class="bookings-toolbar__form">
                 <?php echo rh_server_sort_hidden($bk_sort_key, $bk_sort_dir); ?>
-                <?php /* Searching or filtering keeps the open tab and the overdue views (the notice + Clear is the way out). */ ?>
-                <?php /* Every kept param the form has no field for (rh_bk_keep_params without the form's own fields and the page). */ ?>
-                <?php foreach (rh_bk_keep_params($bk_f, ['search', 'filter_status', 'date_from', 'date_to', 'date_type', 'kind', 'room_type', 'pay', 'page']) as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
+                <?php /* Searching or filtering keeps the open tab and the overdue views (their chips are the way out). Every kept
+                         param the form has no field for (rh_bk_keep_params without the form's own fields and the page). */ ?>
+                <?php foreach (rh_bk_keep_params($bk_f, ['search', 'filter_status', 'date_from', 'date_to', 'date_type', 'kind', 'room_type', 'pay', 'room', 'group', 'source', 'created_by', 'page']) as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
                     <input type="hidden" name="<?php echo $bk_keep_k; ?>" value="<?php echo htmlspecialchars($bk_keep_v, ENT_QUOTES); ?>" data-bk-keep>
                 <?php endif; endforeach; ?>
                 <div class="bookings-toolbar__search">
@@ -3801,17 +3818,6 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         class="bookings-toolbar__input bookings-toolbar__input--search"
                         data-help="Search Bookings|Search by booking reference, guest name, phone number, room number, or payment reference. Results update automatically as you type.">
                 </div>
-                <select name="filter_status" class="bookings-toolbar__input bookings-toolbar__input--status">
-                    <option value="">All Statuses</option>
-                    <option value="pending" <?php echo $filter_status === 'pending' ? 'selected' : ''; ?>>Pending</option>
-                    <option value="tentative" <?php echo $filter_status === 'tentative' ? 'selected' : ''; ?>>Tentative</option>
-                    <option value="confirmed" <?php echo $filter_status === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
-                    <option value="checked-in" <?php echo $filter_status === 'checked-in' ? 'selected' : ''; ?>>Checked In</option>
-                    <option value="checked-out" <?php echo $filter_status === 'checked-out' ? 'selected' : ''; ?>>Checked Out</option>
-                    <option value="cancelled" <?php echo $filter_status === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                    <option value="no-show" <?php echo $filter_status === 'no-show' ? 'selected' : ''; ?>>No-Show</option>
-                    <option value="deleted" <?php echo $filter_status === 'deleted' ? 'selected' : ''; ?>>Deleted</option>
-                </select>
                 <select name="date_type" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Which date From and To apply to"
                     title="Which date From and To apply to. Arrival: check-in date. Departure: check-out date. Staying: in the hotel on at least one night in the range (the departure day is not a night). Booked on: the day the booking was made."
                     data-help="Dates|Pick which date From and To look at. Arrival = the check-in date. Departure = the check-out date. Staying = guests in the hotel on at least one night in the range (the day they leave does not count as a night). Booked on = the day the booking was made. Both end days are included.">
@@ -3819,6 +3825,11 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         <option value="<?php echo $bk_dt_key; ?>" <?php echo $filter_date_type === $bk_dt_key ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_dt_label); ?></option>
                     <?php endforeach; ?>
                 </select>
+                <?php /* Phones: the drop-downs fold under this toggle (bookings.css); hidden on wider screens. */ ?>
+                <button type="button" class="bookings-toolbar__button bookings-toolbar__button--clear bk-filters-toggle" data-bk-filters-toggle data-vo-allow
+                    aria-expanded="false" aria-controls="bkFilterDrops">
+                    <i class="fas fa-sliders-h" aria-hidden="true"></i> Filters <span class="bookings-toolbar__badge" data-bk-drop-count<?php echo $bk_drop_count > 0 ? '' : ' hidden'; ?>><?php echo $bk_drop_count; ?></span>
+                </button>
                 <label class="rh-inline-field"><span class="rh-inline-field__text">From</span>
                 <input type="date" name="date_from" value="<?php echo htmlspecialchars($filter_date_from); ?>"
                     placeholder="From" title="From: first day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="From date"
@@ -3827,51 +3838,149 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 <input type="date" name="date_to" value="<?php echo htmlspecialchars($filter_date_to); ?>"
                     placeholder="To" title="To: last day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="To date"
                     class="bookings-toolbar__input bookings-toolbar__input--date"></label>
-                <span class="bookings-toolbar__btns"><?php /* Filter + Clear stay together on one line */ ?>
-                <button type="submit" class="bookings-toolbar__button bookings-toolbar__button--filter btn btn-primary">
-                    <i class="fas fa-filter"></i> Filter
-                </button>
-                <?php if ($has_active_room_filters): ?>
-                    <a href="bookings.php" class="bookings-toolbar__button bookings-toolbar__button--clear btn btn-secondary">
-                        <i class="fas fa-times"></i> Clear
-                    </a>
+                <?php if ($bk_presets): ?>
+                <div class="bk-presets" role="group" aria-label="Quick dates">
+                    <?php foreach ($bk_presets as $bk_pr): $bk_pr_on = $filter_date_from === $bk_pr['from'] && $filter_date_to === $bk_pr['to']; ?>
+                        <button type="button" class="bk-preset<?php echo $bk_pr_on ? ' is-active' : ''; ?>" data-bk-preset="<?php echo htmlspecialchars($bk_pr['key'], ENT_QUOTES); ?>" data-vo-allow
+                            data-from="<?php echo htmlspecialchars($bk_pr['from'], ENT_QUOTES); ?>" data-to="<?php echo htmlspecialchars($bk_pr['to'], ENT_QUOTES); ?>"
+                            aria-pressed="<?php echo $bk_pr_on ? 'true' : 'false'; ?>"><?php echo htmlspecialchars($bk_pr['label']); ?></button>
+                    <?php endforeach; ?>
+                    <i class="help" data-tip="Quick dates, on the hotel's date, for the date chosen in Dates (Arrival, Departure, Staying or Booked on). Today; Tomorrow; This week = Monday to Sunday; Next 7 days = today and the 6 days after; This month = the 1st to the last day. Both end days are included.">?</i>
+                </div>
                 <?php endif; ?>
-                </span>
-                <?php /* More filters (step 8g): closed until one of them is in use, so phones keep a short toolbar.
-                         The selects are part of this form, so Filter, live search, tabs, sort, paging and the CSV export
-                         keep them. */ ?>
-                <details class="bookings-more-filters"<?php echo $bk_more_active ? ' open' : ''; ?>>
-                    <summary class="bookings-toolbar__button bookings-toolbar__button--clear bookings-more-filters__toggle"
-                        title="More ways to narrow the list: booking kind, room type and payment. Pick, then press Filter.">
-                        <i class="fas fa-sliders-h" aria-hidden="true"></i> More filters<?php if ($bk_more_active): ?> <span class="bookings-toolbar__badge"><?php echo (int)($filter_kind !== '') + (int)($filter_room_type > 0) + (int)($filter_pay !== ''); ?></span><?php endif; ?>
-                    </summary>
-                    <div class="bookings-more-filters__row">
-                        <select name="kind" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Booking kind"
-                            title="Booking kind. Group: rooms booked together as one group (one lead booking and the rooms linked to it). Joined room: a joined pair of rooms sold as one room. Single: neither.">
-                            <option value="">Any booking kind</option>
-                            <?php foreach (rh_bk_kinds() as $bk_k => $bk_k_label): ?>
-                                <option value="<?php echo $bk_k; ?>" <?php echo $filter_kind === $bk_k ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_k_label); ?></option>
+                <div class="bk-filter-drops" id="bkFilterDrops" data-bk-filter-drops>
+                    <span class="bk-drop">
+                        <select name="filter_status" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Booking status">
+                            <option value="">Any status</option>
+                            <?php foreach (['pending' => 'Pending', 'tentative' => 'Tentative', 'confirmed' => 'Confirmed', 'checked-in' => 'Checked in', 'checked-out' => 'Checked out', 'cancelled' => 'Cancelled', 'no-show' => 'No-show', 'deleted' => 'Deleted'] as $bk_st_v => $bk_st_l): ?>
+                                <option value="<?php echo $bk_st_v; ?>" <?php echo $filter_status === $bk_st_v ? 'selected' : ''; ?>><?php echo $bk_st_l; ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <select name="room_type" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Room type"
-                            title="Room type: the room type the booking was made for (not the room number).">
-                            <option value="">Any room type</option>
-                            <?php foreach ($bk_room_types as $bk_rt_row): $bk_rt_id = (int)$bk_rt_row['id']; ?>
-                                <option value="<?php echo $bk_rt_id; ?>" <?php echo $filter_room_type === $bk_rt_id ? 'selected' : ''; ?>><?php echo htmlspecialchars((string)$bk_rt_row['name']); ?><?php echo empty($bk_rt_row['is_active']) ? ' (not on sale)' : ''; ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <select name="pay" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Payment"
-                            title="Payment. Paid: fully paid. Part paid: some paid, some still to pay. Unpaid: anything still to pay, part paid included (same as the Unpaid tab). Refunded: cancelled and all money given back. Fee owed: a cancelled or no-show booking that still owes its fee or extras (same rule as Still owed).">
+                        <i class="help" data-tip="Booking status. Pending: not confirmed yet. Tentative: room held for a short time. Confirmed: booked, not arrived yet. Checked in: in the hotel now. Checked out: has left. Cancelled and No-show: did not stay. Deleted: bookings that were removed (they can be restored from there).">?</i>
+                    </span>
+                    <span class="bk-drop">
+                        <select name="pay" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Payment">
                             <option value="">Any payment</option>
                             <?php foreach (rh_bk_pay_options() as $bk_p => $bk_p_label): ?>
                                 <option value="<?php echo $bk_p; ?>" <?php echo $filter_pay === $bk_p ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_p_label); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="bookings-more-filters__help">Pick one or more, then press Filter. Group = rooms booked together under one lead booking. Joined room = two rooms sold as one.</p>
-                    </div>
-                </details>
+                        <i class="help" data-tip="Payment. Paid: fully paid. Part paid: some paid, some still to pay. Unpaid: anything still to pay, part paid included (same as the Unpaid tab). Refunded: cancelled and all money given back. Fee owed: a cancelled or no-show booking that still owes its fee or extras.">?</i>
+                    </span>
+                    <span class="bk-drop">
+                        <select name="room_type" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Room type">
+                            <option value="">Any room type</option>
+                            <?php foreach ($bk_room_types as $bk_rt_row): $bk_rt_id = (int)$bk_rt_row['id']; ?>
+                                <option value="<?php echo $bk_rt_id; ?>" <?php echo $filter_room_type === $bk_rt_id ? 'selected' : ''; ?>><?php echo htmlspecialchars((string)$bk_rt_row['name']); ?><?php echo empty($bk_rt_row['is_active']) ? ' (not on sale)' : ''; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <i class="help" data-tip="Room type: the room type the booking was made for (not the room number).">?</i>
+                    </span>
+                    <span class="bk-drop">
+                        <select name="room" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Room">
+                            <option value="">Any room</option>
+                            <?php foreach ($bk_room_names as $bk_o_id => $bk_o_label): ?>
+                                <option value="<?php echo (int)$bk_o_id; ?>" <?php echo (int)$bk_f['room'] === (int)$bk_o_id ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_o_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <i class="help" data-tip="Room: the room number the booking is in. Bookings with no room assigned yet are not in any room.">?</i>
+                    </span>
+                    <span class="bk-drop">
+                        <select name="source" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Source">
+                            <option value="">Any source</option>
+                            <?php foreach (rh_bk_source_options() as $bk_s => $bk_s_label): ?>
+                                <option value="<?php echo $bk_s; ?>" <?php echo $bk_f['source'] === $bk_s ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_s_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <i class="help" data-tip="Source: how the booking was made, read from the booking's history. Staff: made by a staff member. Online: made by the guest on the website or a booking link. System: made by the system. Not recorded: the history does not say.">?</i>
+                    </span>
+                    <span class="bk-drop">
+                        <select name="group" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Group">
+                            <option value="">Any group</option>
+                            <?php foreach ($bk_group_names_all as $bk_o_id => $bk_o_label): ?>
+                                <option value="<?php echo (int)$bk_o_id; ?>" <?php echo (int)$bk_f['group'] === (int)$bk_o_id ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_o_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <i class="help" data-tip="Group: the rooms booked together under one lead booking (named by its reference, guest and check-in). Lists groups with a room leaving in the last 30 days or later.">?</i>
+                    </span>
+                    <span class="bk-drop">
+                        <select name="created_by" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Made by">
+                            <option value="">Made by anyone</option>
+                            <?php foreach ($bk_staff_names as $bk_o_id => $bk_o_label): ?>
+                                <option value="<?php echo (int)$bk_o_id; ?>" <?php echo (int)$bk_f['created_by'] === (int)$bk_o_id ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_o_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <i class="help" data-tip="Made by: the staff member who made the booking, read from the booking's history.">?</i>
+                    </span>
+                    <?php /* More filters: Booking kind only (plan T4). Closed until it is in use. */ ?>
+                    <details class="bookings-more-filters"<?php echo $filter_kind !== '' ? ' open' : ''; ?>>
+                        <summary class="bookings-toolbar__button bookings-toolbar__button--clear bookings-more-filters__toggle" data-vo-allow
+                            title="More ways to narrow the list: booking kind. Pick, then press Filter.">
+                            <i class="fas fa-sliders-h" aria-hidden="true"></i> More filters
+                        </summary>
+                        <div class="bookings-more-filters__row">
+                            <select name="kind" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Booking kind"
+                                title="Booking kind. Group: rooms booked together as one group (one lead booking and the rooms linked to it). Joined room: a joined pair of rooms sold as one room. Single: neither.">
+                                <option value="">Any booking kind</option>
+                                <?php foreach (rh_bk_kinds() as $bk_k => $bk_k_label): ?>
+                                    <option value="<?php echo $bk_k; ?>" <?php echo $filter_kind === $bk_k ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_k_label); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="bookings-more-filters__help">Group = rooms booked together under one lead booking. Joined room = two rooms sold as one.</p>
+                        </div>
+                    </details>
+                </div>
+                <span class="bookings-toolbar__btns"><?php /* Filter + Clear all stay together on one line */ ?>
+                <button type="submit" class="bookings-toolbar__button bookings-toolbar__button--filter btn btn-primary">
+                    <i class="fas fa-filter"></i> Filter
+                </button>
+                <a href="bookings.php" class="bookings-toolbar__button bookings-toolbar__button--clear btn btn-secondary" data-bk-clear data-bk-nav data-no-spa="1" data-vo-allow<?php echo $has_active_room_filters ? '' : ' hidden'; ?>>
+                    <i class="fas fa-times"></i> Clear all
+                </a>
+                </span>
             </form>
             <div class="bookings-toolbar__actions">
+                <?php /* Saved filter sets (plan T10, Decision 3): the person's own list, read here; save / delete go to
+                         api/bookings-saved-filters.php (hidden for view-only people, refused there too). */ ?>
+                <div class="bk-saved" data-bk-saved>
+                    <button type="button" class="bookings-toolbar__action bk-saved__toggle" data-bk-saved-toggle data-vo-allow
+                        aria-haspopup="true" aria-expanded="false" aria-controls="bkSavedMenu">
+                        <i class="fas fa-bookmark" aria-hidden="true"></i> Saved filters <span class="bookings-toolbar__badge" data-bk-saved-count<?php echo $bk_saved_sets ? '' : ' hidden'; ?>><?php echo count($bk_saved_sets); ?></span>
+                    </button>
+                    <div class="bk-saved__menu" id="bkSavedMenu" hidden>
+                        <p class="bk-saved__head">Your saved filters <i class="help" data-tip="Filter sets you saved: each opens the list with its filters, tab and sort. Only you see them, on any device. Up to 20.">?</i></p>
+                        <ul class="bk-saved__list" data-bk-saved-list>
+                            <?php foreach ($bk_saved_sets as $bk_ss): ?>
+                                <li class="bk-saved__item">
+                                    <a href="<?php echo htmlspecialchars($bk_ss['url'], ENT_QUOTES); ?>" class="bk-saved__open" data-bk-nav data-no-spa="1" data-vo-allow><?php echo htmlspecialchars($bk_ss['name']); ?></a>
+                                    <?php if (!$bk_view_only): ?>
+                                        <button type="button" class="bk-saved__del" data-bk-saved-del data-name="<?php echo htmlspecialchars($bk_ss['name'], ENT_QUOTES); ?>" aria-label="<?php echo htmlspecialchars('Delete saved filters: ' . $bk_ss['name'], ENT_QUOTES); ?>" title="Delete"><i class="fas fa-times" aria-hidden="true"></i></button>
+                                    <?php endif; ?>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <p class="bk-saved__empty" data-bk-saved-empty<?php echo $bk_saved_sets ? ' hidden' : ''; ?>>No saved filters yet.</p>
+                        <?php if (!$bk_view_only): ?>
+                            <button type="button" class="btn btn-secondary btn-sm bk-saved__save" data-bk-saved-open>Save current filters</button>
+                        <?php endif; ?>
+                    </div>
+                    <?php if (!$bk_view_only): ?>
+                    <dialog class="bk-saved-dialog" id="bkSavedDialog" aria-labelledby="bkSavedDialogTitle">
+                        <form method="dialog" class="bk-saved-dialog__form" data-bk-saved-form data-no-autofilter>
+                            <h3 class="bk-saved-dialog__title" id="bkSavedDialogTitle">Save current filters</h3>
+                            <label class="bk-saved-dialog__label" for="bkSavedName">Name</label>
+                            <input type="text" id="bkSavedName" class="bookings-toolbar__input bk-saved-dialog__input" maxlength="60" autocomplete="off" data-no-autofilter
+                                placeholder="For example: Unpaid arrivals this week">
+                            <p class="bk-saved-dialog__hint">Saves the filters, tab and sort shown now. A name you already used replaces that set.</p>
+                            <p class="bk-saved-dialog__error" data-bk-saved-error role="alert" hidden></p>
+                            <div class="bk-saved-dialog__actions">
+                                <button type="button" class="btn btn-secondary" data-bk-saved-cancel>Cancel</button>
+                                <button type="submit" class="btn btn-primary" data-bk-saved-submit>Save</button>
+                            </div>
+                        </form>
+                    </dialog>
+                    <?php endif; ?>
+                </div>
                 <a href="<?php echo htmlspecialchars('bookings.php?' . http_build_query(array_merge($_GET, ['export' => 'csv']))); ?>" class="bookings-toolbar__action bookings-toolbar__action--export">
                     <i class="fas fa-file-csv"></i> Export CSV
                 </a>
@@ -3884,95 +3993,85 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             </div>
         </div>
 
-        <div id="booking-results" data-active-tab="<?php echo htmlspecialchars($active_tab_override ?: 'all', ENT_QUOTES); ?>" data-admin-pagination-scope data-flash-scope>
+        <?php
+        // Server-printed state the page script reads after every in-place load (it sits inside #booking-results, which is
+        // swapped): the view kind for the remembered sort (Decision 6), the user id for its key.
+        $bk_view_kind = rh_bk_view_kind($active_tab_override, $filter_status);
+        ?>
+        <div id="booking-results" data-active-tab="<?php echo htmlspecialchars($active_tab_override ?: 'all', ENT_QUOTES); ?>" data-view-kind="<?php echo $bk_view_kind; ?>" data-user-id="<?php echo (int)($user['id'] ?? 0); ?>" data-admin-pagination-scope data-flash-scope>
+            <div hidden data-bk-state data-view-kind="<?php echo $bk_view_kind; ?>" data-sort="<?php echo htmlspecialchars($bk_sort_key, ENT_QUOTES); ?>" data-dir="<?php echo htmlspecialchars($bk_sort_dir, ENT_QUOTES); ?>"></div>
             <?php if ($has_active_room_filters): ?>
-                <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-                    <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
-                        <i class="fas fa-filter"></i>
-                        <strong><?php echo htmlspecialchars($filter_since !== '' ? rh_bk_since_words($filter_since, $filter_since_kind) : rh_bk_notice_title($filter_arrival, $filter_departure, $filter_balance, $bk_filter_key)); ?></strong>
-                    </div>
-                    <div style="color: #2f3a63; font-size: 13px;">
-                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to, $filter_date_type); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?><?php if ($filter_balance === 'owing'): ?><?php echo $bk_filter_key === 'checkout_today' ? ' due out today' : ''; ?> with a balance still to pay<?php endif; ?><?php echo htmlspecialchars(rh_bk_more_scope_words($filter_kind, $filter_room_type > 0 ? ($bk_room_type_names[$filter_room_type] ?? '') : '', $filter_pay)); ?>.
-                        <a href="bookings.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
-                    </div>
+                <?php
+                // One chip per active filter (rh_bk_chips); x = the same list without it (page 1, sort kept).
+                $bk_chips = rh_bk_chips($bk_f, ['room_types' => $bk_room_type_names, 'rooms' => $bk_room_names, 'groups' => $bk_group_names_all, 'staff' => $bk_staff_names]);
+                $bk_chip_sort = rh_server_sort_params($bk_sort_key, $bk_sort_dir);
+                ?>
+                <div class="bk-chips" data-bk-chips role="region" aria-label="Active filters">
+                    <span class="bk-chips__count"><i class="fas fa-filter" aria-hidden="true"></i> Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?></span>
+                    <ul class="bk-chips__list">
+                        <?php foreach ($bk_chips as $bk_chip): $bk_chip_q = http_build_query(array_merge($bk_chip['params'], $bk_chip_sort)); ?>
+                            <li class="bk-chip" data-bk-chip="<?php echo htmlspecialchars($bk_chip['key'], ENT_QUOTES); ?>">
+                                <span class="bk-chip__label"><?php echo htmlspecialchars($bk_chip['label']); ?></span>
+                                <a class="bk-chip__x" href="<?php echo htmlspecialchars('bookings.php' . ($bk_chip_q !== '' ? '?' . $bk_chip_q : ''), ENT_QUOTES); ?>" data-bk-nav data-no-spa="1" data-vo-allow
+                                    aria-label="<?php echo htmlspecialchars('Remove filter: ' . $bk_chip['label'], ENT_QUOTES); ?>" title="Remove this filter"><i class="fas fa-times" aria-hidden="true"></i></a>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <a class="bk-chips__clear" href="bookings.php" data-bk-nav data-no-spa="1" data-vo-allow>Clear all</a>
                 </div>
             <?php endif; ?>
 
-            <!-- Tab Navigation -->
+            <!-- Tab Navigation: the everyday tabs on one row, the rest in the More menu (plan T6). Every item stays a
+                 .tab-button[data-tab] inside .tabs-header (the shared tab handler and the count refresh need that); the
+                 data-tab values and the ?filter= deep links are unchanged. -->
+            <?php
+            $bk_tab_open = $active_tab_override !== '' ? $active_tab_override : 'all';
+            $bk_tabs_main = [
+                ['all', 'All', 'fa-list', $total_bookings, ''],
+                ['today-checkins', 'Arriving today', 'fa-calendar-day', $today_checkins, 'Arriving today: bookings checking in today that have not checked in yet.'],
+                ['today-checkouts', 'Leaving today', 'fa-calendar-times', $today_checkouts, 'Leaving today: guests in the hotel who are due to check out today.'],
+                ['checked-in', 'In house', 'fa-sign-in-alt', $checked_in, 'In house: guests checked in now.'],
+                ['pending', 'Pending', 'fa-clock', $pending, 'Pending: bookings not confirmed yet.'],
+                ['unpaid', 'Unpaid', 'fa-exclamation-circle', $unpaid, 'Unpaid: bookings with money still to pay, part paid included.'],
+            ];
+            $bk_tabs_more = [['tentative', 'Tentative', 'fa-hourglass-half', $tentative, 'Tentative: rooms held for a short time, not confirmed yet.']];
+            if ($expiring_soon > 0) { // only while tentative holds are about to lapse
+                $bk_tabs_more[] = ['expiring-soon', 'Expiring soon', 'fa-exclamation-triangle', $expiring_soon, 'Expiring soon: tentative holds that lapse within 24 hours.'];
+            }
+            $bk_tabs_more[] = ['checked-out', 'Checked out', 'fa-sign-out-alt', $checked_out, 'Checked out: guests who have left.'];
+            $bk_tabs_more[] = ['cancelled', 'Cancelled', 'fa-times-circle', $cancelled, 'Cancelled bookings (status Cancelled). Fee still owed: the Payment filter.'];
+            $bk_tabs_more[] = ['no-show', 'No-show', 'fa-user-slash', $no_show, 'No-show bookings: the guest never arrived (status No-show).'];
+            $bk_tabs_more[] = ['group-bookings', 'Groups', 'fa-users', $group_bookings, 'Groups: every room booked together as one group (the lead booking and the rooms linked to it), any status.'];
+            if ($deleted_count > 0 || $filter_status === 'deleted') {
+                $bk_tabs_more[] = ['deleted', 'Deleted', 'fa-trash-can', $deleted_count, 'Deleted bookings: who deleted them, when and why. Restore from here.'];
+            }
+            $bk_more_open = null;
+            foreach ($bk_tabs_more as $bk_t) {
+                if ($bk_t[0] === $bk_tab_open) { $bk_more_open = $bk_t; }
+            }
+            $bk_tab_btn = static function (array $t, string $open, bool $inMenu): string {
+                [$key, $label, $icon, $count, $title] = $t;
+                return '<button type="button" class="tab-button' . ($inMenu ? ' bk-tabs-more__item' : '') . ($key === $open ? ' active' : '') . '"'
+                    . ($inMenu ? ' role="menuitem"' : '') . ' data-tab="' . $key . '" data-label="' . htmlspecialchars($label, ENT_QUOTES) . '" data-count="' . (int)$count . '"'
+                    . ($title !== '' ? ' title="' . htmlspecialchars($title, ENT_QUOTES) . '"' : '') . '>'
+                    . '<i class="fas ' . $icon . '" aria-hidden="true"></i> ' . htmlspecialchars($label)
+                    . ' <span class="tab-count">' . (int)$count . '</span></button>';
+            };
+            ?>
             <div class="tabs-container">
-                <div class="tabs-header">
-                    <?php /* Everyday tabs, then Checked Out / Cancelled / No-Show / Group bookings (step 8g, owner 2026-11-15:
-                             "i dont see cancelled"). Confirmed is in the status filter; Paid and booked-today/week/month
-                             still work via ?filter=. */ ?>
-                    <button class="tab-button <?php echo $active_tab_override === '' ? 'active' : ''; ?>" data-tab="all" data-count="<?php echo $total_bookings; ?>">
-                        <i class="fas fa-list"></i>
-                        All
-                        <span class="tab-count"><?php echo $total_bookings; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="today-checkins" data-count="<?php echo $today_checkins; ?>">
-                        <i class="fas fa-calendar-day"></i>
-                        Today's Check-ins
-                        <span class="tab-count"><?php echo $today_checkins; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="today-checkouts" data-count="<?php echo $today_checkouts; ?>">
-                        <i class="fas fa-calendar-times"></i>
-                        Today's Check-outs
-                        <span class="tab-count"><?php echo $today_checkouts; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="checked-in" data-count="<?php echo $checked_in; ?>">
-                        <i class="fas fa-sign-in-alt"></i>
-                        In-House
-                        <span class="tab-count"><?php echo $checked_in; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="pending" data-count="<?php echo $pending; ?>">
-                        <i class="fas fa-clock"></i>
-                        Pending
-                        <span class="tab-count"><?php echo $pending; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="tentative" data-count="<?php echo $tentative; ?>">
-                        <i class="fas fa-hourglass-half"></i>
-                        Tentative
-                        <span class="tab-count"><?php echo $tentative; ?></span>
-                    </button>
-                    <?php if ($expiring_soon > 0): /* only while tentative holds are about to lapse */ ?>
-                    <button class="tab-button" data-tab="expiring-soon" data-count="<?php echo $expiring_soon; ?>">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        Expiring Soon
-                        <span class="tab-count"><?php echo $expiring_soon; ?></span>
-                    </button>
-                    <?php endif; ?>
-                    <button class="tab-button" data-tab="unpaid" data-count="<?php echo $unpaid; ?>">
-                        <i class="fas fa-exclamation-circle"></i>
-                        Unpaid
-                        <span class="tab-count"><?php echo $unpaid; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="checked-out" data-count="<?php echo $checked_out; ?>" title="Checked out: guests who have left.">
-                        <i class="fas fa-sign-out-alt"></i>
-                        Checked Out
-                        <span class="tab-count"><?php echo $checked_out; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="cancelled" data-count="<?php echo $cancelled; ?>" title="Cancelled bookings (status Cancelled). Fee still owed: More filters, Payment.">
-                        <i class="fas fa-times-circle"></i>
-                        Cancelled
-                        <span class="tab-count"><?php echo $cancelled; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="no-show" data-count="<?php echo $no_show; ?>" title="No-show bookings: the guest never arrived (status No-Show).">
-                        <i class="fas fa-user-slash"></i>
-                        No-Show
-                        <span class="tab-count"><?php echo $no_show; ?></span>
-                    </button>
-                    <button class="tab-button" data-tab="group-bookings" data-count="<?php echo $group_bookings; ?>" title="Group bookings: every room booked together as one group (the lead booking and the rooms linked to it), any status.">
-                        <i class="fas fa-users"></i>
-                        Group Bookings
-                        <span class="tab-count"><?php echo $group_bookings; ?></span>
-                    </button>
-                    <?php if ($deleted_count > 0 || $filter_status === 'deleted'): ?>
-                    <button class="tab-button <?php echo $filter_status === 'deleted' ? 'active' : ''; ?>" data-tab="deleted" data-count="<?php echo $deleted_count; ?>" title="Deleted bookings: who deleted them, when and why. Restore from here.">
-                        <i class="fas fa-trash-can"></i>
-                        Deleted
-                        <span class="tab-count"><?php echo $deleted_count; ?></span>
-                    </button>
-                    <?php endif; ?>
+                <div class="tabs-header bk-tabs">
+                    <?php foreach ($bk_tabs_main as $bk_t) { echo $bk_tab_btn($bk_t, $bk_tab_open, false); } ?>
+                    <div class="bk-tabs-more" data-bk-more>
+                        <button type="button" class="bk-tabs-more__toggle<?php echo $bk_more_open ? ' is-active' : ''; ?>" data-bk-more-toggle data-vo-allow
+                            aria-haspopup="menu" aria-expanded="false" aria-controls="bkTabsMoreMenu" title="More tabs: Tentative, Checked out, Cancelled, No-show, Groups and more.">
+                            <span data-bk-more-label><?php echo $bk_more_open ? htmlspecialchars('More: ' . $bk_more_open[1]) : 'More'; ?></span>
+                            <span class="tab-count" data-bk-more-count<?php echo $bk_more_open ? '' : ' hidden'; ?>><?php echo $bk_more_open ? (int)$bk_more_open[3] : 0; ?></span>
+                            <i class="fas fa-chevron-down bk-tabs-more__caret" aria-hidden="true"></i>
+                        </button>
+                        <div class="bk-tabs-more__menu" id="bkTabsMoreMenu" role="menu" aria-label="More tabs" hidden>
+                            <?php foreach ($bk_tabs_more as $bk_t) { echo $bk_tab_btn($bk_t, $bk_tab_open, true); } ?>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -4026,15 +4125,17 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                     <th class="admin-bulk-col bk-col-pick" scope="col"><label class="bk-pick"><?php echo adminBulkAllBox('Select all bookings shown'); ?></label></th>
                                     <?php rh_server_sort_th('Ref', 'ref', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-ref'); ?>
                                     <?php rh_server_sort_th('Guest Name', 'guest', $bk_sort_key, $bk_sort_dir); ?>
-                                    <?php rh_server_sort_th('Room', 'room', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
+                                    <?php /* "?" helpers (plan T7): what each column counts. Trusted page text; admin-main.js ignores clicks on .help. */ $bk_tip = static fn (string $t): string => ' <i class="help" data-tip="' . htmlspecialchars($t, ENT_QUOTES) . '">?</i>'; ?>
+                                    <?php rh_server_sort_th('Room' . $bk_tip('Room: the room type booked, then the room number assigned (Unassigned = no room yet). Sorts by room number, else room type.'), 'room', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
                                     <?php rh_server_sort_th('Check In', 'check_in', $bk_sort_key, $bk_sort_dir); ?>
                                     <?php rh_server_sort_th('Check Out', 'check_out', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-out'); ?>
-                                    <?php rh_server_sort_th('Nights', 'nights', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-nights'); ?>
+                                    <?php rh_server_sort_th('Nights' . $bk_tip('Nights: nights booked, check-in day to check-out day (the check-out day is not a night).'), 'nights', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-nights'); ?>
                                     <?php rh_server_sort_th('Guests', 'guests', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-guests'); ?>
-                                    <?php rh_server_sort_th('Total', 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
-                                    <?php rh_server_sort_th('Status', 'status', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-status'); ?>
-                                    <?php rh_server_sort_th('Payment', 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
-                                    <?php rh_server_sort_th('Created', 'created', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-created'); ?>
+                                    <?php rh_server_sort_th('Total' . $bk_tip('Total: the whole bill for the booking, room nights plus extras and charges, VAT and levy included. The small line is the booked rate a night times the nights.'), 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
+                                    <?php rh_server_sort_th('Status' . $bk_tip('Status: where the booking is now: Pending, Tentative, Confirmed, Checked in, Checked out, Cancelled, No-show or Expired.'), 'status', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-status'); ?>
+                                    <?php rh_server_sort_th('Payment' . $bk_tip('Payment: from the money on the booking (paid so far against the total): Paid, Part paid, Unpaid or Refunded. The small line is the latest payment reference.'), 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
+                                    <?php rh_server_sort_th('Balance due' . $bk_tip('Balance due: what the guest still has to pay on this booking now (cancelled and no-show bookings: a fee or extras still owed). Blank = nothing to pay. Deleted bookings are blank. Same figure as the CSV export.'), 'balance', $bk_sort_key, $bk_sort_dir, 'col-optional-md bk-col-balance'); ?>
+                                    <?php rh_server_sort_th('Created' . $bk_tip('Created: when the booking was made, and who made it (from the booking history).'), 'created', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-created'); ?>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -4060,6 +4161,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                         error_log('bookings.php tagged expired lookup: ' . $bk_te_e->getMessage());
                                     }
                                 }
+                                ?>
+                                <?php
+                                // Status pill words (plan T7): the status in plain words.
+                                $bk_status_word = static function (string $st): string {
+                                    return ['checked-in' => 'Checked in', 'checked-out' => 'Checked out', 'no-show' => 'No-show'][$st] ?? ucfirst(str_replace('-', ' ', $st));
+                                };
                                 ?>
                                 <?php foreach ($bookings as $booking): ?>
                                     <?php
@@ -4173,7 +4280,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             // The badge words: rh_booking_pay_state()'s short label (the amount left is printed on its own line).
                                             $status_labels = [$status => $bk_pay_state['short']];
                                             // Part-paid: what is still to pay (amount_due), shown under the payment badge; 0 = nothing shown.
-                                            $bk_left_to_pay = $is_deleted_row ? 0.0 : rh_bk_left_to_pay($status, $booking['status'] ?? '', $booking['amount_due'] ?? 0, $booking['amount_paid'] ?? 0);
+                                            // Balance due (plan Decision 9, rh_bk_balance_due: the same rule as the Balance due sort and the CSV column):
+                                            // null for a deleted row, 0 when nothing is to pay. Shown once: the Balance due column, or under the total
+                                            // where that column is hidden (laptop box widths too narrow for it, see the Balance due rule in
+                                            // admin/css/bookings.css; 900px and under; phone row line 3).
+                                            $bk_balance_due = rh_bk_balance_due($booking, isset($bk_tagged_expired[(int)$booking['id']]));
+                                            $bk_left_to_pay = ($bk_balance_due !== null && $bk_balance_due > BALANCE_TOLERANCE) ? (float)$bk_balance_due : 0.0;
                                             $bk_left_text = $bk_left_to_pay > 0 ? $currency_symbol . ' ' . number_format($bk_left_to_pay, 2) . ' left to pay' : '';
                                             ?>
                                             <span class="bk-total-main"><strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?><span class="bk-ph-pay badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>"><?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?></span><?php if ($bk_left_text !== ''): ?><span class="bk-ph-left bk-left-to-pay"><?php echo htmlspecialchars($bk_left_text); ?></span><?php endif; ?></span>
@@ -4181,7 +4293,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             <?php if ($bk_rate['ok']): ?>
                                                 <br><small class="bk-booked-rate" style="color:#666;white-space:nowrap;" title="<?php echo htmlspecialchars('Booked at ' . $bk_rate['text'] . '. Room rate a night × nights, at the price the booking was made at; today\'s room price does not change it.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bk_rate['compact'], ENT_QUOTES); ?></small>
                                             <?php endif; ?>
-                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><span class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?>"><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: ucfirst((string)$booking['status'])); ?></span></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?>
+                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><span class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?>"><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?></span></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
                                                     <br><span class="expires-soon"><i class="fas fa-exclamation-triangle"></i> Expires soon!</span>
@@ -4198,7 +4310,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                                 </small>
                                             <?php else: ?>
                                             <span class="badge badge-<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?>">
-                                                <?php echo htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: ucfirst((string)$booking['status'])); ?>
+                                                <?php echo htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?>
                                             </span>
                                             <?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
@@ -4215,9 +4327,6 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             <span class="badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>">
                                                 <?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?>
                                             </span>
-                                            <?php if ($bk_left_text !== ''): ?>
-                                                <br><strong class="bk-left-to-pay"><span class="bk-left-to-pay__amt"><?php echo htmlspecialchars($currency_symbol . ' ' . number_format($bk_left_to_pay, 2)); ?></span> left to pay</strong>
-                                            <?php endif; ?>
                                             <?php
                                             // Company pays later (migration 084): the list says who owes the balance instead of a plain "Unpaid".
                                             $bkBillLabel = '';
@@ -4239,6 +4348,9 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                                     <?php endif; ?>
                                                 </small>
                                             <?php endif; ?>
+                                        </td>
+                                        <td class="col-optional-md bk-col-balance" data-label="Balance due" data-balance="<?php echo $bk_balance_due === null ? '' : number_format($bk_balance_due, 2, '.', ''); ?>">
+                                            <?php if ($bk_left_to_pay > 0): ?><strong class="bk-balance-due"><?php echo htmlspecialchars($currency_symbol . ' ' . number_format($bk_left_to_pay, 2)); ?></strong><?php endif; ?>
                                         </td>
                                         <td class="col-optional-lg bk-col-created" data-label="Created">
                                             <small style="color: #666; font-size: 11px;">
@@ -4516,7 +4628,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         <span class="pg-summary">Showing <?php echo (($current_page - 1) * $per_page) + 1; ?>–<?php echo min($current_page * $per_page, $list_count); ?> of <?php echo $list_count; ?></span>
                         <?php /* Rows per page: the page script (data-bk-page-size) reloads the results at page 1, keeping filters, tab and sort. */ ?>
                         <label class="pg-size">Show <select aria-label="Rows per page" data-bk-page-size data-no-autofilter>
-                            <?php foreach (array_merge(rh_bk_page_sizes(), rh_bk_all_size_allowed($list_count) ? ['all'] : []) as $bk_sz): ?>
+                            <?php /* 10 / 25 / 50 / All (owner rule, Decision 7); 100 shows only while it is in force (?size=100 from an old link, or All on a list over the All cap). */ foreach (array_merge(['10', '25', '50'], $bk_page_size === '100' ? ['100'] : [], ['all']) as $bk_sz): ?>
                                 <option value="<?php echo htmlspecialchars($bk_sz, ENT_QUOTES); ?>"<?php echo $bk_sz === $bk_page_size ? ' selected' : ''; ?>><?php echo $bk_sz === 'all' ? 'All' : htmlspecialchars($bk_sz); ?></option>
                             <?php endforeach; ?>
                         </select> per page</label>
@@ -4605,17 +4717,19 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             };
         }
 
-        // Searching / filtering keeps the open tab and the overdue views. The form sits outside #booking-results
-        // (tabs reload only the results), so the kept values are taken from the current URL at submit time,
-        // never from what the page first rendered.
+        // Searching / filtering keeps the open tab, the overdue views, the page size and the sort. The form sits outside
+        // #booking-results (tabs reload only the results), so the kept values are taken from the current URL at submit
+        // time, never from what the page first rendered. Every drop-down filter is a field of the form itself (plan T4),
+        // so a filter removed with its chip stays removed when Filter is pressed.
+        const BK_URL_KEEP = ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir'];
         if (!window.__bkKeepFiltersBound) {
             window.__bkKeepFiltersBound = true;
             document.addEventListener('submit', function(e) {
                 const f = e.target;
                 if (!f || !f.matches || !f.matches('[data-live-search-form="room-bookings"]')) return;
                 const cur = new URLSearchParams(window.location.search);
-                f.querySelectorAll('input[data-bk-keep]').forEach(i => i.remove());
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'room', 'group', 'source', 'created_by', 'size'].forEach(k => {
+                f.querySelectorAll('input[data-bk-keep], input[type="hidden"][name="sort"], input[type="hidden"][name="dir"]').forEach(i => i.remove());
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir'].forEach(k => {
                     const v = cur.get(k);
                     if (!v) return;
                     const i = document.createElement('input');
@@ -4628,6 +4742,142 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             }, true);
         }
 
+        // The list URL the form would submit now (its fields + the kept values from the address bar). Also used by the
+        // quick-date buttons.
+        function bkFormUrl() {
+            const searchForm = document.querySelector('[data-live-search-form="room-bookings"]');
+            const keep = new URLSearchParams(window.location.search);
+            const params = new URLSearchParams();
+            if (searchForm) {
+                new FormData(searchForm).forEach(function(v, k) {
+                    if (typeof v !== 'string' || BK_URL_KEEP.indexOf(k) !== -1) return;
+                    if (searchForm.querySelector('input[data-bk-keep][name="' + k + '"]')) return;
+                    params.append(k, v);
+                });
+            }
+            BK_URL_KEEP.forEach(function(k) {
+                const v = keep.get(k);
+                if (v) params.set(k, v);
+            });
+            return 'bookings.php' + (params.toString() ? '?' + params.toString() : '');
+        }
+
+        // After every in-place load and on Back / Forward the form (outside the swapped results) is set from the URL, so
+        // it always shows what the list shows. The search box is left alone while it is being typed in.
+        function bkSyncForm(skipSearch) {
+            const form = document.querySelector('[data-live-search-form="room-bookings"]');
+            if (!form) return;
+            const p = new URLSearchParams(window.location.search);
+            const results = document.getElementById('booking-results');
+            const chipKey = { filter_status: 'status' };
+            ['date_type', 'filter_status', 'pay', 'room_type', 'room', 'source', 'group', 'created_by', 'kind'].forEach(function(name) {
+                const sel = form.querySelector('select[name="' + name + '"]');
+                if (!sel) return;
+                let v = name === 'filter_status' ? (p.get('filter_status') !== null ? p.get('filter_status') : (p.get('status') || '')) : (p.get(name) || '');
+                if (name === 'date_type' && !Array.prototype.some.call(sel.options, o => o.value === v)) v = 'arrival';
+                if (v !== '' && !Array.prototype.some.call(sel.options, o => o.value === v)) {
+                    // A value the server accepted but the drop-down does not list (an older group lead): name it from its chip.
+                    const chip = results ? results.querySelector('[data-bk-chip="' + (chipKey[name] || name) + '"] .bk-chip__label') : null;
+                    if (chip) {
+                        const o = document.createElement('option');
+                        o.value = v;
+                        o.textContent = chip.textContent.replace(/^[^:]+:\s*/, '');
+                        sel.appendChild(o);
+                    } else {
+                        v = '';
+                    }
+                }
+                sel.value = v;
+            });
+            ['date_from', 'date_to'].forEach(function(name) {
+                const inp = form.querySelector('input[name="' + name + '"]');
+                if (inp) inp.value = p.get(name) || '';
+            });
+            const search = form.querySelector('[data-live-search-input="room-bookings"]');
+            if (search && !skipSearch && document.activeElement !== search) search.value = p.get('search') || '';
+            bkSyncBarState();
+        }
+
+        // The parts of the bar that follow its own fields: quick-date buttons, the phone Filters count, Clear all.
+        function bkSyncBarState() {
+            const form = document.querySelector('[data-live-search-form="room-bookings"]');
+            if (!form) return;
+            const from = (form.querySelector('input[name="date_from"]') || {}).value || '';
+            const to = (form.querySelector('input[name="date_to"]') || {}).value || '';
+            form.querySelectorAll('[data-bk-preset]').forEach(function(b) {
+                const on = b.dataset.from === from && b.dataset.to === to;
+                b.classList.toggle('is-active', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+            let n = 0;
+            form.querySelectorAll('[data-bk-filter-drops] select').forEach(function(s) { if (s.value !== '') n++; });
+            const badge = form.querySelector('[data-bk-drop-count]');
+            if (badge) {
+                badge.textContent = String(n);
+                badge.hidden = n === 0;
+            }
+            const clear = form.querySelector('[data-bk-clear]');
+            if (clear) clear.hidden = !document.querySelector('#booking-results [data-bk-chips]');
+        }
+
+        // ── Remembered sort (plan Decision 6): per user and per device, one for upcoming views and one for history views
+        // (Checked out, Cancelled, No-show, Deleted). The URL always wins; the stored sort is used only when the URL has
+        // none. Every storage call is wrapped: a blocked or full localStorage just means no memory.
+        const BK_SORT_KEYS = <?php echo json_encode(array_keys(rh_bk_sort_map())); ?>;
+        function bkSortStoreKey() {
+            const c = document.getElementById('booking-results');
+            const u = c ? String(c.dataset.userId || '') : '';
+            return /^[1-9]\d*$/.test(u) ? 'rh-bk-sort:v1:u' + u : '';
+        }
+        function bkSortAll() {
+            try {
+                const k = bkSortStoreKey();
+                const v = k ? JSON.parse(window.localStorage.getItem(k) || '{}') : {};
+                return v && typeof v === 'object' ? v : {};
+            } catch (_) {
+                return {};
+            }
+        }
+        function bkSortGet(kind) {
+            const v = bkSortAll()[kind];
+            return v && BK_SORT_KEYS.indexOf(v.sort) !== -1 && (v.dir === 'asc' || v.dir === 'desc') ? { sort: v.sort, dir: v.dir } : null;
+        }
+        function bkSortSave(kind, sort, dir) {
+            if ((kind !== 'upcoming' && kind !== 'history') || BK_SORT_KEYS.indexOf(sort) === -1) return;
+            try {
+                const k = bkSortStoreKey();
+                if (!k) return;
+                const all = bkSortAll();
+                all[kind] = { sort: sort, dir: dir === 'asc' ? 'asc' : 'desc' };
+                window.localStorage.setItem(k, JSON.stringify(all));
+            } catch (_) { /* no memory on this device */ }
+        }
+        // The view kind of a list URL (rh_bk_view_kind): history when the status (or its ?status= alias) is one of these.
+        function bkViewKindOf(params) {
+            const st = params.get('filter_status') !== null ? params.get('filter_status') : (params.get('status') || '');
+            return ['checked-out', 'cancelled', 'no-show', 'deleted'].indexOf(st) !== -1 ? 'history' : 'upcoming';
+        }
+        function bkCurrentViewKind() {
+            const s = document.querySelector('#booking-results [data-bk-state]');
+            return s && s.dataset.viewKind === 'history' ? 'history' : 'upcoming';
+        }
+        // A tab change: a sort carried over from the other view kind is dropped, then that kind's remembered sort applies.
+        function bkTabSortParams(params) {
+            const kind = bkViewKindOf(params);
+            if (kind !== bkCurrentViewKind()) {
+                params.delete('sort');
+                params.delete('dir');
+            }
+            if (!params.get('sort')) {
+                const s = bkSortGet(kind);
+                if (s) {
+                    params.set('sort', s.sort);
+                    params.set('dir', s.dir);
+                }
+            }
+            return params;
+        }
+
         (function initRoomBookingsLiveSearch() {
             const searchForm = document.querySelector('[data-live-search-form="room-bookings"]');
             const searchInput = searchForm ? searchForm.querySelector('[data-live-search-input="room-bookings"]') : null;
@@ -4636,28 +4886,14 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             }
 
             // Search as you type reloads only the results (loadBookingResults), so the box keeps focus and the page
-            // does not jump down to the list. Same URL a submit would build: the form's fields plus the kept tab /
-            // overdue / size values from the address bar (the capture listener above).
-            function liveSearchUrl() {
-                const keep = new URLSearchParams(window.location.search);
-                const params = new URLSearchParams();
-                new FormData(searchForm).forEach(function(v, k) {
-                    if (typeof v === 'string' && !searchForm.querySelector('input[data-bk-keep][name="' + k + '"]')) params.append(k, v);
-                });
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'room', 'group', 'source', 'created_by', 'size'].forEach(function(k) {
-                    const v = keep.get(k);
-                    if (v) params.set(k, v);
-                });
-                return 'bookings.php' + (params.toString() ? '?' + params.toString() : '');
-            }
-
+            // does not jump down to the list. Same URL a submit would build (bkFormUrl).
             let searchDebounceTimer = null;
             searchInput.addEventListener('input', function() {
                 window.clearTimeout(searchDebounceTimer);
                 searchDebounceTimer = window.setTimeout(function() {
                     const query = searchInput.value.trim();
                     if (query.length === 0 || query.length >= 2) {
-                        loadBookingResults(liveSearchUrl(), { live: true });
+                        loadBookingResults(bkFormUrl(), { live: true });
                     }
                 }, 350);
             });
@@ -4666,9 +4902,307 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 if (document.activeElement !== searchInput) return;
                 e.preventDefault();
                 window.clearTimeout(searchDebounceTimer);
-                loadBookingResults(liveSearchUrl(), { live: true });
+                loadBookingResults(bkFormUrl(), { live: true });
             });
+            searchForm.addEventListener('change', function(e) {
+                if (e.target && e.target.matches && e.target.matches('select, input[type="date"]')) bkSyncBarState();
+            });
+            bkSyncBarState();
         })();
+
+        // Filter bar, chips, More tabs menu and saved filter sets: delegated once (the results and the tab row are swapped
+        // on every in-place load; the listeners stay on document and only act on this page).
+        if (!window.__bkBarBound) {
+            window.__bkBarBound = true;
+            const onPage = () => /bookings\.php/i.test(window.location.pathname) && !!document.getElementById('booking-results');
+
+            // More tabs menu (plan T6): placed by the shared row-menu helper (position: fixed), because the tab row
+            // scrolls sideways and would clip a menu inside it.
+            let moreOpenedAt = 0;
+            const moreMenu = () => document.getElementById('bkTabsMoreMenu');
+            const moreToggle = () => document.querySelector('[data-bk-more-toggle]');
+            const closeMore = function(focusToggle) {
+                const m = moreMenu();
+                const t = moreToggle();
+                if (m && !m.hidden) {
+                    m.hidden = true;
+                    m.style.cssText = '';
+                }
+                if (t) {
+                    t.setAttribute('aria-expanded', 'false');
+                    if (focusToggle) t.focus({ preventScroll: true });
+                }
+            };
+            const openMore = function() {
+                const m = moreMenu();
+                const t = moreToggle();
+                if (!m || !t) return;
+                m.hidden = false;
+                if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(t, m);
+                t.setAttribute('aria-expanded', 'true');
+                moreOpenedAt = Date.now();
+                const first = m.querySelector('.tab-button.active') || m.querySelector('.tab-button');
+                if (first) first.focus({ preventScroll: true });
+            };
+            window.__bkCloseMore = closeMore;
+
+            // Saved filter sets menu (plan T10).
+            const savedMenu = () => document.getElementById('bkSavedMenu');
+            const closeSaved = function() {
+                const m = savedMenu();
+                const t = document.querySelector('[data-bk-saved-toggle]');
+                if (m) m.hidden = true;
+                if (t) t.setAttribute('aria-expanded', 'false');
+            };
+
+            document.addEventListener('click', function(e) {
+                if (!onPage() || !e.target || !e.target.closest) return;
+                const t = e.target;
+
+                if (t.closest('[data-bk-more-toggle]')) {
+                    e.preventDefault();
+                    const m = moreMenu();
+                    if (m && !m.hidden) closeMore(false); else openMore();
+                    return;
+                }
+                if (t.closest('.bk-tabs-more__item')) {
+                    closeMore(false); // the shared tab handler (capture) has already opened the tab
+                    return;
+                }
+                if (!t.closest('#bkTabsMoreMenu')) closeMore(false);
+
+                if (t.closest('[data-bk-saved-toggle]')) {
+                    e.preventDefault();
+                    const m = savedMenu();
+                    const open = m && m.hidden;
+                    if (m) {
+                        m.hidden = !open;
+                        // Open under the button, towards the side with room (never off screen or under the menu bar).
+                        m.style.left = '';
+                        m.style.right = '';
+                        if (open) {
+                            const r = m.getBoundingClientRect();
+                            if (r.right > window.innerWidth - 8) {
+                                m.style.left = 'auto';
+                                m.style.right = '0';
+                            }
+                        }
+                    }
+                    t.closest('[data-bk-saved-toggle]').setAttribute('aria-expanded', open ? 'true' : 'false');
+                    return;
+                }
+                if (!t.closest('[data-bk-saved]')) closeSaved();
+
+                // Quick dates (Decision 8): From / To on the hotel date, the chosen date field kept, list reloaded in place.
+                const preset = t.closest('[data-bk-preset]');
+                if (preset) {
+                    e.preventDefault();
+                    const form = preset.closest('form');
+                    const from = form ? form.querySelector('input[name="date_from"]') : null;
+                    const to = form ? form.querySelector('input[name="date_to"]') : null;
+                    if (from && to) {
+                        from.value = preset.dataset.from || '';
+                        to.value = preset.dataset.to || '';
+                    }
+                    bkSyncBarState();
+                    loadBookingResults(bkFormUrl());
+                    return;
+                }
+
+                // Phones: the drop-downs fold under the Filters button.
+                const ft = t.closest('[data-bk-filters-toggle]');
+                if (ft) {
+                    e.preventDefault();
+                    const bar = ft.closest('[data-bk-toolbar]');
+                    const open = bar ? !bar.classList.contains('bk-filters-open') : false;
+                    if (bar) bar.classList.toggle('bk-filters-open', open);
+                    ft.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    return;
+                }
+
+                // Chip remove, Clear all and saved sets: the list reloads in place (the address bar follows).
+                const nav = t.closest('a[data-bk-nav]');
+                if (nav && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                    e.preventDefault();
+                    closeSaved();
+                    loadBookingResults(nav.getAttribute('href'));
+                    return;
+                }
+
+                const del = t.closest('[data-bk-saved-del]');
+                if (del) {
+                    e.preventDefault();
+                    bkSavedDelete(del.getAttribute('data-name') || '');
+                    return;
+                }
+                if (t.closest('[data-bk-saved-open]')) {
+                    e.preventDefault();
+                    closeSaved();
+                    const dlg = document.getElementById('bkSavedDialog');
+                    if (!dlg) return;
+                    const inp = dlg.querySelector('#bkSavedName');
+                    const err = dlg.querySelector('[data-bk-saved-error]');
+                    if (inp) inp.value = '';
+                    if (err) err.hidden = true;
+                    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+                    if (inp) inp.focus();
+                    return;
+                }
+                if (t.closest('[data-bk-saved-cancel]')) {
+                    e.preventDefault();
+                    const dlg = document.getElementById('bkSavedDialog');
+                    if (dlg && typeof dlg.close === 'function') dlg.close(); else if (dlg) dlg.removeAttribute('open');
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (!onPage()) return;
+                const m = moreMenu();
+                const menuOpen = m && !m.hidden;
+                if (e.target && e.target.closest && e.target.closest('[data-bk-more-toggle]') && !menuOpen && (e.key === 'ArrowDown')) {
+                    e.preventDefault();
+                    openMore();
+                    return;
+                }
+                if (menuOpen) {
+                    const items = Array.prototype.slice.call(m.querySelectorAll('.tab-button'));
+                    const i = items.indexOf(document.activeElement);
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        closeMore(true);
+                    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        const n = items.length;
+                        if (n) items[(i + (e.key === 'ArrowDown' ? 1 : -1) + n) % n].focus({ preventScroll: true });
+                    } else if (e.key === 'Home' || e.key === 'End') {
+                        e.preventDefault();
+                        if (items.length) items[e.key === 'Home' ? 0 : items.length - 1].focus({ preventScroll: true });
+                    } else if (e.key === 'Tab') {
+                        closeMore(false);
+                    }
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    const sm = savedMenu();
+                    if (sm && !sm.hidden) {
+                        closeSaved();
+                        const tg = document.querySelector('[data-bk-saved-toggle]');
+                        if (tg) tg.focus();
+                    }
+                }
+            });
+            // The fixed menu would float away from its button when the page or the tab row scrolls: close it.
+            window.addEventListener('scroll', function() {
+                if (Date.now() - moreOpenedAt > 250) closeMore(false);
+            }, true);
+            window.addEventListener('resize', function() { closeMore(false); });
+
+            document.addEventListener('submit', function(e) {
+                const f = e.target;
+                if (!onPage() || !f || !f.matches || !f.matches('[data-bk-saved-form]')) return;
+                e.preventDefault();
+                bkSavedSave();
+            });
+        }
+
+        // ── Saved filter sets (plan T10, Decision 3): save / delete through api/bookings-saved-filters.php (own row only,
+        // csrf); the menu is redrawn from the answer (text set with textContent, never as HTML).
+        async function bkSavedPost(fields) {
+            const body = new URLSearchParams();
+            Object.keys(fields).forEach(k => body.set(k, fields[k]));
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            body.set('csrf_token', window._rhCsrf || (meta ? meta.getAttribute('content') : '') || '');
+            let res = null;
+            let j = null;
+            try {
+                res = await fetch('api/bookings-saved-filters.php', { method: 'POST', body: body, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                j = await res.json();
+            } catch (_) {
+                j = null;
+            }
+            if (res && res.ok && j && j.success) {
+                bkSavedRender((j.data && j.data.sets) || []);
+                return { ok: true };
+            }
+            return { ok: false, error: (j && j.error) || 'Could not save that right now. Please try again.' };
+        }
+        function bkSavedRender(sets) {
+            const list = document.querySelector('[data-bk-saved-list]');
+            if (!list) return;
+            const canDelete = !!document.getElementById('bkSavedDialog');
+            list.textContent = '';
+            sets.forEach(function(s) {
+                const li = document.createElement('li');
+                li.className = 'bk-saved__item';
+                const a = document.createElement('a');
+                a.className = 'bk-saved__open';
+                a.href = String(s.url || 'bookings.php');
+                a.textContent = String(s.name || '');
+                a.setAttribute('data-bk-nav', '');
+                a.setAttribute('data-no-spa', '1');
+                a.setAttribute('data-vo-allow', '');
+                li.appendChild(a);
+                if (canDelete) {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'bk-saved__del';
+                    b.setAttribute('data-bk-saved-del', '');
+                    b.setAttribute('data-name', String(s.name || ''));
+                    b.setAttribute('aria-label', 'Delete saved filters: ' + String(s.name || ''));
+                    b.title = 'Delete';
+                    b.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
+                    li.appendChild(b);
+                }
+                list.appendChild(li);
+            });
+            const empty = document.querySelector('[data-bk-saved-empty]');
+            if (empty) empty.hidden = sets.length > 0;
+            const count = document.querySelector('[data-bk-saved-count]');
+            if (count) {
+                count.textContent = String(sets.length);
+                count.hidden = sets.length === 0;
+            }
+        }
+        async function bkSavedSave() {
+            const dlg = document.getElementById('bkSavedDialog');
+            if (!dlg) return;
+            const inp = dlg.querySelector('#bkSavedName');
+            const err = dlg.querySelector('[data-bk-saved-error]');
+            const btn = dlg.querySelector('[data-bk-saved-submit]');
+            const name = inp ? inp.value.replace(/\s+/g, ' ').trim() : '';
+            const showErr = function(msg) {
+                if (err) {
+                    err.textContent = msg;
+                    err.hidden = false;
+                }
+            };
+            if (name === '') {
+                showErr('Type a name for these filters.');
+                if (inp) inp.focus();
+                return;
+            }
+            if (btn) btn.disabled = true;
+            const r = await bkSavedPost({ action: 'save', name: name, query: window.location.search.replace(/^\?/, '') });
+            if (btn) btn.disabled = false;
+            if (!r.ok) {
+                showErr(r.error);
+                return;
+            }
+            if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
+            showBookingActionMessage('Filters saved as "' + name + '".', 'success'); // escapes: the name is typed text
+        }
+        async function bkSavedDelete(name) {
+            if (!name) return;
+            const ok = await confirmAdminAction({
+                title: 'Delete saved filters',
+                message: 'Delete the saved filters "' + name + '"? The bookings themselves are not changed.',
+                confirmText: 'Delete',
+                icon: 'fa-trash-can'
+            });
+            if (!ok) return;
+            const r = await bkSavedPost({ action: 'delete', name: name });
+            showBookingActionMessage(r.ok ? 'Saved filters deleted.' : r.error, r.ok ? 'success' : 'error');
+        }
 
         // ============================================
         // LOADING STATE MANAGEMENT FOR BUTTONS
@@ -4983,11 +5517,28 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 }
             });
 
+            bkUpdateMoreLabel(tabName);
+
             // Filter table rows
             filterBookingsTable(tabName);
 
             // Update section title
             updateSectionTitle(tabName);
+        }
+
+        // The More button names the open tab when it is one of the More menu's (plan T6): "More: Cancelled 12".
+        function bkUpdateMoreLabel(tabName) {
+            const toggle = document.querySelector('[data-bk-more-toggle]');
+            if (!toggle) return;
+            const item = document.querySelector('#bkTabsMoreMenu .tab-button[data-tab="' + String(tabName).replace(/[^a-z0-9_-]/gi, '') + '"]');
+            const label = toggle.querySelector('[data-bk-more-label]');
+            const count = toggle.querySelector('[data-bk-more-count]');
+            toggle.classList.toggle('is-active', !!item);
+            if (label) label.textContent = item ? 'More: ' + (item.dataset.label || '') : 'More';
+            if (count) {
+                count.textContent = item ? String(item.dataset.count || '0') : '0';
+                count.hidden = !item;
+            }
         }
 
         function filterBookingsTable(tabName) {
@@ -5121,9 +5672,9 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 'tentative': 'Tentative Bookings',
                 'expiring-soon': 'Expiring Soon (Urgent)',
                 'confirmed': 'Confirmed Bookings',
-                'today-checkins': "Today's Check-ins",
-                'today-checkouts': "Today's Check-outs",
-                'checked-in': 'Checked In Guests',
+                'today-checkins': 'Arriving today',
+                'today-checkouts': 'Leaving today',
+                'checked-in': 'In house',
                 'checked-out': 'Checked Out Bookings',
                 'cancelled': 'Cancelled Bookings',
                 'no-show': 'No-Show Bookings',
@@ -5400,15 +5951,22 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     if (freshNums[i]) n.textContent = freshNums[i].textContent;
                 });
 
-                // Push URL (replace while typing a search: Back is not filled with half-typed words) and re-apply
-                // visual tab state
-                if (opts.live) {
+                // Push URL (replace while typing a search: Back is not filled with half-typed words; none on Back /
+                // Forward, the address bar is already there) and re-apply visual tab state
+                const histMode = opts.history || (opts.live ? 'replace' : 'push');
+                if (histMode === 'replace') {
                     history.replaceState({ spa: true, url: new URL(url, window.location.href).href }, '', url);
-                } else {
+                } else if (histMode === 'push') {
                     history.pushState({
                         url: url
                     }, '', url);
                 }
+                if (fresh) {
+                    container.dataset.activeTab = fresh.dataset.activeTab || 'all';
+                    container.dataset.viewKind = fresh.dataset.viewKind || 'upcoming';
+                }
+                // The filter bar sits outside the results: set it from the URL so it shows what the list shows.
+                bkSyncForm(!!opts.live);
                 const activeTab = fresh ? (fresh.dataset.activeTab || 'all') : 'all';
                 switchTab(activeTab);
 
@@ -5447,12 +6005,14 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     params.set(k, v);
                 }
             }
+            bkTabSortParams(params); // remembered sort of the tab's view kind (Decision 6)
             loadBookingResults('bookings.php' + (params.toString() ? '?' + params.toString() : ''));
         }
 
         // Browser back/forward support
         window.addEventListener('popstate', function() {
-            loadBookingResults(window.location.href);
+            if (!/bookings\.php/i.test(window.location.pathname) || !document.getElementById('booking-results')) return;
+            loadBookingResults(window.location.href, { history: 'none' });
         });
 
         // Initialize — re-runs on every SPA navigation to this page.
@@ -5467,6 +6027,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 if (tabName === 'all') {
                     const params = new URLSearchParams(window.location.search);
                     ['filter', 'filter_status', 'status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'payment_status', 'page'].forEach(k => params.delete(k));
+                    bkTabSortParams(params);
                     loadBookingResults('bookings.php' + (params.toString() ? '?' + params.toString() : ''));
                 } else if (tabName) {
                     navigateToTab(tabName);
@@ -5512,6 +6073,11 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     if (!/bookings\.php/i.test(window.location.pathname)) return;
                     if (!document.getElementById('booking-results')) return;
                     e.preventDefault();
+                    // Remember it for this view kind, for this user on this device (Decision 6).
+                    try {
+                        const su = new URL(e.detail.url, window.location.href);
+                        bkSortSave(bkCurrentViewKind(), su.searchParams.get('sort') || '', su.searchParams.get('dir') || 'desc');
+                    } catch (_) { /* no memory */ }
                     loadBookingResults(e.detail.url);
                 });
             }
@@ -5524,6 +6090,18 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             // Apply visual filter on loaded rows
             switchTab(activeTab);
             hydrateQuickActionButtons(document);
+
+            // Remembered sort (Decision 6): only when the URL has none; replaces this history entry (Back is not trapped).
+            (function applyRememberedSort() {
+                const here = new URL(window.location.href);
+                if (here.searchParams.get('sort') || here.searchParams.get('export') || here.searchParams.get('action')) return;
+                const s = bkSortGet(bkCurrentViewKind());
+                if (!s) return;
+                here.searchParams.set('sort', s.sort);
+                here.searchParams.set('dir', s.dir);
+                here.searchParams.delete('page');
+                loadBookingResults('bookings.php' + here.search, { history: 'replace', live: true });
+            })();
         })();
 
         async function makeTentative(id, button) {

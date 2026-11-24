@@ -60,6 +60,15 @@ check(!$T('admin_api', 'handover-notes.php', 'POST', [], ['action' => 'write', '
 check($T('admin_api', 'dashboard-seen.php', 'POST', [], ['action' => 'welcome_dismissed']), 'trial: Got it on the welcome card passes');
 check(!rh_licence_write_allowed('admin_api', 'handover-notes.php', 'POST', [], ['action' => 'write', 'body' => 'x']), 'licence read-only: writing a handover note refused');
 check(rh_licence_write_allowed('admin_api', 'dashboard-seen.php', 'POST', [], ['action' => 'handover_read', 'note_id' => '1']), 'licence read-only: marking a handover note read passes');
+// Bookings saved filter sets (plan BOOKINGS_LIST_PLAN Decision 3): a change, on no allowlist, so view only, the view-only
+// trial and the licence's read-only step all refuse save and delete.
+foreach (['save', 'delete'] as $bkAct) {
+    $bkPost = ['action' => $bkAct, 'name' => 'Unpaid', 'query' => 'filter=unpaid'];
+    check(!$A('admin_api', 'bookings-saved-filters.php', 'POST', [], $bkPost), "view only: saved filters $bkAct refused");
+    check(!$T('admin_api', 'bookings-saved-filters.php', 'POST', [], $bkPost), "trial: saved filters $bkAct refused");
+    check(!rh_licence_write_allowed('admin_api', 'bookings-saved-filters.php', 'POST', [], $bkPost), "licence read-only: saved filters $bkAct refused");
+}
+check(!$A('admin_api', 'bookings-saved-filters.php', 'POST'), 'view only: saved filters with no action refused');
 check(!$A('admin_api', 'ai-action.php', 'POST', [], ['action' => 'confirm']), 'the Assistant\'s confirmed actions refused');
 check(!$A('admin_api', 'user-permissions.php', 'POST', [], ['action' => 'save']), 'changing permissions refused');
 check(!$A('station', 'kds-action.php', 'GET', ['action' => 'bump_ticket']), 'a kitchen bump (sent as GET) refused');

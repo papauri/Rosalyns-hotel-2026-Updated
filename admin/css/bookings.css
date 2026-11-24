@@ -2725,8 +2725,8 @@ table.bookings-table td small.bk-status-note {
     }
 
     /* Shown elsewhere on the row or in the booking summary / Full details: reference, room type,
-       check-out, nights, guests, the separate Status and Payment columns, created. */
-    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > :is(td[data-label="Room"], td[data-label="Check Out"], td[data-label="Nights"], td[data-label="Guests"], td[data-label="Status"], td[data-label="Payment"], td[data-label="Created"]) {
+       check-out, nights, guests, the separate Status, Payment and Balance due columns (the amount due is on line 3), created. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > :is(td[data-label="Room"], td[data-label="Check Out"], td[data-label="Nights"], td[data-label="Guests"], td[data-label="Status"], td[data-label="Payment"], td[data-label="Balance due"], td[data-label="Created"]) {
         display: none;
     }
 
@@ -3174,5 +3174,534 @@ table.bookings-table .bk-guests-twin {
 
     #booking-results .admin-bulk-bar__controls > .help {
         display: none;
+    }
+}
+
+/* ==========================================================================
+   Bookings list overhaul, Ship B (plan .claude/BOOKINGS_LIST_PLAN.md T5): one filter bar (quick dates, drop-downs,
+   phone Filters fold), active-filter chips, the More tabs menu, saved filter sets, the Balance due column and a
+   clearer sort arrow. Solid surfaces, one accent (the tab gold), no gradients or glows. 1920 / 1280 / 390.
+   ========================================================================== */
+
+/* Author display rules (inline-flex buttons and badges) would beat the hidden attribute: keep hidden things hidden. */
+.bookings-toolbar [hidden],
+.bk-chips [hidden],
+.bk-tabs-more [data-bk-more-count][hidden],
+.bk-tabs-more__menu[hidden] {
+    display: none !important;
+}
+
+/* Quick dates: small solid buttons beside From / To; the one matching From / To is filled. */
+.bk-presets {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.bk-preset {
+    min-height: calc(var(--rh-bookings-toolbar-control-height) - 6px);
+    padding: 0 0.7rem;
+    border: 1px solid var(--admin-surface-border, var(--color-lux-clay-50));
+    border-radius: 999px;
+    background: var(--color-white, #fff);
+    color: var(--admin-text, var(--color-text-primary));
+    font-family: var(--font-body, var(--font-sans));
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.bk-preset:hover {
+    border-color: var(--gold, var(--color-lux-gold));
+    color: var(--gold, var(--color-lux-gold));
+}
+
+.bk-preset.is-active {
+    background: var(--gold, var(--color-lux-gold));
+    border-color: var(--gold, var(--color-lux-gold));
+    color: #fff;
+}
+
+.bk-preset:focus-visible,
+.bk-chip__x:focus-visible,
+.bk-chips__clear:focus-visible,
+.bk-tabs-more__toggle:focus-visible,
+.bk-saved__del:focus-visible,
+.bk-saved__open:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+/* Drop-downs: one row that wraps; each carries its "?" helper. */
+.bk-filter-drops {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: clamp(0.4rem, 0.36rem + 0.16vw, 0.6rem);
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+.bk-drop {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.bk-drop > .bookings-toolbar__input--status {
+    flex: 0 1 11.5rem;
+    width: 11.5rem;
+    min-width: 7.5rem;
+    max-width: 100%;
+}
+
+.bk-filter-drops > .bookings-more-filters {
+    flex: 0 1 auto;
+}
+
+/* Tablets and touch screens: quick dates are 44px tap targets (staff tap these standing up). */
+@media (max-width: 1024px), (pointer: coarse) {
+    .bk-preset {
+        min-height: 44px;
+    }
+}
+
+/* The phone Filters button only shows where the drop-downs fold (below). */
+.bk-filters-toggle {
+    display: none !important;
+}
+
+@media (max-width: 640px) {
+    .bk-filters-toggle {
+        display: inline-flex !important;
+    }
+
+    .bk-filter-drops {
+        display: none;
+        flex: 1 1 100%;
+    }
+
+    .bookings-toolbar.bk-filters-open .bk-filter-drops {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.5rem;
+    }
+
+    .bk-drop {
+        display: flex;
+        width: 100%;
+    }
+
+    .bk-drop > .bookings-toolbar__input--status {
+        flex: 1 1 auto;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .bk-presets {
+        flex: 1 1 100%;
+    }
+
+    .bk-preset {
+        min-height: 44px;
+        flex: 1 1 auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .bk-presets,
+    .bk-filter-drops,
+    .bookings-toolbar .bk-filter-drops > .bookings-more-filters {
+        grid-column: 1 / -1;
+    }
+
+    /* Filter + Clear all: one full-width row (Filter alone fills it when nothing is set). */
+    .bookings-toolbar__btns {
+        display: flex;
+        grid-column: 1 / -1;
+        gap: 0.5rem;
+    }
+
+    .bookings-toolbar__btns > .bookings-toolbar__button {
+        flex: 1 1 0;
+    }
+}
+
+/* Active-filter chips (inside the results, so they follow every in-place load). */
+.bk-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--admin-surface-border, var(--color-lux-clay-50));
+    border-radius: 10px;
+    background: var(--color-white, #fff);
+}
+
+.bk-chips__count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+}
+
+.bk-chips__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    min-width: 0;
+}
+
+.bk-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    max-width: 100%;
+    padding: 2px 2px 2px 10px;
+    border: 1px solid var(--color-lux-clay-100, #ece1d6);
+    border-radius: 999px;
+    background: var(--color-lux-clay-50, #f3ece4);
+    color: var(--admin-text, var(--color-text-primary));
+    font-size: 13px;
+    line-height: 1.3;
+}
+
+.bk-chip__label {
+    overflow-wrap: anywhere;
+}
+
+.bk-chip__x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+}
+
+.bk-chip__x:hover {
+    background: var(--color-lux-clay-100, #ece1d6);
+    color: var(--admin-text, var(--color-text-primary));
+}
+
+.bk-chips__clear {
+    margin-left: auto;
+    color: var(--gold, var(--color-lux-gold));
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+@media (pointer: coarse), (max-width: 1024px) {
+    .bk-chip__x {
+        width: 44px;
+        height: 44px;
+        margin: -8px -6px -8px -4px;
+    }
+
+    .bk-chips__clear {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+}
+
+/* Tabs: the More button looks like a tab; it is filled when the open tab is one from its menu. */
+.bk-tabs-more {
+    display: inline-flex;
+    flex: 0 0 auto;
+}
+
+.bk-tabs-more__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 40px;
+    padding: 9px 14px;
+    border: 1px solid var(--admin-surface-border);
+    border-radius: 8px;
+    background: var(--color-white, #fff);
+    color: var(--admin-text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.bk-tabs-more__toggle:hover,
+.bk-tabs-more__toggle.is-active {
+    background: var(--gold);
+    border-color: var(--gold);
+    color: #fff;
+}
+
+.bk-tabs-more__toggle .tab-count {
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.bk-tabs-more__caret {
+    font-size: 11px;
+}
+
+/* The menu is placed by rhPlaceActionMenu (position: fixed) so the sideways-scrolling tab row cannot clip it. */
+.bk-tabs-more__menu {
+    min-width: 220px;
+    padding: 6px;
+    border: 1px solid var(--admin-surface-border);
+    border-radius: 10px;
+    background: var(--color-white, #fff);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+
+.bk-tabs-more__menu .tab-button.bk-tabs-more__item {
+    display: flex !important;
+    width: 100%;
+    justify-content: flex-start;
+    min-height: 44px;
+    margin: 0 0 4px;
+    border-color: transparent;
+}
+
+.bk-tabs-more__menu .tab-button.bk-tabs-more__item:last-child {
+    margin-bottom: 0;
+}
+
+.bk-tabs-more__menu .tab-button.bk-tabs-more__item .tab-count {
+    margin-left: auto;
+}
+
+@media (max-width: 640px) {
+    #booking-results .tabs-header > .bk-tabs-more > .bk-tabs-more__toggle {
+        min-height: 44px;
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+}
+
+/* Saved filter sets: a small menu under its button, and the name dialog. */
+.bk-saved {
+    position: relative;
+    display: inline-flex;
+    flex: 0 1 auto;
+}
+
+.bk-saved__toggle {
+    background: var(--color-white, #fff);
+    border-color: var(--admin-surface-border, var(--color-lux-clay-50));
+    color: var(--admin-text, var(--color-text-primary));
+}
+
+.bk-saved__menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 60;
+    width: min(20rem, calc(100vw - 2rem));
+    padding: 10px;
+    border: 1px solid var(--admin-surface-border);
+    border-radius: 10px;
+    background: var(--color-white, #fff);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+
+.bk-saved__head {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.bk-saved__list {
+    margin: 0 0 8px;
+    padding: 0;
+    list-style: none;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.bk-saved__item {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--color-lux-clay-50, #f3ece4);
+}
+
+.bk-saved__open {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 10px 6px;
+    color: var(--admin-text, var(--color-text-primary));
+    font-size: 13.5px;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+.bk-saved__open:hover {
+    color: var(--gold, var(--color-lux-gold));
+}
+
+.bk-saved__del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+}
+
+.bk-saved__del:hover {
+    background: var(--color-lux-clay-50, #f3ece4);
+    color: var(--au-danger, #b4232f);
+}
+
+.bk-saved__empty {
+    margin: 0 0 8px;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+}
+
+.bk-saved__save {
+    width: 100%;
+}
+
+@media (pointer: coarse), (max-width: 1024px) {
+    .bk-saved__del {
+        width: 44px;
+        height: 44px;
+    }
+
+    .bk-saved__open {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+    }
+}
+
+.bk-saved-dialog {
+    width: min(26rem, calc(100vw - 2rem));
+    padding: 18px;
+    border: 1px solid var(--admin-surface-border);
+    border-radius: 12px;
+    background: var(--color-white, #fff);
+    color: var(--admin-text, var(--color-text-primary));
+}
+
+.bk-saved-dialog::backdrop {
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.bk-saved-dialog__title {
+    margin: 0 0 12px;
+    font-size: 17px;
+}
+
+.bk-saved-dialog__label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.bk-saved-dialog__input {
+    width: 100%;
+    min-height: 44px;
+}
+
+.bk-saved-dialog__hint {
+    margin: 8px 0 0;
+    color: var(--color-text-secondary);
+    font-size: 12.5px;
+}
+
+.bk-saved-dialog__error {
+    margin: 8px 0 0;
+    color: var(--au-danger, #b4232f);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.bk-saved-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 14px;
+}
+
+/* Balance due column: the amount still to pay, red like "left to pay"; blank when nothing is due. */
+.bookings-table td.bk-col-balance {
+    white-space: nowrap;
+}
+
+.bookings-table .bk-balance-due {
+    color: var(--au-danger, #b4232f);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+/* Sort arrow (bookings table only; server-sort.php untouched): the active column's arrow is full strength in the
+   accent, the others lighter. The inline opacity comes from rh_server_sort_th, so these need !important. */
+table.bookings-table th[data-sort-key] .admin-sort-icon {
+    opacity: 0.35 !important;
+}
+
+table.bookings-table th[aria-sort="ascending"] .admin-sort-icon,
+table.bookings-table th[aria-sort="descending"] .admin-sort-icon {
+    opacity: 1 !important;
+    color: var(--gold, var(--color-lux-gold));
+}
+
+table.bookings-table th[data-sort-key] .help {
+    margin-left: 4px;
+}
+
+/* Laptops (the Room Bookings box measured, as the column rules above): the Balance due column drops out with the
+   narrow box and its figure shows under the total instead (the .bk-ph-left twin), so the row never scrolls sideways.
+   Measured on Liwonde data (2026-11-24): with the column shown, each column tier above needs a box of at least
+   957px (up to 1099), 1173px (1100-1339), 1401px (1340-1599) and 1715px (1600 and wider). The column shows from
+   that width + 60px spare in each tier and drops out in the ranges below. A 1920 screen with the sidebar open
+   gives a 1343px box: too narrow for the 1401px tier, so the figure shows under the total there. The figure wraps
+   under the total ("left to pay" may take a second line; the amount itself never breaks) so it does not widen the
+   Total column. */
+@media (min-width: 1025px) {
+    @container bookings-section (max-width: 1018px) or ((min-width: 1100px) and (max-width: 1234px)) or ((min-width: 1340px) and (max-width: 1462px)) or ((min-width: 1600px) and (max-width: 1776px)) {
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > .bk-col-balance {
+            display: none;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-left {
+            display: block;
+            margin-top: 2px;
+            white-space: normal;
+        }
+    }
+}
+
+/* Desktop: the drop-downs flow in the bar's own row, so Filter / Clear all sit right after them. */
+@media (min-width: 641px) {
+    .bk-filter-drops {
+        display: contents;
     }
 }

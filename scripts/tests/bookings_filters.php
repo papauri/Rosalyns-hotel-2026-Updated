@@ -113,7 +113,9 @@ check(substr_count($bkSrc, 'rh_bk_list_scope($bk_f, $bk_has_combos)') === 2 && s
 check(strpos($bkSrc, '$bk_f = rh_bk_filters_from_get($_GET, [') !== false && rh_bk_filters_from_get(['date_type' => 'nope'])['date_type'] === 'arrival', 'date_type is whitelisted from the URL');
 check(strpos($bkSrc, "\$pg_params = rh_bk_keep_params(\$bk_f, ['page']);") !== false && (rh_bk_keep_params(rh_bk_filters_from_get(['date_to' => '2026-11-12', 'date_type' => 'booked']))['date_type'] ?? '') === 'booked', 'pagination keeps date_type');
 check(strpos($bkSrc, "\$insight_base_query = rh_bk_keep_params(\$bk_f, ['filter_status', 'filter', 'size', 'page']);") !== false, 'insight card links keep date_type');
-check(strpos($bkSrc, 'rh_bk_date_scope_words($filter_date_from, $filter_date_to, $filter_date_type)') !== false, 'notice names the date type');
+// Ship B (T4): the notice became chips; the dates chip names the date type.
+check(strpos($bkSrc, '$bk_chips = rh_bk_chips($bk_f, ') !== false
+    && strpos(rh_bk_chips(rh_bk_filters_from_get(['date_from' => '2026-11-12', 'date_to' => '2026-11-14', 'date_type' => 'staying']))[0]['label'] ?? '', 'taying') !== false, 'chips name the date type');
 check(strpos($bkSrc, '<select name="date_type"') !== false, 'Dates select is a form field (search / Filter submit carry it)');
 check(strpos($bkSrc, "'date_type'].forEach") === false && strpos($bkSrc, "'date_type', 'page']") === false, 'tabs never drop date_type (it stays with the dates); not double-sent by the keep list');
 check(preg_match('/\$has_active_room_filters = [^;]*date_type/', $bkSrc) === 0, 'date_type alone is not an active filter (no notice/Clear without dates)');
@@ -157,7 +159,8 @@ eq(rh_bk_notice_title('', 'overdue', 'owing', ''), 'Overdue departures only', 'n
 $bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
 check(substr_count($bkSrc, "'departure', 'balance', 'since', 'since_kind', 'payment_status', 'page'].forEach(k => params.delete(k));") === 2, 'tabs clear ?balance= like the other filters');
 $bkKeepTest = rh_bk_keep_params(rh_bk_filters_from_get(['balance' => 'owing', 'size' => '50', 'since' => '2026-11-23 18:40:00', 'since_kind' => 'booked']));
-check(strpos($bkSrc, "rh_bk_keep_params(\$bk_f, ['search', 'filter_status', 'date_from', 'date_to', 'date_type', 'kind', 'room_type', 'pay', 'page']) as \$bk_keep_k") !== false && substr_count($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'room', 'group', 'source', 'created_by', 'size'].forEach") === 2, 'search keeps ?balance= and ?size= (server + client)');
+// Ship B (T4): room / group / source / made by are fields of the bar now (not kept inputs); sort / dir come from the URL.
+check(strpos($bkSrc, "rh_bk_keep_params(\$bk_f, ['search', 'filter_status', 'date_from', 'date_to', 'date_type', 'kind', 'room_type', 'pay', 'room', 'group', 'source', 'created_by', 'page']) as \$bk_keep_k") !== false && substr_count($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir']") === 2, 'search keeps ?balance= and ?size= (server + client)');
 check(($bkKeepTest['size'] ?? '') === '50', 'page links keep ?size=');
 check(($bkKeepTest['balance'] ?? '') === 'owing', 'pagination keeps ?balance=');
 check(rh_bk_scope(rh_bk_filters_from_get(['balance' => 'owing']))['params'] === [rh_fd_balance_tolerance()] && strpos($bkSrc, "\$deleted_scope_params  = \$bk_scope['params'];") !== false && strpos($bkSrc, "\$export_params = \$export_scope['params'];") !== false, 'list, badges and export bind the balance param');
