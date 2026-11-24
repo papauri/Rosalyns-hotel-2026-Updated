@@ -45,10 +45,10 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'booking_child_price_multiplier' => ['label' => 'Child price (% of the adult rate)', 'type' => 'int', 'min' => 0, 'max' => 100, 'default' => '50', 'mirror' => 'child_guest_price_multiplier'],
             ],
             'Payments & documents' => [
-                'bank_name'                 => ['label' => 'Bank name', 'type' => 'text', 'max' => 100, 'default' => '', 'finance' => true],
-                'bank_account_name'         => ['label' => 'Account name', 'type' => 'text', 'max' => 150, 'default' => '', 'finance' => true],
-                'bank_account_number'       => ['label' => 'Account number', 'type' => 'account', 'max' => 50, 'default' => '', 'finance' => true],
-                'bank_branch'               => ['label' => 'Branch', 'type' => 'text', 'max' => 100, 'default' => '', 'finance' => true],
+                'bank_name'                 => ['label' => 'Bank name', 'type' => 'text', 'max' => 100, 'default' => '', 'finance' => true, 'lock' => 'bank'],
+                'bank_account_name'         => ['label' => 'Account name', 'type' => 'text', 'max' => 150, 'default' => '', 'finance' => true, 'lock' => 'bank'],
+                'bank_account_number'       => ['label' => 'Account number', 'type' => 'account', 'max' => 50, 'default' => '', 'finance' => true, 'lock' => 'bank'],
+                'bank_branch'               => ['label' => 'Branch', 'type' => 'text', 'max' => 100, 'default' => '', 'finance' => true, 'lock' => 'bank'],
                 'payment_method_note'       => ['label' => 'Payment methods note', 'type' => 'text', 'max' => 255, 'default' => 'We accept cash payments only.', 'finance' => true],
                 'payment_info'              => ['label' => 'Payment info in arrival reminders', 'type' => 'textarea', 'max' => 500, 'default' => 'Payment will be collected at the hotel reception upon check-in.', 'finance' => true],
                 'invoice_terms'             => ['label' => 'Invoice terms', 'type' => 'textarea', 'max' => 1000, 'default' => '', 'finance' => true],
@@ -65,7 +65,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'restaurant_tagline'            => ['label' => 'Restaurant tagline', 'type' => 'text', 'max' => 100, 'default' => 'Fresh. Local. Inspired.'],
                 'restaurant_receipt_footer'     => ['label' => 'Restaurant receipt footer', 'type' => 'text', 'max' => 160, 'default' => 'Thank you for dining with us!'],
                 'restaurant_menu_pdf_url'       => ['label' => 'Menu PDF link (optional)', 'type' => 'url', 'default' => ''],
-                'restaurant_service_charge_pct' => ['label' => 'Restaurant service charge (%)', 'type' => 'decimal', 'min' => 0, 'max' => 25, 'default' => '0', 'finance' => true],
+                'restaurant_service_charge_pct' => ['label' => 'Restaurant service charge (%)', 'type' => 'decimal', 'min' => 0, 'max' => 25, 'default' => '0', 'finance' => true, 'lock' => 'service_charge'],
                 'stock_variance_alert_pct'      => ['label' => 'Stock count: alert at variance (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '2', 'help' => 'A counted shortage this size or bigger is shaded orange and counted as "over the alert level".'],
                 'stock_variance_block_pct'      => ['label' => 'Stock count: needs approval above (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '10', 'help' => 'A shortage this size or bigger is shaded red and the count needs a second approver.'],
                 'stock_variance_min_cost'       => ['label' => 'Stock count: ignore variances worth less than', 'type' => 'decimal', 'min' => 0, 'max' => 100000000, 'default' => '5000', 'help' => 'Small shortages below this value are never shaded or flagged.'],
@@ -177,6 +177,23 @@ if (!function_exists('rh_hotel_details_fields')) {
         $uid = (int)($user['id'] ?? 0);
         $canFinance = hasPermission($uid, 'finance_settings');
         $isAdmin = rh_hotel_details_is_admin($uid);
+        // High-value fields ('lock' => group, owner 2026-11-25): posted at all (changed or not) without an unlock
+        // token for that group = the whole save is refused, before anything is read. The screen keeps them in a
+        // disabled fieldset until unlocked, so a normal save of the other fields never posts them.
+        require_once __DIR__ . '/../../includes/settings-lock.php';
+        $lockedPosted = [];
+        foreach (rh_hotel_details_fields() as $fields) {
+            foreach ($fields as $key => $spec) {
+                if (!empty($spec['lock']) && array_key_exists($key, $post) && (empty($spec['finance']) || $canFinance)) {
+                    $lockedPosted[(string)$spec['lock']] = true;
+                }
+            }
+        }
+        foreach (array_keys($lockedPosted) as $lockGroup) {
+            if (!rh_settings_lock_is_open($lockGroup, $uid)) {
+                return ['', rh_settings_lock_refusal($lockGroup)];
+            }
+        }
         $errors = [];
         $changes = [];
         foreach (rh_hotel_details_fields() as $fields) {
@@ -202,7 +219,10 @@ if (!function_exists('rh_hotel_details_fields')) {
             }
         }
         if ($errors) {
-            return ['', implode(' ', $errors) . ' Nothing was saved.'];
+            return ['', implode(' ', $errors) . ' Nothing was saved.']; // unlock kept: fix the value and save again
+        }
+        foreach (array_keys($lockedPosted) as $lockGroup) {
+            rh_settings_lock_use($lockGroup); // used up: the card comes back locked
         }
         foreach ($changes as $key => [$old, $new, $spec]) {
             updateSetting($key, $new);
@@ -238,15 +258,48 @@ if (!function_exists('rh_hotel_details_fields')) {
         echo '<div class="rh-panel settings-card" id="hotel-details" data-bs-group="web" data-bs-keywords="Hotel details &amp; policies hotel name address phone check-in check-out time bank details policy vat"><div class="rh-panel__head"><h2 class="rh-panel__title">Hotel details &amp; policies</h2></div>';
         echo '<form method="POST" action="booking-settings.php#hotel-details">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '"><input type="hidden" name="save_hotel_details" value="1">';
+        $uid = (int)($user['id'] ?? 0);
+        require_once __DIR__ . '/../../includes/settings-lock.php';
+        // One plain line under each sub-heading (owner 2026-11-25: sections properly labelled).
+        $intros = [
+            'Hotel identity & contact' => 'Web address, postal address, phone numbers and the map shown on the website and documents.',
+            'Stay policies'            => 'Check-in and check-out times, how long unpaid or tentative bookings are held, and the child price.',
+            'Payments & documents'     => 'Bank details printed on invoices, payment notes and footers, and who gets the End of Day report.',
+            'Restaurant & stock'       => 'Restaurant receipt wording, the service charge and the stock count alert levels.',
+        ];
+        $sub = 0;
         foreach (rh_hotel_details_fields() as $group => $fields) {
-            echo '<h3>' . $e($group) . '</h3>';
+            $sub++;
+            echo '<section class="bs-sub" id="hd-sub-' . $sub . '"><h3 class="bs-sub__title">' . $e($group) . '</h3>';
+            echo '<div class="bs-sub__body" id="hd-sub-' . $sub . '-body">';
+            if (isset($intros[$group])) {
+                echo '<p class="bs-sub__intro">' . $e($intros[$group]) . '</p>';
+            }
             if ($group === 'Payments & documents' && !$canFinance) {
                 echo '<p class="help-text"><i class="fas fa-lock"></i> Only users with the "Change VAT &amp; refund settings" permission can change these.</p>';
             }
             echo '<div class="bs-field-grid">';
+            $openLock = '';
             foreach ($fields as $key => $spec) {
                 if (!empty($spec['admin_only']) && !$isAdmin) {
                     continue; // only administrators see this setting
+                }
+                // High-value fields sit in their own disabled fieldset until unlocked with the password (owner 2026-11-25).
+                $lock = (string)($spec['lock'] ?? '');
+                if ($lock !== $openLock) {
+                    if ($openLock !== '') {
+                        echo '</div></fieldset><div class="bs-field-grid">';
+                    }
+                    if ($lock !== '') {
+                        $fsId = 'hd-lock-' . $lock;
+                        $mayChange = empty($spec['finance']) || $canFinance;
+                        $isOpen = $mayChange && rh_settings_lock_is_open($lock, $uid);
+                        echo '</div>' . rh_settings_lock_bar($lock, $fsId, $mayChange, $uid);
+                        echo '<fieldset class="rh-lock" id="' . $e($fsId) . '" data-lock-group="' . $e($lock) . '"' . ($isOpen ? '' : ' disabled') . '>';
+                        echo '<legend class="rh-lock__legend">' . $e(ucfirst(rh_settings_lock_groups()[$lock] ?? $lock)) . '</legend>';
+                        echo '<div class="bs-field-grid">';
+                    }
+                    $openLock = $lock;
                 }
                 $id = 'hd_' . $key;
                 $val = rh_hotel_details_value($key, $spec);
@@ -282,7 +335,8 @@ if (!function_exists('rh_hotel_details_fields')) {
                 }
                 echo '</div>';
             }
-            echo '</div>';
+            echo $openLock !== '' ? '</div></fieldset>' : '</div>';
+            echo '</div></section>';
         }
         echo '<p class="help-text">Time zone: <strong>' . $e(date_default_timezone_get()) . '</strong> (set per installation with HOTEL_TIMEZONE in .env).</p>';
         echo '<button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Hotel Details</button></form></div>';

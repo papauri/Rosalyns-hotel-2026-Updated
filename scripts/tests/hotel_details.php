@@ -38,11 +38,14 @@ $staff = (int)$pdo->query("SELECT id FROM admin_users WHERE role NOT IN ('admin'
 $before = rh_hotel_details_value('bank_name', $f['bank_name']);
 $pdo->beginTransaction();
 try {
+    // Bank details are locked (owner 2026-11-25): the save needs the password unlock token in the session.
+    $_SESSION['rh_settings_lock'] = ['bank' => ['uid' => $admin, 'exp' => time() + 600]];
     [$msg, $err] = rh_hotel_details_save(['check_in_time' => '15:00', 'tentative_reminder_hours' => '12', 'booking_child_price_multiplier' => '40', 'bank_name' => 'TEST BANK'], ['id' => $admin, 'username' => 'test']);
     $t($err === '' && strpos($msg, 'saved') !== false, "admin save ok ($msg)");
     $t(getSetting('check_in_time') === '3:00 PM' && getSetting('tentative_reminder_hours') === '12', 'values stored and read back');
     $t(getSetting('booking_child_price_multiplier') === '40' && getSetting('child_guest_price_multiplier') === '40', 'child % mirrored to the older key');
     $t(getSetting('bank_name') === 'TEST BANK', 'finance user can change bank details');
+    $t(empty($_SESSION['rh_settings_lock']['bank']), 'bank unlock used up by the save');
     if ($staff) {
         [$msg2, $err2] = rh_hotel_details_save(['bank_name' => 'HACKED', 'restaurant_tagline' => 'Tag test'], ['id' => $staff, 'username' => 'staff']);
         $t(getSetting('bank_name') === 'TEST BANK' && getSetting('restaurant_tagline') === 'Tag test', 'non-finance user: bank ignored, other fields saved');

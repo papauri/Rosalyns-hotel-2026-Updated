@@ -15,9 +15,9 @@ function ok(string $name, bool $cond, string $detail = ''): void {
     global $pass, $fail;
     if ($cond) { $pass++; echo "  PASS  $name\n"; } else { $fail++; echo "  FAIL  $name  $detail\n"; }
 }
-function run_page(string $page, array $post, array $verify = [], bool $ajax = false, array $grep = []): array {
+function run_page(string $page, array $post, array $verify = [], bool $ajax = false, array $grep = [], array $session = []): array {
     global $h;
-    $cfg = base64_encode(json_encode(['post' => $post, 'ajax' => $ajax, 'verify' => $verify, 'grep' => $grep]));
+    $cfg = base64_encode(json_encode(['post' => $post, 'ajax' => $ajax, 'verify' => $verify, 'grep' => $grep] + ($session ? ['session' => $session] : [])));
     $cmd = 'php ' . escapeshellarg($h) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1';
     $out = shell_exec($cmd);
     // A child that printed nothing at all never ran (Windows could not start it under memory
@@ -154,10 +154,15 @@ $r = run_page('admin/booking-settings.php', ['max_advance_booking_days' => '90']
 ok('advance days 90 saved', ($r['verify'][0][0]['setting_value'] ?? '') === '90', flash($r));
 $r = run_page('admin/booking-settings.php', ['max_advance_booking_days' => '400'], $bv('max_advance_booking_days'));
 ok('advance days 400 rejected (live value unchanged)', strpos(flash($r), 'cannot exceed') !== false && ($r['verify'][0][0]['setting_value'] ?? '') !== '400', flash($r));
-$r = run_page('admin/booking-settings.php', ['tourism_levy_settings' => '1', 'tourism_levy_enabled' => '1', 'tourism_levy_percent' => '12.345'], $bv('tourism_levy_percent'));
+// Tourism levy is a locked high-value setting (owner 2026-11-25): these posts carry the password unlock in the session.
+$levyAdminId = (int)pdo_live()->query("SELECT id FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetchColumn();
+$levyUnlock = ['rh_settings_lock' => ['levy' => ['uid' => $levyAdminId, 'exp' => time() + 600]]];
+$r = run_page('admin/booking-settings.php', ['tourism_levy_settings' => '1', 'tourism_levy_enabled' => '1', 'tourism_levy_percent' => '12.345'], $bv('tourism_levy_percent'), false, [], $levyUnlock);
 ok('tourism levy rounded to 2dp', ($r['verify'][0][0]['setting_value'] ?? '') === '12.35', flash($r) . json_encode($r['verify'] ?? ''));
-$r = run_page('admin/booking-settings.php', ['tourism_levy_settings' => '1', 'tourism_levy_percent' => '101'], $bv('tourism_levy_percent'));
+$r = run_page('admin/booking-settings.php', ['tourism_levy_settings' => '1', 'tourism_levy_percent' => '101'], $bv('tourism_levy_percent'), false, [], $levyUnlock);
 ok('tourism levy 101% rejected', strpos(flash($r), 'cannot exceed 100') !== false && ($r['verify'][0][0]['setting_value'] ?? '') !== '101', flash($r));
+$r = run_page('admin/booking-settings.php', ['tourism_levy_settings' => '1', 'tourism_levy_percent' => '7.77'], $bv('tourism_levy_percent'));
+ok('tourism levy without the password unlock refused, unchanged', strpos(flash($r), 'unlock the tourism levy') !== false && ($r['verify'][0][0]['setting_value'] ?? '') !== '7.77', flash($r));
 $r = run_page('admin/booking-settings.php', ['booking_disabled_action' => 'redirect', 'booking_disabled_redirect_url' => 'javascript:alert(1)', 'booking_disabled_message' => 'x'], $bv('booking_disabled_redirect_url'));
 ok('javascript: redirect rejected', strpos(flash($r), 'redirect url must start') !== false && ($r['verify'][0][0]['setting_value'] ?? '') !== 'javascript:alert(1)', flash($r));
 $r = run_page('admin/booking-settings.php', ['save_site_maintenance_message' => '1', 'site_maintenance_message' => str_repeat('m', 2000)], ["SELECT CHAR_LENGTH(setting_value) l FROM site_settings WHERE setting_key='site_maintenance_message'"]);

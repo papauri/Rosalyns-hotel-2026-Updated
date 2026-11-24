@@ -5110,3 +5110,150 @@ select.rh-input-invalid.rh-input-invalid {
     margin: 0;
     line-height: 1.2;
 }
+
+/* ==========================================================================
+   High-value settings lock (owner 2026-11-25): VAT, bank details, tourism levy, service charge.
+   Markup: includes/settings-lock.php rh_settings_lock_bar() + <fieldset class="rh-lock" disabled>;
+   dialog built by admin/js/settings-lock.js. Used on Hotel Settings and the Accounting dashboard.
+   ========================================================================== */
+.rh-lock {
+    min-width: 0;
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.75rem 0.25rem;
+    border: 1px solid var(--rh-line);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.rh-lock[disabled] {
+    background: var(--admin-bg, #f4f2ef);
+}
+
+.rh-lock[disabled] input,
+.rh-lock[disabled] select,
+.rh-lock[disabled] textarea {
+    background: var(--admin-bg, #f4f2ef);
+    color: var(--rh-muted);
+    cursor: not-allowed;
+}
+
+.rh-lock[disabled] .btn-submit,
+.rh-lock[disabled] button[type="submit"] {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.rh-lock__legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.rh-lockbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    margin: 0.25rem 0 0.5rem;
+}
+
+.rh-lockbar__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 44px;
+}
+
+.rh-lockbar__btn[hidden] {
+    display: none;
+}
+
+.rh-lockbar__state {
+    margin: 0;
+    color: var(--rh-muted);
+    font-size: 0.85rem;
+}
+
+.rh-lock[disabled] > .rh-lockbar__state {
+    display: none;
+}
+
+.rh-lockdlg {
+    width: min(26rem, calc(100vw - 2rem));
+    padding: 0;
+    border: 1px solid var(--rh-modal-border, #e2dbd2);
+    border-radius: var(--rh-modal-radius, 14px);
+    background: var(--rh-modal-surface, #fffdfb);
+    color: var(--rh-modal-text, #2A2723);
+    box-shadow: var(--rh-modal-shadow, 0 12px 32px rgba(15, 23, 42, 0.12));
+}
+
+.rh-lockdlg::backdrop {
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.rh-lockdlg__form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 0;
+    padding: 1.1rem 1.2rem 1rem;
+}
+
+.rh-lockdlg__title {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--rh-modal-title-color, #2A2723);
+}
+
+.rh-lockdlg__text {
+    margin: 0;
+    color: var(--rh-muted);
+    font-size: 0.88rem;
+}
+
+.rh-lockdlg__label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--rh-modal-label, #4a423a);
+}
+
+.rh-lockdlg__input {
+    min-height: 44px;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--rh-modal-field-border, #d6d0c8);
+    border-radius: 8px;
+    font-size: 1rem;
+}
+
+.rh-lockdlg__input:focus {
+    outline: 2px solid var(--rh-brand);
+    outline-offset: 1px;
+}
+
+.rh-lockdlg__error {
+    margin: 0;
+    color: var(--rh-danger);
+    font-size: 0.85rem;
+}
+
+.rh-lockdlg__error[hidden] {
+    display: none;
+}
+
+.rh-lockdlg__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+}
+
+.rh-lockdlg__actions .btn {
+    min-height: 44px;
+}

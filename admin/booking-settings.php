@@ -6,6 +6,8 @@ require_once __DIR__ . '/../includes/booking-functions.php';
 require_once __DIR__ . '/../config/email.php';
 // Hotel Settings change log (owner 2026-11-14): switched on only around the save handlers below, off before anything else.
 require_once __DIR__ . '/../includes/settings-change-log.php';
+// High-value settings (tourism levy, bank details, service charge) need a password unlock before a save (owner 2026-11-25).
+require_once __DIR__ . '/../includes/settings-lock.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -1074,6 +1076,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = "Maximum advance booking days updated to {$max_advance_days} days successfully!";
         } elseif (isset($_POST['tourism_levy_settings']) && !hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
             $error = 'You do not have permission to change the tourism levy.'; // same gate as VAT (finance_settings)
+        } elseif (isset($_POST['tourism_levy_settings']) && !rh_settings_lock_is_open('levy', (int)($user['id'] ?? 0))) {
+            // Locked high-value setting (owner 2026-11-25): no password unlock = nothing is read or changed.
+            $error = htmlspecialchars(rh_settings_lock_refusal('levy'), ENT_QUOTES, 'UTF-8');
         } elseif (isset($_POST['tourism_levy_settings'])) {
             // Tourism levy settings
             $tourism_levy_enabled = isset($_POST['tourism_levy_enabled']) ? '1' : '0';
@@ -1091,6 +1096,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Update settings in database
             updateSetting('tourism_levy_enabled', $tourism_levy_enabled);
             updateSetting('tourism_levy_percent', $tourism_levy_percent);
+            rh_settings_lock_use('levy'); // used up: the card comes back locked
 
             // Clear the setting cache
             global $_SITE_SETTINGS;
@@ -1772,6 +1778,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
         <?php if (!$rh_templates_only): ?>
         <section class="bs-group" data-bs-section="web" aria-labelledby="bs-group-web">
             <h2 class="bs-group__title" id="bs-group-web">Website &amp; booking</h2>
+            <p class="bs-group__intro">Website on or off, online booking on or off, and the hotel details and policies guests and documents show.</p>
 
         <div class="rh-panel settings-card" id="maintenance"<?php echo $bsAttr('maintenance'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Frontend Maintenance Mode</h2></div>
@@ -1993,6 +2000,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <?php if ($mod_bookings): ?>
         <section class="bs-group" data-bs-section="rooms" aria-labelledby="bs-group-rooms">
             <h2 class="bs-group__title" id="bs-group-rooms">Rooms &amp; rates rules</h2>
+            <p class="bs-group__intro">How far ahead guests can book, tentative holds and booking reference numbers.</p>
 
             <div class="rh-panel settings-card" id="advance-booking"<?php echo $bsAttr('advance-booking'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Advance Booking Configuration</h2></div>
@@ -2133,6 +2141,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
         <section class="bs-group" data-bs-section="money" aria-labelledby="bs-group-money">
             <h2 class="bs-group__title" id="bs-group-money">Money &amp; documents</h2>
+            <p class="bs-group__intro">Refunds and cancellations, the tourism levy and how invoices and receipts look.</p>
 
             <div class="rh-panel settings-card" id="cancellation"<?php echo $bsAttr('cancellation'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Refunds &amp; cancellations</h2></div>
@@ -2451,7 +2460,19 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <div class="rh-panel settings-card" id="tourism-levy"<?php echo $bsAttr('tourism-levy'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Tourism Levy / City Tax</h2></div>
 
+                <?php
+                /* Locked high-value setting (owner 2026-11-25): the whole form, Save included, stays disabled until the
+                   password unlock; the handler refuses a post without the unlock before it reads anything. */
+                $bsCanLevy = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
+                $bsLevyOpen = $bsCanLevy && rh_settings_lock_is_open('levy', (int)($user['id'] ?? 0));
+                if (!$bsCanLevy): ?>
+                <p class="help-text"><i class="fas fa-lock"></i> Only users with the "Change VAT &amp; refund settings" permission can change the tourism levy.</p>
+                <?php endif; ?>
+                <?php echo rh_settings_lock_bar('levy', 'bs-lock-levy', $bsCanLevy, (int)($user['id'] ?? 0)); ?>
                 <form method="POST" action="booking-settings.php">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                    <fieldset class="rh-lock" id="bs-lock-levy" data-lock-group="levy"<?php echo $bsLevyOpen ? '' : ' disabled'; ?>>
+                    <legend class="rh-lock__legend">Tourism levy</legend>
                     <input type="hidden" name="tourism_levy_settings" value="1">
 
                     <div class="form-group">
@@ -2491,6 +2512,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <button type="submit" class="btn-submit">
                         <i class="fas fa-save"></i> Save Tourism Levy Settings
                     </button>
+                    </fieldset>
                 </form>
 
                 <details class="tips-box">
@@ -2554,6 +2576,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
         <section class="bs-group" data-bs-section="email" aria-labelledby="bs-group-email">
             <h2 class="bs-group__title" id="bs-group-email">Email &amp; notifications</h2>
+            <p class="bs-group__intro">The email server, sender details and who gets booking alerts.</p>
 
             <div class="rh-panel settings-card" id="email-config"<?php echo $bsAttr('email-config'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Email Configuration</h2></div>
@@ -2569,7 +2592,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="email_settings" value="1">
 
-                    <h3 style="color: #1A1A1A; margin-top: 25px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
+                    <h3 class="bs-subhead">
                         <i class="fas fa-server"></i> SMTP Server Settings
                     </h3>
                     <?php if (!$canEmailServer): ?>
@@ -2616,7 +2639,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </div>
                     </fieldset>
 
-                    <h3 style="color: #1A1A1A; margin-top: 30px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
+                    <h3 class="bs-subhead">
                         <i class="fas fa-user"></i> Email Identity
                     </h3>
 
@@ -2676,7 +2699,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             <?php if ($rhStaffBackups): ?><strong><?php echo htmlspecialchars(implode(', ', $rhStaffBackups)); ?></strong><?php if (!$rhBccOn): ?> (only while the hidden-copy switch below is on; it is off)<?php endif; ?><?php else: ?>no backup addresses<?php endif; ?></p>
                     </div>
 
-                    <h3 style="color: #1A1A1A; margin-top: 30px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
+                    <h3 class="bs-subhead">
                         <i class="fas fa-sliders-h"></i> Email Settings
                     </h3>
                     <fieldset<?php echo $canEmailServer ? '' : ' disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
@@ -2734,7 +2757,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 <form method="POST" action="booking-settings.php" id="email-settings-test-form" style="margin-top:24px;padding-top:16px;border-top:1px solid #e0e0e0;">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="email_settings_test" value="1">
-                    <h3 style="color: #1A1A1A; margin-top: 0; margin-bottom: 10px;">
+                    <h3 class="bs-subhead bs-subhead--plain">
                         <i class="fas fa-paper-plane"></i> Test these settings
                     </h3>
                     <p class="help-text"><i class="fas fa-info-circle"></i> Sends one test email using the saved settings, with the same sender, reply-to and hidden copies as a real email. Save your changes first.</p>
@@ -2884,6 +2907,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
         <section class="bs-group" data-bs-section="modules" aria-labelledby="bs-group-modules">
             <h2 class="bs-group__title" id="bs-group-modules">Modules &amp; app</h2>
+            <p class="bs-group__intro">Service module emails, review import keys and the install-app banner.</p>
 
             <div class="rh-panel settings-card" id="service-modules"<?php echo $bsAttr('service-modules'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Service Modules &amp; Dedicated Notification Emails</h2></div>
@@ -3089,6 +3113,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 }
             })();
             </script>
+
+            <!-- Fold groups / cards / hotel-details sub-groups (after the filter script: its search runs first) + the password unlock. -->
+            <script src="js/settings-fold.js?v=<?php echo @filemtime(__DIR__ . '/js/settings-fold.js'); ?>"></script>
+            <script src="js/settings-lock.js?v=<?php echo @filemtime(__DIR__ . '/js/settings-lock.js'); ?>"></script>
 
             <?php endif; /* !$rh_templates_only: settings cards above */ ?>
 

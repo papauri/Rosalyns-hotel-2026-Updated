@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/finance-refunds.php'; // the one refund rule: 
 require_once '../config/credit-notes.php';
 require_once __DIR__ . '/includes/review-panel.php'; // the Decisions panel: prints nothing unless switched on and allowed
 require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes (VAT save)
+require_once __DIR__ . '/../includes/settings-lock.php'; // VAT needs a password unlock before a save (owner 2026-11-25)
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -108,6 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
         $vatSettingsError = 'Security token invalid. Please refresh and try again.';
     } elseif (!$canChangeFinanceSettings) {
         $vatSettingsError = 'You do not have permission to change VAT settings.';
+    } elseif (!rh_settings_lock_is_open('vat', (int)($user['id'] ?? 0))) {
+        // Locked high-value setting (owner 2026-11-25): no password unlock = nothing is read or changed.
+        $vatSettingsError = rh_settings_lock_refusal('vat');
     } else {
         try {
             $postedVatMode = (string)($_POST['vat_mode'] ?? '');
@@ -152,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
                 rh_settings_log_end();
             }
 
+            rh_settings_lock_use('vat'); // used up: the VAT panel comes back locked
             if (!$savedEnabled || !$savedRate || !$savedNumber || !$savedMode) {
                 throw new Exception('Unable to save VAT settings right now.');
             }
@@ -179,6 +184,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
         }
     }
 }
+
+// VAT panel opens only after a password unlock (owner 2026-11-25); still open after a save that failed validation.
+$vatLockOpen = $canChangeFinanceSettings && rh_settings_lock_is_open('vat', (int)($user['id'] ?? 0));
 
 // Refunds card detail (its modal): the latest refund rows of the period, read below with the summary.
 $acctRefundRows = [];
@@ -1427,35 +1435,6 @@ if (!isset($folio_fnb)) {
             </div>
         </template>
 
-        <?php if ($canChangeFinanceSettings): ?>
-        <!-- VAT unlock confirmation modal -->
-        <div class="modal-overlay" id="vatConfirmModal-overlay" data-modal-overlay aria-hidden="true"></div>
-        <div class="modal-overlay vat-confirm-modal" id="vatConfirmModal" role="dialog" aria-modal="true" aria-labelledby="vatConfirmTitle" data-modal data-close-on-escape="true" data-close-on-overlay="false">
-            <div class="modal-container vat-confirm-modal__container">
-                <div class="modal-header">
-                    <h3 class="vat-confirm-modal__title" id="vatConfirmTitle"><i class="fas fa-shield-halved"></i> Unlock VAT Settings?</h3>
-                    <button type="button" class="modal-close" data-modal-close aria-label="Close">&times;</button>
-                </div>
-                <div class="modal-body vat-confirm-modal__content">
-                    <p class="vat-confirm-modal__body">
-                        VAT settings control how tax is calculated across all bookings, POS transactions, and invoices.
-                        Incorrect values put wrong VAT on your documents and in your VAT figures.
-                    </p>
-                    <p class="vat-confirm-modal__body">
-                        <strong>Are you sure you want to unlock and edit these settings?</strong>
-                    </p>
-                </div>
-                <div class="modal-footer vat-confirm-modal__actions">
-                    <button type="button" class="acct-btn acct-btn--ghost" id="vatConfirmCancel">
-                        <i class="fas fa-xmark"></i> No, keep locked
-                    </button>
-                    <button type="button" class="acct-btn btn-primary" id="vatConfirmYes">
-                        <i class="fas fa-lock-open"></i> Yes, unlock to edit
-                    </button>
-                </div>
-            </div>
-        </div>
-        <?php endif; ?>
 
 
         <?php
@@ -2351,8 +2330,8 @@ if (!isset($folio_fnb)) {
                 </div>
                 <?php if ($canChangeFinanceSettings): ?>
                 <div class="vat-unlock-row">
-                    <button type="button" class="ck-btn" id="vatUnlockBtn">
-                        <i class="fas fa-lock-open"></i> Unlock to Edit
+                    <button type="button" class="ck-btn" id="vatUnlockBtn" data-lock-open="<?php echo $vatLockOpen ? '1' : '0'; ?>">
+                        <i class="fas fa-lock"></i> Change (password needed)
                     </button>
                     <p class="vat-unlock-hint"><i class="fas fa-triangle-exclamation"></i> Editing VAT settings affects all future invoices, tax calculations, and VAT reports. Proceed with caution.</p>
                 </div>
@@ -2380,6 +2359,9 @@ if (!isset($folio_fnb)) {
                 <form method="POST" class="vat-edit-form" action="accounting-dashboard.php<?php echo $showAll ? '?show_all=1' : ''; ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="save_vat_settings" value="1">
+                    <fieldset class="rh-lock" id="vat-lock-fieldset" data-lock-group="vat"<?php echo $vatLockOpen ? '' : ' disabled'; ?>>
+                    <legend class="rh-lock__legend">VAT settings</legend>
+                    <p class="rh-lockbar__state" data-lock-state="vat" role="status" aria-live="polite"><i class="fas fa-lock-open" aria-hidden="true"></i> Unlocked for 10 minutes. Save to lock again.</p>
 
                     <div class="vat-edit-fields">
                         <div class="vat-field-group vat-field-group--wide">
@@ -2423,6 +2405,7 @@ if (!isset($folio_fnb)) {
                             <i class="fas fa-save"></i> Save VAT Settings
                         </button>
                     </div>
+                    </fieldset>
                 </form>
                 <script>
                     (function () {
@@ -2444,6 +2427,7 @@ if (!isset($folio_fnb)) {
 
         </div><!-- /.ck -->
 
+        <script src="js/settings-lock.js?v=<?php echo @filemtime(__DIR__ . '/js/settings-lock.js'); ?>"></script>
         <script>
             (function() {
                 var vatDetails = document.getElementById('vat-settings');
@@ -2498,7 +2482,21 @@ if (!isset($folio_fnb)) {
                     if (lockedView) lockedView.hidden = false;
                 }
 
-                if (unlockBtn) unlockBtn.addEventListener('click', openModal);
+                // Owner 2026-11-25: VAT opens only with the signed-in person's own password (admin/js/settings-lock.js);
+                // the server refuses a VAT save without that unlock.
+                if (unlockBtn) unlockBtn.addEventListener('click', function () {
+                    if (unlockBtn.getAttribute('data-lock-open') === '1') { showEditForm(); return; }
+                    if (!window.RhSettingsLock) return;
+                    window.RhSettingsLock.unlock('vat', 'VAT settings', unlockBtn).then(function (ok) {
+                        if (ok) { unlockBtn.setAttribute('data-lock-open', '1'); showEditForm(); }
+                    });
+                });
+                document.addEventListener('rh:settings-locked', function (e) {
+                    if (e.detail && e.detail.group === 'vat') {
+                        if (unlockBtn) unlockBtn.setAttribute('data-lock-open', '0');
+                        showLockedView();
+                    }
+                });
                 if (confirmYes) confirmYes.addEventListener('click', function() {
                     closeModal();
                     showEditForm();
@@ -2572,7 +2570,7 @@ if (!isset($folio_fnb)) {
                 }
 
                 // If there was a save error, re-open the form so admin can fix it
-                <?php if ($vatSettingsError): ?>
+                <?php if ($vatSettingsError && $vatLockOpen): ?>
                     if (editView) editView.hidden = false;
                     if (lockedView) lockedView.hidden = true;
                 <?php endif; ?>

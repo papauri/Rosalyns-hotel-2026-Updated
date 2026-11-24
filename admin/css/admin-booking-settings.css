@@ -798,3 +798,102 @@ details.template-block[open]>summary::after {
     background: #f7f3ee;
     color: #5f5343;
 }
+
+/* ---- Folding (admin/js/settings-fold.js, owner 2026-11-25): groups, cards, hotel-details sub-groups ---- */
+.bs-group__intro {
+    margin: -0.35rem 0 0.7rem;
+    color: var(--rh-muted, #5E554D);
+    font-size: 0.85rem;
+}
+
+.bs-fold {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.bs-fold:focus-visible {
+    outline: 2px solid var(--rh-brand, #766550);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.bs-fold__icon {
+    flex: 0 0 auto;
+    color: var(--rh-muted, #5E554D);
+    font-size: 0.8rem;
+}
+
+.bs-fold[aria-expanded="false"] .bs-fold__icon {
+    transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .bs-fold__icon {
+        transition: transform 0.15s ease;
+    }
+}
+
+.bs-fold-body[hidden],
+.bs-sub__body[hidden] {
+    display: none;
+}
+
+/* A folded card keeps only its heading. */
+.settings-card.rh-panel.is-folded {
+    padding-bottom: 0;
+}
+
+.settings-card.rh-panel.is-folded > .rh-panel__head {
+    margin-bottom: 0;
+    border-bottom: 0;
+}
+
+/* Hotel details sub-groups (admin/includes/hotel-details-settings.php) */
+.bs-sub {
+    margin: 0;
+}
+
+.settings-card h3.bs-sub__title {
+    margin: 14px 0 8px;
+    padding-bottom: 0;
+}
+
+.bs-sub__title .bs-fold {
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--rh-line-soft, #eceff3);
+}
+
+.bs-sub__intro {
+    margin: 0 0 0.6rem;
+    color: var(--rh-muted, #5E554D);
+    font-size: 0.85rem;
+}
+
+/* Email Configuration sub-headings (were inline styles) */
+.settings-card h3.bs-subhead {
+    margin: 28px 0 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rh-line-soft, #eceff3);
+    color: var(--rh-ink, #231F1C);
+}
+
+.settings-card h3.bs-subhead--plain {
+    margin-top: 0;
+    margin-bottom: 10px;
+    padding-bottom: 0;
+    border-bottom: 0;
+}
