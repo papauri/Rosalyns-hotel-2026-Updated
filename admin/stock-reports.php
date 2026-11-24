@@ -41,6 +41,24 @@ $sppKeep = in_array($tab, ['profit', 'pva'], true) ? array_filter(['vat' => ($sp
 $sppQs = $sppKeep ? '&' . http_build_query($sppKeep) : '';
 $sppData = null;
 $pvaData = null;
+// Stock counts not approved yet (still being counted, or submitted and waiting for a manager): what they found only goes into
+// stock on hand when the count is approved, so Inventory and Projected profit leave it out and Projected vs actual cannot use
+// it. An import's opening count leaves every item at 0 until it is approved (owner 2026-11-24: "make sure its clear").
+$scWaiting = [];
+if (in_array($tab, ['inventory', 'profit', 'pva'], true)) {
+    try {
+        $scWaiting = $pdo->query(
+            "SELECT sc.id, sc.reference, sc.status, sc.is_opening,
+                    (SELECT COUNT(*) FROM stock_count_lines l WHERE l.count_id = sc.id) AS line_count
+               FROM stock_counts sc
+              WHERE sc.status IN ('draft', 'submitted')
+              ORDER BY sc.is_opening DESC, sc.created_at, sc.id"
+        )->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('stock reports waiting counts: ' . $e->getMessage());
+        $scWaiting = [];
+    }
+}
 
 function stock_reports_normalize_date(mixed $value, string $fallback): string
 {
@@ -480,7 +498,7 @@ try {
         $analysis_cards = [
             stock_reports_metric('Projected sales', stock_reports_money((float)$sppT['sales'], $currency_symbol), $sppVatWord . ', ' . number_format((int)$sppT['items']) . ' stock item(s)'),
             stock_reports_metric('Stock cost', stock_reports_money((float)$sppT['cost'], $currency_symbol), 'What that stock cost'),
-            stock_reports_metric('Projected profit', stock_reports_money((float)$sppT['profit'], $currency_symbol), 'Projected sales minus stock cost'),
+            stock_reports_metric('Projected profit', stock_reports_money((float)$sppT['profit'], $currency_symbol), (float)$sppT['sales'] > BALANCE_TOLERANCE ? 'Projected sales minus stock cost' : ($scWaiting ? 'Nothing on hand yet: a stock count is waiting for approval' : 'No drink stock on hand')),
             stock_reports_metric('Margin', $sppT['margin'] !== null ? number_format((float)$sppT['margin'], 1) . '%' : '–', $sppT['margin'] !== null ? 'Profit as a share of projected sales, ' . $sppVatWord : 'No projected sales yet'),
         ];
     } elseif ($tab === 'pva') {
@@ -727,6 +745,28 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             'Till vs menu price' => 'What the till took for the counted drinks sold between their two counts (after order discounts), minus the same sales at today\'s menu price. Below zero: discounts, free drinks or a price that has gone up since. Only till items sold as one stock item count; mixed drinks (cocktails) cannot be priced per stock item and are left out.',
         ];
         ?>
+        <?php if ($scWaiting):
+            $scN = count($scWaiting);
+            $scOpening = (int)$scWaiting[0]['is_opening'] === 1; // opening counts sort first
+            $scStatusWord = static fn(array $c): string => (string)$c['status'] === 'submitted' ? 'submitted, waiting for approval' : 'still being counted';
+            if ($tab === 'pva') {
+                $scWhy = 'A count is used here only once it is approved, so ' . ($scN === 1 ? 'this one does' : 'these do') . ' not count as an opening or closing count yet.';
+            } elseif ($scOpening) {
+                $scWhy = 'The opening count sets what is on hand. Until it is approved, what it found is not in stock on hand, so items with no stock before it show 0 on hand' . ($tab === 'profit' ? ' and add nothing to projected sales and projected profit' : ' and 0 stock value') . '.';
+            } else {
+                $scWhy = 'What a count finds goes into stock on hand only when it is approved, so the figures below do not include it yet.';
+            } ?>
+            <div class="alert alert-warning sr-waiting" role="status">
+                <i class="fas fa-clipboard-check" aria-hidden="true"></i>
+                <div>
+                    <strong><?php echo $scN === 1 ? ($scOpening ? 'The opening stock count is not approved yet' : 'A stock count is not approved yet') : number_format($scN) . ' stock counts are not approved yet'; ?></strong>
+                    <span class="sr-waiting__why"><?php echo htmlspecialchars($scWhy); ?> Open it on the Stock Count page to finish and approve it.</span>
+                    <span class="sr-waiting__list">
+                        <?php foreach (array_slice($scWaiting, 0, 3) as $i => $c): ?><?php echo $i > 0 ? ' · ' : ''; ?><a href="stock-count.php?id=<?php echo (int)$c['id']; ?>"><?php echo htmlspecialchars((string)$c['reference'] !== '' ? (string)$c['reference'] : 'Count #' . (int)$c['id']); ?></a> (<?php echo htmlspecialchars(((int)$c['is_opening'] === 1 ? 'opening count, ' : '') . $scStatusWord($c) . ', ' . number_format((int)$c['line_count']) . ' item(s)'); ?>)<?php endforeach; ?><?php echo $scN > 3 ? ' and ' . number_format($scN - 3) . ' more' : ''; ?>
+                    </span>
+                </div>
+            </div>
+        <?php endif; ?>
         <?php if (!empty($analysis_cards)): ?>
             <section class="report-analysis" aria-label="Report analysis">
                 <?php foreach ($analysis_cards as $card): ?>

@@ -454,3 +454,21 @@ td:first-child .spp-drink {
         flex: 1 1 auto;
     }
 }
+
+/* A stock count not approved yet: its quantities are not in stock on hand (owner 2026-11-24). */
+.sr-waiting {
+    align-items: flex-start;
+    margin-bottom: var(--space-4, 1rem);
+}
+
+.sr-waiting__why,
+.sr-waiting__list {
+    display: block;
+    margin-top: 0.2rem;
+}
+
+.sr-waiting__list a {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+}
