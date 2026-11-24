@@ -32,6 +32,10 @@ when prompted."
   ticked rows. Hand-set measures never change unless ticked. New "Shots per bottle" column ("30 shots / bottle", "–").
   Guides: stock items / count measures page. Assistant: answer "why does it show 2.28 bottle" -> set the count measure
   (by hand, Set count measure, or Fill from bottle sizes). Manager Guide: Stock.
+- 2026-11-24 Liwonde c71a77d / Rosalyn's 96956f3 (PATCH): Stock Reports (Inventory, Projected profit, Projected vs
+  actual) show a notice when a stock count is not approved yet, with a link to it. What a count finds goes into stock on
+  hand only on approval, so an unapproved opening count (from an import) leaves items at 0 and projected profit at 0.
+  Guide + Assistant answer for "why is projected profit 0": approve the count. Manager Guide: Stock.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
