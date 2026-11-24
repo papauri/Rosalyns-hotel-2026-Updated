@@ -29,6 +29,13 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   `MSP/usage-reports/<date>.md` + a row in `MSP/usage-reports/HISTORY.md`. COST_LOG.md is retired.
   Baseline 10-16 Nov: 22,793 calls, 50 per hotel commit, 95% Opus, 53 agent runs past today's caps.
 
+## Live data change 2026-11-25: payment + cancellation terms (owner approved the DB write; "wording only")
+- Port of Liwonde f845c7e shipped as 3df06db (email templates: no fixed quote note, automatic plain text, tag glossary, Payment policy box in Booking Settings > Cancellation card).
+- Setting `payment_policy` now: full payment to secure the booking, 4-day window for payment, cash/cards/bank transfer, then cancellation terms 30+ days 30%, 15-29 days 50%, 1-14 days 50%, arrival day or later 100%. Was "Full payment is required upon check-in. We accept cash, credit cards, and bank transfers."
+- `tentative_quotation` email template: new "Payment & Cancellation Terms" block with {{payment_policy}} above the footer.
+- Old values backed up in `backups/payment-policy-before-20261124-211658.json` (gitignored). The system's cancellation fee tiers were NOT changed (cancellation policy is not set up here); the terms are wording only.
+- The policy also shows in booking received / confirmed / converted / reminder emails and the quotation PDFs (they already used {{payment_policy}}). Line breaks show once the owner deploys 3df06db; until then the terms read as one paragraph.
+
 ## Shipped 2026-11-24: Guides + Assistant sync (owner prompted; port of Liwonde 0d6f590)
 - Staff guides 01, 05, 06, 07, 08, 13, 22, 23, 99, faq updated for everything shipped 2026-11-20 to 2026-11-24;
   the Assistant gives stock quantities also in "bottles + shots" words. No DB change, no migration.
