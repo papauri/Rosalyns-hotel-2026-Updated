@@ -37,6 +37,7 @@ require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/includes/account-receipt-send.php';
 require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights line (owner 2026-11-09)
 require_once __DIR__ . '/../includes/quotation-convert.php'; // "Made from quotation" on the Invoices panel
+require_once __DIR__ . '/../includes/cancel-reason.php'; // required cancel / no-show reason + ready-made reasons (owner 2026-11-24)
 finance_ensure_sequence_tables($pdo);
 
 // Get folio charges for this booking
@@ -932,7 +933,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                 // One transaction (orders, status, rooms, holds, refund) in rh_mark_booking_no_show();
                 // the guest email stays here, after the commit.
                 require_once __DIR__ . '/../includes/booking-functions.php';
-                $ns = rh_mark_booking_no_show($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)($user['full_name'] ?? ''), '');
+                // Staff must say why (owner 2026-11-24): the note goes to the audit, the timeline and the System Logs.
+                $noshowCheck = rh_noshow_note_check($_POST['noshow_note'] ?? '');
+                if (!$noshowCheck['ok']) {
+                    $_SESSION['error_message'] = $noshowCheck['error'];
+                    break;
+                }
+                $ns = rh_mark_booking_no_show($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)($user['full_name'] ?? ''), $noshowCheck['reason']);
                 if (!$ns['success']) {
                     $_SESSION['error_message'] = $ns['error'];
                 } else {
@@ -984,7 +991,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         $_SESSION['error_message'] = getBookingActionErrorMessage('cancel', $validation['reason']);
                     } else {
                         $previous_status = $booking_to_cancel['status'];
-                        $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
+                        // Staff must say why (owner 2026-11-24); checked before anything changes.
+                        require_once __DIR__ . '/../includes/cancel-reason.php';
+                        $reasonCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? '');
+                        if (!$reasonCheck['ok']) {
+                            throw new RuntimeException($reasonCheck['error']);
+                        }
+                        $cancellation_reason = $reasonCheck['reason'];
+                        $cancelReasonLine = rh_cancel_reason_history_line($cancellation_reason);
 
                         // Group booking (owner 2026-10-20): the page offers "whole group" and "only this room"
                         // as separate buttons. scope=group cancels every live room of the group in ONE
@@ -1004,6 +1018,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             $cancelEmailGuest = rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('details', (string)$previous_status));
                             foreach ($grpRes['cancelled'] as $gc) {
                                 logBookingStatusChange($gc['id'], $gc['reference'], $gc['previous_status'], 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
+                                logBookingAudit((int)$gc['id'], 'cancelled', ['status' => $gc['previous_status']], ['status' => 'cancelled'], 'Cancelled with its group (' . count($cancelGroupIds) . " rooms)\n" . $cancelReasonLine, (string)$gc['reference']);
+                                if (function_exists('rh_log_event')) {
+                                    rh_log_event('bookings', 'info', 'Booking status changed (group cancel)', ['booking_id' => $gc['id'], 'ref' => $gc['reference'], 'from' => $gc['previous_status'], 'to' => 'cancelled', 'group' => $cancelGroupIds, 'reason' => $cancellation_reason, 'by' => $user['username'] ?? null]);
+                                }
                                 $gcStmt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
                                 $gcStmt->execute([$gc['id']]);
                                 $gcRow = $gcStmt->fetch(PDO::FETCH_ASSOC);
@@ -1014,7 +1032,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                                         rh_email_ctx_account('room', $gcRow['id'], $gcRow['booking_reference']), 'Staff chose not to email the guest');
                                     sendBookingCancelledHotelAlert($gcRow);
                                 } elseif ($gcRow) {
-                                    $gcMail = sendBookingCancelledEmail($gcRow, $cancellation_reason);
+                                    $gcMail = sendBookingCancelledEmail($gcRow, rh_cancel_guest_email_reason()); // the reason stays internal (owner 2026-11-25)
                                     if (!empty($gcMail['success'])) {
                                         $emailsSent++;
                                     } else {
@@ -1038,6 +1056,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             }
 
                             logBookingStatusChange($booking_id, $booking_to_cancel['booking_reference'], $previous_status, 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
+                            logBookingAudit((int)$booking_id, 'cancelled', ['status' => $previous_status], ['status' => 'cancelled'], $cancelReasonLine, (string)$booking_to_cancel['booking_reference']);
+                            if (function_exists('rh_log_event')) {
+                                rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $previous_status, 'to' => 'cancelled', 'mode' => $cancelRes['mode'] ?? null, 'refund' => $cancelRes['refund_total'] ?? null, 'reason' => $cancellation_reason, 'by' => $user['username'] ?? null]);
+                            }
                             $cancel_refund_msg = ' ' . $cancelRes['summary'];
 
                             require_once '../config/email.php';
@@ -1050,7 +1072,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                                 sendBookingCancelledHotelAlert($booking_to_cancel);
                                 $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg . ' No email sent (you chose not to).';
                             } else {
-                                $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
+                                $email_result = sendBookingCancelledEmail($booking_to_cancel, rh_cancel_guest_email_reason()); // the reason stays internal (owner 2026-11-25)
 
                                 $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg .
                                     ($email_result['success'] ? ' Cancellation email sent.' : ' (Email failed)');
@@ -2272,8 +2294,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php endif; ?>
 
                 <?php if (in_array($booking['status'], ['confirmed', 'pending'], true) && strtotime($booking['check_in_date']) < strtotime('today')): ?>
-                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="Mark this booking as no-show and release the assigned room?" data-admin-confirm-title="Mark no-show" data-admin-confirm-ok="Mark no-show" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-user-slash" data-admin-submit-text="Updating...">
+                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="Mark this booking as no-show and release the assigned room?" data-admin-confirm-input="noshow_note" data-admin-confirm-input-label="Why is this booking a no-show? (required)" data-admin-confirm-input-placeholder="e.g. Guest did not arrive and did not answer the phone" data-admin-confirm-input-min="5" data-admin-confirm-input-max="500" data-admin-confirm-input-presets="<?php echo htmlspecialchars(rh_cancel_reason_presets_json('noshow'), ENT_QUOTES); ?>" data-admin-confirm-details="The note is kept in the booking History and the System Logs." data-admin-confirm-title="Mark no-show" data-admin-confirm-ok="Mark no-show" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-user-slash" data-admin-submit-text="Updating...">
                         <input type="hidden" name="booking_action" value="noshow">
+                        <input type="hidden" name="noshow_note" value="">
                         <button type="submit" class="action-btn noshow"><i class="fas fa-user-slash"></i> Mark No-Show</button>
                     </form><?php endif; ?>
                 <?php endif; ?>
@@ -2327,20 +2350,20 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 $bd_cp_group_msg = ($bd_cp_on && !empty($bd_cp['group'])) ? ' Cancellation fee for the group: ' . ($bd_cp_group_fee > BALANCE_TOLERANCE ? $bd_cp_cur . ' ' . number_format($bd_cp_group_fee, 2) : 'none') . '.' : '';
                 ?>
                 <?php if ($can_cancel): ?>
-                    <?php if ($bd_perm_cancel && $bd_group_n > 1): ?><form method="POST" class="booking-action-form" id="bdCancelGroupForm" data-admin-confirm="<?php echo htmlspecialchars('Cancel the WHOLE GROUP (' . $bd_group_n . ' rooms: ' . $bd_group_refs . ') and release every room? If any room cannot be cancelled, none is. Cancellation handling: ' . getCancellationRefundModeLabel() . '.' . $bd_cp_group_msg, ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel whole group" data-admin-confirm-ok="Cancel whole group" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel && $bd_group_n > 1): ?><form method="POST" class="booking-action-form" id="bdCancelGroupForm" data-admin-confirm="<?php echo htmlspecialchars('Cancel the WHOLE GROUP (' . $bd_group_n . ' rooms: ' . $bd_group_refs . ') and release every room? If any room cannot be cancelled, none is. Cancellation handling: ' . getCancellationRefundModeLabel() . '.' . $bd_cp_group_msg, ENT_QUOTES); ?>" data-admin-confirm-input="cancellation_reason" data-admin-confirm-input-label="Why is this booking being cancelled? (required)" data-admin-confirm-input-placeholder="e.g. Guest asked to cancel, double booking, no payment" data-admin-confirm-input-min="5" data-admin-confirm-input-max="500" data-admin-confirm-input-presets="<?php echo htmlspecialchars(rh_cancel_reason_presets_json('room'), ENT_QUOTES); ?>" data-admin-confirm-details="The reason is kept in each room's History and logs for staff only. It is not sent to the guest." data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel whole group" data-admin-confirm-ok="Cancel whole group" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
                         <input type="hidden" name="scope" value="group">
                         <?php if ($bd_cp_on && !empty($bd_cp['group'])): ?><input type="hidden" name="fee_quoted" value="<?php echo htmlspecialchars(number_format($bd_cp_group_fee, 2, '.', ''), ENT_QUOTES); ?>"><?php endif; ?>
                         <input type="hidden" name="email_guest" value="1">
-                        <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
+                        <input type="hidden" name="cancellation_reason" value="">
                         <button type="submit" class="action-btn cancel" aria-label="Cancel whole group"><i class="fas fa-ban"></i> Cancel Whole Group (<?php echo (int)$bd_group_n; ?> rooms)</button>
                     </form><?php endif; ?>
-                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" id="bdCancelSingleForm" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking and release the room?' . ($bd_group_n > 1 ? ' The other rooms of the group stay booked.' : '') . ' Cancellation handling: ' . getCancellationRefundModeLabel() . '.' . $bd_cp_single_msg, ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" id="bdCancelSingleForm" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking and release the room?' . ($bd_group_n > 1 ? ' The other rooms of the group stay booked.' : '') . ' Cancellation handling: ' . getCancellationRefundModeLabel() . '.' . $bd_cp_single_msg, ENT_QUOTES); ?>" data-admin-confirm-input="cancellation_reason" data-admin-confirm-input-label="Why is this booking being cancelled? (required)" data-admin-confirm-input-placeholder="e.g. Guest asked to cancel, double booking, no payment" data-admin-confirm-input-min="5" data-admin-confirm-input-max="500" data-admin-confirm-input-presets="<?php echo htmlspecialchars(rh_cancel_reason_presets_json('room'), ENT_QUOTES); ?>" data-admin-confirm-details="The reason is kept in the booking History and logs for staff only. It is not sent to the guest." data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
                         <?php if ($bd_group_n > 1): ?><input type="hidden" name="scope" value="single"><?php endif; ?>
                         <?php if ($bd_cp_on): ?><input type="hidden" name="fee_quoted" value="<?php echo htmlspecialchars(number_format($bd_cp_single_fee, 2, '.', ''), ENT_QUOTES); ?>"><?php endif; ?>
                         <input type="hidden" name="email_guest" value="1">
-                        <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
+                        <input type="hidden" name="cancellation_reason" value="">
                         <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> <?php echo $bd_group_n > 1 ? 'Cancel This Room Only' : 'Cancel Booking'; ?></button>
                     </form><?php endif; ?>
                 <?php endif; ?>

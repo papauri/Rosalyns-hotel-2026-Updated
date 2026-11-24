@@ -425,7 +425,7 @@ $lookup = static function (string $ref, array $setup) use ($email, $tok): array 
 };
 $cancel = static function (string $ref, array $setup, array $extra) use ($email, $tok): array {
     return cp_run('booking-lookup.php', ['setup' => $setup, 'session' => ['_csrf_pub_lookup' => $tok],
-        'post' => ['cancel_booking' => '1', 'csrf_token' => $tok, 'booking_reference' => $ref, 'guest_email' => $email, 'cancel_reason' => 'test'] + $extra,
+        'post' => ['cancel_booking' => '1', 'csrf_token' => $tok, 'booking_reference' => $ref, 'guest_email' => $email, 'cancel_reason' => 'test', 'cancel_reason_choice' => 'Prefer not to say'] + $extra,
         'verify' => ["SELECT booking_reference, status FROM bookings WHERE booking_reference LIKE " . $GLOBALS['pdo']->quote($ref . '%') . " ORDER BY id",
                      "SELECT COUNT(*) AS n FROM cancellation_log WHERE booking_reference LIKE " . $GLOBALS['pdo']->quote($ref . '%')]]);
 };
@@ -483,7 +483,7 @@ if (is_resource($smtp) && is_file($spool . '.ready')) {
         "INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount, payment_method, payment_type, payment_status, created_at) VALUES ("
             . $q($prefix . 'PAY') . ", 'room', @cpl_lead, " . $q($R) . ", CURDATE(), 6000, 0, 0, 6000, 'cash', 'partial_payment', 'completed', NOW())"];
     $r = cp_run('booking-lookup.php', ['setup' => $okSetup, 'session' => ['_csrf_pub_lookup' => $tok], 'fake_smtp' => $port,
-        'post' => ['cancel_booking' => '1', 'csrf_token' => $tok, 'booking_reference' => $R . '-2', 'guest_email' => $email, 'cancel_reason' => 'test', 'fee_quoted' => '10000.00', 'accept_fee' => '1'],
+        'post' => ['cancel_booking' => '1', 'csrf_token' => $tok, 'booking_reference' => $R . '-2', 'guest_email' => $email, 'cancel_reason' => 'test', 'cancel_reason_choice' => 'Prefer not to say', 'fee_quoted' => '10000.00', 'accept_fee' => '1'],
         'verify' => ["SELECT booking_reference, status, cancellation_retained_amount AS kept FROM bookings WHERE booking_reference LIKE " . $pdo->quote($R . '%') . " ORDER BY id",
                      "SELECT COUNT(*) AS n FROM cancellation_log WHERE booking_reference LIKE " . $pdo->quote($R . '%'),
                      "SELECT COALESCE(SUM(p.total_amount),0) AS t FROM payments p JOIN bookings b ON b.id = p.booking_id WHERE b.booking_reference = " . $pdo->quote($R) . " AND p.payment_type = 'refund' AND p.refund_status = 'pending'"]]);

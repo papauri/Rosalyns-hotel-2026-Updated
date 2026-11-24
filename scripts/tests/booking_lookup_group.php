@@ -90,7 +90,7 @@ $lookup = function (string $ref, array $setup) use ($email, $tok, $base): array 
 };
 $cancel = function (string $ref, array $setup, string $postTok = '') use ($email, $tok, $base): array {
     return blr_run('booking-lookup.php', ['setup' => array_merge($base, $setup), 'session' => ['_csrf_pub_lookup' => $tok],
-        'post' => ['cancel_booking' => '1', 'csrf_token' => $postTok !== '' ? $postTok : $tok, 'booking_reference' => $ref, 'guest_email' => $email, 'cancel_reason' => 'test'],
+        'post' => ['cancel_booking' => '1', 'csrf_token' => $postTok !== '' ? $postTok : $tok, 'booking_reference' => $ref, 'guest_email' => $email, 'cancel_reason' => 'test', 'cancel_reason_choice' => 'Prefer not to say'],
         'verify' => ["SELECT status, deleted_at IS NOT NULL AS del FROM bookings WHERE booking_reference = " . $GLOBALS['pdo']->quote($ref),
                      "SELECT COUNT(*) AS n FROM cancellation_log WHERE booking_reference = " . $GLOBALS['pdo']->quote($ref)]]);
 };

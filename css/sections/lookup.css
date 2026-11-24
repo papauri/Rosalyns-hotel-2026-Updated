@@ -265,3 +265,29 @@
 .lookup-container .contact-info a:hover {
     color: var(--color-lux-gold);
 }
+
+/* Guest cancel: the required "Why are you cancelling?" list and the optional note (booking-lookup.php, owner 2026-11-24). */
+.lookup-cancel-reason {
+    margin-bottom: var(--space-3);
+}
+
+.lookup-cancel-reason__label {
+    display: block;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-2);
+}
+
+.lookup-cancel-reason__field {
+    width: 100%;
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: var(--space-3);
+    border: 2px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    background: var(--color-white);
+}
+
+.lookup-cancel-reason__field--select {
+    margin-bottom: var(--space-2);
+}

@@ -13,6 +13,7 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/gym-schedule-lib.php';
 require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
+require_once __DIR__ . '/includes/account-cancel-reason.php'; // required cancel reason (owner 2026-11-24)
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -76,7 +77,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gs_action'])) {
         if ($action === 'cancel_reservation') {
             if (!$gs_can_edit) { $gs_json(false, 'You do not have permission to cancel reservations.'); }
             $id = (int)($_POST['id'] ?? 0);
+            // A reason is required (owner 2026-11-24), checked before anything is written; kept in System Logs.
+            $gsCancelCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? null);
+            if (!$gsCancelCheck['ok']) { $gs_json(false, $gsCancelCheck['error']); }
+            $gsRefSt = $pdo->prepare("SELECT reference FROM gym_slot_reservations WHERE id = ?");
+            $gsRefSt->execute([$id]);
+            $gsRef = (string)($gsRefSt->fetchColumn() ?: '');
             $res = gymScheduleCancelReservation($pdo, (string)$id, false);
+            if ($res['ok']) {
+                rh_account_cancel_log('gym_slot', $gsRef, $id, $gsCancelCheck['reason'], $user);
+            }
             $gs_json($res['ok'], $res['message']);
         }
 
@@ -333,7 +343,29 @@ $gs_nextDate = (clone $gs_dateObj)->modify('+1 day')->format('Y-m-d');
         }
         function gsSaveSettings(e) { e.preventDefault(); var fd = new FormData(document.getElementById('gsSettingsForm')); fd.append('gs_action', 'save_settings'); gsPost(fd); return false; }
         function gsSaveHours(e) { e.preventDefault(); var fd = new FormData(document.getElementById('gsHoursForm')); fd.append('gs_action', 'save_hours'); gsPost(fd); return false; }
-        function gsCancel(id) { var fd = new FormData(); fd.append('gs_action', 'cancel_reservation'); fd.append('id', id); gsPost(fd); }
+        // Cancelling a slot booking asks why first (required, kept in System Logs), with the 'slot' pick list
+        // from includes/cancel-reason.php.
+        function gsCancel(id) {
+            if (!window.AdminConfirm || typeof window.AdminConfirm.prompt !== 'function') { gsToast('Could not open the reason box. Reload the page and try again.', false); return; }
+            window.AdminConfirm.prompt({
+                title: 'Cancel slot booking',
+                message: 'Cancel this gym slot booking? The place is released for others.',
+                inputLabel: 'Why is this booking being cancelled? (required)',
+                inputPlaceholder: 'e.g. Member called to cancel, gym closed for maintenance',
+                inputPresets: <?php echo json_encode(rh_cancel_reason_presets('slot'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>,
+                inputMin: 5,
+                inputMax: 500,
+                inputMinMessage: 'Please write at least 5 characters.',
+                details: ['The reason is kept in System Logs. It is not sent to the member.'],
+                confirmText: 'Cancel booking',
+                cancelText: 'Keep booking',
+                tone: 'danger',
+                icon: 'fa-ban'
+            }).then(function (why) {
+                if (why === null) { return; }
+                var fd = new FormData(); fd.append('gs_action', 'cancel_reservation'); fd.append('id', id); fd.append('cancellation_reason', String(why).trim()); gsPost(fd);
+            });
+        }
         function gsMark(id, status) { var fd = new FormData(); fd.append('gs_action', 'mark_status'); fd.append('id', id); fd.append('status', status); gsPost(fd); }
         window.gsSaveSettings = gsSaveSettings; window.gsSaveHours = gsSaveHours; window.gsCancel = gsCancel; window.gsMark = gsMark;
     </script>

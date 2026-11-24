@@ -28,6 +28,7 @@ require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/../includes/event-capacity.php';
 require_once __DIR__ . '/includes/account-record-payment.php';
 require_once __DIR__ . '/includes/account-receipt-send.php';
+require_once __DIR__ . '/includes/account-cancel-reason.php'; // required cancel reason + ready-made reasons (owner 2026-11-24)
 
 // Handle status updates, deletions and financial actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
@@ -124,6 +125,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 throw new Exception('Event booking not found!');
             }
 
+            // Cancelling needs a reason (owner 2026-11-24). Checked before anything is written (the payment sync
+            // below writes), so a refused cancel changes nothing.
+            $cancelWhy = '';
+            if ($action === 'cancel') {
+                $cancelCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? null);
+                if (!$cancelCheck['ok']) {
+                    throw new Exception($cancelCheck['error']);
+                }
+                $cancelWhy = $cancelCheck['reason'];
+            }
+
             $paymentSnapshot = syncEventInquiryPaymentSnapshot($pdo, $inquiry_id);
             if ($paymentSnapshot !== null) {
                 $inquiry['amount_paid'] = $paymentSnapshot['amount_paid'];
@@ -192,6 +204,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                         throw new Exception('This booking is already cancelled.');
                     }
                     $pdo->prepare("UPDATE event_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$inquiry_id]);
+                    // The reason goes into the booking's own Notes (shown in the details), with the date and who cancelled.
+                    rh_account_cancel_append_note($pdo, 'event', (int)$inquiry_id, rh_account_cancel_note($cancelWhy, rh_account_cancel_actor($user)));
                     if (!rh_sync_account_payments($pdo, 'event', (int)$inquiry_id)) {
                         throw new Exception('Could not recalculate the account balance.');
                     }
@@ -204,6 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     }
                     throw $cancelEx;
                 }
+                rh_account_cancel_log('event', (string)($inquiry['reference_number'] ?? ''), (int)$inquiry_id, $cancelWhy, $user);
                 $cancelCredit = rh_account_credit_owed($pdo, 'event', (int)$inquiry_id);
                 $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE
                     ? ' ' . getSetting('currency_symbol') . number_format($cancelCredit, 2) . ' already paid stays as credit owed back - refund it from the payment Refund screen.'
@@ -545,6 +560,8 @@ try {
     <script>
         var canEventsFinancials = <?php echo json_encode($_can_events_financials); ?>;
         var eventCsrfToken = <?php echo json_encode($csrf_token); ?>;
+        // Ready-made cancel reasons (includes/cancel-reason.php), already escaped for the button's data attribute.
+        var eventCancelPresetsAttr = <?php echo json_encode(htmlspecialchars(rh_cancel_reason_presets_json('event'), ENT_QUOTES, 'UTF-8'), JSON_HEX_TAG); ?>;
         var eventCurrencySymbol = <?php echo json_encode($currency_symbol); ?>;
 
         // Status dropdown: confirm through the shared admin dialog, put the old value back on cancel.
@@ -687,7 +704,8 @@ try {
                         <input type="hidden" name="inquiry_action" value="cancel">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
-                        <button type="submit" class="btn btn-danger btn-sm" data-admin-confirm="Cancel this booking? The bill is voided; any payment already recorded stays as credit owed back to the guest (refund it from the Payments screen)." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-cancel="Keep" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban"><i class="fas fa-ban"></i> Cancel Booking</button>
+                        <input type="hidden" name="cancellation_reason" value="">
+                        <button type="submit" class="btn btn-danger btn-sm" data-admin-confirm="Cancel this booking? The bill is voided; any payment already recorded stays as credit owed back to the guest (refund it from the Payments screen)." data-admin-confirm-input="cancellation_reason" data-admin-confirm-input-label="Why is this booking being cancelled? (required)" data-admin-confirm-input-placeholder="e.g. Client cancelled, event postponed, no payment" data-admin-confirm-input-min="5" data-admin-confirm-input-max="500" data-admin-confirm-input-presets="${eventCancelPresetsAttr}" data-admin-confirm-details="The reason is kept in this booking's Notes and in System Logs. It is not sent to the guest." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-cancel="Keep" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban"><i class="fas fa-ban"></i> Cancel Booking</button>
                     </form>` : ''}
                 </div>
                 <div class="detail-item" style="grid-column: 1 / -1;">

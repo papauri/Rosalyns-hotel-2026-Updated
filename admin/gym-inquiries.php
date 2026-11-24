@@ -30,6 +30,7 @@ $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
 // which is rate-safe — it never rewrites an old-rate invoice to the current rate.
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/includes/gym-billing-lib.php';
+require_once __DIR__ . '/includes/account-cancel-reason.php'; // required cancel reason + ready-made reasons (owner 2026-11-24)
 
 // Handle status updates and deletions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
@@ -216,6 +217,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 throw new Exception('Gym inquiry not found!');
             }
 
+            // Cancelling needs a reason (owner 2026-11-24). Checked before anything is written (the payment sync
+            // below writes), so a refused cancel changes nothing.
+            $cancelWhy = '';
+            if ($action === 'cancel') {
+                $cancelCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? null);
+                if (!$cancelCheck['ok']) {
+                    throw new Exception($cancelCheck['error']);
+                }
+                $cancelWhy = $cancelCheck['reason'];
+            }
+
             $paymentSnapshot = syncGymInquiryPaymentSnapshot($pdo, $inquiry_id);
             if ($paymentSnapshot !== null) {
                 $inquiry['amount_paid'] = $paymentSnapshot['amount_paid'];
@@ -262,6 +274,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                         throw new Exception('This booking is already cancelled.');
                     }
                     $pdo->prepare("UPDATE gym_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$inquiry_id]);
+                    // The reason goes into the inquiry's own Notes (shown in the details), with the date and who cancelled.
+                    rh_account_cancel_append_note($pdo, 'gym', (int)$inquiry_id, rh_account_cancel_note($cancelWhy, rh_account_cancel_actor($user)));
                     // The member created from this enquiry stops being a live member, and their future
                     // floor-slot bookings and class places are released (the bill/payment handling below is unchanged).
                     $linkedMembers = $pdo->prepare("SELECT id, member_number FROM gym_members WHERE gym_inquiry_id = ? AND status IN ('active','suspended') FOR UPDATE");
@@ -290,9 +304,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     }
                     throw $cancelEx;
                 }
+                rh_account_cancel_log('gym', (string)($inquiry['reference_number'] ?? ''), (int)$inquiry_id, $cancelWhy, $user);
                 if (function_exists('logGymMemberAudit')) {
                     foreach ($cancelledMemberIds as $cmId) {
-                        logGymMemberAudit($cmId, 'status_changed', ['status' => 'active/suspended'], ['status' => 'cancelled'], 'Cancelled with gym enquiry ' . (string)($inquiry['reference_number'] ?? ('#' . $inquiry_id)));
+                        logGymMemberAudit($cmId, 'status_changed', ['status' => 'active/suspended'], ['status' => 'cancelled'], 'Cancelled with gym enquiry ' . (string)($inquiry['reference_number'] ?? ('#' . $inquiry_id)) . '. Reason: ' . $cancelWhy);
                     }
                 }
                 $cancelCredit = rh_account_credit_owed($pdo, 'gym', (int)$inquiry_id);
@@ -680,6 +695,8 @@ try {
     <script>
         var canGymFinancials = <?php echo json_encode($_can_gym_financials); ?>;
         var gymCsrfToken = <?php echo json_encode($csrf_token); ?>;
+        // Ready-made cancel reasons (includes/cancel-reason.php), already escaped for the button's data attribute.
+        var gymCancelPresetsAttr = <?php echo json_encode(htmlspecialchars(rh_cancel_reason_presets_json('gym'), ENT_QUOTES, 'UTF-8'), JSON_HEX_TAG); ?>;
         var gymCurrencySymbol = <?php echo json_encode($currency_symbol); ?>;
 
         // Global HTML-escape helper (also used by the email composer).
@@ -827,7 +844,8 @@ try {
                         <input type="hidden" name="inquiry_action" value="cancel">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${gymCsrfToken}">
-                        <button type="submit" class="btn btn-danger btn-sm" data-admin-confirm="Cancel this membership? The bill is voided; any payment already recorded stays as credit owed back (refund it from the Payments screen)." data-admin-confirm-title="Cancel membership" data-admin-confirm-ok="Cancel membership" data-admin-confirm-cancel="Keep" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban"><i class="fas fa-ban"></i> Cancel Membership</button>
+                        <input type="hidden" name="cancellation_reason" value="">
+                        <button type="submit" class="btn btn-danger btn-sm" data-admin-confirm="Cancel this membership? The bill is voided; any payment already recorded stays as credit owed back (refund it from the Payments screen)." data-admin-confirm-input="cancellation_reason" data-admin-confirm-input-label="Why is this membership being cancelled? (required)" data-admin-confirm-input-placeholder="e.g. Member asked to cancel, moving away, no payment" data-admin-confirm-input-min="5" data-admin-confirm-input-max="500" data-admin-confirm-input-presets="${gymCancelPresetsAttr}" data-admin-confirm-details="The reason is kept in this inquiry's Notes, the member's change history and System Logs. It is not sent to the member." data-admin-confirm-title="Cancel membership" data-admin-confirm-ok="Cancel membership" data-admin-confirm-cancel="Keep" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban"><i class="fas fa-ban"></i> Cancel Membership</button>
                     </form>` : ''}
                     ${inquiry.email ? `
                     <button type="button" class="btn btn-sm" style="background:#7E684B;color:#fff;" onclick="openEmailComposer(window._gymCurrentInquiry)">

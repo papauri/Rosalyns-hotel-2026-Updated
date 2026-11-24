@@ -399,6 +399,15 @@ try {
     }
 
     if ($action === 'cancel') {
+        // Staff must say why (owner 2026-11-24): checked before anything is read or changed (includes/cancel-reason.php).
+        require_once __DIR__ . '/../includes/cancel-reason.php';
+        $pcReasonCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? '');
+        if (!$pcReasonCheck['ok']) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => $pcReasonCheck['error']]);
+            exit;
+        }
+        $pcReason = $pcReasonCheck['reason'];
         // Cancel a booking - use centralized validation
         $check = $pdo->prepare("SELECT status, room_id, individual_room_id, booking_reference FROM bookings WHERE id = ?");
         $check->execute([$booking_id]);
@@ -429,8 +438,17 @@ try {
 
         // One transaction: status + room/stock release + bill treatment + refund
         // (booking row locked). Any failure rolls everything back.
-        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)$admin_user_id, 'Cancelled via check-in workflow');
+        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)$admin_user_id, $pcReason);
         if ($cancelRes['success']) {
+            // The reason in History (timeline + audit, shown once) and the System Logs, as the All Bookings cancel.
+            require_once __DIR__ . '/../includes/booking-timeline.php';
+            require_once __DIR__ . '/includes/audit-functions.php';
+            $pcRef = (string)($booking['booking_reference'] ?? '');
+            logBookingStatusChange((int)$booking_id, $pcRef, (string)$booking['status'], 'cancelled', 'admin', (int)$admin_user_id ?: null, null, $pcReason);
+            logBookingAudit((int)$booking_id, 'cancelled', ['status' => $booking['status']], ['status' => 'cancelled'], rh_cancel_reason_history_line($pcReason), $pcRef);
+            if (function_exists('rh_log_event')) {
+                rh_log_event('bookings', 'info', 'Booking cancelled (check-in screen)', ['booking_id' => (int)$booking_id, 'ref' => $pcRef, 'reason' => $pcReason]);
+            }
             echo json_encode(['success' => true, 'message' => 'Booking cancelled successfully. ' . $cancelRes['summary']]);
             exit;
         }

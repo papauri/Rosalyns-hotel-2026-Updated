@@ -2302,6 +2302,75 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     display: none;
 }
 
+/* Required answer too short (AdminConfirm inputMin): plain message under the box */
+.admin-confirm-input-error {
+    display: block;
+    margin-top: 6px;
+    color: #b91c1c;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.admin-confirm-input-error[hidden] {
+    display: none;
+}
+
+/* Ready-made reasons above the answer box (AdminConfirm inputPresets) */
+.admin-confirm-preset-wrap {
+    margin-top: 14px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.admin-confirm-preset-wrap label {
+    display: block;
+}
+
+.admin-confirm-preset-wrap select {
+    width: 100%;
+    margin-top: 7px;
+    border: 1px solid #d9dee6;
+    border-radius: 8px;
+    padding: 9px 12px;
+    font: inherit;
+    font-weight: 400;
+    background: #fff;
+}
+
+.admin-confirm-preset-wrap[hidden] {
+    display: none;
+}
+
+/* A page's own reason box with a pick list above it (includes/cancel-reason.php rh_reason_preset_select). */
+.bk-reason-presets {
+    margin-bottom: 8px;
+}
+
+.bk-reason-presets[hidden] {
+    display: none;
+}
+
+.reason-preset-label {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
+}
+
+.reason-preset-select {
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+/* Touch screens and tablets: the reason pick lists are full finger targets. */
+@media (pointer: coarse), (max-width: 1024px) {
+    .admin-confirm-preset-wrap select,
+    .reason-preset-select {
+        min-height: 44px;
+    }
+}
+
 /* Rows-per-page choice next to every auto pager (admin-section-pagination.js; data-no-page-size-picker opts out),
    the server-paged Bookings list (bookings.php) and the pages that draw their own pager (rh_lp_size_picker in
    admin/includes/log-pager.php: Receipts, Reviews, Visitor log, Gym members, Stock reports) */

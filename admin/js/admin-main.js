@@ -1446,6 +1446,8 @@
         const modalId = 'adminConfirmModal';
         let activeResolve = null;
         let previousFocus = null;
+        let activeInputMin = 0; // 0 = the answer is optional (every caller before 2026-11-24)
+        let activeInputMinMessage = '';
 
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>"']/g, function (char) {
@@ -1475,9 +1477,14 @@
                 '</div>',
                 '<div class="admin-confirm-body">',
                 '<div id="adminConfirmDetails" class="admin-confirm-details" hidden></div>',
+                '<div id="adminConfirmPresetWrap" class="admin-confirm-preset-wrap" hidden>',
+                '<label for="adminConfirmPreset">Pick a reason, or type your own below</label>',
+                '<select id="adminConfirmPreset" data-reason-preset-for="adminConfirmInput"></select>',
+                '</div>',
                 '<label id="adminConfirmInputWrap" class="admin-confirm-input-wrap" hidden>',
                 '<span id="adminConfirmInputLabel">Reason</span>',
                 '<textarea id="adminConfirmInput" rows="3"></textarea>',
+                '<small id="adminConfirmInputError" class="admin-confirm-input-error" role="alert" hidden></small>',
                 '</label>',
                 '<label id="adminConfirmCheckWrap" class="admin-confirm-check" hidden>',
                 '<input type="checkbox" id="adminConfirmCheck">',
@@ -1498,10 +1505,30 @@
                 }
             });
             modal.querySelector('[data-admin-confirm-ok]').addEventListener('click', function () {
+                if (!inputLongEnough(modal)) return;
                 settle(true);
+            });
+            modal.querySelector('#adminConfirmInput').addEventListener('input', function () {
+                const err = modal.querySelector('#adminConfirmInputError');
+                if (err && !err.hidden && this.value.trim().length >= activeInputMin) err.hidden = true;
             });
 
             return modal;
+        }
+
+        // Required answer (options.inputMin / options.inputRequired): OK does not close the dialog while the trimmed
+        // answer is too short; a plain message shows under the box and the typed text stays.
+        function inputLongEnough(modal) {
+            if (!activeInputMin) return true;
+            const input = modal.querySelector('#adminConfirmInput');
+            const err = modal.querySelector('#adminConfirmInputError');
+            if (input && input.value.trim().length >= activeInputMin) return true;
+            if (err) {
+                err.textContent = activeInputMinMessage || ('Please write at least ' + activeInputMin + ' characters.');
+                err.hidden = false;
+            }
+            if (input) input.focus();
+            return false;
         }
 
         function renderDetails(target, details) {
@@ -1598,6 +1625,27 @@
             input.value = opts.inputValue || '';
             input.placeholder = opts.inputPlaceholder || '';
             modal.querySelector('#adminConfirmInputLabel').textContent = opts.inputLabel || 'Reason';
+            // Optional minimum length (opt-in; reset on every open so it never carries over to another dialog).
+            const inputMin = opts.input ? (parseInt(opts.inputMin, 10) || (opts.inputRequired ? 1 : 0)) : 0;
+            activeInputMin = inputMin > 0 ? inputMin : 0;
+            activeInputMinMessage = activeInputMin ? String(opts.inputMinMessage || '') : '';
+            const inputMax = opts.input ? (parseInt(opts.inputMax, 10) || 0) : 0;
+            if (inputMax > 0) input.setAttribute('maxlength', String(inputMax));
+            else input.removeAttribute('maxlength');
+            const inputErr = modal.querySelector('#adminConfirmInputError');
+            if (inputErr) {
+                inputErr.hidden = true;
+                inputErr.textContent = '';
+            }
+            // Optional ready-made reasons (options.inputPresets = ['Guest asked to cancel', ..., 'Other (type below)']):
+            // picking one fills the box, staff may add to it. Reset on every open.
+            const presetWrap = modal.querySelector('#adminConfirmPresetWrap');
+            const presetSel = modal.querySelector('#adminConfirmPreset');
+            if (presetWrap && presetSel) {
+                const presets = opts.input && Array.isArray(opts.inputPresets) ? opts.inputPresets : [];
+                fillReasonPresetSelect(presetSel, presets);
+                presetWrap.hidden = presetSel.options.length < 2;
+            }
 
             // Optional tick box (data-admin-confirm-check): e.g. "Email the guest" on a cancel.
             const checkWrap = modal.querySelector('#adminConfirmCheckWrap');
@@ -1622,6 +1670,51 @@
                 }, 50);
             });
         }
+
+        // Ready-made reasons (owner 2026-11-24). Any <select data-reason-preset-for="<textarea id>"> on an admin page
+        // fills that box when a reason is picked; "Other ..." empties the pick so staff type their own. Lists come from
+        // includes/cancel-reason.php rh_cancel_reason_presets() (the server still checks the final text).
+        function isOtherPreset(text) {
+            return /^other\b/i.test(String(text || '').trim());
+        }
+        function fillReasonPresetSelect(select, presets) {
+            if (!select) return;
+            select.replaceChildren();
+            select.dataset.lastFill = '';
+            const list = (Array.isArray(presets) ? presets : []).filter(function (p) { return typeof p === 'string' && p.trim() !== ''; });
+            if (!list.length) return;
+            const first = document.createElement('option');
+            first.value = '';
+            first.textContent = 'Choose a reason...';
+            select.appendChild(first);
+            list.forEach(function (p) {
+                const opt = document.createElement('option');
+                opt.value = isOtherPreset(p) ? '__other' : p;
+                opt.textContent = p;
+                select.appendChild(opt);
+            });
+        }
+        function applyReasonPreset(select, input) {
+            if (!select || !input) return;
+            const picked = select.value === '__other' ? '' : String(select.value || '');
+            const last = select.dataset.lastFill || '';
+            let rest = String(input.value || '');
+            if (last && rest.indexOf(last) === 0) {
+                rest = rest.slice(last.length).replace(/^\s*-\s*/, '');
+            }
+            rest = rest.trim();
+            input.value = picked ? picked + (rest ? ' - ' + rest : '') : rest;
+            select.dataset.lastFill = picked;
+            input.dispatchEvent(new Event('input', { bubbles: true })); // clears a "too short" message
+            input.focus();
+            try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) { /* not a text box */ }
+        }
+        window.AdminReasonPresets = { fill: fillReasonPresetSelect, apply: applyReasonPreset };
+        document.addEventListener('change', function (event) {
+            const select = event.target && event.target.closest ? event.target.closest('select[data-reason-preset-for]') : null;
+            if (!select) return;
+            applyReasonPreset(select, document.getElementById(select.dataset.reasonPresetFor));
+        });
 
         window.AdminConfirm = {
             request: function (options) {
@@ -1685,6 +1778,28 @@
                     checked: checkField.value !== '0'
                 };
             }
+            // Optional typed answer (data-admin-confirm-input="<hidden field name>"), e.g. the reason on a cancel:
+            // written into that hidden field. data-admin-confirm-input-min makes it required (OK waits for it).
+            const inputField = confirmTarget.dataset.adminConfirmInput
+                ? form.querySelector('input[type="hidden"][name="' + String(confirmTarget.dataset.adminConfirmInput).replace(/[^A-Za-z0-9_-]/g, '') + '"]')
+                : null;
+            if (inputField) {
+                const inputMin = parseInt(confirmTarget.dataset.adminConfirmInputMin, 10) || 0;
+                confirmOpts.input = true;
+                confirmOpts.inputLabel = confirmTarget.dataset.adminConfirmInputLabel || 'Reason';
+                confirmOpts.inputPlaceholder = confirmTarget.dataset.adminConfirmInputPlaceholder || '';
+                confirmOpts.inputValue = '';
+                confirmOpts.inputMin = inputMin;
+                confirmOpts.inputMax = parseInt(confirmTarget.dataset.adminConfirmInputMax, 10) || 0;
+                confirmOpts.inputMinMessage = inputMin > 0 ? 'Please write at least ' + inputMin + ' characters.' : '';
+                // data-admin-confirm-input-presets='["Guest asked to cancel", ...]': a pick list above the box.
+                if (confirmTarget.dataset.adminConfirmInputPresets) {
+                    try {
+                        const presetList = JSON.parse(confirmTarget.dataset.adminConfirmInputPresets);
+                        if (Array.isArray(presetList)) confirmOpts.inputPresets = presetList;
+                    } catch (e) { /* bad JSON: no pick list, the box still works */ }
+                }
+            }
             const proceed = function () {
                 form.dataset.adminConfirmBypass = '1';
                 if (typeof form.requestSubmit === 'function' && submitter && submitter.form === form) {
@@ -1695,7 +1810,7 @@
                     HTMLFormElement.prototype.submit.call(form);
                 }
             };
-            if (!checkField) {
+            if (!checkField && !inputField) {
                 window.AdminConfirm.request(confirmOpts).then(function (confirmed) {
                     if (!confirmed) return;
                     proceed();
@@ -1706,7 +1821,8 @@
                 if (!result.confirmed) return;
                 // The tick box answer goes into the form's hidden field ('1' ticked, '0' unticked). When the box was
                 // not on screen the field keeps its default, so the old behaviour stays.
-                if (result.checkShown) checkField.value = result.checked ? '1' : '0';
+                if (checkField && result.checkShown) checkField.value = result.checked ? '1' : '0';
+                if (inputField) inputField.value = String(result.value || '').trim();
                 proceed();
             });
         });

@@ -1,5 +1,8 @@
 <?php
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/cancel-reason.php';
+require_once __DIR__ . '/../includes/booking-timeline.php';
+require_once __DIR__ . '/includes/audit-functions.php';
 /** @var \PDO $pdo */
 /** @var array $user */
 /** @var string $csrf_token */
@@ -121,19 +124,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($booking['status'] !== 'tentative') {
                 throw new Exception('Only an active tentative hold can be cancelled here.');
             }
+            // Staff must say why (owner 2026-11-24), checked before anything changes: includes/cancel-reason.php.
+            $holdReasonCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? '');
+            if (!$holdReasonCheck['ok']) {
+                throw new Exception($holdReasonCheck['error']);
+            }
+            $cancelReason = $holdReasonCheck['reason'];
 
             // Shared settled cancellation (status, room release, bill treatment, refunds).
-            $settled = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)$user['id'], 'Tentative hold cancelled by ' . $user['full_name']);
+            $settled = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)$user['id'], $cancelReason);
             if (empty($settled['success'])) {
                 throw new Exception($settled['error'] !== '' ? $settled['error'] : 'Could not cancel the booking.');
             }
 
             $pdo->prepare("INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason) VALUES (?, 'cancelled', ?, ?)")
                 ->execute([$booking_id, (int)$user['id'], 'Cancelled by ' . $user['full_name']]);
+            // The reason in History (timeline + audit, shown once) and the System Logs, as the All Bookings cancel.
+            if (function_exists('logBookingStatusChange')) {
+                logBookingStatusChange((int)$booking_id, (string)$booking['booking_reference'], 'tentative', 'cancelled', 'admin', (int)$user['id'], (string)($user['full_name'] ?? ''), $cancelReason);
+            }
+            if (function_exists('logBookingAudit')) {
+                logBookingAudit((int)$booking_id, 'cancelled', ['status' => 'tentative'], ['status' => 'cancelled'], rh_cancel_reason_history_line($cancelReason), (string)$booking['booking_reference']);
+            }
+            if (function_exists('rh_log_event')) {
+                rh_log_event('bookings', 'info', 'Tentative hold cancelled', ['booking_id' => (int)$booking_id, 'ref' => $booking['booking_reference'], 'reason' => $cancelReason, 'by' => $user['username'] ?? null]);
+            }
 
             // Notify guest, unless staff unticked "Email the guest" (owner 2026-11-12: cancel quietly, no email or WhatsApp)
             require_once '../config/email.php';
-            $cancelReason = 'Tentative hold cancelled by hotel';
             $cancelEmailSkipped = !rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('tentative', (string)$booking['status']));
             if ($cancelEmailSkipped) {
                 $cancel_email_result = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
@@ -141,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rh_email_ctx_account('room', $booking['id'], $booking['booking_reference']), 'Staff chose not to email the guest');
                 sendBookingCancelledHotelAlert($booking); // nothing to the guest; the hotel's own WhatsApp alert still goes
             } else {
-                $cancel_email_result = sendBookingCancelledEmail($booking, $cancelReason);
+                $cancel_email_result = sendBookingCancelledEmail($booking, rh_cancel_guest_email_reason('hold')); // the reason stays internal (owner 2026-11-25)
             }
             logCancellationToDatabase(
                 $booking['id'],
@@ -558,8 +576,16 @@ foreach ($active as $bk) {
                                                 <input type="hidden" name="action" value="cancel">
                                                 <input type="hidden" name="id" value="<?php echo (int)$bk['id']; ?>">
                                                 <input type="hidden" name="email_guest" value="1">
+                                                <input type="hidden" name="cancellation_reason" value="">
                                                 <button type="submit" class="acct-quick-action" style="width: 100%; color: #dc2626;"
                                                     data-admin-confirm="Cancel this tentative hold and release the room?"
+                                                    data-admin-confirm-input="cancellation_reason"
+                                                    data-admin-confirm-input-label="Why is this hold being cancelled? (required)"
+                                                    data-admin-confirm-input-placeholder="e.g. Guest asked to cancel, no payment received"
+                                                    data-admin-confirm-input-min="5"
+                                                    data-admin-confirm-input-max="500"
+                                                    data-admin-confirm-input-presets="<?php echo htmlspecialchars(rh_cancel_reason_presets_json('room'), ENT_QUOTES); ?>"
+                                                    data-admin-confirm-details="The reason is kept in the booking History and logs for staff only. It is not sent to the guest."
                                                     data-admin-confirm-check="email_guest"
                                                     data-admin-confirm-check-label="Email the guest that this booking is cancelled"
                                                     data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest."

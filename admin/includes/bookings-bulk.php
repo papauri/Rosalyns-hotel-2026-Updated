@@ -716,12 +716,26 @@ if (!function_exists('rh_bk_bulk_ops')) {
     function rh_bk_bulk_apply(PDO $pdo, string $op, array $ids, array $user, string $state, ?string $today = null, array $choices = [], array $in = []): array
     {
         $out = ['success' => false, 'error' => '', 'message' => '', 'results' => [], 'done' => 0];
-        // Cancel: one reason for every room (required); email_guest '1' / '0' (the review's tick). Mark no-show: an
-        // optional note, as the single button's.
+        // Cancel: one reason for every room (required); email_guest '1' / '0' (the review's tick). Mark no-show: one
+        // note for every room (required since 2026-11-24, as the single button's).
         $reason = trim((string)($in['cancellation_reason'] ?? ''));
-        if ($op === 'cancel' && $reason === '') {
-            $out['error'] = 'Give one reason for the cancellation. Nothing was done.';
-            return $out;
+        if ($op === 'cancel') {
+            // Same rule as the single Cancel (includes/cancel-reason.php), checked once before any room is touched.
+            $reasonCheck = rh_cancel_reason_check($reason);
+            if (!$reasonCheck['ok']) {
+                $out['error'] = $reasonCheck['error'];
+                return $out;
+            }
+            $reason = $reasonCheck['reason'];
+        }
+        $noshowNote = '';
+        if ($op === 'noshow') {
+            $noteCheck = rh_noshow_note_check($in['note'] ?? '');
+            if (!$noteCheck['ok']) {
+                $out['error'] = $noteCheck['error'];
+                return $out;
+            }
+            $noshowNote = $noteCheck['reason'];
         }
         $plan = rh_bk_bulk_plan($pdo, $op, $ids, (int)($user['id'] ?? 0), $today);
         if (empty($plan['success'])) {
@@ -794,7 +808,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
                         adminBulkSkip($skipped, $one['why']);
                     }
                 } elseif ($op === 'noshow') {
-                    $one = rh_bk_bulk_noshow_one($pdo, (int)$r['id'], $user, trim((string)($in['note'] ?? '')));
+                    $one = rh_bk_bulk_noshow_one($pdo, (int)$r['id'], $user, $noshowNote);
                     $res['ok'] = $one['ok'];
                     $res['text'] = $one['text'];
                     if (!$one['ok']) {

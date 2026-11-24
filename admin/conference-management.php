@@ -18,6 +18,7 @@ require_once '../includes/form-validation.php';
 require_once '../includes/conference-pricing.php';
 require_once __DIR__ . '/includes/account-record-payment.php';
 require_once __DIR__ . '/includes/account-receipt-send.php';
+require_once __DIR__ . '/includes/account-cancel-reason.php'; // required cancel reason + ready-made reasons (owner 2026-11-24)
 
 finance_ensure_sequence_tables($pdo);
 
@@ -471,6 +472,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             throw new Exception('Only an administrator or manager can delete conference enquiries.');
         }
 
+        // Cancelling needs a reason (owner 2026-11-24). Checked before anything is written (the payment sync below
+        // writes), so a refused cancel changes nothing.
+        $cancelWhy = '';
+        if ($action === 'cancel') {
+            $cancelCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? null);
+            if (!$cancelCheck['ok']) {
+                throw new Exception($cancelCheck['error']);
+            }
+            $cancelWhy = $cancelCheck['reason'];
+        }
+
         $paymentSnapshot = syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
         if ($paymentSnapshot !== null) {
             $enquiry['amount_paid'] = $paymentSnapshot['amount_paid'];
@@ -588,6 +600,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                     throw new Exception('This booking is already cancelled.');
                 }
                 $pdo->prepare("UPDATE conference_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$enquiry_id]);
+                // The reason goes into the enquiry's own Notes (shown in Details), with the date and who cancelled.
+                rh_account_cancel_append_note($pdo, 'conference', (int)$enquiry_id, rh_account_cancel_note($cancelWhy, rh_account_cancel_actor($user)));
                 if (!rh_sync_account_payments($pdo, 'conference', (int)$enquiry_id)) {
                     throw new Exception('Could not recalculate the account balance.');
                 }
@@ -606,6 +620,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 }
                 throw $cancelEx;
             }
+            rh_account_cancel_log('conference', (string)($enquiry['inquiry_reference'] ?? ''), (int)$enquiry_id, $cancelWhy, $user);
             $cancelCredit = rh_account_credit_owed($pdo, 'conference', (int)$enquiry_id);
             $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE
                 ? ' ' . getSetting('currency_symbol') . number_format($cancelCredit, 2) . ' already paid stays as credit owed back - refund it from the payment Refund screen.'
@@ -621,7 +636,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 'conference',
                 $enquiry['email'],
                 $user['id'],
-                'Cancelled by admin',
+                $cancelWhy,
                 $email_sent,
                 $email_status
             );
@@ -631,7 +646,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 'conference',
                 $enquiry['email'],
                 $user['full_name'] ?? $user['username'],
-                'Cancelled by admin',
+                $cancelWhy,
                 $email_sent,
                 $email_status
             );
@@ -1310,8 +1325,16 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                                                 <input type="hidden" name="enquiry_action" value="cancel">
                                                                 <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
+                                                                <input type="hidden" name="cancellation_reason" value="">
                                                                 <button type="submit" class="text-danger"
                                                                     data-admin-confirm="Cancel this conference enquiry? The bill is voided; any payment already recorded stays as credit owed back (refund it from the Payments screen)."
+                                                                    data-admin-confirm-input="cancellation_reason"
+                                                                    data-admin-confirm-input-label="Why is this enquiry being cancelled? (required)"
+                                                                    data-admin-confirm-input-placeholder="e.g. Client cancelled, moved to another venue, no deposit"
+                                                                    data-admin-confirm-input-min="5"
+                                                                    data-admin-confirm-input-max="500"
+                                                                    data-admin-confirm-input-presets="<?php echo htmlspecialchars(rh_cancel_reason_presets_json('conference'), ENT_QUOTES, 'UTF-8'); ?>"
+                                                                    data-admin-confirm-details="The reason is kept in the enquiry's Notes and in System Logs. It is not sent to the client."
                                                                     data-admin-confirm-title="Cancel enquiry"
                                                                     data-admin-confirm-ok="Cancel enquiry"
                                                                     data-admin-confirm-cancel="Keep enquiry"

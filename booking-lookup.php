@@ -15,6 +15,7 @@ header('Cache-Control: no-store, private');
 require_once 'config/database.php';
 require_once 'config/base-url.php';
 require_once 'includes/public-csrf.php';
+require_once __DIR__ . '/includes/cancel-reason.php'; // the guest's cancel reason list (owner 2026-11-24)
 
 /** @var array|null $booking */
 $booking = null;
@@ -66,20 +67,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['lookup'])) {
 
 // Handle guest cancellation
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
+    // The guest picks a reason (owner 2026-11-24; "Prefer not to say" counts), extra text optional:
+    // includes/cancel-reason.php. Checked before the rate limit, so a missed choice does not use up an attempt.
+    $guestReason = rh_guest_cancel_reason_from_post($_POST);
     // CSRF validation
     if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'lookup')) {
         $error = 'Invalid request. Please refresh the page and try again.';
+    } elseif (!$guestReason['ok']) {
+        $error = $guestReason['error'];
     } elseif (!pub_rate_limit('cancel_booking', 3, 600) || !pub_ip_rate_limit('cancel_booking', 5, 3600)) {
         // Rate limiting: 3 cancellations per 10 minutes per session
         $error = 'Too many cancellation attempts. Please contact us directly.';
     } else {
         $reference = trim($_POST['booking_reference'] ?? '');
         $email = trim($_POST['guest_email'] ?? '');
-        $cancel_reason = trim((string)($_POST['cancel_reason'] ?? ''));
-        if ($cancel_reason === '') {
-            $cancel_reason = 'Cancelled by guest';
-        }
-        $cancel_reason = function_exists('mb_substr') ? mb_substr($cancel_reason, 0, 300) : substr($cancel_reason, 0, 300);
+        $cancel_reason = $guestReason['reason']; // "<picked reason>" or "<picked reason> - <their words>", at most 300 characters
 
         if (!empty($reference) && !empty($email)) {
             try {
@@ -486,8 +488,16 @@ try {
                                 <?php if ($lookup_has_policy): ?>
                                     <input type="hidden" name="fee_quoted" value="<?php echo htmlspecialchars(number_format($lookup_fee, 2, '.', ''), ENT_QUOTES); ?>">
                                 <?php endif; ?>
-                                <div class="form-group" style="margin-bottom: 12px;">
-                                    <textarea name="cancel_reason" class="form-control" rows="2" placeholder="Reason for cancellation (optional)" style="width:100%; box-sizing:border-box; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: 'Jost', sans-serif;"></textarea>
+                                <div class="form-group lookup-cancel-reason">
+                                    <label for="cancel_reason_choice" class="lookup-cancel-reason__label">Why are you cancelling?</label>
+                                    <select name="cancel_reason_choice" id="cancel_reason_choice" class="form-control lookup-cancel-reason__field lookup-cancel-reason__field--select" required>
+                                        <option value="">Choose a reason</option>
+                                        <?php foreach (rh_cancel_reason_presets('guest') as $lookup_why): ?>
+                                            <option value="<?php echo htmlspecialchars($lookup_why, ENT_QUOTES); ?>"><?php echo htmlspecialchars($lookup_why === rh_cancel_reason_other() ? 'Other (tell us below)' : $lookup_why); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <label for="cancel_reason" class="lookup-cancel-reason__label">Anything else you would like us to know? (optional)</label>
+                                    <textarea name="cancel_reason" id="cancel_reason" class="form-control lookup-cancel-reason__field" rows="2" maxlength="300"></textarea>
                                 </div>
                                 <?php if ($lookup_has_policy && $lookup_fee > BALANCE_TOLERANCE): ?>
                                     <label style="display: flex; gap: 8px; align-items: flex-start; font-size: 14px; margin-bottom: 12px; cursor: pointer;">

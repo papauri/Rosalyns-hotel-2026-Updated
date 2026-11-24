@@ -404,7 +404,7 @@ try {
     ok('cancel: email tick default as the row (confirmed yes, pending no)', !empty($room($xp, $X6)['email_default']) && empty($room($xp, $X1)['email_default']));
     ok('cancel: no Cancel Booking permission -> skipped', ($room(rh_bk_bulk_plan($pdo, 'cancel', [$X1], 0), $X1)['why'] ?? '') === 'no permission');
     $xp2 = rh_bk_bulk_plan($pdo, 'cancel', [$X1, $X2, $X3], $adminId);
-    ok('cancel apply: no reason -> refused, nothing done', strpos((string)rh_bk_bulk_apply($pdo, 'cancel', [$X1, $X2, $X3], $admin, $xp2['state'], null, [], ['email_guest' => '0'])['error'], 'Give one reason') === 0
+    ok('cancel apply: no reason -> refused, nothing done', strpos((string)rh_bk_bulk_apply($pdo, 'cancel', [$X1, $X2, $X3], $admin, $xp2['state'], null, [], ['email_guest' => '0'])['error'], 'Say why') === 0
         && $get($X1)['status'] === 'pending');
     $xa = rh_bk_bulk_apply($pdo, 'cancel', [$X1, $X2, $X3], $admin, $xp2['state'], null, [], ['cancellation_reason' => 'GBLK bulk test', 'email_guest' => '0']);
     $xr = array_column($xa['results'] ?? [], null, 'id');

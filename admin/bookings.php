@@ -2278,7 +2278,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Mark a confirmed booking as no-show
             $booking_id = intval($_POST['id'] ?? 0);
             $noshow_note = trim((string)($_POST['checkin_note'] ?? ''));
-            if ($booking_id > 0) {
+            // Staff must say why (owner 2026-11-24): the note goes to the audit, the timeline and the System Logs.
+            $noshowCheck = rh_noshow_note_check($noshow_note);
+            if ($booking_id > 0 && !$noshowCheck['ok']) {
+                $error = $noshowCheck['error'];
+            } elseif ($booking_id > 0) {
+                $noshow_note = $noshowCheck['reason'];
                 // One transaction (orders, status, rooms, holds, refund) in rh_mark_booking_no_show().
                 require_once __DIR__ . '/../includes/booking-functions.php';
                 $ns = rh_mark_booking_no_show($pdo, $booking_id, (int)($user['id'] ?? 0), (string)($user['full_name'] ?? ($user['username'] ?? '')), $noshow_note);
@@ -2504,15 +2509,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $bbChoices[(int)$bbCid] = $bbPick;
                 }
             }
-            // G5c Cancel: one reason for every room (required) + the "Email the guest" tick; Mark no-show: an optional note.
+            // G5c Cancel: one reason for every room (required) + the "Email the guest" tick; Mark no-show: one note for every
+            // room (required since 2026-11-24, same rule).
             $bbIn = [
                 'cancellation_reason' => trim((string)($_POST['cancellation_reason'] ?? '')),
                 'email_guest' => (string)($_POST['email_guest'] ?? '0') === '1' ? '1' : '0',
                 'note' => trim((string)($_POST['note'] ?? '')),
             ];
-            if ($bbOp === 'cancel' && $bbIn['cancellation_reason'] === '') {
+            if ($bbOp === 'cancel' && !($bbReasonCheck = rh_cancel_reason_check($bbIn['cancellation_reason']))['ok']) {
                 // Checked before the one-time token is used, so the same review can still be confirmed.
-                echo json_encode(['success' => false, 'message' => 'Give one reason for the cancellation. Nothing was done.']);
+                echo json_encode(['success' => false, 'message' => $bbReasonCheck['error']]);
+                exit;
+            }
+            if ($bbOp === 'noshow' && !($bbNoteCheck = rh_noshow_note_check($bbIn['note']))['ok']) {
+                echo json_encode(['success' => false, 'message' => $bbNoteCheck['error']]);
                 exit;
             }
             $bbReply = rh_bk_bulk_once_run($_SESSION['rh_bk_bulk_once'], trim((string)($_POST['once'] ?? '')), $bbScope, static function () use ($pdo, $bbOp, $bbIds, $user, $bbChoices, $bbIn): array {
@@ -6431,12 +6441,20 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 message: 'Cancel booking ' + reference + '?',
                 details: ['The booking status will change to cancelled.', 'Room availability will be released where applicable.', 'Cancellation handling: ' + <?php echo json_encode(getCancellationRefundModeLabel(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>],
                 confirmText: 'Cancel Booking',
-                inputLabel: 'Cancellation reason (optional)',
-                inputPlaceholder: 'Example: Guest requested cancellation',
+                inputLabel: 'Why is this booking being cancelled? (required)',
+                inputPlaceholder: 'e.g. Guest asked to cancel, double booking, no payment',
+                inputMin: 5,
+                inputMax: 500,
+                inputMinMessage: 'Please write at least 5 characters.',
+                inputPresets: <?php echo json_encode(rh_cancel_reason_presets('room'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>,
                 icon: 'fa-ban',
                 tone: 'danger'
             });
             if (reason === null) {
+                return;
+            }
+            if (String(reason).trim().length < 5) {
+                Alert.show('Say why this booking is being cancelled (at least 5 characters).', 'error');
                 return;
             }
 
@@ -6452,7 +6470,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             formData.append('action', 'update_status');
             formData.append('id', id);
             formData.append('status', 'cancelled');
-            formData.append('cancellation_reason', reason || 'Cancelled by admin');
+            formData.append('cancellation_reason', String(reason).trim());
 
             postBookingAction(formData, 'Error cancelling booking')
                 .then(data => reloadWithBookingActionMessage(data, 'Booking cancelled successfully.'))
@@ -7604,8 +7622,9 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     </div>
 
                     <div class="form-group" id="checkin_note_group">
-                        <label for="checkin_note"><i class="fas fa-sticky-note"></i> Optional Note</label>
-                        <textarea name="checkin_note" id="checkin_note" class="form-control" rows="2" placeholder="Add any check-in or no-show notes..."></textarea>
+                        <div class="bk-reason-presets" id="checkin_noshow_presets" hidden><?php echo rh_reason_preset_select('noshow', 'checkin_noshow_preset', 'checkin_note'); ?></div>
+                        <label for="checkin_note" id="checkin_note_label"><i class="fas fa-sticky-note"></i> Optional Note</label>
+                        <textarea name="checkin_note" id="checkin_note" class="form-control" rows="2" maxlength="500" placeholder="Add any check-in or no-show notes..."></textarea>
                     </div>
 
                     <?php /* Owner 2026-11-12 "A tick box": hidden 0 before the box, so unticked posts email_guest=0. */ ?>
@@ -7649,9 +7668,10 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         <input type="text" id="cancel_guest_name" class="form-control" readonly style="background: #f5f5f5;">
                     </div>
                     <div class="form-group">
-                        <label for="cancellation_reason"><i class="fas fa-comment"></i> Cancellation Reason (Optional):</label>
-                        <textarea name="cancellation_reason" id="cancellation_reason" class="form-control" rows="3" placeholder="Reason for cancellation..."></textarea>
-                        <small style="color: #666;">This reason will be included in the cancellation email and logs.</small>
+                        <div class="bk-reason-presets"><?php echo rh_reason_preset_select('room', 'cancellation_reason_preset', 'cancellation_reason'); ?></div>
+                        <label for="cancellation_reason"><i class="fas fa-comment"></i> Why is this booking being cancelled? (required)</label>
+                        <textarea name="cancellation_reason" id="cancellation_reason" class="form-control" rows="3" maxlength="500" required placeholder="e.g. Guest asked to cancel, double booking, no payment"></textarea>
+                        <small style="color: #666;">At least 5 characters. Kept in the booking History and logs for staff only; it is not sent to the guest.</small>
                     </div>
                     <div class="form-group" id="cancel_group_box" style="display: none; background: #fff8e6; padding: 12px; border-radius: 8px;">
                         <label style="margin-bottom: 6px;"><i class="fas fa-layer-group"></i> This room was booked together with other rooms. Cancel:</label>
@@ -9333,6 +9353,17 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             resetCheckInModalState();
             if (formEl) formEl.reset();
             setBookingPageModalOpen(modal, true);
+            // No-show: the note is required (owner 2026-11-24), with ready-made reasons; check-in: optional.
+            const nsPresetsEl = document.getElementById('checkin_noshow_presets');
+            const nsPresetSel = document.getElementById('checkin_noshow_preset');
+            const ciNoteLabel = document.getElementById('checkin_note_label');
+            const ciNote = document.getElementById('checkin_note');
+            if (nsPresetsEl) nsPresetsEl.hidden = safeMode !== 'noshow';
+            if (nsPresetSel) { nsPresetSel.value = ''; nsPresetSel.dataset.lastFill = ''; }
+            if (ciNoteLabel) ciNoteLabel.innerHTML = safeMode === 'noshow'
+                ? '<i class="fas fa-sticky-note"></i> Why is this booking a no-show? (required)'
+                : '<i class="fas fa-sticky-note"></i> Optional Note';
+            if (ciNote) ciNote.placeholder = safeMode === 'noshow' ? 'e.g. Guest did not arrive and did not answer the phone' : 'Add any check-in notes...';
 
             document.getElementById('checkin_booking_id').value = bookingId;
             document.getElementById('checkin_booking_ref').value = bookingReference;
@@ -9521,6 +9552,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             document.getElementById('cancel_booking_ref').value = bookingReference;
             document.getElementById('cancel_guest_name').value = guestName;
             document.getElementById('cancellation_reason').value = '';
+            const cancelPreset = document.getElementById('cancellation_reason_preset');
+            if (cancelPreset) { cancelPreset.value = ''; cancelPreset.dataset.lastFill = ''; }
             const cancelStatus = String(bookingStatus || '');
             bkApplyCancelEmailChoice(cancelStatus === '' || cancelStatus === 'confirmed');
             bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', { count: 0, members: [] });
@@ -9672,6 +9705,14 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 errorEl.dataset.lateError = '1';
                 return;
             }
+            const noteEl = document.getElementById('checkin_note');
+            if (mode === 'noshow' && (!noteEl || noteEl.value.trim().length < 5)) {
+                errorEl.textContent = 'Say why this booking is a no-show (at least 5 characters). Pick a reason or type one.';
+                errorEl.style.color = '';
+                errorEl.style.display = 'block';
+                if (noteEl) noteEl.focus();
+                return;
+            }
             const formData = new FormData(this); // checkin_note is posted by its own field
             const picked = form.querySelector('input[name="late_arrival"]:checked');
             const isEnded = mode !== 'noshow' && !!picked && picked.value === 'ended';
@@ -9748,6 +9789,13 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
 
         document.getElementById('cancelBookingForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            // The cancellation reason is required (owner 2026-11-24; the server checks it too).
+            const cancelReasonEl = document.getElementById('cancellation_reason');
+            if (cancelReasonEl && cancelReasonEl.value.trim().length < 5) {
+                Alert.show('Say why this booking is being cancelled (at least 5 characters).', 'error');
+                cancelReasonEl.focus();
+                return;
+            }
             // Lowering a policy fee needs a reason (the server checks it too).
             const ovFilled = ['cancel_fee_override_amount', 'cancel_fee_override_pct'].some(id => { const el = document.getElementById(id); return el && !el.disabled && el.value.trim() !== ''; });
             const ovReasonEl = document.getElementById('cancel_fee_override_reason');
@@ -12030,14 +12078,16 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 <?php /* G5c: what Cancel / Mark no-show ask once for every room (shown only for those two). */ ?>
                 <div id="bkBulkExtra" class="bk-bulk-extra" hidden>
                     <div data-bk-extra="cancel" hidden>
-                        <label for="bkBulkReason" class="form-label">Reason for cancelling (required) <i class="help" data-tip="One reason for every room going ahead. It is written to each booking's History and, when the guest is emailed, put in the cancellation email.">?</i></label>
-                        <textarea id="bkBulkReason" class="form-control" rows="2" maxlength="500" required></textarea>
+                        <label for="bkBulkReason" class="form-label">Reason for cancelling (required) <i class="help" data-tip="One reason for every room going ahead. It is written to each booking's History for staff only; it is not sent to the guest.">?</i></label>
+                        <div class="bk-reason-presets"><?php echo rh_reason_preset_select('room', 'bkBulkReasonPreset', 'bkBulkReason'); ?></div>
+                        <textarea id="bkBulkReason" class="form-control" rows="2" maxlength="500" required placeholder="e.g. Guest asked to cancel, double booking, no payment"></textarea>
                         <label class="bk-bulk-check"><input type="checkbox" id="bkBulkEmail"> Email the guest <i class="help" data-tip="Ticked: each room that was confirmed gets the cancellation email, as with the row's Cancel. Rooms not confirmed yet get no email. Unticked: no email to any guest.">?</i></label>
                         <p class="bk-bulk-note">Each room's fee is the automatic one from its own cancellation policy. To change one room's fee, open that booking and cancel it there. Rooms of one group that are all ticked are cancelled together (all or none).</p>
                     </div>
                     <div data-bk-extra="noshow" hidden>
-                        <label for="bkBulkNote" class="form-label">Note (optional) <i class="help" data-tip="Written to each booking's History with the no-show. Each guest with an email address gets the no-show email, as with the row's No-show.">?</i></label>
-                        <textarea id="bkBulkNote" class="form-control" rows="2" maxlength="500"></textarea>
+                        <label for="bkBulkNote" class="form-label">Why are these bookings no-shows? (required) <i class="help" data-tip="One note for every room going ahead, at least 5 characters. Written to each booking's History and the System Logs with the no-show. Each guest with an email address gets the no-show email, as with the row's No-show.">?</i></label>
+                        <div class="bk-reason-presets"><?php echo rh_reason_preset_select('noshow', 'bkBulkNotePreset', 'bkBulkNote'); ?></div>
+                        <textarea id="bkBulkNote" class="form-control" rows="2" maxlength="500" required placeholder="e.g. Guest did not arrive and did not answer the phone"></textarea>
                         <p class="bk-bulk-note">Each room's no-show fee is the automatic one. To change one room's fee, open that booking.</p>
                     </div>
                 </div>
@@ -12133,6 +12183,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             Array.prototype.forEach.call(x.querySelectorAll('[data-bk-extra]'), function (s) { s.hidden = s.getAttribute('data-bk-extra') !== op; });
             var r = byId('bkBulkReason'); if (r) { r.value = ''; r.disabled = false; }
             var n = byId('bkBulkNote'); if (n) { n.value = ''; n.disabled = false; }
+            ['bkBulkReasonPreset', 'bkBulkNotePreset'].forEach(function (pid) { var p = byId(pid); if (p) { p.value = ''; p.dataset.lastFill = ''; p.disabled = false; } });
             var e = byId('bkBulkEmail'); if (e) { e.checked = false; e.disabled = false; }
         }
         // A Confirm whose result is unknown: no second try from this dialog; Close reloads the list.
@@ -12203,11 +12254,13 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             var reasonEl = byId('bkBulkReason'), noteEl = byId('bkBulkNote'), emailEl = byId('bkBulkEmail');
             if (bulk.op === 'cancel') {
                 var why = reasonEl ? reasonEl.value.trim() : '';
-                if (!why) { bulkError('Give one reason for the cancellation. It is written to every room\'s History.'); if (reasonEl) reasonEl.focus(); return; }
+                if (why.length < 5) { bulkError('Give one reason for the cancellation (at least 5 characters). It is written to every room\'s History.'); if (reasonEl) reasonEl.focus(); return; }
                 fields.cancellation_reason = why;
                 fields.email_guest = emailEl && emailEl.checked ? '1' : '0';
             } else if (bulk.op === 'noshow') {
-                fields.note = noteEl ? noteEl.value.trim() : '';
+                var nsWhy = noteEl ? noteEl.value.trim() : '';
+                if (nsWhy.length < 5) { bulkError('Say why these bookings are no-shows (at least 5 characters). It is written to every room\'s History.'); if (noteEl) noteEl.focus(); return; }
+                fields.note = nsWhy;
             }
             var list = byId('bkBulkList');
             if (bulk.op === 'remove_group' && list) {
@@ -12218,7 +12271,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     return;
                 }
             }
-            [reasonEl, noteEl, emailEl].forEach(function (x) { if (x) x.disabled = true; });
+            [reasonEl, noteEl, emailEl, byId('bkBulkReasonPreset'), byId('bkBulkNotePreset')].forEach(function (x) { if (x) x.disabled = true; });
             Array.prototype.forEach.call(list ? list.querySelectorAll('select[data-bk-pick]') : [], function (s) {
                 fields['choices[' + s.getAttribute('data-bk-pick') + ']'] = s.value;
                 s.disabled = true;

@@ -61,6 +61,15 @@ when prompted."
   "Guest has left" per row; Staff Workload is one chip row. Maintenance list now shows only rooms out of order / under
   maintenance or with an open job (no longer every occupied room). Guides: housekeeping, room maintenance. Manager
   Guide: Housekeeping and Maintenance (screenshots + wording). Showcase SYNC QUEUE: both screens changed.
+- 2026-11-25 (owner FEATURE, commit "Cancel reasons required" in both repos): every staff cancel needs a reason (at
+  least 5 characters; "Cancelled by admin" refused), picked from a ready-made list or typed ("Other" = type it): room
+  bookings (booking page single/group, bookings list row + bulk, Cancel Hold, Assistant), Mark no-show (single + bulk
+  note), conference / event / gym enquiries, gym members (status + Edit), gym slot bookings. Guest website cancel must
+  pick a reason ("Prefer not to say" counts). The reason shows once in the booking History, audit and System Logs
+  (conference/event/gym: dated line in the record's Notes + System Logs). Owner 2026-11-25: the staff reason stays
+  internal; guest emails unchanged ("Cancelled by admin" / "Tentative hold cancelled by hotel"). Guides: reception
+  bookings cancel + no-show, tentative holds, conference/events/gym. Assistant: cancel card already asks the reason;
+  answer "why was this cancelled" -> booking History. Manager Guide: Bookings.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 

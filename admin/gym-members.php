@@ -21,6 +21,7 @@ require_once __DIR__ . '/includes/gym-classes-lib.php';
 require_once __DIR__ . '/includes/gym-schedule-lib.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
+require_once __DIR__ . '/includes/account-cancel-reason.php'; // required cancel reason + ready-made reasons (owner 2026-11-24)
 require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size: visit log rows per page
 
 /** @var PDO $pdo */
@@ -201,6 +202,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                     $gm_json(false, 'Member not found.');
                 }
 
+                // Setting the status to Cancelled here needs a reason (owner 2026-11-24), checked before anything is saved.
+                $gmCancelWhy = '';
+                if ($status === 'cancelled' && (string)($cur['status'] ?? '') !== 'cancelled') {
+                    $gmCancelCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? null);
+                    if (!$gmCancelCheck['ok']) {
+                        $gm_json(false, $gmCancelCheck['error']);
+                    }
+                    $gmCancelWhy = $gmCancelCheck['reason'];
+                }
+
                 $nameChanged = $name !== rh_clean_text($cur['full_name']);
 
                 // Only re-check for the same person when email or phone actually changed.
@@ -297,10 +308,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 if (function_exists('logGymMemberAudit')) {
                     $auditAction = $nameChanged ? 'name_changed' : 'updated';
                     $auditNote = $nameChanged ? ('Name change reason: ' . $changeReason) : ($changeReason ?: null);
+                    if ($gmCancelWhy !== '') {
+                        $auditNote = ($auditNote !== null ? $auditNote . ' | ' : '') . 'Cancellation reason: ' . $gmCancelWhy;
+                    }
                     logGymMemberAudit($memberId, $auditAction, $before, $after, $auditNote, (string)($cur['member_number'] ?? ''));
                     if ($renewalBill) {
                         logGymMemberAudit($memberId, 'renewed', ['expiry_date' => (string)($cur['expiry_date'] ?? '')], ['expiry_date' => (string)$expiry, 'monthly_fee' => $fee], 'Renewal billed on account ' . $renewalBill['reference'], (string)($cur['member_number'] ?? ''));
                     }
+                }
+                if ($gmCancelWhy !== '') {
+                    rh_account_cancel_log('gym_member', (string)($cur['member_number'] ?? ''), $memberId, $gmCancelWhy, $user);
                 }
                 $gm_json(true, 'Member updated.' . ($renewalBill
                     ? ' Renewal billed: account ' . $renewalBill['reference'] . ' for ' . number_format($renewalBill['total'], 2) . ' - record the payment in Gym Inquiries (Record payment).'
@@ -641,6 +658,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if ($status === '') {
                 $gm_json(false, 'Invalid status.');
             }
+            // Cancelling a member needs a reason (owner 2026-11-24), checked before anything is written.
+            $gmCancelWhy = '';
+            if ($status === 'cancelled') {
+                $gmCurSt = $pdo->prepare("SELECT status FROM gym_members WHERE id = ?");
+                $gmCurSt->execute([$memberId]);
+                if ((string)$gmCurSt->fetchColumn() !== 'cancelled') {
+                    $gmCancelCheck = rh_cancel_reason_check($_POST['cancellation_reason'] ?? null);
+                    if (!$gmCancelCheck['ok']) {
+                        $gm_json(false, $gmCancelCheck['error']);
+                    }
+                    $gmCancelWhy = $gmCancelCheck['reason'];
+                }
+            }
             // The lazily created gym tables are made before the transaction (CREATE TABLE commits implicitly).
             gymClassesEnsureTables($pdo);
             gymScheduleEnsureTables($pdo);
@@ -669,12 +699,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 throw $statusEx;
             }
             if ($prevRow && function_exists('logGymMemberAudit')) {
+                $gmStatusNote = $voided['accounts'] > 0 ? ('Unpaid gym bill voided: ' . number_format($voided['cleared'], 2) . ' across ' . $voided['accounts'] . ' account(s) ('
+                    . implode(', ', array_map(fn($d) => $d['reference'] . ' ' . $d['mode'], $voided['details'])) . ')') : null;
+                if ($gmCancelWhy !== '' && (string)$prevRow['status'] !== 'cancelled') {
+                    $gmStatusNote = 'Cancellation reason: ' . $gmCancelWhy . ($gmStatusNote !== null ? ' | ' . $gmStatusNote : '');
+                }
                 logGymMemberAudit($memberId, 'status_changed',
                     ['status' => (string)$prevRow['status']],
                     ['status' => $status],
-                    $voided['accounts'] > 0 ? ('Unpaid gym bill voided: ' . number_format($voided['cleared'], 2) . ' across ' . $voided['accounts'] . ' account(s) ('
-                        . implode(', ', array_map(fn($d) => $d['reference'] . ' ' . $d['mode'], $voided['details'])) . ')') : null,
+                    $gmStatusNote,
                     (string)$prevRow['member_number']);
+            }
+            if ($prevRow && $gmCancelWhy !== '' && (string)$prevRow['status'] !== 'cancelled') {
+                rh_account_cancel_log('gym_member', (string)$prevRow['member_number'], $memberId, $gmCancelWhy, $user);
             }
             $voidMsg = $voided['accounts'] > 0
                 ? ' Unpaid bill of ' . getSetting('currency_symbol') . number_format($voided['cleared'], 2) . ' cleared; anything already paid stays on the account (refund or credit-note it separately).'
@@ -1216,6 +1253,9 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
 
         var gmOrigName = '';
         var gmOrigExpiry = '';
+        var gmOrigStatus = '';
+        // Ready-made cancel reasons (includes/cancel-reason.php) for the reason asked when a member is set to Cancelled.
+        var GM_CANCEL_PRESETS = <?php echo json_encode(rh_cancel_reason_presets('gym'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         // Billing hints: enrolment always bills a paid fee; an edit that extends the expiry offers "Bill this renewal".
         function gmSyncBill() {
@@ -1245,6 +1285,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             document.getElementById('gmNotes').value = m ? (m.notes || '') : '';
             gmOrigName = m ? (m.full_name || '') : '';
             gmOrigExpiry = m ? (m.expiry_date || '') : '';
+            gmOrigStatus = m ? (m.status || 'active') : '';
             var billChk = document.getElementById('gmBillRenewal');
             if (billChk) { billChk.checked = true; }
 
@@ -1345,6 +1386,34 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 }
             }
 
+            // Setting an existing member to Cancelled asks why first (required, kept in the change history and System Logs).
+            var newStatus = document.getElementById('gmStatus').value;
+            if (isEdit && newStatus === 'cancelled' && gmOrigStatus !== 'cancelled') {
+                if (!window.AdminConfirm || typeof window.AdminConfirm.prompt !== 'function') { gmToast('Could not open the reason box. Reload the page and try again.', false); return; }
+                window.AdminConfirm.prompt({
+                    title: 'Cancel membership',
+                    message: 'Set ' + name + ' to Cancelled?',
+                    inputLabel: 'Why is this membership being cancelled? (required)',
+                    inputPlaceholder: 'e.g. Member asked to cancel, moving away, no payment',
+                    inputMin: 5,
+                    inputMax: 500,
+                    inputMinMessage: 'Please write at least 5 characters.',
+                    inputPresets: GM_CANCEL_PRESETS,
+                    details: ['The reason is kept in the member change history and in System Logs. It is not sent to the member.'],
+                    confirmText: 'Cancel membership',
+                    cancelText: 'Keep member',
+                    tone: 'danger',
+                    icon: 'fa-ban'
+                }).then(function (why) {
+                    if (why === null) { return; }
+                    gmSaveSend(name, start, reasonEl, String(why).trim());
+                });
+                return;
+            }
+            gmSaveSend(name, start, reasonEl, '');
+        }
+
+        function gmSaveSend(name, start, reasonEl, cancelReason) {
             var pkgSel = document.getElementById('gmPackage');
             var pkgId = (pkgSel.value === 'custom' || pkgSel.value === '0') ? 0 : pkgSel.value;
             var compEl = document.getElementById('gmComplimentary');
@@ -1366,6 +1435,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 status: document.getElementById('gmStatus').value,
                 bill_renewal: (document.getElementById('gmBillRenewalWrap').style.display === 'flex' && document.getElementById('gmBillRenewal').checked) ? 1 : 0,
                 change_reason: reasonEl ? reasonEl.value.trim() : '',
+                cancellation_reason: cancelReason,
                 notes: document.getElementById('gmNotes').value.trim()
             }).then(function (d) {
                 // stay disabled while the page reloads after a successful save; re-enable on any failure

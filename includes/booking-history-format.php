@@ -695,6 +695,36 @@ if (!function_exists('rh_hist_tol')) {
         return $out;
     }
 
+    /**
+     * Adds the cancellation-log steps to $events. Each one with a "Reason: ..." line is tied (a shared identity key, so
+     * rh_hist_merge folds them into one step however far apart they were written) to the latest earlier step - at or
+     * before it, 5 seconds' grace - that is a change to cancelled carrying the very same reason line (owner 2026-11-24:
+     * the reason shows once, even when the guest email or a group cancel delays the log row).
+     */
+    function rh_hist_pair_cancel_reasons(array $events, array $cancelEvs): array
+    {
+        $used = [];
+        foreach ($cancelEvs as $ci => $ce) {
+            $reasonLine = '';
+            foreach (preg_split('/\n/', (string)$ce['detail']) as $ln) {
+                if (strpos(trim($ln), 'Reason: ') === 0) { $reasonLine = trim($ln); break; }
+            }
+            if ($reasonLine === '') continue;
+            $best = -1;
+            foreach ($events as $i => $e) {
+                if (isset($used[$i]) || !in_array('status:cancelled', $e['keys'], true) || $e['ts'] > $ce['ts'] + 5) continue;
+                if (!in_array($reasonLine, array_map('trim', preg_split('/\n/', (string)$e['detail'])), true)) continue;
+                if ($best < 0 || $e['ts'] > $events[$best]['ts']) $best = $i;
+            }
+            if ($best < 0) continue;
+            $used[$best] = true;
+            $key = 'cancelrsn:' . $ci;
+            $events[$best]['keys'][] = $key;
+            $cancelEvs[$ci]['keys'][] = $key;
+        }
+        return array_merge($events, $cancelEvs);
+    }
+
     /** guest_communication_log + automated_email_log rows. */
     function rh_hist_from_emails(array $comms, array $auto, array $ctx): array
     {
@@ -1034,7 +1064,7 @@ if (!function_exists('rh_hist_tol')) {
     {
         if ($k === 'created' || $k === 'price-explain') return true;
         if (strpos($k, 'payment:amt:') === 0) return false;
-        foreach (['payment:', 'refund:', 'cn:', 'paydel:', 'cnemail:', 'cnvoid:', 'receipt:', 'ph:'] as $p) {
+        foreach (['payment:', 'refund:', 'cn:', 'paydel:', 'cnemail:', 'cnvoid:', 'receipt:', 'ph:', 'cancelrsn:'] as $p) {
             if (strpos($k, $p) === 0 && strlen($k) > strlen($p)) return true;
         }
         return false;
@@ -1170,7 +1200,6 @@ if (!function_exists('rh_hist_tol')) {
             rh_hist_from_payment_audit($src['payment_audit'] ?? [], $ctx),
             rh_hist_from_credit_notes($src['credit_notes'] ?? [], $ctx),
             rh_hist_from_cn_apps($src['cn_apps'] ?? [], $ctx),
-            rh_hist_from_cancellations($src['cancellations'] ?? [], $ctx),
             rh_hist_from_emails($src['comms'] ?? [], $src['auto_emails'] ?? [], $ctx),
             rh_hist_from_tentative($src['tentative'] ?? [], $ctx),
             rh_hist_from_financial_audit($src['financial_audit'] ?? [], $ctx),
@@ -1178,6 +1207,9 @@ if (!function_exists('rh_hist_tol')) {
             rh_hist_from_blocked_prices($src['blocked_prices'] ?? [], $ctx),
             rh_hist_from_price_history($src['price_history'] ?? [], $ctx)
         );
+        // The cancellation log row is written after the cancel (and after the guest email), so it can land outside the
+        // merge window: tie it to the cancel step that carries the same reason, so the reason shows once.
+        $events = rh_hist_pair_cancel_reasons(array_values(array_filter($events)), rh_hist_from_cancellations($src['cancellations'] ?? [], $ctx));
         // Rooms last: their person comes from the creation / releasing step built above.
         $events = array_merge($events, rh_hist_from_booking_rooms($src['booking_rooms'] ?? [], $ctx, array_values(array_filter($events))));
         // Emails from the send log: folded into the older record of the same email (within 2 minutes) so none shows twice.

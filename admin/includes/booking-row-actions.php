@@ -16,6 +16,7 @@
 require_once __DIR__ . '/../../includes/booking-timeline.php';
 require_once __DIR__ . '/../../includes/late-stay.php';
 require_once __DIR__ . '/../../includes/system-logger.php';
+require_once __DIR__ . '/../../includes/cancel-reason.php';
 require_once __DIR__ . '/audit-functions.php';
 
 if (!function_exists('bookings_convert_tentative_booking')) {
@@ -549,9 +550,18 @@ if (!function_exists('bookings_convert_tentative_booking')) {
         $new_status = 'cancelled';
         $cancelledNow = []; // bookings cancelled by this request: [id, previous_status]
         $done = [];
+        // Staff must say why (owner 2026-11-24): checked before anything changes; a page loaded before this change
+        // (still posting "Cancelled by admin") is refused too.
+        $reasonCheck = rh_cancel_reason_check($in['cancellation_reason'] ?? '');
+        if (!$reasonCheck['ok']) {
+            throw new Exception($reasonCheck['error']);
+        }
+        $cancellation_reason = $reasonCheck['reason'];
+        $reasonLine = rh_cancel_reason_history_line($cancellation_reason);
+        $actorId = isset($user['id']) ? (int)$user['id'] : null;
+        $actorName = $user['full_name'] ?? ($user['username'] ?? null);
         // Cancellation: status change + room/stock release + bill treatment +
         // refund all commit together (one transaction, booking row locked).
-        $cancellation_reason = $in['cancellation_reason'] ?? 'Cancelled by admin';
         // Group booking (owner 2026-10-20): the dialog asks each time. scope=group cancels every live
         // room of the group in ONE transaction (all go or none); scope=single (or none) is one room.
         $cancelGroupIds = ($in['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, (int)$booking_id) : [];
@@ -565,8 +575,10 @@ if (!function_exists('bookings_convert_tentative_booking')) {
             foreach ($grpRes['cancelled'] as $gc) {
                 $cancelledNow[] = ['id' => $gc['id'], 'previous_status' => $gc['previous_status']];
                 $done[] = ['id' => (int)$gc['id'], 'previous_status' => (string)$gc['previous_status'], 'reference' => (string)$gc['reference'], 'summary' => (string)$gc['summary']];
-                rh_log_event('bookings', 'info', 'Booking status changed (group cancel)', ['booking_id' => $gc['id'], 'ref' => $gc['reference'], 'to' => $new_status, 'group' => $cancelGroupIds, 'by' => $user['username'] ?? null]);
-                logBookingAudit($gc['id'], $new_status, ['status' => $gc['previous_status']], ['status' => $new_status], 'Cancelled with its group (' . count($cancelGroupIds) . ' rooms)', $gc['reference']);
+                rh_log_event('bookings', 'info', 'Booking status changed (group cancel)', ['booking_id' => $gc['id'], 'ref' => $gc['reference'], 'to' => $new_status, 'group' => $cancelGroupIds, 'reason' => $cancellation_reason, 'by' => $user['username'] ?? null]);
+                // History: the status step with the reason (as Booking details writes it); the audit note's lines match it.
+                logBookingStatusChange((int)$gc['id'], (string)$gc['reference'], (string)$gc['previous_status'], $new_status, 'admin', $actorId, $actorName, $cancellation_reason);
+                logBookingAudit($gc['id'], $new_status, ['status' => $gc['previous_status']], ['status' => $new_status], 'Cancelled with its group (' . count($cancelGroupIds) . " rooms)\n" . $reasonLine, $gc['reference']);
             }
         } else {
             $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($in, false));
@@ -576,8 +588,9 @@ if (!function_exists('bookings_convert_tentative_booking')) {
             $cancelledNow[] = ['id' => (int)$booking_id, 'previous_status' => (string)$current_status];
             $done[] = ['id' => (int)$booking_id, 'previous_status' => (string)$current_status, 'reference' => (string)($cancelRes['booking_reference'] ?? ''), 'summary' => (string)$cancelRes['summary']];
             $message = 'Booking cancelled. ' . $cancelRes['summary'];
-            rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'mode' => $cancelRes['mode'], 'refund' => $cancelRes['refund_total'], 'by' => $user['username'] ?? null]);
-            logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $booking_reference);
+            rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'mode' => $cancelRes['mode'], 'refund' => $cancelRes['refund_total'], 'reason' => $cancellation_reason, 'by' => $user['username'] ?? null]);
+            logBookingStatusChange((int)$booking_id, (string)($booking_reference ?: ($cancelRes['booking_reference'] ?? '')), (string)$current_status, $new_status, 'admin', $actorId, $actorName, $cancellation_reason);
+            logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], $reasonLine, $booking_reference);
         }
 
         $emailOut = [];
@@ -585,7 +598,6 @@ if (!function_exists('bookings_convert_tentative_booking')) {
             // (Stock release, room release and refund were done atomically by cancelRoomBookingSettled above.)
             // Every booking cancelled by this request that was confirmed gets the guest email + the log rows.
             require_once __DIR__ . '/../../config/email.php';
-            $cancellation_reason = $in['cancellation_reason'] ?? 'Cancelled by admin';
             foreach ($cancelledNow as $cn) {
                 if ($cn['previous_status'] !== 'confirmed') {
                     continue;
@@ -613,7 +625,7 @@ if (!function_exists('bookings_convert_tentative_booking')) {
                     }
                 } else {
                     // Send cancellation email
-                    $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
+                    $email_result = sendBookingCancelledEmail($booking, rh_cancel_guest_email_reason()); // the reason stays internal (owner 2026-11-25)
                 }
 
                 // Log cancellation to database
