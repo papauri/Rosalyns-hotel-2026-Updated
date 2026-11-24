@@ -4,7 +4,7 @@
 // steps: [{viewport:[w,h]} | {nav:"{base}/__devlogin?to=pos.php", after:ms} | {eval:"js", label} | {wait:ms} | {shot:"file.png"} | {init:"js"}]
 // Real pointer input: {click:[x,y]} | {clickSel:"css", label} (scrolls into view, clicks the centre, prints the element
 // actually under the pointer so overlays that swallow clicks show up) | {type:"text"} (Input.insertText into the focused field)
-// | {key:"Tab"|"Enter"|...}.
+// | {key:"Tab"|"Enter"|...} | {touch:true} (touch emulation on) | {pointAt:"js -> {x,y}", action:"click"|"tap"}.
 // "{base}" in nav is replaced by $BASE (default http://localhost:8000). /__devlogin signs in as the
 // first active admin (dev-router.php only, built-in server only). Console errors/exceptions print.
 import { spawn } from 'node:child_process';
@@ -56,6 +56,25 @@ for (const s of steps) {
     await send('Input.dispatchMouseEvent', { ...base, type: 'mousePressed' });
     await send('Input.dispatchMouseEvent', { ...base, type: 'mouseReleased' });
     await sleep(s.after ?? 400);
+  }
+  if (s.touch) { await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }); }
+  if (s.pointAt) {
+    // {pointAt:"js -> {x,y}", action:"click"|"tap", label}: real input at page coordinates the page works out itself
+    // (e.g. an element inside a same-origin frame). A missing point prints null and does nothing.
+    const r = await send('Runtime.evaluate', { expression: s.pointAt, awaitPromise: true, returnByValue: true });
+    const v = r.result?.result?.value;
+    console.log('POINT', s.label || '', '=>', JSON.stringify(v ?? r.result?.exceptionDetails?.exception?.description ?? null));
+    if (v && typeof v.x === 'number' && s.action === 'tap') {
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: v.x, y: v.y }] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await sleep(s.after ?? 600);
+    } else if (v && typeof v.x === 'number') {
+      const b = { x: v.x, y: v.y, button: 'left', clickCount: 1 };
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: v.x, y: v.y });
+      await send('Input.dispatchMouseEvent', { ...b, type: 'mousePressed' });
+      await send('Input.dispatchMouseEvent', { ...b, type: 'mouseReleased' });
+      await sleep(s.after ?? 600);
+    }
   }
   if (s.type !== undefined) { await send('Input.insertText', { text: s.type }); await sleep(150); }
   if (s.key) { const k = s.key; const code = { Enter: 13, Tab: 9, Escape: 27 }[k] || 0; for (const t of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type: t, key: k, code: k, windowsVirtualKeyCode: code }); await sleep(150); }

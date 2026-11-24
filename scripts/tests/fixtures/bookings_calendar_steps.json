@@ -1,0 +1,592 @@
+[
+ {
+  "init": "\nwindow.__until = (fn, ms) => new Promise(res => { const t0 = Date.now(); (function tick() { let v = false; try { v = fn(); } catch (e) { v = false; } if (v) return res(v); if (Date.now() - t0 > (ms || 15000)) return res(false); setTimeout(tick, 150); })(); });\nwindow.__vis = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'; };\nwindow.__noH = () => document.documentElement.scrollWidth <= window.innerWidth + 1;\nwindow.__idle = () => { const c = document.getElementById('booking-results'); return !!c && c.style.opacity === '' && c.style.pointerEvents === ''; };\nwindow.__ready = () => !!document.getElementById('booking-results') && !document.querySelector('#adminPageLoader.is-visible') && window.__idle();\nwindow.__q = (k) => new URLSearchParams(location.search).get(k);\nwindow.__fr = () => document.querySelector('[data-bk-cal-frame]');\nwindow.__fd = () => { const f = window.__fr(); try { return f && f.contentDocument; } catch (e) { return null; } };\nwindow.__fw = () => { const f = window.__fr(); return f && f.contentWindow; };\nwindow.__tl = () => { const d = window.__fd(); if (!d || d.readyState !== 'complete') return false; const r = d.querySelector('#roomTimeline[data-tl-bound=\"1\"]'); return !!r && !!d.querySelector('#roomTimeline .tl-lane, #roomTimeline [data-tl-agenda] li, #roomTimeline [data-tl-empty]:not([hidden])'); };\nwindow.__calShown = () => { const p = document.querySelector('[data-bk-cal]'); return !!p && !p.hidden && document.getElementById('booking-results').hidden; };\nwindow.__listShown = () => { const p = document.querySelector('[data-bk-cal]'); return !!p && p.hidden && !document.getElementById('booking-results').hidden; };\nwindow.__hb = () => { const h = document.querySelector('.admin-header'); return h ? Math.max(0, h.getBoundingClientRect().bottom) : 0; };\nwindow.__fpt = (el) => { const f = window.__fr(); if (!f || !el) return null; let fr0 = f.getBoundingClientRect(); if (fr0.top < window.__hb() - 1 || fr0.bottom > innerHeight + 1) window.scrollBy(0, fr0.top - window.__hb()); el.scrollIntoView({ block: 'center' }); const fr = f.getBoundingClientRect(); const s = fr.width ? (f.clientWidth / f.contentWindow.innerWidth) : 1; const r = el.getBoundingClientRect(); const doc = el.ownerDocument; const cands = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 8, r.top + r.height / 2], [r.right - 8, r.top + r.height / 2], [r.left + r.width / 2, r.top + 5]]; const pick = cands.find(c => { const h = doc.elementFromPoint(c[0], c[1]); return h && (h === el || el.contains(h)); }) || cands[0]; const lx = pick[0], ly = pick[1]; const x = fr.left + f.clientLeft * (fr.width / f.offsetWidth) + lx * s * (fr.width / f.offsetWidth), y = fr.top + f.clientTop * (fr.height / f.offsetHeight) + ly * s * (fr.height / f.offsetHeight); const hit = el.ownerDocument.elementFromPoint(lx, ly); return { x, y, inside: !!hit && (hit === el || el.contains(hit)), top: document.elementFromPoint(x, y) === f }; };\nwindow.__clickable = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); if (!r.width) return false; const h = el.ownerDocument.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && (h === el || el.contains(h)); };\nwindow.__pt = (el) => { if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };\ndocument.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style'); s.textContent = '#admin-pwa-banner { display: none !important; }'; document.head.appendChild(s); });\n"
+ },
+ {
+  "viewport": [
+   1920,
+   1080
+  ]
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} return true; })()",
+  "label": "1920 reset device memory"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?room_type=2&filter=checked_in",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 page ready"
+ },
+ {
+  "eval": "(async () => { \n  const sw = document.querySelector('[data-bk-view-switch]');\n  return !!sw && window.__vis(sw) && window.__listShown() && !window.__fr().getAttribute('src') && document.querySelector('a[data-bk-view=\"list\"]').getAttribute('aria-pressed') === 'true'; })()",
+  "label": "1920 List shown, switch present, frame not loaded yet (lazy)"
+ },
+ {
+  "clickSel": "a[data-bk-view=\"calendar\"]",
+  "after": 800
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { \n  const f = window.__fr(), fw = window.__fw(), d = window.__fd();\n  const src = new URL(f.src); const p = src.searchParams;\n  const ty = d.querySelector('[data-tl-filter=\"type\"]'), stt = d.querySelector('[data-tl-filter=\"status\"]');\n  const out = { view: window.__q('view') === 'calendar', embed: p.get('embed') === '1', from: p.get('from') === 'bookings', type: p.get('filter_room_type') === '2', occ: p.get('tl_status') === 'occ',\n    typeSel: !!ty && ty.value === '2', statusSel: !!stt && stt.value === 'occ', noteHidden: document.querySelector('[data-bk-cal-note]').hidden,\n    pressed: document.querySelector('a[data-bk-view=\"calendar\"]').getAttribute('aria-pressed') === 'true' };\n  const bad = Object.keys(out).filter(k => !out[k]);\n  return bad.length ? 'FAIL ' + bad.join(',') + ' src=' + f.src : true; })()",
+  "label": "1920 switch carries room type + In house -> occ (URL, frame src, timeline selects)"
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(); const rows = Array.from(d.querySelectorAll('#roomTimeline .tl-lane[data-tl-lane]')).filter(window.__vis);\n  const cfg = JSON.parse(d.querySelector('#roomTimeline [data-tl-json]').textContent); const lanes = {}; cfg.data.lanes.forEach(l => { lanes[l.id] = l; });\n  const wrong = rows.filter(r => { const l = lanes[r.getAttribute('data-tl-lane')]; return !l || String(l.type_id) !== '2' || !l.today.occ; });\n  return rows.length > 0 && wrong.length === 0 ? true : 'FAIL rows=' + rows.length + ' wrong=' + wrong.length; })()",
+  "label": "1920 In house filter applied in the frame (only occupied rooms of type 2 drawn)"
+ },
+ {
+  "eval": "(async () => { \n  const r = window.__fr().getBoundingClientRect(); const h = document.querySelector('.admin-header'); const hb = h ? h.getBoundingClientRect().bottom : 0;\n  return r.top >= hb - 2 && r.top <= hb + 40 && r.height >= innerHeight - hb - 60 ? true : 'FAIL top=' + Math.round(r.top) + ' hb=' + Math.round(hb) + ' h=' + Math.round(r.height); })()",
+  "label": "1920 frame fills the window below the header"
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(), fw = window.__fw();\n  const out = { csrf: (fw._rhCsrf || '').length > 10, hdr: !d.querySelector('.admin-header'), nav: !d.querySelector('.admin-nav'),\n    ai: !d.querySelector('#rhAiNotice, [class*=\"rh-ai-\"], [id^=\"rhAi\"]'), help: !d.querySelector('#rhHelpFloatingToggle'),\n    foot: !d.getElementById('rhAdminFooter'), loader: !window.__vis(d.querySelector('#adminPageLoader.is-visible')),\n    base: (d.querySelector('base') || {}).target === '_top', path: fw.location.pathname.endsWith('/calendar.php') && /[?&]embed=1(&|$)/.test(fw.location.search),\n    topNoH: window.__noH(), frameNoH: d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1,\n    frameFits: (() => { const r = window.__fr().getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; })() };\n  const bad = Object.keys(out).filter(k => !out[k]);\n  return bad.length ? 'FAIL ' + bad.join(',') : true; })()",
+  "label": "1920 frame: _rhCsrf set, no header/nav/Assistant/help/footer, base _top, no side-scroll"
+ },
+ {
+  "shot": "tmp/c1-1920-calendar.png"
+ },
+ {
+  "eval": "(async () => { \n  const i = document.querySelector('[data-live-search-input=\"room-bookings\"]'); i.focus(); i.value = 'Zq'; i.dispatchEvent(new Event('input', { bubbles: true }));\n  const ok = await window.__until(() => window.__idle() && window.__q('search') === 'Zq' && window.__q('view') === 'calendar' && /filter_search=Zq/.test(window.__fr().src), 20000);\n  const ok2 = await window.__until(() => window.__tl() && /filter_search=Zq/.test(window.__fw().location.search), 30000);\n  return !!ok && !!ok2 && window.__calShown() && document.querySelector('[data-bk-cal-note]').hidden; })()",
+  "label": "1920 live search (name) reloads the frame with filter_search"
+ },
+ {
+  "eval": "(async () => { \n  const i = document.querySelector('[data-live-search-input=\"room-bookings\"]'); i.value = 'guest@example.invalid'; i.dispatchEvent(new Event('input', { bubbles: true }));\n  const ok = await window.__until(() => window.__idle() && window.__q('search') === 'guest@example.invalid' && !/filter_search=/.test(window.__fr().src), 20000);\n  const note = document.querySelector('[data-bk-cal-note]');\n  return !!ok && !note.hidden && /phone \\/ email search/.test(note.textContent) && window.__calShown(); })()",
+  "label": "1920 email search stays on the list and the note names it"
+ },
+ {
+  "eval": "(async () => { \n  const i = document.querySelector('[data-live-search-input=\"room-bookings\"]'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));\n  const ok = await window.__until(() => window.__idle() && !window.__q('search') && !/filter_search=/.test(window.__fr().src), 20000);\n  return !!ok && document.querySelector('[data-bk-cal-note]').hidden; })()",
+  "label": "1920 clear search"
+ },
+ {
+  "eval": "(async () => { const s = document.querySelector('select[name=\"filter_status\"]'); s.value = 'pending'; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value === 'pending'; })()",
+  "label": "1920 status drop-down set to Pending"
+ },
+ {
+  "clickSel": ".bookings-toolbar__button--filter",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 after Filter page ready"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 after Filter calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { \n  const note = document.querySelector('[data-bk-cal-note]');\n  return window.__q('view') === 'calendar' && window.__q('filter_status') === 'pending' && !note.hidden && /status/.test(note.textContent) ? true : 'FAIL ' + location.search + ' note=' + note.textContent; })()",
+  "label": "1920 Filter keeps Calendar; note names status"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => location.reload(), 10); return true; })()",
+  "label": "1920 refresh"
+ },
+ {
+  "wait": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 after refresh page ready"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 after refresh calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { return window.__q('view') === 'calendar' && window.__calShown(); })()",
+  "label": "1920 refresh keeps Calendar"
+ },
+ {
+  "clickSel": "a[data-bk-view=\"list\"]",
+  "after": 800
+ },
+ {
+  "eval": "(async () => { \n  const ok = await window.__until(() => window.__ready() && window.__listShown(), 30000);\n  return !!ok && !window.__q('view') && document.querySelector('a[data-bk-view=\"list\"]').getAttribute('aria-pressed') === 'true'; })()",
+  "label": "1920 List: rows back, URL without view, list reloaded"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => history.back(), 10); return true; })()",
+  "label": "1920 Back"
+ },
+ {
+  "wait": 4000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 after Back page ready"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 after Back calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { return window.__q('view') === 'calendar' && window.__calShown(); })()",
+  "label": "1920 Back returns to Calendar"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => history.forward(), 10); return true; })()",
+  "label": "1920 Forward"
+ },
+ {
+  "wait": 4000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 after Forward page ready"
+ },
+ {
+  "eval": "(async () => { return !window.__q('view') && window.__listShown(); })()",
+  "label": "1920 Forward returns to List"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?view=calendar",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 move page ready"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 move calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { \n  // Moves a real booking (then moves it back): the test hotel only, never a live one.\n  if (!/Liwonde/i.test((document.querySelector('.admin-header h1') || {}).textContent || '')) return 'FAIL refused: not the Liwonde test hotel';\n  const d = window.__fd(); const cfg = JSON.parse(d.querySelector('#roomTimeline [data-tl-json]').textContent);\n  const lanes = {}; cfg.data.lanes.forEach(l => { lanes[l.id] = l; });\n  const c = cfg.data.bookings.filter(b => b.status === 'confirmed' && b.drag && b.drag.move && b.lanes.length === 1 && !b.joined && !b.group && lanes[b.lanes[0]] && d.querySelector('.tl-lane[data-tl-lane=\"' + b.lanes[0] + '\"] [data-tl-booking=\"' + b.id + '\"]'));\n  if (!c.length) return 'FAIL no movable booking in view';\n  const b = c[0]; window.__mv = { id: b.id, ref: b.ref, fromLane: String(b.lanes[0]), fromRoom: lanes[b.lanes[0]].number };\n  return 'BEFORE ' + JSON.stringify(window.__mv); })()",
+  "label": "1920 move: pick a confirmed single-room booking the timeline may move (BEFORE)"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('.tl-lane[data-tl-lane=\"' + window.__mv.fromLane + '\"] [data-tl-booking=\"' + window.__mv.id + '\"]')))()",
+  "action": "click",
+  "label": "1920 click the booking bar",
+  "after": 1200
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(); const ok = await window.__until(() => window.__vis(d.querySelector('[data-tl-drawer]')) && d.querySelector('[data-tl-drawer] a[href^=\"booking-details.php\"]'), 15000);\n  const links = Array.from(d.querySelectorAll('[data-tl-drawer] a[href]'));\n  const aside = document.documentElement.classList.contains('rh-bk-cal-panel') && !window.__vis(document.querySelector('.rh-ai-launch')) && !window.__vis(document.querySelector('.rh-ai-notice-card')) && !window.__vis(document.querySelector('#rhHelpFloatingToggle'));\n  return !!ok && links.length > 0 && links.every(a => !a.getAttribute('target')) && d.querySelector('base').target === '_top' && aside ? true : 'FAIL ok=' + !!ok + ' aside=' + aside; })()",
+  "label": "1920 panel open; its links have no own target (base sends them to the top window); the outer Assistant / notice / help buttons step aside"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-drawer] [data-tl-more]')))()",
+  "action": "click",
+  "label": "1920 More",
+  "after": 600
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-drawer] [data-tl-act=\"move\"]')))()",
+  "action": "click",
+  "label": "1920 Move room",
+  "after": 2500
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(); const ok = await window.__until(() => d.querySelector('[data-tl-room-pick]'), 20000);\n  if (!ok) return 'FAIL no free room listed: ' + ((d.querySelector('[data-tl-drawer]') || {}).textContent || '').trim().slice(0, 200);\n  window.__mv.toLane = d.querySelector('[data-tl-room-pick]').getAttribute('data-tl-room-pick'); return 'pick ' + window.__mv.toLane; })()",
+  "label": "1920 free rooms listed"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-room-pick=\"' + window.__mv.toLane + '\"]')))()",
+  "action": "click",
+  "label": "1920 choose the room",
+  "after": 1200
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(); const ok = await window.__until(() => window.__vis(d.querySelector('[data-tl-confirm]')), 15000);\n  return ok ? 'CONFIRM: ' + ((d.querySelector('[data-tl-drawer] .tl-confirm__text') || {}).textContent || '').trim() : 'FAIL no confirm'; })()",
+  "label": "1920 confirm shown (nothing saved yet)"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-confirm]')))()",
+  "action": "click",
+  "label": "1920 Confirm the move",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { \n  const ok = await window.__until(() => { const d = window.__fd(); return window.__tl() && d.querySelector('.tl-lane[data-tl-lane=\"' + window.__mv.toLane + '\"] [data-tl-booking=\"' + window.__mv.id + '\"]'); }, 30000);\n  const d = window.__fd(); const cfgRow = d.querySelector('.tl-lane[data-tl-lane=\"' + window.__mv.toLane + '\"] .tl-room__num');\n  window.__mv.toRoom = cfgRow ? cfgRow.textContent.trim() : '';\n  return ok && window.__mv.toRoom && window.__mv.toRoom !== window.__mv.fromRoom ? 'AFTER booking ' + window.__mv.ref + ' now Room ' + window.__mv.toRoom + ' (was ' + window.__mv.fromRoom + ')' : 'FAIL bar not on lane ' + window.__mv.toLane; })()",
+  "label": "1920 move saved: the bar is on the new room (AFTER)"
+ },
+ {
+  "eval": "(async () => { document.querySelector('#booking-results [data-bk-state]').dataset.mark = 'old'; return true; })()",
+  "label": "1920 mark the list rows rendered before the move"
+ },
+ {
+  "clickSel": "a[data-bk-view=\"list\"]",
+  "after": 800
+ },
+ {
+  "eval": "(async () => { \n  const ok = await window.__until(() => window.__ready() && window.__listShown() && !document.querySelector('#booking-results [data-bk-state][data-mark]'), 30000);\n  return !!ok && !!window.__mv; })()",
+  "label": "1920 back on List the rows and tab counts were fetched again (no page reload)"
+ },
+ {
+  "eval": "(async () => { \n  await window.__until(() => window.__ready() && window.__listShown(), 30000);\n  const i = document.querySelector('[data-live-search-input=\"room-bookings\"]'); i.focus(); i.value = window.__mv.ref; i.dispatchEvent(new Event('input', { bubbles: true }));\n  await window.__until(() => window.__idle() && window.__q('search') === window.__mv.ref, 20000);\n  const row = Array.from(document.querySelectorAll('#booking-results table.bookings-table tbody tr')).find(tr => tr.textContent.indexOf(window.__mv.ref) !== -1);\n  const txt = row ? row.textContent.replace(/\\s+/g, ' ') : '';\n  return row && window.__mv.toRoom && txt.indexOf(window.__mv.toRoom) !== -1 && txt.indexOf(window.__mv.fromRoom) === -1 ? 'LIST ROW AFTER: ' + txt.slice(0, 160) : 'FAIL row: ' + txt.slice(0, 200); })()",
+  "label": "1920 List after the move shows the new room for that booking"
+ },
+ {
+  "clickSel": "a[data-bk-view=\"calendar\"]",
+  "after": 800
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 move back calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__tl() && new URL(window.__fr().src).searchParams.get('filter_search') === window.__mv.ref, 30000)); })()",
+  "label": "1920 frame follows the search (reference)"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => { const d = window.__fd(); const b = d && d.querySelector('.tl-lane[data-tl-lane=\"' + window.__mv.toLane + '\"] [data-tl-booking=\"' + window.__mv.id + '\"]'); if (b) b.scrollIntoView({ block: 'center' }); return window.__clickable(b); }, 20000)) ? true : 'FAIL ' + (() => { const d = window.__fd(); const b = d.querySelector('[data-tl-booking=\"' + window.__mv.id + '\"]'); if (!b) return 'no bar'; const r = b.getBoundingClientRect(); const h = d.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return 'covered by ' + (h ? h.tagName + '.' + String(h.className) : 'nothing'); })(); })()",
+  "label": "1920 the moved bar is drawn and nothing covers it"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('.tl-lane[data-tl-lane=\"' + window.__mv.toLane + '\"] [data-tl-booking=\"' + window.__mv.id + '\"]')))()",
+  "action": "click",
+  "label": "1920 click the moved bar",
+  "after": 1200
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-drawer] [data-tl-more]')))()",
+  "action": "click",
+  "label": "1920 More",
+  "after": 600
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-drawer] [data-tl-act=\"move\"]')))()",
+  "action": "click",
+  "label": "1920 Move room",
+  "after": 2500
+ },
+ {
+  "eval": "(async () => { const d = window.__fd(); return !!(await window.__until(() => d.querySelector('[data-tl-room-pick=\"' + window.__mv.fromLane + '\"]'), 20000)); })()",
+  "label": "1920 the original room is free again"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-room-pick=\"' + window.__mv.fromLane + '\"]')))()",
+  "action": "click",
+  "label": "1920 choose the original room",
+  "after": 1200
+ },
+ {
+  "eval": "(async () => { const d = window.__fd(); return !!(await window.__until(() => window.__vis(d.querySelector('[data-tl-confirm]')), 15000)); })()",
+  "label": "1920 confirm (move back)"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-confirm]')))()",
+  "action": "click",
+  "label": "1920 Confirm the move back",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { \n  const ok = await window.__until(() => { const d = window.__fd(); return window.__tl() && d.querySelector('.tl-lane[data-tl-lane=\"' + window.__mv.fromLane + '\"] [data-tl-booking=\"' + window.__mv.id + '\"]'); }, 30000);\n  return ok && window.__mv.toRoom ? 'RESTORED booking ' + window.__mv.ref + ' Room ' + window.__mv.fromRoom : 'FAIL not restored to lane ' + window.__mv.fromLane; })()",
+  "label": "1920 moved back: the bar is on the original room again"
+ },
+ {
+  "clickSel": "a[data-bk-view=\"list\"]",
+  "after": 800
+ },
+ {
+  "eval": "(async () => { \n  await window.__until(() => window.__ready() && window.__listShown(), 30000);\n  const row = Array.from(document.querySelectorAll('#booking-results table.bookings-table tbody tr')).find(tr => tr.textContent.indexOf(window.__mv.ref) !== -1);\n  const txt = row ? row.textContent.replace(/\\s+/g, ' ') : '';\n  return row && window.__mv.toRoom && txt.indexOf(window.__mv.fromRoom) !== -1 && txt.indexOf(window.__mv.toRoom) === -1 ? 'LIST ROW RESTORED: ' + txt.slice(0, 160) : 'FAIL row: ' + txt.slice(0, 200); })()",
+  "label": "1920 List after the move back shows the original room"
+ },
+ {
+  "clickSel": "a[data-bk-view=\"calendar\"]",
+  "after": 800
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 open booking calendar frame drawn"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-booking=\"' + window.__mv.id + '\"]')))()",
+  "action": "click",
+  "label": "1920 click the bar",
+  "after": 1200
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-drawer] a[href^=\"booking-details.php\"]')))()",
+  "action": "click",
+  "label": "1920 Open booking",
+  "after": 4000
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => /\\/booking-details\\.php$/.test(location.pathname) && window.top === window, 30000)) ? 'top ' + location.pathname + location.search : 'FAIL ' + location.href; })()",
+  "label": "1920 Open booking opened in the TOP window"
+ },
+ {
+  "eval": "(async () => { setTimeout(() => history.back(), 10); return true; })()",
+  "label": "1920 Back from the booking"
+ },
+ {
+  "wait": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 after Back page ready"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 after Back calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { return window.__q('view') === 'calendar' && window.__calShown(); })()",
+  "label": "1920 Back keeps Calendar"
+ },
+ {
+  "eval": "(async () => { \n  if (!window.caches) return true;\n  const names = await caches.keys(); const hits = [];\n  for (const n of names) { const c = await caches.open(n); (await c.keys()).forEach(r => { if (/[?&]embed=1/.test(r.url)) hits.push(n + ' ' + r.url); }); }\n  return hits.length ? 'FAIL ' + hits.join(' | ') : true; })()",
+  "label": "1920 service worker page cache holds no embed=1 page"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?view=calendar",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 sign-out page ready"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1920 sign-out calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { \n  try { sessionStorage.removeItem('rh-bk-cal-out'); } catch (e) {}\n  await new Promise(res => { const x = new XMLHttpRequest(); x.open('GET', 'logout.php'); x.onloadend = res; x.send(); });\n  window.__fw().location.reload(); return true; })()",
+  "label": "1920 sign out behind the page (plain request, no page change), then the frame reloads"
+ },
+ {
+  "wait": 5000
+ },
+ {
+  "eval": "(async () => { \n  const ok = await window.__until(() => /\\/login\\.php$/.test(location.pathname) && document.readyState === 'complete', 20000);\n  const r = new URLSearchParams(location.search).get('redirect'); const inp = document.querySelector('input[name=\"redirect\"]');\n  return ok && window.top === window && r === 'bookings.php?view=calendar' && !!inp && inp.value === 'bookings.php?view=calendar' ? 'top ' + location.pathname + location.search + ' form redirect=' + inp.value : 'FAIL ' + location.href + ' form=' + (inp && inp.value); })()",
+  "label": "1920 whole window on the sign-in page, coming back to bookings.php?view=calendar"
+ },
+ {
+  "nav": "{base}/__devlogin?to=bookings.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1920 signed in again page ready"
+ },
+ {
+  "eval": "(async () => { try { sessionStorage.clear(); } catch (e) {} return true; })()",
+  "label": "1920 clear the break-out guard"
+ },
+ {
+  "nav": "{base}/admin/calendar.php",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { \n  const ok = await window.__until(() => !document.querySelector('#adminPageLoader.is-visible') && document.querySelector('#roomTimeline .tl-lane'), 60000);\n  const hh = getComputedStyle(document.documentElement).getPropertyValue('--admin-header-height').trim();\n  const out = { drawn: !!ok, hdr: !!document.querySelector('.admin-header'), nav: !!document.querySelector('.admin-nav'), head: !!document.querySelector('.tl-page-head'),\n    foot: !!document.getElementById('rhAdminFooter'), noBase: !document.querySelector('base'), noEmbed: !document.body.classList.contains('rh-embed'),\n    hh: hh !== '' && hh !== '0px', month: window.__vis(document.querySelector('.tl-view a[href*=\"view=month\"]')) };\n  const bad = Object.keys(out).filter(k => !out[k]); return bad.length ? 'FAIL ' + bad.join(',') : true; })()",
+  "label": "1920 plain calendar.php unchanged (header, nav, tabs, footer, no base, no embed class)"
+ },
+ {
+  "viewport": [
+   1280,
+   800
+  ]
+ },
+ {
+  "nav": "{base}/admin/bookings.php?room_type=2&filter=checkin_today",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "1280 page ready"
+ },
+ {
+  "clickSel": "a[data-bk-view=\"calendar\"]",
+  "after": 800
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "1280 calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { const p = new URL(window.__fr().src).searchParams; const d = window.__fd(); return p.get('tl_status') === 'arr' && p.get('filter_room_type') === '2' && d.querySelector('[data-tl-filter=\"status\"]').value === 'arr'; })()",
+  "label": "1280 Arriving today -> arr, room type carried"
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(), fw = window.__fw();\n  const out = { csrf: (fw._rhCsrf || '').length > 10, hdr: !d.querySelector('.admin-header'), nav: !d.querySelector('.admin-nav'),\n    ai: !d.querySelector('#rhAiNotice, [class*=\"rh-ai-\"], [id^=\"rhAi\"]'), help: !d.querySelector('#rhHelpFloatingToggle'),\n    foot: !d.getElementById('rhAdminFooter'), loader: !window.__vis(d.querySelector('#adminPageLoader.is-visible')),\n    base: (d.querySelector('base') || {}).target === '_top', path: fw.location.pathname.endsWith('/calendar.php') && /[?&]embed=1(&|$)/.test(fw.location.search),\n    topNoH: window.__noH(), frameNoH: d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1,\n    frameFits: (() => { const r = window.__fr().getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; })() };\n  const bad = Object.keys(out).filter(k => !out[k]);\n  return bad.length ? 'FAIL ' + bad.join(',') : true; })()",
+  "label": "1280 frame: _rhCsrf set, no header/nav/Assistant/help/footer, base _top, no side-scroll"
+ },
+ {
+  "shot": "tmp/c2-1280-calendar.png"
+ },
+ {
+  "viewport": [
+   768,
+   1024
+  ]
+ },
+ {
+  "touch": true
+ },
+ {
+  "eval": "(async () => { try { localStorage.setItem('rh_page_zoom', '1'); } catch (e) {} return true; })()",
+  "label": "768 display size 100% (the device setting)"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?room_type=2&filter=checked_in",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "768 page ready"
+ },
+ {
+  "eval": "(async () => { const bad = Array.from(document.querySelectorAll('a[data-bk-view]')).filter(a => { const r = a.getBoundingClientRect(); return r.height < 40 || r.width < 40; }); return bad.length === 0 && document.querySelectorAll('a[data-bk-view]').length === 2; })()",
+  "label": "768 switch buttons are >= 40px touch targets"
+ },
+ {
+  "pointAt": "(() => window.__pt(document.querySelector('a[data-bk-view=\"calendar\"]')))()",
+  "action": "tap",
+  "label": "768 tap Calendar",
+  "after": 1000
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "768 calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { \n  const fw = window.__fw(), d = window.__fd(); const on = d.querySelector('[data-tl-days][aria-pressed=\"true\"]');\n  return fw.RoomTimeline.util.viewport() === 'tablet' && on && on.getAttribute('data-tl-days') === '7' && d.querySelector('[data-tl-filter=\"status\"]').value === 'occ' ? true : 'FAIL vp=' + fw.RoomTimeline.util.viewport() + ' days=' + (on && on.getAttribute('data-tl-days')); })()",
+  "label": "768 frame uses the timeline tablet layout (7 days), mapping carried"
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(), fw = window.__fw();\n  const out = { csrf: (fw._rhCsrf || '').length > 10, hdr: !d.querySelector('.admin-header'), nav: !d.querySelector('.admin-nav'),\n    ai: !d.querySelector('#rhAiNotice, [class*=\"rh-ai-\"], [id^=\"rhAi\"]'), help: !d.querySelector('#rhHelpFloatingToggle'),\n    foot: !d.getElementById('rhAdminFooter'), loader: !window.__vis(d.querySelector('#adminPageLoader.is-visible')),\n    base: (d.querySelector('base') || {}).target === '_top', path: fw.location.pathname.endsWith('/calendar.php') && /[?&]embed=1(&|$)/.test(fw.location.search),\n    topNoH: window.__noH(), frameNoH: d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1,\n    frameFits: (() => { const r = window.__fr().getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; })() };\n  const bad = Object.keys(out).filter(k => !out[k]);\n  return bad.length ? 'FAIL ' + bad.join(',') : true; })()",
+  "label": "768 frame: _rhCsrf set, no header/nav/Assistant/help/footer, base _top, no side-scroll"
+ },
+ {
+  "shot": "tmp/c3-768-calendar.png"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('#roomTimeline .tl-bar')))()",
+  "action": "tap",
+  "label": "768 tap a booking bar inside the frame",
+  "after": 1500
+ },
+ {
+  "eval": "(async () => { const d = window.__fd(); return !!(await window.__until(() => window.__vis(d.querySelector('[data-tl-drawer]')) && d.querySelector('[data-tl-drawer] a[href^=\"booking-details.php\"]'), 15000)) && window.__noH(); })()",
+  "label": "768 the booking panel opens by touch inside the frame"
+ },
+ {
+  "shot": "tmp/c3b-768-panel.png"
+ },
+ {
+  "eval": "(async () => { try { localStorage.removeItem('rh_page_zoom'); } catch (e) {} return true; })()",
+  "label": "768 default tablet display size (60%)"
+ },
+ {
+  "nav": "{base}/admin/bookings.php?room_type=2&filter=checked_in&view=calendar",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "768 60% page ready"
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "768 60% calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { \n  const f = window.__fr(), fw = window.__fw(); const z = window.__rhPageZoom || 1; const fz = fw.__rhPageZoom || 1; const vp = fw.RoomTimeline.util.viewport();\n  const ok = fz === 1 && (vp === 'tablet' || fw.innerWidth > 1024) && window.__noH();\n  return (ok ? '' : 'FAIL ') + 'top zoom ' + z + ', frame own zoom none, frame ' + fw.innerWidth + ' CSS px wide -> timeline ' + vp + ' layout'; })()",
+  "label": "768 60%: page zoom applied once (the frame has no zoom of its own), layout reported"
+ },
+ {
+  "shot": "tmp/c3c-768-60pct.png"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('#roomTimeline .tl-bar')))()",
+  "action": "tap",
+  "label": "768 60%: tap a booking bar inside the frame",
+  "after": 1500
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(); const ok = await window.__until(() => window.__vis(d.querySelector('[data-tl-drawer]')) && d.querySelector('[data-tl-drawer] a[href^=\"booking-details.php\"]'), 15000);\n  const r = d.querySelector('[data-tl-drawer]').getBoundingClientRect(); const fw = window.__fw();\n  return !!ok && r.left >= -1 && r.right <= fw.innerWidth + 1 && r.bottom <= fw.innerHeight + 1 && window.__noH() && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1; })()",
+  "label": "768 60%: the panel opens by touch, fits the frame, no side-scroll"
+ },
+ {
+  "shot": "tmp/c3d-768-60pct-panel.png"
+ },
+ {
+  "pointAt": "(() => window.__pt(document.querySelector('a[data-bk-view=\"list\"]')))()",
+  "action": "tap",
+  "label": "768 tap List",
+  "after": 1000
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__ready() && window.__listShown() && !window.__q('view'), 30000)) && window.__noH(); })()",
+  "label": "768 List back"
+ },
+ {
+  "viewport": [
+   390,
+   844
+  ]
+ },
+ {
+  "touch": true
+ },
+ {
+  "nav": "{base}/admin/bookings.php?room_type=2&filter=checked_in",
+  "after": 3000
+ },
+ {
+  "eval": "(async () => { return await window.__until(() => window.__ready(), 60000); })()",
+  "label": "390 page ready"
+ },
+ {
+  "eval": "(async () => { const bad = Array.from(document.querySelectorAll('a[data-bk-view]')).filter(a => { const r = a.getBoundingClientRect(); return r.height < 40 || r.width < 40; }); return bad.length === 0 && window.__noH(); })()",
+  "label": "390 switch buttons are >= 40px touch targets, no side-scroll"
+ },
+ {
+  "pointAt": "(() => window.__pt(document.querySelector('a[data-bk-view=\"calendar\"]')))()",
+  "action": "tap",
+  "label": "390 tap Calendar",
+  "after": 1000
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__calShown() && window.__tl(), 60000)); })()",
+  "label": "390 calendar frame drawn"
+ },
+ {
+  "eval": "(async () => { \n  const fw = window.__fw(), d = window.__fd(); const on = d.querySelector('[data-tl-days][aria-pressed=\"true\"]'); const ag = d.querySelector('[data-tl-mode=\"agenda\"]');\n  return fw.RoomTimeline.util.viewport() === 'phone' && on && on.getAttribute('data-tl-days') === '3' && window.__vis(ag) ? true : 'FAIL vp=' + fw.RoomTimeline.util.viewport() + ' days=' + (on && on.getAttribute('data-tl-days')) + ' agenda=' + window.__vis(ag); })()",
+  "label": "390 frame uses the timeline phone layout (3 days + Agenda)"
+ },
+ {
+  "eval": "(async () => { \n  const d = window.__fd(), fw = window.__fw();\n  const out = { csrf: (fw._rhCsrf || '').length > 10, hdr: !d.querySelector('.admin-header'), nav: !d.querySelector('.admin-nav'),\n    ai: !d.querySelector('#rhAiNotice, [class*=\"rh-ai-\"], [id^=\"rhAi\"]'), help: !d.querySelector('#rhHelpFloatingToggle'),\n    foot: !d.getElementById('rhAdminFooter'), loader: !window.__vis(d.querySelector('#adminPageLoader.is-visible')),\n    base: (d.querySelector('base') || {}).target === '_top', path: fw.location.pathname.endsWith('/calendar.php') && /[?&]embed=1(&|$)/.test(fw.location.search),\n    topNoH: window.__noH(), frameNoH: d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1,\n    frameFits: (() => { const r = window.__fr().getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; })() };\n  const bad = Object.keys(out).filter(k => !out[k]);\n  return bad.length ? 'FAIL ' + bad.join(',') : true; })()",
+  "label": "390 frame: _rhCsrf set, no header/nav/Assistant/help/footer, base _top, no side-scroll"
+ },
+ {
+  "shot": "tmp/c4-390-calendar.png"
+ },
+ {
+  "pointAt": "(() => window.__fpt(window.__fd().querySelector('[data-tl-mode=\"agenda\"]')))()",
+  "action": "tap",
+  "label": "390 tap Agenda inside the frame",
+  "after": 1500
+ },
+ {
+  "eval": "(async () => { const d = window.__fd(); const ok = await window.__until(() => window.__vis(d.querySelector('[data-tl-agenda]')), 10000); return !!ok && window.__noH() && d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1; })()",
+  "label": "390 Agenda shows inside the frame, still no side-scroll"
+ },
+ {
+  "shot": "tmp/c5-390-agenda.png"
+ },
+ {
+  "pointAt": "(() => window.__pt(document.querySelector('a[data-bk-view=\"list\"]')))()",
+  "action": "tap",
+  "label": "390 tap List",
+  "after": 1000
+ },
+ {
+  "eval": "(async () => { return !!(await window.__until(() => window.__ready() && window.__listShown() && !window.__q('view'), 30000)) && window.__noH(); })()",
+  "label": "390 List back"
+ }
+]

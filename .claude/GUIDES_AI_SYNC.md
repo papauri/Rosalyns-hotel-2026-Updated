@@ -36,6 +36,21 @@ when prompted."
   actual) show a notice when a stock count is not approved yet, with a link to it. What a count finds goes into stock on
   hand only on approval, so an unapproved opening count (from an import) leaves items at 0 and projected profit at 0.
   Guide + Assistant answer for "why is projected profit 0": approve the count. Manager Guide: Stock.
+- 2026-11-24 bookings list overhaul (owner FEATURE; Liwonde 5d1d320 + 5af0c15 + Ship C commit "Bookings list Ship C" /
+  Rosalyn's c6f99e6 + f0e6169 + its port): Bookings page has one filter bar (search; date field + quick dates Today /
+  Tomorrow / This week / Next 7 days / This month; room type, room, status, payment, source, group, made by; phone:
+  Filters button), removable filter chips + Clear all, main tabs + "More" menu (Tentative, Expiring, Checked out,
+  Cancelled, No-show, Groups, Deleted), Balance due column (amount under the total where it does not fit), sort
+  remembered per user per device, 10/25/50/All, "Saved filters" (save / open / delete your own sets), CSV follows the
+  screen sort + Balance due, default order upcoming = soonest arrival first, history = newest first, and a List |
+  Calendar switch showing the Room Timeline inside the page. Guides: 07-reception-bookings. Assistant: links into
+  bookings.php unchanged; answers for "find unpaid arrivals this week", "save my filters", "see bookings on the
+  calendar". Manager Guide: Bookings.
+- 2026-11-24 Liwonde 4940b48 / Rosalyn's e5be00f (owner PATCH): Calendar, Blocked Dates, Housekeeping, Maintenance
+  grids pick the night under the pointer at any display size (was wrong on tablets at 60%); a selection stays when you
+  change days or month; Shift-click / long press "Select <start> to here" extends the room's run across months; the
+  bar and Block confirm name every selected night. Guides: calendar / blocked dates selection. Manager Guide:
+  Bookings, Housekeeping and Maintenance.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 

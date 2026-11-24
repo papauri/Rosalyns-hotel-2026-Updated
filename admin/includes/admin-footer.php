@@ -3,6 +3,8 @@
    layout (same on every page); admin-spa.js does not re-run them on in-place navigation. */ ?>
 <template id="rh-shared-footer-start"></template>
 
+<?php $_rh_embed = !empty($rh_admin_embed); /* embedded page (admin-header.php): no footer bar, install prompt, offline banner or order-log overlay */ ?>
+<?php if (!$_rh_embed): ?>
 <!-- Simple Admin Footer -->
 <footer id="rhAdminFooter" style="background: var(--deep-navy); color: white; padding: 15px 20px; text-align: center; border-top: 3px solid var(--gold);">
     <div class="container">
@@ -11,6 +13,7 @@
         </p>
     </div>
 </footer>
+<?php endif; ?>
 
 <!-- Admin Components (Modal, Alert/Toast, AdminConfirm, ButtonLoader) — guard prevents double-init -->
 <script src="js/admin-components.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-components.js'); ?>"></script>
@@ -33,18 +36,18 @@
 <!-- Results anchoring: filter cards, tabs and chips land on the filtered list below the sticky header -->
 <script src="js/admin-anchor.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-anchor.js'); ?>"></script>
 <!-- PWA install prompt — shows "Install App" banner on Chrome/Edge desktop + Android -->
-<script src="js/pwa-install.js" defer></script>
+<?php if (!$_rh_embed): ?><script src="js/pwa-install.js" defer></script><?php endif; ?>
 <!-- Universal offline queue + connectivity banner. Only intercepts forms with
      data-offline-queue="1" attribute; only displays the banner when offline
      or when there are pending sync items. Safe to include on every admin page. -->
-<?php require __DIR__ . '/offline-banner.php'; ?>
+<?php if (!$_rh_embed) { require __DIR__ . '/offline-banner.php'; } ?>
 <!-- Shared session flash toasts — renders any unconsumed success/error session messages -->
 <?php require __DIR__ . '/admin-flash.php'; ?>
 <!-- Shared order-log overlay. Included here rather than on each page so every
      admin surface that links to order-lifecycle.php opens it in place instead of
      a new tab; it renders a hidden div and is inert until rhOpenLifecycle() is
      called, and self-guards against being included twice. -->
-<?php require __DIR__ . '/lifecycle-modal.php'; ?>
+<?php if (!$_rh_embed) { require __DIR__ . '/lifecycle-modal.php'; } ?>
 <?php /* Everything after this marker is page-specific: the scripts each page prints after
    including this footer. admin-spa.js runs them after an in-place navigation, because they sit
    outside #rh-admin-page and would otherwise be dropped. */ ?>

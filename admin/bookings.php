@@ -3801,7 +3801,22 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         $bk_drop_count = (int)($filter_status !== '') + (int)($filter_pay !== '') + (int)($filter_room_type > 0) + (int)($bk_f['room'] > 0)
             + (int)($bk_f['group'] > 0) + (int)($bk_f['source'] !== '') + (int)($bk_f['created_by'] > 0) + (int)($filter_kind !== '');
         $bk_saved_sets = rh_bk_saved_links(rh_bk_saved_list($pdo, (int)($user['id'] ?? 0))); // the person's own row only
+        // List | Calendar switch (plan T12, Decision 4): the existing Room Timeline in a same-origin frame of
+        // calendar.php?embed=1 (its own page: own scripts, same login + permission checks). Only for people who can open
+        // calendar.php (permission + module), so ?view=calendar never shows a frame that would be refused.
+        $bk_can_calendar = rhCanLinkTo((int)($user['id'] ?? 0), 'calendar.php');
+        $bk_view = ($bk_can_calendar && is_scalar($_GET['view'] ?? null) && (string)$_GET['view'] === 'calendar') ? 'calendar' : 'list';
         ?>
+        <?php if ($bk_can_calendar): $bk_view_q = $_GET; unset($bk_view_q['view'], $bk_view_q['action'], $bk_view_q['booking_id'], $bk_view_q['export']); ?>
+            <div class="bk-view-switch" role="group" aria-label="Show bookings as" data-bk-view-switch>
+                <?php foreach (['list' => ['List', 'fa-list'], 'calendar' => ['Calendar', 'fa-calendar-days']] as $bk_vk => [$bk_vl, $bk_vi]):
+                    $bk_vq = $bk_vk === 'calendar' ? array_merge($bk_view_q, ['view' => 'calendar']) : $bk_view_q; ?>
+                    <a href="<?php echo htmlspecialchars('bookings.php' . ($bk_vq ? '?' . http_build_query($bk_vq) : ''), ENT_QUOTES); ?>" class="bk-view-switch__btn<?php echo $bk_view === $bk_vk ? ' is-active' : ''; ?>" data-bk-view="<?php echo $bk_vk; ?>" aria-pressed="<?php echo $bk_view === $bk_vk ? 'true' : 'false'; ?>" data-no-spa="1" data-no-admin-loader="1" data-vo-allow>
+                        <i class="fas <?php echo $bk_vi; ?>" aria-hidden="true"></i> <?php echo $bk_vl; ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
         <div class="bookings-toolbar" data-bk-toolbar>
             <form method="GET" data-live-search-form="room-bookings" class="bookings-toolbar__form">
                 <?php echo rh_server_sort_hidden($bk_sort_key, $bk_sort_dir); ?>
@@ -3997,9 +4012,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         // Server-printed state the page script reads after every in-place load (it sits inside #booking-results, which is
         // swapped): the view kind for the remembered sort (Decision 6), the user id for its key.
         $bk_view_kind = rh_bk_view_kind($active_tab_override, $filter_status);
+        // The Calendar frame's address and its "list only" note follow the list's filters; printed in the swapped state
+        // element so every in-place load hands the page script the new ones (it reloads the frame only when they change).
+        $bk_cal = rh_bk_calendar_params($bk_f, (string)$active_tab_override);
         ?>
-        <div id="booking-results" data-active-tab="<?php echo htmlspecialchars($active_tab_override ?: 'all', ENT_QUOTES); ?>" data-view-kind="<?php echo $bk_view_kind; ?>" data-user-id="<?php echo (int)($user['id'] ?? 0); ?>" data-admin-pagination-scope data-flash-scope>
-            <div hidden data-bk-state data-view-kind="<?php echo $bk_view_kind; ?>" data-sort="<?php echo htmlspecialchars($bk_sort_key, ENT_QUOTES); ?>" data-dir="<?php echo htmlspecialchars($bk_sort_dir, ENT_QUOTES); ?>"></div>
+        <div id="booking-results"<?php echo $bk_view === 'calendar' ? ' hidden' : ''; ?> data-active-tab="<?php echo htmlspecialchars($active_tab_override ?: 'all', ENT_QUOTES); ?>" data-view-kind="<?php echo $bk_view_kind; ?>" data-user-id="<?php echo (int)($user['id'] ?? 0); ?>" data-admin-pagination-scope data-flash-scope>
+            <div hidden data-bk-state data-view-kind="<?php echo $bk_view_kind; ?>" data-sort="<?php echo htmlspecialchars($bk_sort_key, ENT_QUOTES); ?>" data-dir="<?php echo htmlspecialchars($bk_sort_dir, ENT_QUOTES); ?>" data-cal-src="<?php echo htmlspecialchars($bk_cal['src'], ENT_QUOTES); ?>" data-cal-note="<?php echo htmlspecialchars($bk_cal['note'], ENT_QUOTES); ?>"></div>
             <?php if ($has_active_room_filters): ?>
                 <?php
                 // One chip per active filter (rh_bk_chips); x = the same list without it (page 1, sort kept).
@@ -4637,9 +4655,18 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             </div>
         </div><!-- /booking-results -->
 
+        <?php if ($bk_can_calendar): ?>
+            <?php /* Calendar view: the frame gets its src only when Calendar is first shown (page script). Links that leave
+                     the timeline open in this whole window (<base target="_top"> in the embedded page). */ ?>
+            <section class="bk-cal" data-bk-cal aria-label="Room calendar"<?php echo $bk_view === 'calendar' ? '' : ' hidden'; ?>>
+                <p class="bk-cal__note" data-bk-cal-note<?php echo $bk_cal['note'] === '' ? ' hidden' : ''; ?>><i class="fas fa-circle-info" aria-hidden="true"></i> <span data-bk-cal-note-text><?php echo htmlspecialchars($bk_cal['note']); ?></span></p>
+                <iframe class="bk-cal__frame" data-bk-cal-frame title="Room calendar"></iframe>
+            </section>
+        <?php endif; ?>
+
         <?php if (!empty($show_conference_block)): ?>
         <!-- Conference enquiries & bookings (latest 10; the Conference page has the full list) -->
-        <div class="bookings-section">
+        <div class="bookings-section" data-bk-list-part<?php echo $bk_view === 'calendar' ? ' hidden' : ''; ?>>
             <h3 class="section-title">
                 <i class="fas fa-users"></i> Conference enquiries &amp; bookings
                 <span style="font-size: 14px; font-weight: normal; color: #666;">
@@ -4721,7 +4748,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         // #booking-results (tabs reload only the results), so the kept values are taken from the current URL at submit
         // time, never from what the page first rendered. Every drop-down filter is a field of the form itself (plan T4),
         // so a filter removed with its chip stays removed when Filter is pressed.
-        const BK_URL_KEEP = ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir'];
+        const BK_URL_KEEP = ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir', 'view'];
         if (!window.__bkKeepFiltersBound) {
             window.__bkKeepFiltersBound = true;
             document.addEventListener('submit', function(e) {
@@ -4729,7 +4756,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 if (!f || !f.matches || !f.matches('[data-live-search-form="room-bookings"]')) return;
                 const cur = new URLSearchParams(window.location.search);
                 f.querySelectorAll('input[data-bk-keep], input[type="hidden"][name="sort"], input[type="hidden"][name="dir"]').forEach(i => i.remove());
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir'].forEach(k => {
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir', 'view'].forEach(k => {
                     const v = cur.get(k);
                     if (!v) return;
                     const i = document.createElement('input');
@@ -4819,6 +4846,135 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             const clear = form.querySelector('[data-bk-clear]');
             if (clear) clear.hidden = !document.querySelector('#booking-results [data-bk-chips]');
         }
+
+        // ── List | Calendar switch (plan T12, Decision 4). The Calendar is the Room Timeline page itself
+        // (calendar.php?embed=1) in a frame: its address and "list only" note come from the server on every load
+        // (data-cal-src / data-cal-note on [data-bk-state], rh_bk_calendar_params), so the mapping lives in one place.
+        // ?view=calendar is in the URL (refresh and Back keep it); the frame is loaded only when Calendar is first shown
+        // and again only when a mapped filter changes; back on List the rows and tab counts are fetched again (a booking
+        // may have been moved in the frame).
+        function bkCalShown() {
+            const pane = document.querySelector('[data-bk-cal]');
+            return !!pane && !pane.hidden;
+        }
+        function bkUrlWithView(url) {
+            if (!bkCalShown()) return url;
+            try {
+                const u = new URL(url, window.location.href);
+                if (u.pathname !== window.location.pathname) return url;
+                u.searchParams.set('view', 'calendar');
+                return u.pathname.split('/').pop() + u.search;
+            } catch (_) {
+                return url;
+            }
+        }
+        function bkCalSync() {
+            const pane = document.querySelector('[data-bk-cal]');
+            const frame = pane ? pane.querySelector('[data-bk-cal-frame]') : null;
+            const st = document.querySelector('#booking-results [data-bk-state]');
+            if (!pane || !frame || !st) return;
+            const note = String(st.dataset.calNote || '');
+            const noteBox = pane.querySelector('[data-bk-cal-note]');
+            const noteText = pane.querySelector('[data-bk-cal-note-text]');
+            if (noteText) noteText.textContent = note;
+            if (noteBox) noteBox.hidden = note === '';
+            if (pane.hidden) return; // lazy: no request until Calendar is shown
+            const src = String(st.dataset.calSrc || '');
+            if (!/^calendar\.php\?embed=1(&|$)/.test(src)) return; // only ever the embedded timeline
+            if (frame.dataset.bkSrc !== src) {
+                frame.dataset.bkSrc = src;
+                frame.src = src;
+            }
+        }
+        function bkApplyView() {
+            const pane = document.querySelector('[data-bk-cal]');
+            const results = document.getElementById('booking-results');
+            if (!pane || !results) return;
+            const cal = new URLSearchParams(window.location.search).get('view') === 'calendar';
+            pane.hidden = !cal;
+            results.hidden = cal;
+            if (!cal) document.documentElement.classList.remove('rh-bk-cal-panel'); // the frame's panel is out of sight
+            document.querySelectorAll('[data-bk-list-part]').forEach(el => { el.hidden = cal; });
+            document.querySelectorAll('[data-bk-view]').forEach(function(b) {
+                const on = b.dataset.bkView === (cal ? 'calendar' : 'list');
+                b.classList.toggle('is-active', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+            bkCalSync();
+        }
+        if (!window.__bkViewBound) {
+            window.__bkViewBound = true;
+            // Capture: runs before the shared link loader and the SPA router see the click.
+            document.addEventListener('click', function(e) {
+                if (!/bookings\.php/i.test(window.location.pathname) || !document.getElementById('booking-results')) return;
+                const b = e.target && e.target.closest ? e.target.closest('a[data-bk-view]') : null;
+                if (!b || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                const want = b.dataset.bkView === 'calendar' ? 'calendar' : 'list';
+                const u = new URL(window.location.href);
+                if ((u.searchParams.get('view') === 'calendar' ? 'calendar' : 'list') === want) return;
+                if (want === 'calendar') u.searchParams.set('view', 'calendar'); else u.searchParams.delete('view');
+                history.pushState({ url: u.href }, '', u.pathname + u.search);
+                const frame = document.querySelector('[data-bk-cal-frame]');
+                const used = !!(frame && frame.dataset.bkSrc);
+                bkApplyView();
+                const pane = document.querySelector('[data-bk-cal]');
+                if (want === 'calendar' && pane) {
+                    // The frame fills the window below the header: bring it up under the header.
+                    if (window.rhAnchors) window.rhAnchors.scrollToResults(pane);
+                    else pane.scrollIntoView({ block: 'start' });
+                }
+                if (want === 'list' && used) {
+                    // Changes made in the Calendar (moves, blocks, check-ins) show in the rows and tab counts at once.
+                    loadBookingResults(u.pathname.split('/').pop() + u.search, { history: 'none' });
+                }
+            }, true);
+        }
+        // The frame must stay the embedded timeline. Anything else (signed out, no access, module off) sends the whole
+        // window to sign in and come back to this view; a second time within 20 seconds shows a plain note instead, so
+        // a refusal can never loop.
+        function bkCalFrameLoaded(frame) {
+            if (!frame || !frame.dataset.bkSrc) return;
+            let path = '', search = '', href = '';
+            try {
+                href = String(frame.contentWindow.location.href || '');
+                path = String(frame.contentWindow.location.pathname || '');
+                search = String(frame.contentWindow.location.search || '');
+            } catch (_) { /* not this site: treat as not the timeline */ }
+            if (href === 'about:blank') return;
+            if (/\/calendar\.php$/i.test(path) && /[?&]embed=1(&|$)/.test(search)) return;
+            let last = 0;
+            try { last = parseInt(sessionStorage.getItem('rh-bk-cal-out') || '0', 10) || 0; } catch (_) { /* no storage */ }
+            if (Date.now() - last < 20000) {
+                const pane = document.querySelector('[data-bk-cal]');
+                const noteBox = pane ? pane.querySelector('[data-bk-cal-note]') : null;
+                const noteText = pane ? pane.querySelector('[data-bk-cal-note-text]') : null;
+                if (noteText) noteText.textContent = 'The calendar could not be opened here. Open the Calendar page from the menu, or sign in again.';
+                if (noteBox) noteBox.hidden = false;
+                frame.hidden = true;
+                return;
+            }
+            try { sessionStorage.setItem('rh-bk-cal-out', String(Date.now())); } catch (_) { /* no storage */ }
+            window.location.href = 'login.php?redirect=' + encodeURIComponent('bookings.php?view=calendar');
+        }
+        (function bkInitView() {
+            const frame = document.querySelector('[data-bk-cal-frame]');
+            if (frame && !frame.dataset.bkLoadBound) {
+                frame.dataset.bkLoadBound = '1';
+                frame.addEventListener('load', function() { bkCalFrameLoaded(frame); });
+            }
+            bkApplyView();
+            // Opened on Calendar (a link, refresh or Back at the top of the page): the frame fills the window under the
+            // header, as after the switch, so the timeline's side panel and its buttons are in view.
+            if (bkCalShown() && (window.pageYOffset || 0) < 5) {
+                window.setTimeout(function() {
+                    const pane = document.querySelector('[data-bk-cal]');
+                    if (!bkCalShown() || (window.pageYOffset || 0) >= 5 || !pane) return;
+                    if (window.rhAnchors) window.rhAnchors.scrollToResults(pane, { force: true, focus: false });
+                    else pane.scrollIntoView({ block: 'start' });
+                }, 300);
+            }
+        })();
 
         // ── Remembered sort (plan Decision 6): per user and per device, one for upcoming views and one for history views
         // (Checked out, Cancelled, No-show, Deleted). The URL always wins; the stored sort is used only when the URL has
@@ -5865,6 +6021,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         // older search that answers late is dropped (only the newest search may draw the list).
         async function loadBookingResults(url, opts) {
             opts = opts || {};
+            if ((opts.history || '') !== 'none') url = bkUrlWithView(url); // Calendar stays open while filters change
             const container = document.getElementById('booking-results');
             if (!container) {
                 window.location.href = url;
@@ -5928,8 +6085,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 // Shared anchoring: lands below the sticky header and stays put when the list is already in view.
                 // Not while typing a search: the page stays where it is so the box stays under the user's fingers.
                 const topAnchor = container.querySelector('[data-rh-results]') || container.querySelector('.bookings-section') || container;
-                if (opts.live) {
-                    // no scroll, no focus change
+                if (opts.live || bkCalShown()) {
+                    // no scroll, no focus change (in Calendar view the list is hidden)
                 } else if (window.rhAnchors) {
                     window.rhAnchors.scrollToResults(topAnchor);
                 } else {
@@ -5969,6 +6126,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 bkSyncForm(!!opts.live);
                 const activeTab = fresh ? (fresh.dataset.activeTab || 'all') : 'all';
                 switchTab(activeTab);
+                bkApplyView(); // List or Calendar from the URL (Back / Forward), frame src from the new filters
 
                 // Export CSV sits outside the results: point it at what the list now shows (search, tab, page size).
                 const exportLink = document.querySelector('.bookings-toolbar__action--export');

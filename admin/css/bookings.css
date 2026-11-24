@@ -2569,7 +2569,10 @@ table.bookings-table td small.bk-status-note {
         }
     }
 
-    @container bookings-section (max-width: 1339px) {
+    /* OWNER 2026-11-24 ("move the ref and check out columns earlier"): Ref and Check Out drop out up to a 1462px box
+       (was 1339px), so a 1920 screen with the sidebar open (1343px box) has room for the Balance due column. Below
+       this width the reference shows under the guest name and the check-out date under the check-in, as before. */
+    @container bookings-section (max-width: 1462px) {
         :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > :is(.bk-col-ref, .bk-col-out) {
             display: none;
         }
@@ -3680,13 +3683,14 @@ table.bookings-table th[data-sort-key] .help {
 /* Laptops (the Room Bookings box measured, as the column rules above): the Balance due column drops out with the
    narrow box and its figure shows under the total instead (the .bk-ph-left twin), so the row never scrolls sideways.
    Measured on Liwonde data (2026-11-24): with the column shown, each column tier above needs a box of at least
-   957px (up to 1099), 1173px (1100-1339), 1401px (1340-1599) and 1715px (1600 and wider). The column shows from
-   that width + 60px spare in each tier and drops out in the ranges below. A 1920 screen with the sidebar open
-   gives a 1343px box: too narrow for the 1401px tier, so the figure shows under the total there. The figure wraps
+   957px (up to 1099), 1173px (1100-1462, Ref and Check Out dropped), 1401px (1463-1599) and 1715px (1600 and wider).
+   The column shows from that width + 60px spare in each tier and drops out in the ranges below. OWNER 2026-11-24:
+   Ref / Check Out now drop up to a 1462px box (was 1339px), so the old 1340-1462 band is gone and a 1920 screen with
+   the sidebar open (1343px box) shows the Balance due column. The figure wraps
    under the total ("left to pay" may take a second line; the amount itself never breaks) so it does not widen the
    Total column. */
 @media (min-width: 1025px) {
-    @container bookings-section (max-width: 1018px) or ((min-width: 1100px) and (max-width: 1234px)) or ((min-width: 1340px) and (max-width: 1462px)) or ((min-width: 1600px) and (max-width: 1776px)) {
+    @container bookings-section (max-width: 1018px) or ((min-width: 1100px) and (max-width: 1234px)) or ((min-width: 1600px) and (max-width: 1776px)) {
         :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > .bk-col-balance {
             display: none;
         }
@@ -3704,4 +3708,100 @@ table.bookings-table th[data-sort-key] .help {
     .bk-filter-drops {
         display: contents;
     }
+}
+
+/* ==========================================================================
+   Bookings list overhaul, Ship C (plan .claude/BOOKINGS_LIST_PLAN.md T12): the List | Calendar switch and the
+   Calendar frame (the Room Timeline page itself, calendar.php?embed=1). Solid surfaces, one accent (the tab gold).
+   ========================================================================== */
+#booking-results[hidden],
+[data-bk-list-part][hidden],
+.bk-cal[hidden],
+.bk-cal__note[hidden],
+.bk-cal__frame[hidden] {
+    display: none !important;
+}
+
+.bk-view-switch {
+    display: inline-flex;
+    margin: 0 0 0.6rem;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 8px;
+    background: var(--color-white, #fff);
+    overflow: hidden;
+}
+
+.bk-view-switch__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 44px;
+    padding: 0 1rem;
+    color: var(--admin-text, #1f2a37);
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.bk-view-switch__btn + .bk-view-switch__btn {
+    border-left: 1px solid var(--admin-surface-border, #d7dde6);
+}
+
+.bk-view-switch__btn:hover {
+    color: var(--gold, #8F6A35);
+}
+
+.bk-view-switch__btn.is-active {
+    background: var(--gold, #8F6A35);
+    color: #fff;
+}
+
+.bk-view-switch__btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+}
+
+.bk-cal {
+    margin-top: 0.75rem;
+    min-width: 0;
+}
+
+.bk-cal__note {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin: 0 0 0.5rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 8px;
+    background: var(--admin-surface, #fffdfb);
+    color: var(--admin-text, #1f2a37);
+    font-size: 13px;
+}
+
+.bk-cal__note .fa-circle-info {
+    margin-top: 2px;
+    color: var(--gold, #8F6A35);
+}
+
+/* The frame fills the window below the fixed admin header; the page zoom (page-zoom.php) shrinks the page, so the
+   screen height is divided by it, as the other screen-sized boxes do. */
+.bk-cal__frame {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: calc(100vh / var(--page-zoom, 1) - var(--admin-header-height, 74px) - 24px);
+    height: calc(100dvh / var(--page-zoom, 1) - var(--admin-header-height, 74px) - 24px);
+    min-height: 480px;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 8px;
+    background: var(--color-white, #fff);
+}
+
+/* While the Calendar frame's booking panel is open (calendar.php?embed=1 sets this class on this page), the floating
+   Assistant button, its notice and the help button step out of the way, so they never cover the panel's buttons
+   (Open booking, More), as on the Calendar page itself. They come back when the panel closes. */
+html.rh-bk-cal-panel :is(.rh-ai-launch, .rh-ai-notice-card, .rh-ai-notice-pill, .rh-help-toggle:not([data-inline="1"])) {
+    display: none !important;
 }

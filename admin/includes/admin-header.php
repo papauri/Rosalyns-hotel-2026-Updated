@@ -16,6 +16,11 @@
 // Load permissions system
 require_once __DIR__ . '/permissions.php';
 
+// Embedded page (calendar.php?embed=1 shown inside bookings.php, BOOKINGS_LIST_PLAN T11): the page sets $rh_admin_embed
+// before this file. It keeps #rh-admin-page, the view-only notice and window._rhCsrf; it drops the service worker +
+// manifest, page zoom (the outer page already zooms), the boot loader, header, sidebar, SPA router, help and Assistant.
+$_rh_embed = !empty($rh_admin_embed);
+
 // Resolve the current user from $user (set by admin-init.php) or fall back to session.
 if (!isset($user) || !is_array($user)) {
     $user = [
@@ -255,6 +260,7 @@ if ($_admin_back_target !== null) {
     $_admin_back_label = 'Back to ' . $_parent_label;
 }
 ?>
+<?php if (!$_rh_embed): ?>
 <script>
     /* no-FOUC: apply saved sidebar state before first CSS paint */
     (function() {
@@ -337,16 +343,20 @@ if ($_admin_back_target !== null) {
         });
     }
 </script>
+<?php endif; /* !$_rh_embed */ ?>
 <?php /* Display size — the same standard as the POS and station boards. Output
          before anything visible so the page never paints at the wrong size. */ ?>
-<?php require_once __DIR__ . '/page-zoom.php'; rh_page_zoom_bootstrap(); ?>
+<?php require_once __DIR__ . '/page-zoom.php'; if ($_rh_embed) { require_once __DIR__ . '/../../includes/admin-session.php'; rh_admin_client_script(); } else { rh_page_zoom_bootstrap(); } ?>
 <link rel="stylesheet" href="css/page-zoom.css?v=<?php echo @filemtime(__DIR__ . '/../css/page-zoom.css'); ?>">
 <?php /* One size for every summary card and data table — loaded after page CSS so it wins. */ ?>
 <link rel="stylesheet" href="css/admin-kpi.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-kpi.css'); ?>">
 <link rel="stylesheet" href="css/admin-uniform.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-uniform.css'); ?>">
 <link rel="stylesheet" href="css/admin-global-search.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-global-search.css'); ?>">
 <link rel="stylesheet" href="css/rh-total-info.css?v=<?php echo @filemtime(__DIR__ . '/../css/rh-total-info.css'); ?>">
+<?php if (!$_rh_embed): /* embed: no global search inside the frame (its results would open inside the frame) */ ?>
 <script src="js/admin-global-search.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-global-search.js'); ?>" defer></script>
+<?php endif; ?>
+<?php if (!$_rh_embed): ?>
 <div id="adminPageLoader" class="admin-page-loader is-visible" data-boot-loader="1" role="status" aria-live="polite" aria-hidden="false">
     <div class="admin-page-loader-card">
         <div class="admin-page-loader-brand"><i class="fas fa-hotel" aria-hidden="true"></i><span id="adminPageLoaderBrand"><?php echo htmlspecialchars($site_name); ?></span></div>
@@ -358,7 +368,9 @@ if ($_admin_back_target !== null) {
         <div class="admin-page-loader-bar"><span></span></div>
     </div>
 </div>
+<?php endif; /* !$_rh_embed */ ?>
 <?php echo rhUserTzScript(); ?>
+<?php if (!$_rh_embed): ?>
 <header class="admin-header">
     <div class="admin-header-brand">
         <i class="fas fa-hotel"></i>
@@ -499,6 +511,7 @@ if ($_admin_back_target !== null) {
           content swaps and position:fixed is always relative to the viewport. */ ?>
 <?php require_once __DIR__ . '/help-tooltips.php'; ?>
 <?php require_once __DIR__ . '/ai-panel.php'; /* Assistant: outside #rh-admin-page; prints nothing unless switched on + permitted */ ?>
+<?php endif; /* !$_rh_embed: header, sidebar, SPA router, help, Assistant */ ?>
 
 <?php /* #rh-admin-page wraps all per-page content.
           This div is intentionally left unclosed here — each admin page's </body>
@@ -509,7 +522,7 @@ if ($_admin_back_target !== null) {
     <?php require __DIR__ . '/access-notice.php'; /* friendly card after a "no access" redirect */ ?>
     <?php if (function_exists('rh_licence_render_banner')) { rh_licence_render_banner(); /* overdue-payment notice; prints nothing unless this build is licensed and overdue */ } ?>
     <?php if (function_exists('rh_view_only_render')) { rh_view_only_render(); /* view-only banner + greyed-out change buttons; prints nothing unless this person is view only */ } ?>
-    <?php if ($_admin_back_target !== null && $_admin_back_label !== ''): ?>
+    <?php if (!$_rh_embed && $_admin_back_target !== null && $_admin_back_label !== ''): ?>
         <div class="content admin-back-row">
             <a href="<?php echo htmlspecialchars((string)$_admin_back_target['href']); ?>" class="btn btn-secondary btn-sm" aria-label="<?php echo htmlspecialchars($_admin_back_label); ?>">
                 <i class="fas fa-arrow-left" aria-hidden="true"></i>

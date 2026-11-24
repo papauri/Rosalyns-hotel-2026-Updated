@@ -1118,4 +1118,73 @@ if (!function_exists('rh_bk_filters_from_get')) {
         }
         return 'b.created_at DESC';
     }
+
+    /**
+     * List | Calendar switch (Decision 4, T12): the list's filters as admin/calendar.php?embed=1 params, and the ones the
+     * room grid cannot apply. $f = rh_bk_filters_from_get(), $tab = its 'tab'.
+     *   room type -> filter_room_type, room -> filter_room_id, search -> filter_search (guest, reference, room: the
+     *   timeline matches those only, so a phone number or email search stays on the list), Arriving today -> tl_status
+     *   arr, Leaving today -> dep, In house (tab or status checked-in) -> occ, From date of an arrival / staying range ->
+     *   start. Status, payment, source, staff, group and phone / email search apply to the list only.
+     * @return array{params: array<string,string>, list_only: string[], note: string, src: string}
+     */
+    function rh_bk_calendar_params(array $f, string $tab): array
+    {
+        $p = ['embed' => '1', 'from' => 'bookings'];
+        $only = [];
+        if (($rt = (int)($f['room_type'] ?? 0)) > 0) {
+            $p['filter_room_type'] = (string)$rt;
+        }
+        if (($room = (int)($f['room'] ?? 0)) > 0) {
+            $p['filter_room_id'] = (string)$room;
+        }
+        $search = trim((string)($f['search'] ?? ''));
+        if ($search !== '') {
+            $isEmail = strpos($search, '@') !== false;
+            $isPhone = preg_match('/^\+?[\d\s\-().]+$/', $search) === 1 && strlen((string)preg_replace('/\D/', '', $search)) >= 6;
+            if ($isEmail || $isPhone) {
+                $only[] = 'phone / email search';
+            } else {
+                $p['filter_search'] = $search;
+            }
+        }
+        $states = ['today-checkins' => 'arr', 'today-checkouts' => 'dep', 'checked-in' => 'occ'];
+        if (isset($states[$tab])) {
+            $p['tl_status'] = $states[$tab];
+        }
+        $from = (string)($f['date_from'] ?? '');
+        if ($from !== '' && in_array((string)($f['date_type'] ?? 'arrival'), ['arrival', 'staying'], true)) {
+            $p['start'] = $from;
+        }
+        $status = (string)($f['status'] ?? '');
+        $statusTabs = ['expiring-soon'];
+        if (($status !== '' && !($status === 'checked-in' && $tab === 'checked-in')) || in_array($tab, $statusTabs, true)) {
+            $only[] = 'status';
+        }
+        if ((string)($f['pay'] ?? '') !== '' || (string)($f['balance'] ?? '') !== '' || in_array($tab, ['paid', 'unpaid'], true)) {
+            $only[] = 'payment';
+        }
+        if ((string)($f['source'] ?? '') !== '') {
+            $only[] = 'source';
+        }
+        if ((int)($f['created_by'] ?? 0) > 0) {
+            $only[] = 'staff';
+        }
+        if ((int)($f['group'] ?? 0) > 0 || $tab === 'group-bookings') {
+            $only[] = 'group';
+        }
+        // Fixed order: status, payment, source, staff, group, phone / email search.
+        $order = ['status', 'payment', 'source', 'staff', 'group', 'phone / email search'];
+        $only = array_values(array_filter($order, static function ($k) use ($only) {
+            return in_array($k, $only, true);
+        }));
+        $note = '';
+        if ($only) {
+            $last = array_pop($only);
+            $names = $only ? implode(', ', $only) . ' and ' . $last : $last;
+            $only[] = $last;
+            $note = 'Calendar shows rooms; the ' . $names . ' filter' . (count($only) === 1 ? ' applies' : 's apply') . ' to the list only.';
+        }
+        return ['params' => $p, 'list_only' => $only, 'note' => $note, 'src' => 'calendar.php?' . http_build_query($p)];
+    }
 }

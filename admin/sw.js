@@ -42,8 +42,9 @@ const isImmutableAsset = url => /\.(?:woff2?|ttf|eot|svg|png|jpe?g|webp|gif|ico)
 const isStyleOrScript  = url => /\.(?:css|js)(\?.*)?$/i.test(url.pathname + url.search);
 // Real screens only. The till's ?ajax=... polls and the /admin/api/ endpoints are live JSON (one is a
 // state-changing GET): never stored or answered from the cache, so they cannot show stale money as
-// current, fake a success offline, or push the real pages out of the cache.
-const isPage           = url => /\/admin\/[^?]*\.php$/.test(url.pathname) && !/\/admin\/api\//.test(url.pathname) && !/[?&]ajax=/.test(url.search);
+// current, fake a success offline, or push the real pages out of the cache. An embedded page (?embed=1, the Calendar
+// inside bookings.php) is never stored either: it is part of another screen, not a page to open offline.
+const isPage           = url => /\/admin\/[^?]*\.php$/.test(url.pathname) && !/\/admin\/api\//.test(url.pathname) && !/[?&]ajax=/.test(url.search) && !/[?&]embed=1(?:&|$)/.test(url.search);
 const isData           = url => /\/api\/(?:room-types|page-content|site-settings|room-amenities)\.php/.test(url.pathname);
 
 /** Trim a named cache to at most `max` entries (oldest-first eviction). */

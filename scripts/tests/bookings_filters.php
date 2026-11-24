@@ -160,7 +160,7 @@ $bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
 check(substr_count($bkSrc, "'departure', 'balance', 'since', 'since_kind', 'payment_status', 'page'].forEach(k => params.delete(k));") === 2, 'tabs clear ?balance= like the other filters');
 $bkKeepTest = rh_bk_keep_params(rh_bk_filters_from_get(['balance' => 'owing', 'size' => '50', 'since' => '2026-11-23 18:40:00', 'since_kind' => 'booked']));
 // Ship B (T4): room / group / source / made by are fields of the bar now (not kept inputs); sort / dir come from the URL.
-check(strpos($bkSrc, "rh_bk_keep_params(\$bk_f, ['search', 'filter_status', 'date_from', 'date_to', 'date_type', 'kind', 'room_type', 'pay', 'room', 'group', 'source', 'created_by', 'page']) as \$bk_keep_k") !== false && substr_count($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir']") === 2, 'search keeps ?balance= and ?size= (server + client)');
+check(strpos($bkSrc, "rh_bk_keep_params(\$bk_f, ['search', 'filter_status', 'date_from', 'date_to', 'date_type', 'kind', 'room_type', 'pay', 'room', 'group', 'source', 'created_by', 'page']) as \$bk_keep_k") !== false && substr_count($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance', 'since', 'since_kind', 'size', 'sort', 'dir', 'view']") === 2, 'search keeps ?balance= and ?size= (server + client)');
 check(($bkKeepTest['size'] ?? '') === '50', 'page links keep ?size=');
 check(($bkKeepTest['balance'] ?? '') === 'owing', 'pagination keeps ?balance=');
 check(rh_bk_scope(rh_bk_filters_from_get(['balance' => 'owing']))['params'] === [rh_fd_balance_tolerance()] && strpos($bkSrc, "\$deleted_scope_params  = \$bk_scope['params'];") !== false && strpos($bkSrc, "\$export_params = \$export_scope['params'];") !== false, 'list, badges and export bind the balance param');
@@ -456,6 +456,50 @@ eq(rh_bk_view_kind('unpaid', 'cancelled'), 'history', 'view kind: a history stat
 eq(array_keys(rh_bk_source_options()), ['staff', 'online', 'system', 'none'], 'source choices');
 check(strpos(rh_bk_source_sql(), "bkau.action = 'created' ORDER BY bkau.id ASC LIMIT 1") !== false && strpos(rh_bk_source_sql(), "bktl.action_type = 'create' ORDER BY bktl.id ASC LIMIT 1") !== false, 'source SQL reads the FIRST audit / timeline create rows');
 check(strpos(rh_bk_creator_sql(), 'bkau.performed_by') !== false && strpos(rh_bk_creator_sql(), 'bktl.performed_by_id') !== false, 'made-by SQL: audit id, else timeline id');
+
+// ---- List | Calendar switch (T12, Decision 4): list filters -> calendar.php?embed=1 params + the "list only" note
+$cal = static function (array $get): array { $f = rh_bk_filters_from_get($get); return rh_bk_calendar_params($f, $f['tab']); };
+$c = $cal([]);
+eq($c['params'], ['embed' => '1', 'from' => 'bookings'], 'calendar: no filters -> embed + from only');
+eq($c['src'], 'calendar.php?embed=1&from=bookings', 'calendar: src');
+eq([$c['list_only'], $c['note']], [[], ''], 'calendar: no note without list-only filters');
+$c = $cal(['room_type' => '3', 'filter' => 'checked_in']);
+eq([$c['params']['filter_room_type'] ?? null, $c['params']['tl_status'] ?? null, $c['note']], ['3', 'occ', ''], 'calendar: room type + In house tab -> type + occ, no note');
+$c = $cal(['filter_status' => 'checked-in']);
+eq([$c['params']['tl_status'] ?? null, $c['list_only']], ['occ', []], 'calendar: In house via the status drop-down -> occ, status not named');
+$c = $cal(['status' => 'checked-in']);
+eq($c['params']['tl_status'] ?? null, 'occ', 'calendar: ?status= alias of In house -> occ');
+eq($cal(['filter' => 'checkin_today'])['params']['tl_status'] ?? null, 'arr', 'calendar: Arriving today -> arr');
+eq($cal(['filter' => 'checkout_today'])['params']['tl_status'] ?? null, 'dep', 'calendar: Leaving today -> dep');
+$c = $cal(['filter' => 'checkin_today', 'filter_status' => 'checked-in']);
+eq([$c['params']['tl_status'] ?? null, $c['list_only']], ['arr', ['status']], 'calendar: Arriving today + a status -> arr, status named');
+$c = $cal(['filter_status' => 'pending']);
+eq([isset($c['params']['tl_status']), $c['list_only'], $c['note']], [false, ['status'], 'Calendar shows rooms; the status filter applies to the list only.'], 'calendar: pending status -> list only, note');
+eq($cal(['room' => '12'])['params']['filter_room_id'] ?? null, '12', 'calendar: room -> filter_room_id');
+eq($cal(['room' => '0', 'room_type' => 'x'])['params'], ['embed' => '1', 'from' => 'bookings'], 'calendar: invalid room / type ids dropped');
+eq($cal(['search' => 'Banda'])['params']['filter_search'] ?? null, 'Banda', 'calendar: name search carried');
+eq($cal(['search' => 'BK-2026-0012'])['params']['filter_search'] ?? null, 'BK-2026-0012', 'calendar: reference search carried');
+$c = $cal(['search' => 'guest@example.invalid']);
+eq([isset($c['params']['filter_search']), $c['list_only']], [false, ['phone / email search']], 'calendar: email search stays on the list, named');
+$c = $cal(['search' => '+265 991 234 567']);
+eq([isset($c['params']['filter_search']), $c['list_only']], [false, ['phone / email search']], 'calendar: phone search stays on the list, named');
+eq($cal(['search' => '204'])['params']['filter_search'] ?? null, '204', 'calendar: short number (room) carried');
+eq($cal(['date_from' => '2026-12-01', 'date_to' => '2026-12-05'])['params']['start'] ?? null, '2026-12-01', 'calendar: arrival From -> start');
+eq($cal(['date_from' => '2026-12-01', 'date_type' => 'staying'])['params']['start'] ?? null, '2026-12-01', 'calendar: staying From -> start');
+eq(isset($cal(['date_from' => '2026-12-01', 'date_type' => 'departure'])['params']['start']), false, 'calendar: departure dates -> no start');
+eq(isset($cal(['date_from' => '2026-12-01', 'date_type' => 'booked'])['params']['start']), false, 'calendar: booked-on dates -> no start');
+eq(isset($cal(['date_from' => '2026-02-30'])['params']['start']), false, 'calendar: impossible From -> no start');
+$c = $cal(['filter_status' => 'cancelled', 'pay' => 'unpaid', 'source' => 'online', 'group' => '7', 'search' => 'a@b.c']);
+eq($c['list_only'], ['status', 'payment', 'source', 'group', 'phone / email search'], 'calendar: list-only names in fixed order');
+eq($c['note'], 'Calendar shows rooms; the status, payment, source, group and phone / email search filters apply to the list only.', 'calendar: note names every list-only filter');
+eq($cal(['filter' => 'unpaid'])['list_only'], ['payment'], 'calendar: Unpaid tab -> payment named');
+eq($cal(['payment_status' => 'paid'])['list_only'], ['payment'], 'calendar: ?payment_status= -> payment named');
+eq($cal(['filter' => 'group_bookings'])['list_only'], ['group'], 'calendar: Groups tab -> group named');
+eq($cal(['filter' => 'expiring_soon'])['list_only'], ['status'], 'calendar: Expiring tab -> status named');
+eq($cal(['created_by' => '4'])['list_only'], ['staff'], 'calendar: made by -> staff named');
+$c = $cal(['search' => "x\"'<script>&tl_status=occ"]);
+eq([$c['params']['filter_search'] ?? null, isset($c['params']['tl_status'])], ["x\"'<script>&tl_status=occ", false], 'calendar: search text is one encoded param, never extra params');
+check(strpos($c['src'], '&tl_status=') === false && strpos($c['src'], '<') === false, 'calendar: src is URL-encoded');
 
 // ---- Step 13 cross-check (LIWONDE only, READ-ONLY): every booking's tab / filter membership from the real SQL equals
 // its badge (rh_booking_pay_state) - group rooms, company-billed rooms, cancelled / no-show / expired included.

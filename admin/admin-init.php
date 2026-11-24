@@ -45,7 +45,11 @@ if (!isset($_SESSION['admin_user_id'])) {
     $isAdminPage = strtolower(substr($requestedFile, -4)) === '.php'
         && strtolower($requestedFile) !== 'login.php';
 
-    if ($isAdminPage) {
+    // An embedded page (?embed=1, e.g. the Calendar inside bookings.php) is never the after-login target: the frame
+    // shows the sign-in page and the outer page sends the whole window there (bookings.php checks the frame).
+    $isEmbed = is_scalar($_GET['embed'] ?? null) && (string)$_GET['embed'] === '1';
+
+    if ($isAdminPage && !$isEmbed) {
         $redirectTarget = $requestedFile . ($requestQuery !== '' ? '?' . $requestQuery : '');
         $_SESSION['admin_redirect_after_login'] = $redirectTarget;
         header('Location: login.php?redirect=' . rawurlencode($redirectTarget));

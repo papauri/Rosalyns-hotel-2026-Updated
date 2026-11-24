@@ -115,7 +115,8 @@
             api: cfg.api || 'api/calendar-timeline.php',
             start: cfg.data.start,
             days: cfg.data.days,
-            filters: { type: ini.type ? String(ini.type) : '', floor: ini.floor || '', status: '', room: ini.room ? Number(ini.room) : 0, day: null },
+            // status: a room state carried in from bookings.php (calendar.php ?tl_status=), whitelisted again here.
+            filters: { type: ini.type ? String(ini.type) : '', floor: ini.floor || '', status: ['free', 'occ', 'arr', 'dep', 'dirty', 'oos'].indexOf(ini.status) !== -1 ? ini.status : '', room: ini.room ? Number(ini.room) : 0, day: null },
             search: ini.search || '',
             mode: 'grid',
             collapsed: store(STORE_COLLAPSE) || {},
@@ -134,6 +135,8 @@
         var floorSel = q(st, '[data-tl-filter="floor"]');
         if (typeSel) typeSel.value = st.filters.type;
         if (floorSel) floorSel.value = st.filters.floor;
+        var statusSel = q(st, '[data-tl-filter="status"]');
+        if (statusSel) statusSel.value = st.filters.status;
         var search = q(st, '[data-tl-search]');
         if (search) search.value = st.search;
 
@@ -1869,7 +1872,8 @@
             : Promise.resolve({ confirmed: true });
         ask.then(function (ans) {
             endDrag(st);
-            if (ans && ans.confirmed) window.location.href = href;
+            // Inside bookings.php's Calendar frame the booking opens in the whole window, not in the frame.
+            if (ans && ans.confirmed) (window.top !== window.self ? window.top : window).location.href = new URL(href, window.location.href).href;
         });
     }
 

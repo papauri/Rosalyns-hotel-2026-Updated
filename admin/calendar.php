@@ -30,6 +30,16 @@ if ($calViewRaw === '') {
 }
 $calView = $calViewRaw === 'month' ? 'month' : 'timeline';
 
+// Embedded (?embed=1): the Room Timeline alone inside bookings.php's List | Calendar switch (BOOKINGS_LIST_PLAN
+// Decision 4, T11). Same login + permission checks (admin-init.php above); no sidebar, header or calendar tabs
+// (admin-header.php / admin-footer.php read $rh_admin_embed); links that leave the timeline open in the top window.
+$calEmbed = is_scalar($_GET['embed'] ?? null) && (string)$_GET['embed'] === '1';
+$rh_admin_embed = $calEmbed;
+if ($calEmbed) {
+    $calTab = 'calendar';
+    $calView = 'timeline';
+}
+
 // Get date parameters
 $currentYear  = isset($_GET['year'])  ? intval($_GET['year'])  : date('Y');
 $currentMonth = isset($_GET['month']) ? intval($_GET['month']) : date('m');
@@ -186,6 +196,9 @@ if ($calIsMonth) {
         'floor' => $filterFloor,
         'search' => $filterSearchRaw,
         'days_set' => isset($_GET['days']),
+        // Room state filter carried in from bookings.php (Arriving today -> arr, Leaving today -> dep, In house -> occ).
+        'status' => (is_scalar($_GET['tl_status'] ?? null) && in_array((string)$_GET['tl_status'], ['free', 'occ', 'arr', 'dep', 'dirty', 'oos'], true)) ? (string)$_GET['tl_status'] : '',
+        'from' => (is_scalar($_GET['from'] ?? null) && (string)$_GET['from'] === 'bookings') ? 'bookings' : '',
     ];
 } elseif ($calTab === 'housekeeping') {
     $calHkFilter = (is_scalar($_GET['hk'] ?? null) && in_array((string)$_GET['hk'], ['dirty', 'cleaning', 'inspection', 'clean', 'unassigned'], true)) ? (string)$_GET['hk'] : '';
@@ -212,14 +225,46 @@ if ($calIsMonth) {
     <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
     <link rel="stylesheet" href="css/calendar.css?v=<?php echo @filemtime(__DIR__ . '/css/calendar.css'); ?>">
     <link rel="stylesheet" href="css/room-timeline.css?v=<?php echo @filemtime(__DIR__ . '/css/room-timeline.css'); ?>">
+<?php if ($calEmbed): ?>
+    <?php /* No href: only the default target changes, so fetch() and relative links resolve as before. */ ?>
+    <base target="_top">
+    <script>
+        window.__rhPresencePing = true; /* the outer bookings.php already reports where this person is */
+        // While the booking panel (side panel or phone sheet) is open, tell the outer page, so its floating Assistant,
+        // notice and help buttons step aside and never cover the panel's buttons (as on the Calendar page itself).
+        document.addEventListener('DOMContentLoaded', function () {
+            var outer = null;
+            try { outer = window.parent !== window ? window.parent.document.documentElement : null; } catch (e) { outer = null; }
+            var dr = document.querySelector('[data-tl-drawer]');
+            if (!outer) return;
+            var sync = function () {
+                var open = document.documentElement.classList.contains('rh-tl-open') || (!!dr && !dr.hidden && dr.classList.contains('is-open'));
+                outer.classList.toggle('rh-bk-cal-panel', open);
+            };
+            var mo = new MutationObserver(sync);
+            mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+            if (dr) mo.observe(dr, { attributes: true, attributeFilter: ['class', 'hidden'] });
+            window.addEventListener('pagehide', function () { outer.classList.remove('rh-bk-cal-panel'); });
+            sync();
+        });
+    </script>
+    <style>
+        /* No admin header in the frame: the side panel starts at the top and the grid gets the header's height. */
+        html:root { --admin-header-height: 0px; }
+        html, body.rh-embed { background: var(--admin-bg, #f5f6f8); }
+        body.rh-embed > #rh-admin-page { padding-top: 0 !important; margin-left: 0 !important; width: 100% !important; }
+        body.rh-embed > #rh-admin-page > .content { margin: 0 !important; padding: 8px !important; max-width: none !important; }
+        body.rh-embed .tl-view a.ck-tab[href*="view=month"] { display: none; }
+    </style>
+<?php endif; ?>
 </head>
 
-<body>
+<body<?php echo $calEmbed ? ' class="rh-embed"' : ''; ?>>
 
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="content">
-        <?php require __DIR__ . '/includes/calendar-shell.php'; ?>
+        <?php if (!$calEmbed) { require __DIR__ . '/includes/calendar-shell.php'; } ?>
 
         <?php if (isset($error)): ?>
             <div class="alert alert-error">
