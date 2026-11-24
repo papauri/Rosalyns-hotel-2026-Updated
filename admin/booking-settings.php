@@ -2663,11 +2663,11 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </div>
 
                     <div class="form-group">
-                        <label for="email_admin_backup">Backup staff copy emails (optional)</label>
+                        <label for="email_admin_backup">Backup staff copy emails: hidden copy of every email (optional)</label>
                         <input type="text" id="email_admin_backup" name="email_admin_backup" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_admin_backup'] ?? ''); ?>"
                             placeholder="owner@example.com, accounts@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Up to 5, comma-separated. Each gets the same hidden copy as the staff copy email, while the switch below is on. Guests never see them. They do not receive the alerts or reports that fall back to the staff copy email.</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Up to 5, comma-separated. <strong>What adding an address here does:</strong> it gets a hidden copy (BCC) of every email the system sends while the switch below is on: guest emails such as booking confirmations, cancellations and invoices, and staff alerts such as new bookings. Guests never see these addresses. They are not used as the main recipient of an alert or report when its own box is blank. Reports are separate: to copy someone on the End of Day and daily reports, add them to "End-of-day report CC" (Payments &amp; documents); for the kitchen, bar and coffee bar reports, to "Copy (CC) on the station report emails" (Automated Emails).</p>
                         <?php
                         $rhStaffBackups = rh_mail_staff_backup_addresses();
                         $rhBccOn = ($current_settings['email_bcc_admin'] ?? '1') === '1';
@@ -2685,7 +2685,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <label style="display: flex; align-items: center; gap: 10px;">
                             <input type="checkbox" id="email_bcc_admin" name="email_bcc_admin" value="1"
                                 <?php echo ($current_settings['email_bcc_admin'] ?? '1') === '1' ? 'checked' : ''; ?>>
-                            <span>Send the staff copy email a hidden copy of every email</span>
+                            <span>Send the staff copy email and the backup staff copy emails a hidden copy of every email</span>
                         </label>
                         <p class="help-text"><i class="fas fa-info-circle"></i> Guests can't see this copy. It covers guest emails and staff alerts (new bookings, conference and gym alerts, expired holds, contact-form messages), once each: an email that already goes to the staff copy email is not copied again. Automated reminders use their own switch on the Automated Emails page.</p>
                     </div>
