@@ -45,18 +45,26 @@ $pvaData = null;
 // stock on hand when the count is approved, so Inventory and Projected profit leave it out and Projected vs actual cannot use
 // it. An import's opening count leaves every item at 0 until it is approved (owner 2026-11-24: "make sure its clear").
 $scWaiting = [];
+$scCanOpen = false; // may this user open the Stock Count page? If not, the counts are named without a link.
+$scCanApprove = false; // and approve a count there (stock_count_approve)? Decides who the notice tells to approve it.
 if (in_array($tab, ['inventory', 'profit', 'pva'], true)) {
     try {
+        // is_opening came with a later migration: without it every count is an ordinary one, never a failed query.
+        $scOpenCol = rh_spva_has_col($pdo, 'stock_counts', 'is_opening') ? 'sc.is_opening' : '0';
         $scWaiting = $pdo->query(
-            "SELECT sc.id, sc.reference, sc.status, sc.is_opening,
+            "SELECT sc.id, sc.reference, sc.status, {$scOpenCol} AS is_opening,
                     (SELECT COUNT(*) FROM stock_count_lines l WHERE l.count_id = sc.id) AS line_count
                FROM stock_counts sc
               WHERE sc.status IN ('draft', 'submitted')
-              ORDER BY sc.is_opening DESC, sc.created_at, sc.id"
+              ORDER BY is_opening DESC, sc.created_at, sc.id"
         )->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         error_log('stock reports waiting counts: ' . $e->getMessage());
         $scWaiting = [];
+    }
+    if ($scWaiting) {
+        $scCanOpen = function_exists('rhCanOpenPage') && rhCanOpenPage((int)($user['id'] ?? 0), 'stock-count.php');
+        $scCanApprove = $scCanOpen && hasPermission((int)($user['id'] ?? 0), 'stock_count_approve');
     }
 }
 
@@ -760,9 +768,9 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                 <i class="fas fa-clipboard-check" aria-hidden="true"></i>
                 <div>
                     <strong><?php echo $scN === 1 ? ($scOpening ? 'The opening stock count is not approved yet' : 'A stock count is not approved yet') : number_format($scN) . ' stock counts are not approved yet'; ?></strong>
-                    <span class="sr-waiting__why"><?php echo htmlspecialchars($scWhy); ?> Open it on the Stock Count page to finish and approve it.</span>
+                    <span class="sr-waiting__why"><?php echo htmlspecialchars($scWhy); ?> <?php echo $scCanApprove ? 'Open it on the Stock Count page to finish and approve it.' : ($scCanOpen ? 'Open it on the Stock Count page to finish and submit it, then a manager who can approve stock counts approves it.' : 'Ask a manager who can approve stock counts to finish and approve it.'); ?></span>
                     <span class="sr-waiting__list">
-                        <?php foreach (array_slice($scWaiting, 0, 3) as $i => $c): ?><?php echo $i > 0 ? ' · ' : ''; ?><a href="stock-count.php?id=<?php echo (int)$c['id']; ?>"><?php echo htmlspecialchars((string)$c['reference'] !== '' ? (string)$c['reference'] : 'Count #' . (int)$c['id']); ?></a> (<?php echo htmlspecialchars(((int)$c['is_opening'] === 1 ? 'opening count, ' : '') . $scStatusWord($c) . ', ' . number_format((int)$c['line_count']) . ' item(s)'); ?>)<?php endforeach; ?><?php echo $scN > 3 ? ' and ' . number_format($scN - 3) . ' more' : ''; ?>
+                        <?php foreach (array_slice($scWaiting, 0, 3) as $i => $c): ?><?php echo $i > 0 ? ' · ' : ''; ?><?php $scRef = htmlspecialchars((string)$c['reference'] !== '' ? (string)$c['reference'] : 'Count #' . (int)$c['id']); echo $scCanOpen ? '<a href="stock-count.php?id=' . (int)$c['id'] . '">' . $scRef . '</a>' : '<strong>' . $scRef . '</strong>'; ?> (<?php echo htmlspecialchars(((int)$c['is_opening'] === 1 ? 'opening count, ' : '') . $scStatusWord($c) . ', ' . number_format((int)$c['line_count']) . ' item(s)'); ?>)<?php endforeach; ?><?php echo $scN > 3 ? ' and ' . number_format($scN - 3) . ' more' : ''; ?>
                     </span>
                 </div>
             </div>
