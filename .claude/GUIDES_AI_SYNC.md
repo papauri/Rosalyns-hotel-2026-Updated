@@ -25,7 +25,13 @@ when prompted."
 
 ## Pending (oldest first)
 
-(none)
+- 2026-11-24 Liwonde 2cdb039 / Rosalyn's d089216 (owner FEATURE): Stock Items has a "Fill from bottle sizes" button: it
+  works out shots (or glasses) per bottle from the item's bottle size and the Drink measures list sizes its menu items
+  are sold in, shows a preview (new = ticked; items with a different measure or sold in several measures = unticked with
+  the reason; skips say what to set, e.g. "No bottle size: set Bottle size on the item, then run again"), and saves only
+  ticked rows. Hand-set measures never change unless ticked. New "Shots per bottle" column ("30 shots / bottle", "–").
+  Guides: stock items / count measures page. Assistant: answer "why does it show 2.28 bottle" -> set the count measure
+  (by hand, Set count measure, or Fill from bottle sizes). Manager Guide: Stock.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
