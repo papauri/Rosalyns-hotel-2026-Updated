@@ -473,7 +473,12 @@ if (!function_exists('rh_smb_list_rows')) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $why = $e instanceof RuntimeException ? $e->getMessage() : 'it could not be saved';
+                // PDOException extends RuntimeException: database text (SQLSTATE, lock waits) is logged, never shown.
+                $friendly = $e instanceof RuntimeException && !($e instanceof PDOException);
+                if (!$friendly) {
+                    error_log('stock measure bulk apply (item ' . (int)$row['id'] . '): ' . $e->getMessage());
+                }
+                $why = $friendly ? $e->getMessage() : 'it could not be saved';
                 $res['skipped'][] = [$row['name'], $why];
                 $outRow['status'] = 'skip';
                 $outRow['why'] = $why;
