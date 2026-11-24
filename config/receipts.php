@@ -1603,6 +1603,9 @@ if (!function_exists('receipt_send_email')) {
         }
 
         $placeholders = receipt_placeholders($pdo, $payment, $context);
+        // {{payment_policy}} in the receipt email's subject / plain text (decoded again when sent). Not in
+        // receipt_placeholders(): that list also feeds the WhatsApp receipt.
+        $placeholders['{{payment_policy}}'] = htmlspecialchars(trim((string)getSetting('payment_policy', '')), ENT_QUOTES, 'UTF-8');
         $receiptTemplate = function_exists('getBookingEmailTemplateConfig')
             ? getBookingEmailTemplateConfig('payment_receipt', [])
             : [];

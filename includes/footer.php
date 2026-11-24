@@ -33,7 +33,8 @@ if (!function_exists('footer_parse_tags')) {
                 // Booking
                 '{{check_in_time}}'      => getSetting('check_in_time', '2:00 PM'),
                 '{{check_out_time}}'     => getSetting('check_out_time', '11:00 AM'),
-                '{{payment_policy}}'     => getSetting('payment_policy', ''),
+                // Plain text edited in Hotel Settings: escaped, line breaks kept.
+                '{{payment_policy}}'     => nl2br(htmlspecialchars((string)getSetting('payment_policy', ''), ENT_QUOTES, 'UTF-8')),
                 '{{cancellation_policy}}' => getSetting('cancellation_policy', ''),
                 // Cancellation policy as set in Hotel Settings (current wording; '' when switched off)
                 '{{cancellation_terms}}'  => function_exists('rh_current_policy_text_all') ? rh_current_policy_text_all() : '',

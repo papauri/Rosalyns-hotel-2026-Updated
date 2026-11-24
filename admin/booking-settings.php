@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/booking-functions.php';
 require_once __DIR__ . '/../config/email.php';
 // Hotel Settings change log (owner 2026-11-14): switched on only around the save handlers below, off before anything else.
 require_once __DIR__ . '/../includes/settings-change-log.php';
+require_once __DIR__ . '/../includes/email-template-tags.php';
 // High-value settings (tourism levy, bank details, service charge) need a password unlock before a save (owner 2026-11-25).
 require_once __DIR__ . '/../includes/settings-lock.php';
 
@@ -394,6 +395,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_no_show_refund_p
     }
 }
 
+// Payment policy: plain text shown where payment terms appear (quotation PDF, {{payment_policy}} in templates).
+// Inside the settings change log span, so who/when/old -> new is recorded by updateSetting().
+$rh_payment_policy_max = 1000;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_payment_policy'])) {
+    $ppNew = trim(str_replace(["\r\n", "\r"], "\n", (string)($_POST['payment_policy'] ?? '')));
+    $ppOld = trim((string)getSetting('payment_policy', ''));
+    if (!hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
+        $error = 'You do not have permission to change the payment policy.';
+    } elseif ((function_exists('mb_strlen') ? mb_strlen($ppNew) : strlen($ppNew)) > $rh_payment_policy_max) {
+        $error = 'Payment policy not saved: keep it to ' . $rh_payment_policy_max . ' characters.';
+        $rh_pp_sticky = $ppNew;
+    } elseif ($ppNew === $ppOld) {
+        $message = 'Payment policy unchanged.';
+    } else {
+        updateSetting('payment_policy', $ppNew);
+        $message = 'Payment policy saved.';
+    }
+}
+
 // Hotel details & policies (registry-driven; see admin/includes/hotel-details-settings.php)
 require_once __DIR__ . '/includes/hotel-details-settings.php';
 require_once __DIR__ . '/includes/review-sources-settings.php';
@@ -685,7 +705,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{contact_email}}'            => (string)(getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
             '{{contact_phone}}'            => (string)getSetting('phone_main', ''),
             '{{phone_main}}'               => (string)getSetting('phone_main', ''),
-            '{{payment_policy}}'           => 'Full payment is due 48 hours before check-in.',
+            '{{payment_policy}}'           => rh_email_payment_policy_html('Full payment is due 48 hours before check-in.'),
             '{{check_in_time}}'            => (string)getSetting('check_in_time', '2:00 PM'),
             '{{check_out_time}}'           => (string)getSetting('check_out_time', '11:00 AM'),
             '{{cancellation_reason}}'      => 'Requested by guest.',
@@ -901,8 +921,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
         $ajaxFullHtml    = function_exists('wrapEmailTemplate')
             ? wrapEmailTemplate($ajaxResHtmlBody, $ajaxResSubject)
             : $ajaxResHtmlBody;
+        // No plain text typed: show the one made from the HTML at send time (shown only, never saved).
+        $ajaxTextAuto = false;
+        if (trim((string)$ajaxResTextBody) === '' && function_exists('rh_email_html_to_text')) {
+            $ajaxResTextBody = rh_email_html_to_text($ajaxResHtmlBody);
+            $ajaxTextAuto = true;
+        }
 
-        echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'html_body' => $ajaxResHtmlBody, 'is_document' => false, 'has_unsaved_changes' => $hasUnsavedChanges]);
+        echo json_encode(['success' => true, 'full_html' => $ajaxFullHtml, 'subject' => $ajaxResSubject, 'text_body' => $ajaxResTextBody, 'text_auto' => $ajaxTextAuto, 'html_body' => $ajaxResHtmlBody, 'is_document' => false, 'has_unsaved_changes' => $hasUnsavedChanges]);
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
@@ -1274,7 +1300,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{contact_email}}'            => (string)(getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
                 '{{contact_phone}}'            => (string)getSetting('phone_main', ''),
                 '{{phone_main}}'               => (string)getSetting('phone_main', ''),
-                '{{payment_policy}}'           => 'Full payment is due 48 hours before check-in.',
+                '{{payment_policy}}'           => rh_email_payment_policy_html('Full payment is due 48 hours before check-in.'),
                 '{{check_in_time}}'            => (string)getSetting('check_in_time', '2:00 PM'),
                 '{{check_out_time}}'           => (string)getSetting('check_out_time', '11:00 AM'),
                 '{{cancellation_reason}}'      => 'Requested by guest.',
@@ -1712,7 +1738,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             'advance-booking' => ['rooms', 'Advance booking', 'Advance booking window advance days max booking ahead', $mod_bookings],
             'tentative' => ['rooms', 'Tentative', 'Tentative bookings tentative hold provisional expiry', $mod_bookings],
             'booking-references' => ['rooms', 'References', 'Booking reference prefix reference prefix booking number', $mod_bookings],
-            'cancellation' => ['money', 'Refunds', 'Refunds & cancellations refund cancel cancellation policy credit note', $mod_bookings],
+            'cancellation' => ['money', 'Refunds', 'Refunds & cancellations refund cancel cancellation policy credit note payment policy payment terms', $mod_bookings],
             'tourism-levy' => ['money', 'Tourism levy', 'Tourism levy / city tax tourism levy city tax', $mod_bookings],
             'document-branding' => ['money', 'Branding', 'Document branding invoice pdf logo branding colours receipt', $mod_bookings],
             'email-config' => ['email', 'Email', 'Email server (SMTP) email smtp mail server password sender', true],
@@ -2438,6 +2464,21 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save no-show refund rule</button>
                         <?php endif; ?>
                     </div>
+                </form>
+
+                <?php $ppValue = isset($rh_pp_sticky) ? (string)$rh_pp_sticky : (string)getSetting('payment_policy', ''); ?>
+                <form method="POST" action="booking-settings.php#payment-policy" id="payment-policy" class="form-group bs-subcard">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_payment_policy" value="1">
+                    <h3><label for="payment_policy_text" style="margin:0;">Payment policy</label> <i class="help" data-tip="Shown to guests where payment terms appear: the quotation PDF's Payment terms, and any email template that uses the {{payment_policy}} tag.">?</i></h3>
+                    <p class="help-text">Plain text, up to <?php echo (int)$rh_payment_policy_max; ?> characters. Line breaks are kept. When a deposit is required, the quotation PDF shows the deposit terms instead.</p>
+                    <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> class="bs-fieldset">
+                        <textarea id="payment_policy_text" name="payment_policy" class="form-control" rows="4" maxlength="<?php echo (int)$rh_payment_policy_max; ?>"
+                            placeholder="e.g. Full payment is due on arrival. We accept cash, card and bank transfer."><?php echo htmlspecialchars($ppValue, ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    </fieldset>
+                    <?php if ($canEditRefundRules): ?>
+                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save payment policy</button>
+                    <?php endif; ?>
                 </form>
             </div>
 
@@ -3215,6 +3256,9 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         $tpl      = $booking_templates[$tkey];
                         $isActive = (int)($tpl['is_active'] ?? 1) === 1;
                         $isShown  = ($tkey === $activeTabKey);
+                        $tIsDocument = in_array($tkey, $booking_document_template_keys, true);
+                        $tTagGroups  = rh_email_template_tags((string)$tkey);
+                        $tTagNote    = rh_email_template_tag_note((string)$tkey);
                     ?>
                         <div class="tpl-panel" id="panel-<?php echo $tkey; ?>" <?php echo $isShown ? '' : 'hidden'; ?> role="tabpanel">
                             <div class="tpl-split<?php echo $canEditTemplates ? '' : ' tpl-split--locked'; ?>">
@@ -3265,25 +3309,47 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                             autocomplete="off"><?php echo htmlspecialchars($tpl['html_body'] ?? ''); ?></textarea>
                                     </div>
 
+                                    <?php if ($tIsDocument): ?>
+                                    <?php /* PDF documents have no plain text part: the saved value is kept as it is. */ ?>
+                                    <input type="hidden" id="<?php echo $tkey; ?>_text_body" name="<?php echo $tkey; ?>_text_body" value="<?php echo htmlspecialchars($tpl['text_body'] ?? ''); ?>">
+                                    <?php else: ?>
                                     <details class="tpl-textbody-toggle">
-                                        <summary>Plain text version <span style="font-weight:400;font-size:10.5px;color:#9ca3af;">(optional fallback for clients that can't render HTML)</span></summary>
+                                        <summary>Plain text version <span style="font-weight:400;font-size:10.5px;color:#6b7280;">(optional). Leave empty and it is made from the HTML automatically.</span></summary>
                                         <div style="margin-top:8px;">
                                             <textarea id="<?php echo $tkey; ?>_text_body"
                                                 name="<?php echo $tkey; ?>_text_body"
                                                 class="form-control"
                                                 rows="5"
-                                                placeholder="Plain text version of this email..."><?php echo htmlspecialchars($tpl['text_body'] ?? ''); ?></textarea>
+                                                placeholder="Leave empty to use the text made from the HTML. Click Preview to see it."><?php echo htmlspecialchars($tpl['text_body'] ?? ''); ?></textarea>
                                         </div>
                                     </details>
+                                    <?php endif; ?>
 
-                                    <!-- Placeholder chips -->
+                                    <!-- Tags this template fills (includes/email-template-tags.php) -->
                                     <details class="tips-box tpl-placeholders" style="margin-top:10px;">
-                                        <summary><i class="fas fa-code"></i> Placeholders <em style="font-weight:400;font-size:10px;margin-left:4px;">— click to insert at cursor</em></summary>
+                                        <summary><i class="fas fa-code"></i> Tags you can use in this template <i class="help" data-tip="Tags are replaced with the real details when the email or PDF is sent. Only the tags listed here work in this template.">?</i> <em style="font-weight:400;font-size:10px;margin-left:4px;">Click a tag to put it where the cursor is.</em></summary>
                                         <div class="tips-body">
-                                            <div class="placeholder-grid" id="chips-<?php echo $tkey; ?>">
-                                                <?php foreach ($allPlaceholders as $ph): ?>
-                                                    <code class="tpl-chip" data-tpl="<?php echo $tkey; ?>"><?php echo htmlspecialchars($ph); ?></code>
-                                                <?php endforeach; ?>
+                                            <?php if ($tTagNote !== ''): ?>
+                                                <p class="help-text tpl-tag-note"><?php echo htmlspecialchars($tTagNote); ?></p>
+                                            <?php endif; ?>
+                                            <div id="chips-<?php echo $tkey; ?>">
+                                            <?php if ($tTagGroups === null): ?>
+                                                <div class="placeholder-grid">
+                                                    <?php foreach ($allPlaceholders as $ph): ?>
+                                                        <code class="tpl-chip" data-tpl="<?php echo $tkey; ?>"><?php echo htmlspecialchars($ph); ?></code>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php else: foreach ($tTagGroups as $tGroupName => $tGroupTags): ?>
+                                                <p class="tpl-tag-group__title"><?php echo htmlspecialchars($tGroupName); ?></p>
+                                                <ul class="tpl-tag-list">
+                                                    <?php foreach ($tGroupTags as $tTag => $tMeaning): ?>
+                                                        <li class="tpl-tag-list__item">
+                                                            <code class="tpl-chip" data-tpl="<?php echo $tkey; ?>" role="button" tabindex="0"><?php echo htmlspecialchars('{{' . $tTag . '}}'); ?></code>
+                                                            <span class="tpl-tag-list__meaning"><?php echo htmlspecialchars($tMeaning); ?></span>
+                                                        </li>
+                                                    <?php endforeach; ?>
+                                                </ul>
+                                            <?php endforeach; endif; ?>
                                             </div>
                                         </div>
                                     </details>
@@ -3316,6 +3382,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                             <p>Click <strong>Preview</strong> to render this email with sample guest data</p>
                                         </div>
                                     </div>
+
+                                    <?php if (!$tIsDocument): ?>
+                                    <details class="tpl-textbody-toggle tpl-plain-preview" id="plain-preview-<?php echo $tkey; ?>" hidden>
+                                        <summary>Plain text the guest gets <span style="font-weight:400;font-size:10.5px;color:#6b7280;">(shown by mail apps that cannot show the designed email)</span></summary>
+                                        <div><pre class="tpl-plain-preview__text" id="plain-preview-text-<?php echo $tkey; ?>"></pre></div>
+                                    </details>
+                                    <?php endif; ?>
 
                                     <div class="tpl-send-test" id="send-test-area-<?php echo $tkey; ?>" style="display:none;">
                                         <p class="tpl-send-test-label"><i class="fas fa-paper-plane"></i> Send as Test Email</p>
@@ -3645,6 +3718,12 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     document.querySelectorAll('.tpl-chip').forEach(function(chip) {
                         chip.title = 'Click to insert at cursor';
                         chip.style.cursor = 'pointer';
+                        chip.addEventListener('keydown', function(ev) {
+                            if (ev.key === 'Enter' || ev.key === ' ') {
+                                ev.preventDefault();
+                                this.click();
+                            }
+                        });
                         chip.addEventListener('click', function() {
                             var key = this.dataset.tpl;
                             var ta = document.getElementById(key + '_html_body');
@@ -3734,6 +3813,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                 sendArea._previewTextBody = data.text_body || '';
                                 sendArea._previewIsDocument = !!data.is_document;
                                 if (feedback) feedback.style.display = 'none';
+                            }
+                            // Plain text part: the typed one, or the one made from the HTML when none is typed.
+                            var plainBox = document.getElementById('plain-preview-' + key);
+                            var plainText = document.getElementById('plain-preview-text-' + key);
+                            if (plainBox && plainText) {
+                                plainText.textContent = data.text_body || '';
+                                plainBox.hidden = !!data.is_document || !(data.text_body || '');
                             }
                         } else {
                             wrapper.innerHTML = '<p style="color:#dc2626;padding:24px;text-align:center;">' +

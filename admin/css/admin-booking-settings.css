@@ -689,6 +689,85 @@ details.template-block[open]>summary::after {
     margin-top: 10px;
 }
 
+/* Tag glossary: each tag with its meaning, grouped */
+.tpl-tag-note {
+    margin: 0 0 8px;
+}
+
+.tpl-tag-group__title {
+    margin: 10px 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-primary-dark, #5F5343);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.tpl-tag-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 4px 14px;
+}
+
+.tpl-tag-list__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.tpl-tag-list .tpl-chip {
+    background: #fff;
+    border: 1px solid #D6CDBF;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+    color: var(--color-primary-dark, #5F5343);
+    overflow-wrap: anywhere;
+}
+
+.tpl-tag-list .tpl-chip:focus-visible {
+    outline: 2px solid var(--color-primary-dark, #5F5343);
+    outline-offset: 1px;
+}
+
+.tpl-tag-list__meaning {
+    color: #4b5563;
+    min-width: 0;
+}
+
+/* Plain text part shown under the preview */
+.tpl-plain-preview {
+    margin: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+}
+
+.tpl-plain-preview__text {
+    margin: 0;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #374151;
+    background: #fff;
+}
+
+@media (max-width: 600px) {
+    .tpl-tag-list {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Utility buttons in editor toolbar */
 .btn-load-default,
 .btn-format-html {

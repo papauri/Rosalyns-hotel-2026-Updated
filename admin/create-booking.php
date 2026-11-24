@@ -1385,7 +1385,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                         if ($qp_booking) {
                             $qp_result = sendTentativeQuotationEmail($qp_booking, [
                                 'valid_days'      => 30,
-                                'quotation_notes' => 'Payment is due upon arrival. Please bring this quotation with you.',
+                                'quotation_notes' => '',
                                 'attach_pdf'      => true,
                                 'send_whatsapp'   => false,
                             ]);

@@ -200,7 +200,7 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             $mail->isHTML(true);
             $mail->Subject = $subject;
             $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-            $mail->AltBody = $textBody ?: strip_tags($htmlBody);
+            $mail->AltBody = $textBody ?: rh_email_html_to_text($htmlBody);
 
             rh_test_platform_mail_apply($mail); // test platform: only the test recipient
             $mail->send();
@@ -339,7 +339,7 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
             $mail->isHTML(true);
             $mail->Subject = $subject;
             $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-            $mail->AltBody = $textBody !== '' ? $textBody : strip_tags($htmlBody);
+            $mail->AltBody = $textBody !== '' ? $textBody : rh_email_html_to_text($htmlBody);
             rh_test_platform_mail_apply($mail); // test platform: only the test recipient
             $mail->send();
 
@@ -2289,7 +2289,7 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'contact_email' => $email_from_email ?: getSetting('email_main', ''),
         'phone_main' => getSetting('phone_main', ''),
         'currency_symbol' => $currency,
-        'payment_policy' => getSetting('payment_policy', ''),
+        'payment_policy' => rh_email_payment_policy_html(),
         'check_in_time' => getSetting('check_in_time', '2:00 PM'),
         'check_out_time' => getSetting('check_out_time', '11:00 AM'),
         'booking_reference' => $booking['booking_reference'] ?? '',
@@ -2753,6 +2753,73 @@ function rh_email_block_plain(string $html): string
 }
 
 /**
+ * PURE. Whole HTML email -> readable plain text for the text part of the email (what a mail app shows when it
+ * cannot show HTML). Drops <head>/<style>/<script>/comments and hidden (display:none) preheaders; paragraph,
+ * heading, row and list ends become new lines, table cells a space; a link reads "Text (address)" when the
+ * address adds something; entities decoded; blank runs collapsed to one blank line.
+ */
+function rh_email_html_to_text(string $html): string
+{
+    if (trim($html) === '') {
+        return '';
+    }
+    $t = (string)preg_replace('#<!--.*?-->#s', '', $html);
+    $t = (string)preg_replace('#<(head|style|script|title)\b[^>]*>.*?</\1\s*>#is', '', $t);
+    $t = (string)preg_replace('#<(div|span|p|td)\b[^>]*style\s*=\s*("|\')[^"\']*display\s*:\s*none[^"\']*\2[^>]*>.*?</\1\s*>#is', '', $t);
+    // Source line breaks and indentation mean nothing in HTML.
+    $t = (string)preg_replace('/\s+/u', ' ', $t);
+    $t = (string)preg_replace_callback('#<a\b[^>]*\bhref\s*=\s*("|\')(.*?)\1[^>]*>(.*?)</a\s*>#is', static function (array $m): string {
+        $href = trim(html_entity_decode($m[2], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $label = trim(html_entity_decode(strip_tags($m[3]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if (!preg_match('#^(https?://|mailto:)#i', $href)) {
+            return $m[3];
+        }
+        $bare = (string)preg_replace('#^(mailto:|tel:)#i', '', $href);
+        if ($label === '') {
+            return htmlspecialchars($bare, ENT_QUOTES, 'UTF-8');
+        }
+        if (strcasecmp($label, $href) === 0 || strcasecmp($label, $bare) === 0) {
+            return $m[3];
+        }
+        return $m[3] . ' (' . htmlspecialchars($bare, ENT_QUOTES, 'UTF-8') . ')';
+    }, $t);
+    $t = (string)preg_replace('#<br\s*/?>#i', "\n", $t);
+    $t = (string)preg_replace('#</(p|h[1-6]|div|tr|li|table|ul|ol|blockquote)\s*>#i', "\n", $t);
+    $t = (string)preg_replace('#</t[dh]\s*>#i', ' ', $t);
+    $t = html_entity_decode(strip_tags($t), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    // Non-breaking and zero-width characters (preheader padding, &nbsp;) survive trim(): drop them here.
+    $t = (string)preg_replace('/[\x{200B}-\x{200D}\x{FEFF}\x{034F}\x{00AD}]/u', '', $t);
+    $t = (string)preg_replace('/[\x{00A0}\t ]+/u', ' ', $t);
+    $lines = array_map('trim', preg_split('/\R/u', $t) ?: []);
+    $out = [];
+    $blank = 0;
+    foreach ($lines as $line) {
+        if ($line === '') {
+            $blank++;
+            continue;
+        }
+        if ($out && $blank > 1) {
+            $out[] = '';
+        }
+        $blank = 0;
+        $out[] = $line;
+    }
+    return implode("\n", $out);
+}
+
+/**
+ * Payment policy (Hotel Settings) as HTML for an email/PDF: escaped, line breaks kept. $default when none is set.
+ */
+function rh_email_payment_policy_html(string $default = ''): string
+{
+    $policy = function_exists('getSetting') ? trim((string)getSetting('payment_policy', '')) : '';
+    if ($policy === '') {
+        $policy = $default;
+    }
+    return nl2br(htmlspecialchars($policy, ENT_QUOTES, 'UTF-8'));
+}
+
+/**
  * Render booking email template from DB
  */
 function renderBookingEmailTemplate(string $templateKey, array $vars)
@@ -2764,6 +2831,10 @@ function renderBookingEmailTemplate(string $templateKey, array $vars)
     $template = getBookingEmailTemplateConfig($templateKey, []);
     if (empty($template['subject']) || empty($template['html_body']) || (int)($template['is_active'] ?? 1) !== 1) {
         return null;
+    }
+    // {{payment_policy}} works in every email template, also for senders whose own variables leave it out.
+    if (!array_key_exists('payment_policy', $vars)) {
+        $vars['payment_policy'] = rh_email_payment_policy_html();
     }
     return rh_render_booking_email_template_row($templateKey, $template, $vars);
 }
@@ -2780,7 +2851,7 @@ function rh_render_booking_email_template_row(string $templateKey, array $templa
     }
     // A block of HTML placed in the plain-text part goes in as plain lines.
     $textReplace = $replace;
-    foreach (['{{booked_rate_block}}', '{{group_rooms_block}}'] as $blockKey) {
+    foreach (['{{booked_rate_block}}', '{{group_rooms_block}}', '{{payment_policy}}', '{{quotation_notes}}'] as $blockKey) {
         if (isset($replace[$blockKey])) {
             $textReplace[$blockKey] = htmlspecialchars(rh_email_block_plain($replace[$blockKey]), ENT_QUOTES, 'UTF-8');
         }
@@ -2832,6 +2903,10 @@ function rh_render_booking_email_template_row(string $templateKey, array $templa
                 $out['text_body'] .= $plain;
             }
         }
+    }
+    // No plain-text version saved: made from the finished HTML (appended blocks included). Never stored.
+    if ($out['text_body'] === '') {
+        $out['text_body'] = rh_email_html_to_text($out['html_body']);
     }
     return $out;
 }
@@ -3018,7 +3093,7 @@ function sendBookingReceivedEmail(array $booking)
         <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #856404; margin-top: 0;;text-align:left;">Payment Information</h3>
             <p style="color: #856404; margin: 0;">
-                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
+                ' . (trim((string)getSetting('payment_policy', '')) !== '' ? rh_email_payment_policy_html() : 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
             </p>
         </div>';
 
@@ -3126,7 +3201,7 @@ function sendBookingConfirmedEmail(array $booking)
         <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #856404; margin-top: 0;;text-align:left;">Payment Information</h3>
             <p style="color: #856404; margin: 0;">
-                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
+                ' . (trim((string)getSetting('payment_policy', '')) !== '' ? rh_email_payment_policy_html() : 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
             </p>
         </div>
 
@@ -4197,7 +4272,7 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
                 $pdfContent,
                 'Gym-Quotation-' . $quoteRef . '.pdf',
                 'application/pdf',
-                'Please review the attached gym membership quotation PDF.'
+                '' // text part made from the HTML (rh_email_html_to_text)
             );
         } else {
             $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Member'), $subject, $htmlBody);
@@ -4416,7 +4491,7 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
                 $pdfContent,
                 'Event-Quotation-' . $quoteRef . '.pdf',
                 'application/pdf',
-                'Please review the attached event booking quotation PDF.'
+                '' // text part made from the HTML (rh_email_html_to_text)
             );
         } else {
             $result = sendEmail($recipientEmail, (string)($inquiry['name'] ?? 'Attendee'), $subject, $htmlBody);
@@ -4774,7 +4849,7 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
         $mail->isHTML(true);
         $mail->Subject = $subject;
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-        $mail->AltBody = $textBody ?: strip_tags($htmlBody);
+        $mail->AltBody = $textBody ?: rh_email_html_to_text($htmlBody);
 
         rh_test_platform_mail_apply($mail); // test platform: only the test recipient
         $mail->send();
@@ -5366,7 +5441,7 @@ function sendTentativeBookingConvertedEmail(array $booking)
         <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #856404; margin-top: 0;;text-align:left;">Payment Information</h3>
             <p style="color: #856404; margin: 0;">
-                ' . getSetting('payment_policy', 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
+                ' . (trim((string)getSetting('payment_policy', '')) !== '' ? rh_email_payment_policy_html() : 'Payment will be made at the hotel upon arrival.<br>We accept cash payments only. Please bring the total amount of <strong>' . getSetting('currency_symbol') . ' ' . number_format(rh_booking_owed($booking)['owed'], 0) . '</strong> with you.') . '
             </p>
         </div>
 
@@ -6886,7 +6961,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             $htmlBody .= '
         <div style="background:#FFF8DC;border-left:4px solid #F0A500;border-radius:4px;padding:15px 18px;margin:20px 0;">
             <h3 style="color:#856404;margin-top:0;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;font-size:15px;">Payment Terms</h3>
-            <p style="color:#856404;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;font-size:14px;margin:0;">' . $policy . '</p>
+            <p style="color:#856404;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;font-size:14px;margin:0;">' . nl2br(htmlspecialchars($policy, ENT_QUOTES, 'UTF-8')) . '</p>
         </div>';
         }
 
@@ -6952,7 +7027,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
                 'child_supplement' => $fmt($child_supp),
                 'deposit_amount' => $fmt($deposit_amt),
                 'balance_due' => $deposit_amt > 0 ? $fmt($total - $deposit_amt) : $fmt($total),
-                'payment_policy' => (string)(getSetting('payment_policy') ?: 'Full payment is due on arrival.'),
+                'payment_policy' => rh_email_payment_policy_html('Full payment is due on arrival.'),
                 'valid_until' => $valid_until->format('F j, Y'),
                 'quotation_notes' => nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')),
             ]);
@@ -7013,9 +7088,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             $mail->isHTML(true);
             $mail->Subject  = $subject;
             $mail->Body     = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-            $mail->AltBody  = $textBody !== ''
-                ? $textBody
-                : ('Please see the attached PDF quotation for your stay at ' . $site_name . '.');
+            $mail->AltBody  = $textBody !== '' ? $textBody : rh_email_html_to_text($htmlBody);
             $mail->addStringAttachment($pdfContent, 'Quotation-' . $quote_ref . '.pdf', 'base64', 'application/pdf');
             rh_test_platform_mail_apply($mail); // test platform: only the test recipient
             $mail->send();
@@ -7107,7 +7180,7 @@ function sendEmailWithBinaryAttachment(
         $mail->isHTML(true);
         $mail->Subject = $subject;
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
-        $mail->AltBody = $altBody !== '' ? $altBody : 'Please view this message in an HTML-compatible email client.';
+        $mail->AltBody = $altBody !== '' ? $altBody : (rh_email_html_to_text($htmlBody) ?: 'Please view this message in an HTML-compatible email client.');
         $mail->addStringAttachment($attachmentContent, $attachmentName, 'base64', $attachmentMime);
         rh_test_platform_mail_apply($mail); // test platform: only the test recipient
         $mail->send();
@@ -7327,6 +7400,7 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
                     '{{logo_html}}' => rh_email_logo_html_tag($siteName),
                     '{{address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
                     '{{guest_email}}' => htmlspecialchars($recipientEmail, ENT_QUOTES, 'UTF-8'),
+                    '{{payment_policy}}' => rh_email_payment_policy_html(),
                 ];
                 $subject = strtr((string)$tplConfig['subject'], $tagMap);
                 $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
@@ -7352,7 +7426,7 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
                 $pdfContent,
                 'Conference-Quotation-' . $quoteRef . '.pdf',
                 'application/pdf',
-                'Please review the attached conference quotation PDF.'
+                '' // text part made from the HTML (rh_email_html_to_text)
             );
         } else {
             $result = sendEmail($recipientEmail, (string)($enquiry['contact_person'] ?? 'Guest'), $subject, $htmlBody);
@@ -7477,6 +7551,7 @@ function sendEventQuotationEmail(array $event, array $options = []): array
                     '{{logo_html}}' => rh_email_logo_html_tag($siteName),
                     '{{address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
                     '{{guest_email}}' => htmlspecialchars($recipientEmail, ENT_QUOTES, 'UTF-8'),
+                    '{{payment_policy}}' => rh_email_payment_policy_html(),
                 ];
                 $subject = strtr((string)$tplConfig['subject'], $tagMap);
                 $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
@@ -7507,7 +7582,7 @@ function sendEventQuotationEmail(array $event, array $options = []): array
                 $pdfContent,
                 'Event-Quotation-' . $quoteRef . '.pdf',
                 'application/pdf',
-                'Please review the attached event quotation PDF.'
+                '' // text part made from the HTML (rh_email_html_to_text)
             );
         } else {
             $result = sendEmail($recipientEmail, $recipientName, $subject, $htmlBody);

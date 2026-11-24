@@ -320,7 +320,7 @@ try {
                             </ol>
                             <?php if (!$is_tentative && $payment_policy): ?>
                             <p class="conf-payment-text" style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(139,115,85,0.08);">
-                                <?php echo $payment_policy; ?>
+                                <?php echo nl2br(htmlspecialchars((string)$payment_policy, ENT_QUOTES, 'UTF-8')); ?>
                             </p>
                             <?php endif; ?>
                         </div>

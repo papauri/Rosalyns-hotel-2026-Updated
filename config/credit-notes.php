@@ -1466,6 +1466,7 @@ if (!function_exists('sendCreditNoteEmail')) {
                         '{{contact_phone}}'      => htmlspecialchars($hotel_phone !== '' ? $hotel_phone : (string)getSetting('phone_main', '')),
                         '{{guest_email}}'        => htmlspecialchars((string)($cn['guest_email'] ?? '')),
                         '{{booked_rate}}'        => htmlspecialchars($cnBookedRate),
+                        '{{payment_policy}}'     => function_exists('rh_email_payment_policy_html') ? rh_email_payment_policy_html() : '',
                     ];
                     $htmlBody = str_replace(array_keys($cnPlaceholders), array_values($cnPlaceholders), $dbTpl['html_body']);
                     if (!empty($dbTpl['subject'])) {
