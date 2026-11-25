@@ -164,6 +164,35 @@ $booking_template_short_names = [
     'quotation_expiry_reminder' => 'Quote Expiry',
 ];
 
+/**
+ * The PDF layout a preview / test PDF shows for a *_document template: the same choice the real send makes.
+ * A stored copy that only repeats the code default's wording (older browser-only styling: CSS padding, max-width)
+ * is dropped by the real send for the current print layout, so the preview uses that layout too. Without this the
+ * test PDF printed the stored copy edge to edge while guests got the proper layout (owner 2026-11-25).
+ * Invoices follow invoice_document_template_mode like rh_inv_custom_template(): 'kit' = always the default,
+ * 'custom' = always the saved copy. Any edited wording is honoured as typed, exactly as the real send does.
+ */
+if (!function_exists('rh_template_preview_document_html')) {
+function rh_template_preview_document_html(string $key, string $html, array $documentKeys): string
+{
+    if ($html === '' || !in_array($key, $documentKeys, true) || !function_exists('rh_pdf_template_is_stock')
+        || !function_exists('hotel_booking_template_defaults_map')) {
+        return $html;
+    }
+    $default = (string)(hotel_booking_template_defaults_map()[$key]['html'] ?? '');
+    if ($default === '') {
+        return $html;
+    }
+    $mode = in_array($key, ['payment_invoice_document', 'conference_invoice_document'], true)
+        ? strtolower(trim((string)getSetting('invoice_document_template_mode', '')))
+        : '';
+    if ($mode === 'custom') {
+        return $html;
+    }
+    return ($mode === 'kit' || rh_pdf_template_is_stock($html, $default)) ? $default : $html;
+}
+}
+
 // Handle enable/disable via GET parameter
 if (isset($_GET['enable'])) {
     // A state change must never fire from a bare link (cross-site image/link): require the CSRF token.
@@ -658,6 +687,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
         if ($ajaxSubject === '' || $ajaxHtmlBody === '') {
             throw new Exception('No content to preview — fill in the fields or save the template first.');
         }
+        // PDF templates: show the layout the real send prints (after the unsaved-changes compare above).
+        $ajaxHtmlBody = rh_template_preview_document_html($ajaxKey, $ajaxHtmlBody, $booking_document_template_keys);
 
         $ajaxAddressParts = [
             trim((string)getSetting('address_line1', '')),
@@ -796,37 +827,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
                 : '';
 
             $invoiceLogoHtml = $invoiceLogoUrl !== ''
-                ? '<img src="' . htmlspecialchars($invoiceLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '" height="116" style="height:116px;width:auto;display:block;margin:0 auto;">'
+                ? '<img src="' . htmlspecialchars($invoiceLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '" height="80" style="height:80px;width:auto;display:block;margin:0 auto;">'
                 : '';
             $invoiceRoomIconHtml = '<span style="color:#8F6A35;font-size:11px;vertical-align:middle;">&#9679;</span>';
+            // Sample rows in the print kit's look (TCPDF: bgcolor attribute, not the CSS background shorthand, which
+            // it does not paint; widths match the template header 50/10/15/25 so the columns line up).
+            $invTok = hotel_brand_tokens()['colors'];
+            $invCur = htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8');
+            $invRule = 'border-bottom:0.5px solid ' . $invTok['rule'] . ';';
+            $invTotalRow = static function (string $label, string $value, string $color, bool $bold = false): string {
+                $s = 'color:' . $color . ';font-size:8.5pt;' . ($bold ? 'font-weight:bold;' : '');
+                return '<tr><td colspan="3" align="right" style="' . $s . '">' . $label . '</td>'
+                    . '<td width="25%" align="right" style="' . $s . '">' . $value . '</td></tr>';
+            };
             $invoiceChargesRows = ''
                 . '<tr>'
-                . '<td width="58%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;line-height:1.3;">Deluxe Ocean Suite - Accommodation</td>'
-                . '<td width="8%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#6C6258;text-align:center;">2</td>'
-                . '<td width="16%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#6C6258;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 2,250.00</td>'
-                . '<td width="18%" style="padding:5px 7px;border-bottom:1px solid #ECE2D7;font-size:7px;color:#1F1C17;font-weight:600;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
+                . '<td width="50%" style="font-size:8.5pt;color:' . $invTok['text'] . ';' . $invRule . '">Deluxe Ocean Suite - Accommodation</td>'
+                . '<td width="10%" align="center" style="font-size:8.5pt;color:' . $invTok['muted_dark'] . ';' . $invRule . '">2</td>'
+                . '<td width="15%" align="right" style="font-size:8.5pt;color:' . $invTok['muted_dark'] . ';' . $invRule . '">' . $invCur . ' 2,250.00</td>'
+                . '<td width="25%" align="right" style="font-size:8.5pt;color:' . $invTok['text'] . ';font-weight:bold;' . $invRule . '">' . $invCur . ' 4,500.00</td>'
                 . '</tr>';
             $invoiceTotalsRows = ''
+                . $invTotalRow('Subtotal', $invCur . ' 4,500.00', $invTok['muted_dark'])
+                . $invTotalRow('VAT (15%)', $invCur . ' 675.00', $invTok['muted_dark'])
                 . '<tr>'
-                . '<td colspan="3" style="padding:5px 7px 2px;border-top:1px solid #DCCFC2;font-size:7px;color:#6C6258;text-align:right;">Subtotal</td>'
-                . '<td width="18%" style="padding:5px 7px 2px;border-top:1px solid #DCCFC2;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 4,500.00</td>'
+                . '<td colspan="3" align="right" bgcolor="' . $invTok['accent'] . '" style="color:' . $invTok['accent_text'] . ';font-size:9pt;font-weight:bold;">Invoice Total</td>'
+                . '<td width="25%" align="right" bgcolor="' . $invTok['accent'] . '" style="color:' . $invTok['accent_text'] . ';font-size:9pt;font-weight:bold;">' . $invCur . ' 5,175.00</td>'
                 . '</tr>'
-                . '<tr>'
-                . '<td colspan="3" style="padding:2px 7px;font-size:7px;color:#6C6258;text-align:right;">VAT (15%)</td>'
-                . '<td width="18%" style="padding:2px 7px;font-size:7px;color:#1F1C17;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 675.00</td>'
-                . '</tr>'
-                . '<tr>'
-                . '<td colspan="3" style="padding:5px 7px;background:#20303E;color:#F7F1EA;font-size:7px;font-weight:700;text-align:right;">Invoice Total</td>'
-                . '<td width="18%" style="padding:5px 7px;background:#20303E;color:#D6A968;font-size:7px;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 5,175.00</td>'
-                . '</tr>'
-                . '<tr>'
-                . '<td colspan="3" style="padding:2px 7px 1px;font-size:7px;color:#6C6258;text-align:right;">Amount Paid</td>'
-                . '<td width="18%" style="padding:2px 7px 1px;font-size:7px;color:#1E6C43;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 1,000.00</td>'
-                . '</tr>'
-                . '<tr>'
-                . '<td colspan="3" style="padding:1px 7px 4px;font-size:7px;color:#A63A3A;font-weight:700;text-align:right;">Balance Due</td>'
-                . '<td width="18%" style="padding:1px 7px 4px;font-size:7px;color:#A63A3A;font-weight:700;text-align:right;">' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES, 'UTF-8') . ' 4,175.00</td>'
-                . '</tr>';
+                . $invTotalRow('Amount Paid', $invCur . ' 1,000.00', $invTok['muted_dark'])
+                . $invTotalRow('Balance Due', $invCur . ' 4,175.00', $invTok['danger'], true);
             $invoicePaymentHistorySection = '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #D5B37C;">'
                 . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Payment History</p>'
                 . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
@@ -1266,6 +1295,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($subjectRaw === '' || $htmlBodyRaw === '') {
                 throw new Exception('This template has no content yet — save it first, or type content into the HTML body field.');
             }
+            $htmlBodyRaw = rh_template_preview_document_html($templateKey, $htmlBodyRaw, $booking_document_template_keys);
 
             $currencySymbol = (string)getSetting('currency_symbol', 'MWK');
             $previewVars = [

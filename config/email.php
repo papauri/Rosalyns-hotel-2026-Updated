@@ -886,7 +886,8 @@ if (!function_exists('hotel_japandi_key_value_rows')) {
             $value = (string)($row['value'] ?? '');
             $html .= '<tr>'
                 . '<td width="' . htmlspecialchars($labelWidth, ENT_QUOTES, 'UTF-8') . '" style="color:' . $t['muted'] . ';font-weight:bold;letter-spacing:0.6pt;font-size:6.5pt;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</td>'
-                . '<td style="color:' . htmlspecialchars($valueColor, ENT_QUOTES, 'UTF-8') . ';font-weight:' . $weight . ';font-size:9pt;">' . $value . '</td>'
+                // letter-spacing:0: the panel cell's heading spacing must not stretch (and wrap) the value.
+                . '<td style="color:' . htmlspecialchars($valueColor, ENT_QUOTES, 'UTF-8') . ';font-weight:' . $weight . ';font-size:9pt;letter-spacing:0;">' . $value . '</td>'
                 . '</tr>';
         }
         $html .= '</table>';
