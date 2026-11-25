@@ -3099,6 +3099,16 @@ $bk_f = rh_bk_filters_from_get($_GET, [
     'groups'     => $bk_group_ids,
     'staff'      => array_keys($bk_staff_names),
 ]);
+if ($bk_f['chase'] === 'arrivals') {
+    // Dashboard "Arrivals with a balance to chase": exactly the lead bookings of the shared list (no list = no rows).
+    $bk_f['chase_ids'] = [];
+    try {
+        require_once __DIR__ . '/../includes/arrivals-chase.php';
+        $bk_f['chase_ids'] = rh_arrivals_chase_ids(rh_arrivals_to_chase($pdo));
+    } catch (Throwable $e) {
+        error_log('Bookings arrivals to chase filter: ' . $e->getMessage());
+    }
+}
 $search_query = $bk_f['search'];
 $filter_status = $bk_f['status'];
 $filter_date_from = $bk_f['date_from'];

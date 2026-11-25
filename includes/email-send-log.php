@@ -78,6 +78,7 @@ if (!function_exists('rh_email_kinds')) {
             'daily_report' => ['Daily report'],
             'end_of_day_report' => ['End of day report'],
             'station_report' => ['Station report'],
+            'arrivals_chase' => ['Arrivals with a balance to chase (staff)'],
             'stock_order' => ['Stock order'],
             'test' => ['Test'],
             'other' => ['Other'],

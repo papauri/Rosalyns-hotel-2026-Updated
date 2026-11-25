@@ -24,7 +24,7 @@ $messageType = 'success';
 $tableReady = rh_auto_log_table_ready($pdo);
 $jobs = rh_scheduler_jobs();
 // Report-email jobs whose switch, recipients and copy need the Timed report emails permission (checked server-side).
-$timedReportJobs = ['daily_reports', 'station_reports'];
+$timedReportJobs = ['daily_reports', 'station_reports', 'arrivals_chase'];
 $canTimedReports = hasPermission((int)$user['id'], 'timed_report_emails');
 $timedNote = 'Needs the Timed report emails permission';
 // Company statements (owner D6 2026-11-13): its switch and copy list need 'company_statement_emails'.
@@ -36,7 +36,7 @@ $aeSpec = [];
 foreach (['automated_email_master', 'automated_email_reminder_stages', 'automated_email_test_recipient', 'automated_email_payment_terms_days',
     'automated_email_lookback_days', 'automated_email_quotation_days', 'automated_email_interval_minutes', 'automated_email_bcc_hotel',
     'automated_job_daily_reports_cc', 'automated_job_station_reports_to', 'automated_job_station_reports_cc', 'automated_job_company_statements_cc',
-    'prearrival_payment_reminder_days', 'automated_email_reminder_cc'] as $aeK) {
+    'prearrival_payment_reminder_days', 'automated_email_reminder_cc', 'automated_job_arrivals_chase_to', 'automated_job_arrivals_chase_cc'] as $aeK) {
     $aeSpec[$aeK] = rh_auto_defaults()[$aeK] ?? '';
 }
 foreach ($jobs as $aeJob) {
@@ -197,6 +197,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             updateSetting('automated_job_station_reports_cc', $aeV);
                         }
                     }
+                    // Arrivals to chase email (owner 2026-11-25): To (empty = Main contact email, Hotel Details) and CC.
+                    if ($posted('automated_job_arrivals_chase_to')) {
+                        $aeV = $cleanList('automated_job_arrivals_chase_to', 'arrivals to chase email "goes to" list');
+                        if ($aeWrite('automated_job_arrivals_chase_to', $aeV, $aeRaw('automated_job_arrivals_chase_to'))) {
+                            updateSetting('automated_job_arrivals_chase_to', $aeV);
+                        }
+                    }
+                    if ($posted('automated_job_arrivals_chase_cc')) {
+                        $aeV = $cleanList('automated_job_arrivals_chase_cc', 'arrivals to chase email copy (CC)');
+                        if ($aeWrite('automated_job_arrivals_chase_cc', $aeV, $aeRaw('automated_job_arrivals_chase_cc'))) {
+                            updateSetting('automated_job_arrivals_chase_cc', $aeV);
+                        }
+                    }
                 }
                 if ($canCompanyEmails && $posted('automated_job_company_statements_cc')) {
                     $aeV = $cleanList('automated_job_company_statements_cc', 'company statements copy (CC)');
@@ -206,7 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 // Only the switches this form showed are written: a form opened before a job existed never switches it off.
                 // A form without the list predates 'station_reports' (2026-11-12); every job added since is left out too.
-                $shownJobs = isset($_POST['jobs_shown']) ? (array)$_POST['jobs_shown'] : array_diff(array_keys($jobs), ['station_reports', 'prearrival_payment_reminders']);
+                $shownJobs = isset($_POST['jobs_shown']) ? (array)$_POST['jobs_shown'] : array_diff(array_keys($jobs), ['station_reports', 'prearrival_payment_reminders', 'arrivals_chase']);
                 foreach ($jobs as $jobName => $job) {
                     if (!in_array($jobName, $shownJobs, true)) {
                         continue;
@@ -408,7 +421,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                         <span><?php echo $esc($job['label']); ?><?php if ($jobLocked): ?><br><small class="help-text"><?php echo $esc($jobLockNote); ?></small><?php endif; ?></span></label>
                 <?php endforeach; ?>
             </div>
-            <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members. Daily station reports email sends the bookings, restaurant/till, accounting and stock reports once a day, soon after the trading day ends (next opening), to the End of Day report recipients. Station report emails send each station's Station Report (the same email as the Email button on that page) once a day per station, soon after that station's trading day ends (its next opening), to the "Station report emails go to" list (empty = End of Day report recipients). A station with no tickets that day gets no email.</p>
+            <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members. Daily station reports email sends the bookings, restaurant/till, accounting and stock reports once a day, soon after the trading day ends (next opening), to the End of Day report recipients. Station report emails send each station's Station Report (the same email as the Email button on that page) once a day per station, soon after that station's trading day ends (its next opening), to the "Station report emails go to" list (empty = End of Day report recipients). A station with no tickets that day gets no email. Arrivals with a balance to chase sends the front office, once a day, the confirmed bookings arriving soon that still owe money (the same list as the Dashboard item); its addresses are under Delivery.</p>
 
             <h3>Overdue payment reminders</h3>
             <div class="ae-grid">
@@ -448,6 +461,13 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                 <div class="form-group"><label for="stationcc">Copy (CC) on the station report emails</label>
                     <input type="text" id="stationcc" name="automated_job_station_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_station_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
                     <p class="help-text">What adding an address here does: it gets a copy (CC) of every kitchen, bar and coffee bar report email, shown openly to the other staff recipients (staff only, never guests). Separate several addresses with commas. Not used on test sends.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
+                <?php $aeChaseLim = rh_arrivals_chase_limits(); ?>
+                <div class="form-group"><label for="chaseto">Arrivals to chase email goes to</label>
+                    <input type="text" id="chaseto" name="automated_job_arrivals_chase_to" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_arrivals_chase_to')); ?>" placeholder="empty = Main contact email (Hotel Details)" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
+                    <p class="help-text">Who gets the daily "Arrivals with a balance to chase" email (front office). It lists every confirmed booking arriving in the next <?php echo (int)$aeChaseLim['window']; ?> days that still owes money, the urgent ones (arriving within <?php echo (int)$aeChaseLim['urgent']; ?> days) first, with the guest's phone, balance, amount paid and the last payment reminder the guest got. Both numbers follow the "Payment reminders before arrival" days setting (now <?php echo $esc(implode(', ', $aeChaseLim['days'])); ?>): the largest = how far ahead, the smallest = urgent. Sent once a day soon after the trading day opens; a day with nothing to chase sends no email (Recent activity shows it as skipped). Empty = the Main contact email in Hotel Details. Separate several addresses with commas. Works only while its job above is ticked and the master switch is on.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
+                <div class="form-group"><label for="chasecc">Copy (CC) on the arrivals to chase email</label>
+                    <input type="text" id="chasecc" name="automated_job_arrivals_chase_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_arrivals_chase_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
+                    <p class="help-text">These addresses get an open copy (CC) of the arrivals to chase email (staff only, never guests). Separate several addresses with commas. Not used on test sends.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
                 <div class="form-group"><label for="companycc">Copy (CC) on the company statements</label>
                     <input type="text" id="companycc" name="automated_job_company_statements_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_company_statements_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canCompanyEmails ? '' : ' disabled'; ?>>
                     <p class="help-text">Company statements go once a week to each company with an overdue booking, at its billing email (plus the company's own copy list on Company accounts) and openly copied to these addresses. A company with no billing email gets nothing. The guest is never emailed for the company share.<?php echo $canCompanyEmails ? '' : ' ' . $esc($companyNote) . '.'; ?></p></div>

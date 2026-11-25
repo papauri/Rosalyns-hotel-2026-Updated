@@ -866,6 +866,8 @@ if (!function_exists('rh_bk_filters_from_get')) {
             'group'      => rh_bk_id_filter($get['group'] ?? '', $known['groups'] ?? null),
             'source'     => rh_bk_source_filter($get['source'] ?? ''),
             'created_by' => rh_bk_creator_filter($get['created_by'] ?? '', $known['staff'] ?? null),
+            // Dashboard "Arrivals with a balance to chase" (includes/arrivals-chase.php): the caller sets 'chase_ids'.
+            'chase'      => ($get['chase'] ?? '') === 'arrivals' ? 'arrivals' : '',
             'filter'     => $filter,
             // The open tab: the ?filter= shortcut, else the status (status tabs are named like the status values).
             'tab'        => $filter !== '' ? rh_bk_tab_map()[$filter] : $status,
@@ -877,7 +879,7 @@ if (!function_exists('rh_bk_filters_from_get')) {
     /** Any filter set (the tab and page size are not filters). */
     function rh_bk_filters_active(array $f): bool
     {
-        foreach (['search', 'status', 'date_from', 'date_to', 'arrival', 'departure', 'balance', 'since', 'kind', 'pay', 'source'] as $k) {
+        foreach (['search', 'status', 'date_from', 'date_to', 'arrival', 'departure', 'balance', 'since', 'kind', 'pay', 'source', 'chase'] as $k) {
             if (($f[$k] ?? '') !== '') {
                 return true;
             }
@@ -942,6 +944,18 @@ if (!function_exists('rh_bk_filters_from_get')) {
             $clauses[] = rh_bk_creator_sql() . ' = ?';
             $params[] = $by;
         }
+        if (($f['chase'] ?? '') === 'arrivals') {
+            // Exactly the bookings of rh_arrivals_to_chase() (one per group, its lead), set by the caller as 'chase_ids'.
+            $ids = array_values(array_filter(array_map('intval', (array)($f['chase_ids'] ?? [])), static function ($v) {
+                return $v > 0;
+            }));
+            if ($ids) {
+                $clauses[] = 'b.id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')';
+                $params = array_merge($params, $ids);
+            } else {
+                $clauses[] = '1 = 0';
+            }
+        }
         return ['clauses' => $clauses, 'params' => $params];
     }
 
@@ -993,7 +1007,8 @@ if (!function_exists('rh_bk_filters_from_get')) {
             'group'         => $id($f['group'] ?? 0),
             'source'        => (string)($f['source'] ?? ''),
             'created_by'    => $id($f['created_by'] ?? 0),
-            'size'          => ($f['size'] ?? '10') !== '10' ? (string)$f['size'] : '',
+            'chase'         => (string)($f['chase'] ?? ''),
+            'size'         => ($f['size'] ?? '10') !== '10' ? (string)$f['size'] : '',
             'page'          => (int)($f['page'] ?? 1) > 1 ? (string)(int)$f['page'] : '',
         ];
         $out = [];
@@ -1057,6 +1072,9 @@ if (!function_exists('rh_bk_filters_from_get')) {
         }
         if ((int)($f['created_by'] ?? 0) > 0) {
             $defs[] = ['created_by', 'Made by: ' . $name('staff', (int)$f['created_by']), ['created_by']];
+        }
+        if (($f['chase'] ?? '') !== '') {
+            $defs[] = ['chase', 'Arrivals with a balance to chase', ['chase']];
         }
         $out = [];
         foreach ($defs as [$key, $label, $drop]) {
@@ -1161,7 +1179,8 @@ if (!function_exists('rh_bk_filters_from_get')) {
         if (($status !== '' && !($status === 'checked-in' && $tab === 'checked-in')) || in_array($tab, $statusTabs, true)) {
             $only[] = 'status';
         }
-        if ((string)($f['pay'] ?? '') !== '' || (string)($f['balance'] ?? '') !== '' || in_array($tab, ['paid', 'unpaid'], true)) {
+        if ((string)($f['pay'] ?? '') !== '' || (string)($f['balance'] ?? '') !== '' || (string)($f['chase'] ?? '') !== ''
+            || in_array($tab, ['paid', 'unpaid'], true)) {
             $only[] = 'payment';
         }
         if ((string)($f['source'] ?? '') !== '') {

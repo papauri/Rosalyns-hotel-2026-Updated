@@ -2307,6 +2307,23 @@ $currency_symbol = getSetting('currency_symbol');
         $departuresStillToGo = (int)$today_checkouts + $overdueDepartures;
         // Due out today and owing: exactly the guests Bookings "Today's Check-outs" lists (overdue guests have their own chip).
         $departuresOwing = rh_fd_departures_owing($departureList);
+        // Confirmed arrivals still owing inside the pre-arrival reminder window: the same shared list as Bookings
+        // ?chase=arrivals and the daily staff email (includes/arrivals-chase.php). Red when any is urgent.
+        $arrivalsOwing = 0;
+        $attnOver = [];
+        if (!empty($attnGate['arrivals_owing'])) {
+            try {
+                require_once __DIR__ . '/../includes/arrivals-chase.php';
+                $arrChase = rh_arrivals_to_chase($pdo);
+                $arrivalsOwing = count($arrChase['rows']);
+                $attnOver['arrivals_owing'] = [
+                    'tone' => $arrChase['urgent'] > 0 ? 'red' : 'amber',
+                    'hint' => rh_arrivals_chase_rule_words((int)$arrChase['window'], (int)$arrChase['urgent_days']),
+                ];
+            } catch (Throwable $e) {
+                error_log('Dashboard arrivals to chase: ' . $e->getMessage());
+            }
+        }
 
         // ---- Needs-attention queue: only what is non-zero is shown loudly ----
         // Items, gates, links and hints: admin/includes/dashboard-attention.php (one gate per item, $attnGate above);
@@ -2316,7 +2333,8 @@ $currency_symbol = getSetting('currency_symbol');
             'overdue_departures'     => $overdueDepartures,
             'pending_bookings'       => (int)$pending_bookings,
             'departures_owing'       => $departuresOwing,
-            'refunds_pending'        => (int)$finance['refunds_pending'],
+            'arrivals_owing'         => $arrivalsOwing,
+            'refunds_pending'      => (int)$finance['refunds_pending'],
             'pending_conference'     => (int)$pending_conference,
             'unread_contact'         => (int)$guestSvc['unread_contact'],
             'pending_reviews'        => (int)$guestSvc['pending_reviews'],
@@ -2330,7 +2348,7 @@ $currency_symbol = getSetting('currency_symbol');
             'open_tabs'              => (int)$ops['open_tabs'],
             'expired_batches'        => (int)$stock['expired_batches'],
             'low_stock'              => (int)$stock['low_stock'],
-        ], $can, isRestaurantEnabled());
+        ], $can, isRestaurantEnabled(), $attnOver);
         [$attnOpen, $attnClear, $attnTotal] = rh_dash_attention_split($attn);
 
         // ---- Hero sentence ----

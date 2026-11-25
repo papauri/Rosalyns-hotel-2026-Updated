@@ -220,6 +220,8 @@ if (!function_exists('rh_settings_log_begin')) {
             'automated_job_station_reports_to' => 'Station report emails go to',
             'automated_job_station_reports_cc' => 'Station report emails copies (CC)',
             'automated_job_company_statements_cc' => 'Company statements copies (CC)',
+            'automated_job_arrivals_chase_to' => 'Arrivals to chase email goes to',
+            'automated_job_arrivals_chase_cc' => 'Arrivals to chase email copies (CC)',
             'automated_email_job_overdue' => 'Job: overdue payment reminders',
             'automated_email_job_quotation' => 'Job: quotation expiry reminders',
             'automated_email_job_tentative' => 'Job: tentative hold reminders',
@@ -235,6 +237,7 @@ if (!function_exists('rh_settings_log_begin')) {
             'automated_job_daily_reports' => 'Job: daily station reports email',
             'automated_job_station_reports' => 'Job: station report emails',
             'automated_job_company_statements' => 'Job: company statements',
+            'automated_job_arrivals_chase' => 'Job: arrivals with a balance to chase (daily staff email)',
             'automated_backup_enabled' => 'Job: nightly database backup',
             // VAT (admin/accounting-dashboard.php)
             'vat_enabled' => 'VAT switched on',

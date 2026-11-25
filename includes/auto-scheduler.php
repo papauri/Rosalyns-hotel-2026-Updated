@@ -66,6 +66,11 @@ if (!function_exists('rh_auto_defaults')) {
             // email (+ its own CC) and this visible copy list. Needs migration 084.
             'automated_job_company_statements'    => '0',
             'automated_job_company_statements_cc' => '',
+            // Arrivals with a balance to chase (owner 2026-11-25): OFF until switched on; once a day to the staff. To empty =
+            // the Main contact email (Hotel Details, email_main), else the Reservations email; CC optional.
+            'automated_job_arrivals_chase'      => '0',
+            'automated_job_arrivals_chase_to'   => '',
+            'automated_job_arrivals_chase_cc'   => '',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];
@@ -169,6 +174,12 @@ if (!function_exists('rh_auto_defaults')) {
             'station_reports' => [
                 'label' => 'Station report emails (kitchen / bar / coffee bar)', 'fn' => 'rh_job_station_reports',
                 'toggle' => 'automated_job_station_reports', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'global',
+            ],
+            // Arrivals with a balance to chase (owner 2026-11-25): once a day, soon after the trading day opens, the list the
+            // Dashboard shows (includes/arrivals-chase.php) to the front office. OFF by default; needs 'timed_report_emails'.
+            'arrivals_chase' => [
+                'label' => 'Arrivals with a balance to chase (daily staff email)', 'fn' => 'rh_job_arrivals_chase',
+                'toggle' => 'automated_job_arrivals_chase', 'toggle_default' => '0', 'interval' => 60, 'legacy' => false, 'bcc' => 'global',
             ],
             // Company pays later (owner D6 2026-11-13): once a week per company, its statement to the company billing
             // email while it has an overdue booking. OFF by default; the switch and copy list need 'company_statement_emails'.

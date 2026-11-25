@@ -25,7 +25,7 @@ require_once $root . '/admin/includes/dashboard-attention.php';
 check(!isset($GLOBALS['pdo']), 'part 1 loads without the database');
 
 $ALL = array_keys(rh_dash_attention_defs());
-eq(count($ALL), 18, '18 Needs-attention items');
+eq(count($ALL), 19, '19 Needs-attention items');
 
 /* ---- simulated user: permissions, module switches, page access (mirrors rhCanOpenPage / rhCanLinkTo) ---- */
 function sim_mods(array $modules, array $frontEnd): callable
@@ -82,7 +82,7 @@ $full = $presets['full_hotel'];
 
 /* ---- 1. every item: hint, icon, link to a real page; its gate = the permission + modules of that page ---- */
 $dataKeys = [ // the permission(s) that let a person see each list (any one is enough)
-    'overdue_arrivals' => ['bookings'], 'overdue_departures' => ['bookings'], 'pending_bookings' => ['bookings'], 'departures_owing' => ['bookings'],
+    'overdue_arrivals' => ['bookings'], 'overdue_departures' => ['bookings'], 'pending_bookings' => ['bookings'], 'departures_owing' => ['bookings'], 'arrivals_owing' => ['bookings'],
     'refunds_pending' => ['payments', 'refund_payment'], 'pending_conference' => ['conference'], 'unread_contact' => ['contact'],
     'pending_reviews' => ['reviews'], 'pending_events' => ['events_bookings'], 'pending_gym' => ['gym'], 'gym_expiring' => ['gym'],
     'rooms_out_of_service' => ['room_maintenance'], 'housekeeping_due' => ['housekeeping'],
@@ -122,7 +122,7 @@ foreach (rh_dash_attention_defs(true) as $key => $def) {
 }
 
 /* ---- 2. role matrix (Full Hotel, all modules on): exactly these items, and these links ---- */
-$bk4 = ['overdue_arrivals', 'overdue_departures', 'pending_bookings', 'departures_owing'];
+$bk4 = ['overdue_arrivals', 'overdue_departures', 'pending_bookings', 'departures_owing', 'arrivals_owing'];
 $matrix = [
     'administrator' => [role_keys('admin'), true, $ALL, $ALL],
     'manager' => [role_keys('manager'), false, $ALL, $ALL],
@@ -207,6 +207,23 @@ eq($stripped['rows'][1]['reference'], ['type' => 'details', 'summary' => 'x'], '
     ['key' => 'c', 'count' => 0, 'tone' => 'red'], ['key' => 'd', 'count' => 5, 'tone' => 'amber'],
 ]);
 eq([array_column($open, 'key'), array_column($clear, 'key'), $total], [['b', 'd', 'a'], ['c'], 8], 'red first, then biggest; zero = clear; total of open');
+// Per-item overrides (arrivals to chase: red when one is urgent, hint with the setting's numbers); bad values ignored.
+$ovGates = rh_dash_attention_gates(sim_perm(['dashboard', 'bookings']), sim_mods($full['modules'], $fe));
+$ovCan = sim_can(['dashboard', 'bookings'], sim_mods($full['modules'], $fe), false);
+$ovBy = static function (array $over) use ($ovGates, $ovCan): array {
+    $o = [];
+    foreach (rh_dash_attention_items($ovGates, ['arrivals_owing' => 3], $ovCan, true, $over) as $it) { $o[$it['key']] = $it; }
+    return $o;
+};
+$ov0 = $ovBy([]);
+eq([$ov0['arrivals_owing']['tone'], $ov0['arrivals_owing']['href'], $ov0['arrivals_owing']['count']], ['amber', 'bookings.php?chase=arrivals', 3], 'arrivals to chase: amber by default, links the chase filter');
+$ov1 = $ovBy(['arrivals_owing' => ['tone' => 'red', 'hint' => 'urgent within 7 days'], 'departures_owing' => ['tone' => 'amber']]);
+eq([$ov1['arrivals_owing']['tone'], $ov1['arrivals_owing']['hint'], $ov1['departures_owing']['tone']], ['red', 'urgent within 7 days', 'amber'], 'override: tone + hint applied per key');
+$ov2 = $ovBy(['arrivals_owing' => ['tone' => 'pink', 'hint' => '   ']]);
+eq([$ov2['arrivals_owing']['tone'], $ov2['arrivals_owing']['hint']], ['amber', rh_dash_attention_defs()['arrivals_owing']['hint']], 'override: unknown tone / blank hint ignored');
+check(!preg_match('/\b\d+ days\b/', rh_dash_attention_defs()['arrivals_owing']['hint']), 'arrivals to chase default hint has no fixed day number');
+check(strpos($d0 = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/dashboard.php')), "'tone' => \$arrChase['urgent'] > 0 ? 'red' : 'amber',") !== false
+    && strpos($d0, '$arrivalsOwing = count($arrChase[\'rows\']);') !== false, 'dashboard: arrivals to chase count + tone from the shared list');
 
 /* ---- 6. admin/dashboard.php uses the one rule everywhere ---- */
 $d = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/dashboard.php')); // CRLF checkouts (Liwonde laptop) match too
@@ -214,7 +231,7 @@ check(strpos($d, '$add($attn') === false, 'dashboard: no inline item list left')
 check(strpos($d, "\$ledeTail = \$attnTotal > 0 ? ' — ' . \$attnTotal . ' thing'") !== false && strpos($d, "\$ledeText .= \$ledeTail;") !== false
     && strpos($d, 'rh_dash_since_line($heroSinceCounts, $heroSince, $money, $can, $ledeTail)') !== false && strpos($d, 'count($attnOpen) . \' thing') === false,
     'dashboard: greeting and the since line end with "N things need you" from the badge total (they always match)');
-check(strpos($d, '$attn = rh_dash_attention_items($attnGate, [') !== false && strpos($d, '], $can, isRestaurantEnabled());') !== false, 'dashboard: items from the helper, links through $can');
+check(strpos($d, '$attn = rh_dash_attention_items($attnGate, [') !== false && strpos($d, '], $can, isRestaurantEnabled(), $attnOver);') !== false, 'dashboard: items from the helper, links through $can');
 foreach ($ALL as $k) check(strpos($d, "'$k'") !== false, "dashboard: passes a count for $k");
 foreach ([
     "'pending_bookings'          => \$attnGate['pending_bookings'],", "'pending_conference'        => \$attnGate['pending_conference'],",
@@ -228,9 +245,9 @@ check(strpos($d, "if (\$attnGate['rooms_out_of_service']) {\n            \$guest
 check(strpos($d, "if (\$mod_roomsvc || \$attnGate['room_service_open']) {") !== false, 'dashboard: room-service open counted for Orders & Tabs users too');
 check(strpos($d, '<?php if ($dash_open_tabs): // the Orders & Tabs list') !== false && strpos($d, '<?php if ($dash_open_tabs && $mod_bookings): ?>') !== false, 'dashboard: open tabs tile + money line follow the popup rule');
 check(strpos($d, "if (\$attnGate['pending_gym']) {") !== false && strpos($d, "if (\$dash_open_tabs) { // the open tabs list") !== false, 'dashboard: popup rows follow item gates (gym enquiries, open tabs)');
-// Handover note (first-login plan C3): first row of the panel, outside the 18 items and outside the badge total.
+// Handover note (first-login plan C3): first row of the panel, outside the 19 items and outside the badge total.
 $attnLib = (string)file_get_contents($root . '/admin/includes/dashboard-attention.php');
-check(stripos($attnLib, 'handover') === false && count($ALL) === 18, 'handover: not one of the 18 attention items (rh_dash_attention_items untouched)');
+check(stripos($attnLib, 'handover') === false && count($ALL) === 19, 'handover: not one of the 19 attention items (rh_dash_attention_items untouched)');
 check(strpos($d, '<?php if ($attn || $handoverNote):') !== false, 'handover: the panel shows when there are items or an unread note');
 $hPos = strpos($d, '<li data-handover-item>');
 $fPos = strpos($d, '<?php foreach ($attnOpen as $i => $a): ?>');

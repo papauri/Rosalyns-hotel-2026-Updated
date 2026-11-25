@@ -31,6 +31,7 @@
 
 require_once __DIR__ . '/auto-scheduler.php';
 require_once __DIR__ . '/../config/email.php';
+require_once __DIR__ . '/arrivals-chase.php'; // rh_auto_prearrival_days + the shared owing-arrivals WHERE + job 'arrivals_chase'
 
 if (!function_exists('rh_job_overdue_payment_reminders')) {
 
@@ -1143,33 +1144,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
 
     /* ── payment reminders before arrival (owner 2026-11-25) ─────────── */
 
-    /**
-     * PURE. The "days before check-in" stages: whole numbers 1..365, each once, largest first, at most
-     * 6 (the largest ones; more would read as spam). Nothing usable = [30, 15, 4]. $raw null = the saved setting.
-     *
-     * @return int[]
-     */
-    function rh_auto_prearrival_days(?string $raw = null): array
-    {
-        if ($raw === null) {
-            $raw = rh_auto_setting('prearrival_payment_reminder_days');
-        }
-        $out = [];
-        foreach (preg_split('/[\s,;]+/', (string)$raw) ?: [] as $p) {
-            $p = trim($p);
-            if ($p === '' || !ctype_digit($p)) {
-                continue;
-            }
-            $n = (int)$p;
-            if ($n >= 1 && $n <= 365) {
-                $out[$n] = $n;
-            }
-        }
-        $out = array_values($out);
-        rsort($out);
-        $out = array_slice($out, 0, 6);
-        return $out ?: [30, 15, 4];
-    }
+    // rh_auto_prearrival_days(): includes/arrivals-chase.php (shared with the arrivals-to-chase list).
 
     /**
      * PURE. The stage due now for a stay $daysUntil days away: the smallest stage D with $daysUntil <= D, so a booking
@@ -1199,14 +1174,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
      */
     function rh_auto_prearrival_candidates(PDO $pdo, int $maxDays): array
     {
-        $noArr = rh_checkin_arrangement_exclude_sql('b');
-        $st = $pdo->prepare("SELECT DISTINCT COALESCE(NULLIF(b.primary_booking_id, 0), b.id) AS root FROM bookings b
-            WHERE b.status = 'confirmed' AND b.deleted_at IS NULL
-              AND b.check_in_date > CURDATE() AND b.check_in_date <= (CURDATE() + INTERVAL ? DAY)
-              AND b.amount_due > ?{$noArr}
-            ORDER BY root LIMIT 200");
-        $st->execute([max(1, $maxDays), BALANCE_TOLERANCE]);
-        return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+        return rh_prearrival_owing_roots($pdo, $maxDays, 200); // includes/arrivals-chase.php: the WHERE the chase list shares
     }
 
     /**

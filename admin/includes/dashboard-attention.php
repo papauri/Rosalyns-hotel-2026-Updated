@@ -45,6 +45,11 @@ if (!function_exists('rh_dash_attention_defs')) {
             'departures_owing' => ['label' => 'Departures with a balance', 'icon' => 'fa-sack-dollar', 'tone' => 'red',
                 'href' => 'bookings.php?filter=checkout_today&balance=owing', 'when' => [$bk], 'insight' => null,
                 'hint' => 'Due out today, balance to collect before they leave'],
+            // bookings.php ?chase=arrivals = exactly rh_arrivals_to_chase() (includes/arrivals-chase.php). The dashboard
+            // passes the tone (red when any is urgent) and the hint with the setting's numbers as overrides.
+            'arrivals_owing' => ['label' => 'Arrivals with a balance to chase', 'icon' => 'fa-phone', 'tone' => 'amber',
+                'href' => 'bookings.php?chase=arrivals', 'when' => [$bk], 'insight' => null,
+                'hint' => 'Confirmed, arriving soon, still owing (follows the "Payment reminders before arrival" days setting)'],
             // payments.php ?refund_status=pending,processing (not module-scoped, like the count). Refund approvers
             // without Payments see the number as plain text (owner 2026-11-11: stays on payments / refund_payment).
             'refunds_pending' => ['label' => 'Refunds to approve', 'icon' => 'fa-rotate-left', 'tone' => 'red',
@@ -160,9 +165,10 @@ if (!function_exists('rh_dash_attention_defs')) {
 
     /**
      * The items this user sees, in panel order: count, label, icon, tone, href ('' = plain text), insight (popup
-     * card key or null), hint, key. $counts: key => int.
+     * card key or null), hint, key. $counts: key => int. $over: key => ['tone' => 'red'|'amber', 'hint' => string]
+     * (optional per-item overrides, e.g. arrivals_owing turns red when one is urgent; other keys are ignored).
      */
-    function rh_dash_attention_items(array $gates, array $counts, callable $can, bool $restaurant): array
+    function rh_dash_attention_items(array $gates, array $counts, callable $can, bool $restaurant, array $over = []): array
     {
         $out = [];
         foreach (rh_dash_attention_defs($restaurant) as $key => $def) {
@@ -174,15 +180,18 @@ if (!function_exists('rh_dash_attention_defs')) {
             if ($insight !== null && !empty($def['insight_needs_link']) && !$canOpen) {
                 $insight = null;
             }
+            $o = is_array($over[$key] ?? null) ? $over[$key] : [];
+            $tone = in_array($o['tone'] ?? null, ['red', 'amber'], true) ? (string)$o['tone'] : (string)$def['tone'];
+            $hint = (is_string($o['hint'] ?? null) && trim($o['hint']) !== '') ? (string)$o['hint'] : (string)$def['hint'];
             $out[] = [
                 'key'     => $key,
                 'count'   => (int)($counts[$key] ?? 0),
                 'label'   => (string)$def['label'],
                 'icon'    => (string)$def['icon'],
-                'tone'    => (string)$def['tone'],
+                'tone'    => $tone,
                 'href'    => $canOpen ? (string)$def['href'] : '',
                 'insight' => $insight,
-                'hint'    => (string)$def['hint'],
+                'hint'    => $hint,
             ];
         }
         return $out;
