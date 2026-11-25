@@ -344,11 +344,57 @@ body.dashboard-insight-open {
     display: none;
 }
 
+.ck-today .ck-pane[hidden] {
+    display: none;
+}
+
+/* Room service outside Today: invisible but keeps its space, so the tab row (and the card) keeps one height. */
+.ck-today .ck-tab--off {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* Above 680px the card keeps one height: the list scrolls inside it and its pager sits pinned at the card's
+   bottom, outside the scrolling rows (owner 2026-11-26). */
 @media (min-width: 681px) {
-    .ck-today .ck-pane {
+    .ck-today .ck-pane:not([hidden]) {
+        display: flex;
+        flex-direction: column;
         height: 460px;
+        overflow-y: auto; /* fallback only: the list below takes the spare height and scrolls itself */
+    }
+
+    .ck-today .ck-mv-block:not([hidden]) {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .ck-today .ck-pane > *,
+    .ck-today .ck-mv-block > * {
+        flex: none;
+    }
+
+    .ck-today .ck-pane > ul.ck-rows,
+    .ck-today .ck-mv-block > ul.ck-rows,
+    .ck-today .ck-mv-block > ol.ck-timeline {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-x: hidden;
         overflow-y: auto;
         scrollbar-gutter: stable;
+    }
+
+    .ck-today ul.ck-rows > li,
+    .ck-today ol.ck-timeline > li {
+        flex-shrink: 0;
+    }
+
+    .ck-today .ck-mv-block > .ck-empty:only-child {
+        flex: 1 1 auto;
+        justify-content: center;
     }
 }
 
@@ -379,7 +425,12 @@ body.dashboard-insight-open {
         display: none;
     }
 
-    .ck-today .ck-pane {
+    .ck-today .ck-pane:not([hidden]),
+    .ck-today .ck-mv-block:not([hidden]),
+    .ck-today .ck-pane > ul.ck-rows,
+    .ck-today .ck-mv-block > ul.ck-rows,
+    .ck-today .ck-mv-block > ol.ck-timeline {
+        display: block;
         height: auto;
         overflow: visible;
     }

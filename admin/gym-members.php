@@ -1520,6 +1520,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 btn('Next &raquo;', p + 1, p >= tp) : '') + size + '</div>';
         }
 
+        // The pager keeps one place on a short page (admin-section-pagination.js, owner 2026-11-26).
+        function gmHoldPager() {
+            if (window.AdminAutoSectionPagination && typeof window.AdminAutoSectionPagination.holdServerPagers === 'function') {
+                window.AdminAutoSectionPagination.holdServerPagers();
+            }
+        }
+
         // Rows-per-page choice: page 1 of the log at the new size (same sort).
         function gmVisitsSize(v) {
             var n = parseInt(v, 10);
@@ -1564,6 +1571,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     gmLogState.total = parseInt(d.total || 0, 10) || 0;
                     document.getElementById('gmVisitsBody').innerHTML = gmVisitsRows((d && d.visits) || []);
                     document.getElementById('gmVisitsPager').innerHTML = gmVisitsPager();
+                    gmHoldPager();
                     if (wrap) { wrap.style.opacity = '1'; }
                 })
                 .catch(function () { if (wrap) { wrap.style.opacity = '1'; } });
@@ -1692,6 +1700,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                         '<tbody id="gmVisitsBody">' + gmVisitsRows(visits) + '</tbody></table>' +
                         '<div id="gmVisitsPager">' + gmVisitsPager() + '</div></div>';
                     body.innerHTML = html;
+                    gmHoldPager();
                 })
                 .catch(function () { document.getElementById('gmLogBody').innerHTML = '<p style="color:#c0392b;margin:0;">Could not load visits.</p>'; });
         }

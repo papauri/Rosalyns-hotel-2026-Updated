@@ -300,13 +300,31 @@
         }
 
         function scrollHostIntoView() {
+            // A list that scrolls inside its own fixed-height card (dashboard movements): go back to its top row and
+            // leave the window where it is, unless the list's top is off screen.
+            // A table wrapper computes overflow-y:auto only because of its overflow-x, so a scroll area is one that
+            // overflows now or scrolls up/down only (overflow-x hidden, as the dashboard lists set it), even when
+            // this page is short enough to fit.
+            var hostStyle = window.getComputedStyle(host);
+            var oy = hostStyle.overflowY;
+            var ox = hostStyle.overflowX;
+            var scrollsItself = (oy === 'auto' || oy === 'scroll') &&
+                (ox === 'hidden' || ox === 'clip' || host.scrollHeight > host.clientHeight + 1);
+            if (scrollsItself) {
+                host.scrollTop = 0;
+                var top = host.getBoundingClientRect().top;
+                if (top >= 0 && top < (window.innerHeight || 0) - 80) return;
+            }
             var y = host.getBoundingClientRect().top + window.scrollY - 80;
             if (y < 0) y = 0;
             window.scrollTo({ top: y, behavior: 'smooth' });
         }
 
-        // Keep the pager in one place on every page: measure the tallest page once and pad the
-        // pager down by however much shorter the current page is (rows themselves never stretch).
+        // Keep the pager in one place on every page, every screen size (owner 2026-11-26, replaces the 2026-11-22
+        // phone/tablet exception): measure the height of a full page once and pad the pager down by however much
+        // shorter the current page is (rows themselves never stretch). A short last page, a filter or an empty
+        // result never moves it up. The reference is a full page of ALL rows (filter ignored), so it holds through
+        // filters; it is measured again only on resize/load or a new rows-per-page choice.
         var tallestPage = 0;
         var baseMargin = null;
 
@@ -329,6 +347,24 @@
         function measureTallestPage() {
             tallestPage = 0;
             if (!hostIsVisible()) return; // hidden pane: stays 0, the next render after it shows measures
+            if (pageSize > 0) {
+                // A full page of rows with the filter ignored (rows another script hid with style.display stay out).
+                // Extra items (an empty-result message, a "no matches" row) are hidden while measuring.
+                var extras = Array.prototype.slice.call(tbody.children).filter(function (el) {
+                    return rows.indexOf(el) === -1 && !el.hidden;
+                });
+                extras.forEach(function (el) { el.hidden = true; });
+                var size = perPage();
+                var shown = 0;
+                rows.forEach(function (row) {
+                    var on = shown < size && row.style.display !== 'none';
+                    row.hidden = !on;
+                    if (on) shown++;
+                });
+                tallestPage = host.getBoundingClientRect().height;
+                extras.forEach(function (el) { el.hidden = false; });
+            }
+            syncTotals();
             var limit = Math.min(totalPages, 60);
             for (var pg = 1; pg <= limit; pg++) {
                 showRows(pg);
@@ -337,14 +373,8 @@
         }
 
         function holdPagerPosition() {
-            // Phone + tablet (owner 2026-11-22): rows are tall list rows, so padding the pager down to the tallest page
-            // left a big empty gap under a shorter page. Up to 1024px the pager just follows the last row.
-            if ((window.innerWidth || document.documentElement.clientWidth || 0) <= 1024) {
-                nav.style.marginTop = '';
-                return;
-            }
-            if (!hostIsVisible()) {
-                tallestPage = 0;
+            // "All" is one page: nothing to line up with, so the pager follows the last row.
+            if (pageSize === 0 || !hostIsVisible()) {
                 nav.style.marginTop = '';
                 return;
             }
@@ -468,8 +498,9 @@
         // Page scripts that filter rows call table.rhPagerRefresh(true) after flagging rows with
         // data-filter-hidden: back to page 1 (or stay on the current page) with fresh counts.
         // Lists expose the same call on the <ul> (e.g. after a dashboard tab shows its pane).
+        // The held height is kept (a filter must not move the pager); it is measured here only if it never was
+        // (a list in a pane that was hidden until now).
         table.rhPagerRefresh = function (resetPage) {
-            tallestPage = 0;
             renderPage(resetPage ? 1 : currentPage, false);
         };
 
@@ -486,7 +517,124 @@
         renderPage(1, false);
     }
 
+    // ---- Server-rendered pagers (owner 2026-11-26) ----
+    // Bookings, Payments, Receipts, Credit notes, Reviews, Stock reports, Visitor analytics, System Logs and the gym
+    // visit log send only one page of rows. A short page (the last one, a filter, nothing found) would pull the pager
+    // up, so it is padded down by the rows that page is missing (rows-per-page choice - rows shown) x the height of a
+    // row on this page (or to the last full page of the same list seen in this tab). "All" is never padded.
+    var SERVER_PAGER_SELECTOR = '[data-admin-pagination], .bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination';
+    var PAGER_MEMORY_KEY = 'rh-pager-hold:';
+
+    function serverPagerSize(nav) {
+        var sel = nav.querySelector('.pg-size select, select[aria-label="Rows per page"]');
+        if (!sel) return 0;
+        var n = parseInt(sel.value, 10);
+        return n > 0 ? n : 0;
+    }
+
+    function isShown(el) {
+        return el.getClientRects().length > 0;
+    }
+
+    // The list just above the pager: { rows: its data rows on screen (a table's body rows, not a full-width "nothing
+    // found" or detail row; or a run of cards, Reviews' <article>s), height: what the list body takes up now }.
+    // null when there is no list to line up with.
+    function serverPagerList(nav) {
+        var rows = serverPagerRows(nav);
+        if (!rows) return null;
+        var height = 0;
+        if (rows.body) {
+            height = rows.body.getBoundingClientRect().height;
+        } else if (rows.length) {
+            height = rows[0].getBoundingClientRect().bottom - rows[rows.length - 1].getBoundingClientRect().top;
+        }
+        return { rows: rows, height: height };
+    }
+
+    function serverPagerRows(nav) {
+        var prev = nav.previousElementSibling;
+        if (!prev && nav.parentElement) prev = nav.parentElement.previousElementSibling; // gym: pager in its own <div>
+        var hops = 0;
+        while (prev && hops < 4 && prev.matches('script, style, input, .admin-pagination-loader-wrap, .log-table-pagination-loader-wrap')) {
+            prev = prev.previousElementSibling;
+            hops++;
+        }
+        if (!prev) return null;
+        var table = prev.tagName === 'TABLE' ? prev : prev.querySelector('table');
+        if (table) {
+            var body = table.tBodies && table.tBodies[0];
+            if (!body) return null;
+            var trs = Array.prototype.slice.call(body.rows).filter(function (tr) {
+                if (tr.querySelector('td[colspan], th[colspan]') && tr.children.length === 1) return false;
+                return isShown(tr);
+            });
+            trs.body = body;
+            return trs;
+        }
+        if (prev.tagName === 'ARTICLE') {
+            var cls = prev.classList[0];
+            var run = [];
+            for (var el = prev; el && el.tagName === 'ARTICLE' && (!cls || el.classList.contains(cls)); el = el.previousElementSibling) {
+                if (isShown(el)) run.push(el);
+            }
+            return run;
+        }
+        return null;
+    }
+
+    function holdServerPagers() {
+        var root = document.getElementById('rh-admin-page') || document;
+        var navs = Array.prototype.slice.call(root.querySelectorAll(SERVER_PAGER_SELECTOR)).filter(function (nav) {
+            return !nav.matches('[data-admin-auto-pagination-nav]') && !nav.parentElement.closest(SERVER_PAGER_SELECTOR);
+        });
+        navs.forEach(function (nav, index) {
+            nav.style.marginTop = '';
+            var size = serverPagerSize(nav);
+            if (!size || !isShown(nav)) return;
+            var list = serverPagerList(nav);
+            if (!list) return;
+            var rows = list.rows;
+            // Remembered for this tab: the height of the last full page of this list at this rows-per-page choice
+            // and screen width, and its row height. A short page is padded to that full page exactly; without one
+            // (a direct link to the last page) it is estimated from the rows on screen.
+            var key = PAGER_MEMORY_KEY + location.pathname + ':' + index + ':' + size + ':' + (window.innerWidth > 1024 ? 'wide' : (window.innerWidth > 680 ? 'mid' : 'narrow'));
+            var memory = null;
+            try { memory = JSON.parse(window.sessionStorage.getItem(key) || 'null'); } catch (e) { memory = null; }
+            var rowHeight = 0;
+            if (rows.length) {
+                var heights = rows.map(function (r) { return r.getBoundingClientRect().height; }).sort(function (a, b) { return a - b; });
+                rowHeight = heights[Math.floor(heights.length / 2)];
+            }
+            if (rows.length >= size) {
+                try { window.sessionStorage.setItem(key, JSON.stringify({ full: Math.round(list.height), row: Math.round(rowHeight) })); } catch (e) { /* storage off */ }
+                return;
+            }
+            var target = memory && memory.full > 0 ? memory.full : 0;
+            if (!target) {
+                if (!rowHeight && memory && memory.row > 0) rowHeight = memory.row;
+                if (!rowHeight) return;
+                target = list.height + (size - rows.length) * rowHeight;
+            }
+            var deficit = target - list.height;
+            if (deficit <= 0.5) return;
+            var base = parseFloat(window.getComputedStyle(nav).marginTop) || 0;
+            nav.style.marginTop = (base + deficit) + 'px';
+        });
+    }
+
+    var serverHoldTimer = null;
+    function scheduleServerHold(delay) {
+        window.clearTimeout(serverHoldTimer);
+        serverHoldTimer = window.setTimeout(holdServerPagers, typeof delay === 'number' ? delay : 0);
+    }
+    window.addEventListener('resize', function () { scheduleServerHold(200); });
+    window.addEventListener('load', function () { scheduleServerHold(50); });
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function () { scheduleServerHold(50); });
+    }
+
     function initGlobalSectionPagination() {
+        scheduleServerHold(0);
         var root = document.getElementById('rh-admin-page') || document;
         if (!root) return;
 
@@ -527,6 +675,7 @@
 
     window.AdminAutoSectionPagination = {
         init: initGlobalSectionPagination,
+        holdServerPagers: holdServerPagers, // call after a script re-renders a server pager (gym visit log)
         pageSize: PAGE_SIZE
     };
 })();

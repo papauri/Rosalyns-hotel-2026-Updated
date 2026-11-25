@@ -2897,10 +2897,13 @@ $currency_symbol = getSetting('currency_symbol');
                                 <span class="ck-row__act"><a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>"><i class="fas fa-eye"></i> View</a></span>
                             </li>
                             <?php endforeach; ?>
+                            <?php /* Inside the list (not counted by the pager), so the pager keeps its place on an empty period. */ ?>
+                            <li class="ck-empty" data-ck-ahead-empty data-admin-auto-pagination-ignore="1" hidden><i class="fas fa-mug-saucer"></i><p>No arrivals tomorrow.</p></li>
                         </ul>
                         <?php if ($mvMore['arrivals']): ?><p class="ck-panel__sub">Showing the first <?php echo (int)$mvAheadCap; ?> arrivals. <a href="bookings.php">See all in Bookings</a></p><?php endif; ?>
+                        <?php else: ?>
+                        <div class="ck-empty" data-ck-ahead-empty><i class="fas fa-mug-saucer"></i><p>No arrivals tomorrow.</p></div>
                         <?php endif; ?>
-                        <div class="ck-empty" data-ck-ahead-empty<?php echo $mvArrAhead ? ' hidden' : ''; ?>><i class="fas fa-mug-saucer"></i><p>No arrivals tomorrow.</p></div>
                     </div>
                 </div>
 
@@ -2968,10 +2971,12 @@ $currency_symbol = getSetting('currency_symbol');
                                 <span class="ck-row__act"><a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$d['id']; ?>"><i class="fas fa-eye"></i> View</a></span>
                             </li>
                             <?php endforeach; ?>
+                            <li class="ck-empty" data-ck-ahead-empty data-admin-auto-pagination-ignore="1" hidden><i class="fas fa-suitcase-rolling"></i><p>No departures tomorrow.</p></li>
                         </ul>
                         <?php if ($mvMore['departures']): ?><p class="ck-panel__sub">Showing the first <?php echo (int)$mvAheadCap; ?> departures. <a href="bookings.php">See all in Bookings</a></p><?php endif; ?>
+                        <?php else: ?>
+                        <div class="ck-empty" data-ck-ahead-empty><i class="fas fa-suitcase-rolling"></i><p>No departures tomorrow.</p></div>
                         <?php endif; ?>
-                        <div class="ck-empty" data-ck-ahead-empty<?php echo $mvDepAhead ? ' hidden' : ''; ?>><i class="fas fa-suitcase-rolling"></i><p>No departures tomorrow.</p></div>
                     </div>
                 </div>
                 <?php endif; ?>
@@ -3011,10 +3016,12 @@ $currency_symbol = getSetting('currency_symbol');
                                 <span class="ck-row__act"><a class="ck-btn ck-btn--sm" href="conference-management.php"><i class="fas fa-eye"></i> View</a></span>
                             </li>
                             <?php endforeach; ?>
+                            <li class="ck-empty" data-ck-ahead-empty data-admin-auto-pagination-ignore="1" hidden><i class="fas fa-calendar-xmark"></i><p>No conference events tomorrow.</p></li>
                         </ul>
                         <?php if ($mvMore['events']): ?><p class="ck-panel__sub">Showing the first <?php echo (int)$mvAheadCap; ?> events. <a href="conference-management.php">See all events</a></p><?php endif; ?>
+                        <?php else: ?>
+                        <div class="ck-empty" data-ck-ahead-empty><i class="fas fa-calendar-xmark"></i><p>No conference events tomorrow.</p></div>
                         <?php endif; ?>
-                        <div class="ck-empty" data-ck-ahead-empty<?php echo $mvEvtAhead ? ' hidden' : ''; ?>><i class="fas fa-calendar-xmark"></i><p>No conference events tomorrow.</p></div>
                     </div>
                 </div>
                 <?php endif; ?>
@@ -3360,8 +3367,9 @@ $currency_symbol = getSetting('currency_symbol');
                         <span class="ck-row__act"><a href="conference-management.php" class="ck-btn ck-btn--sm">Manage</a></span>
                     </li>
                     <?php endforeach; ?>
+                    <?php /* Inside the list (not counted by the pager), so the pager keeps its place on an empty day. */ ?>
+                    <li class="ck-empty" data-ck-day-empty data-admin-auto-pagination-ignore="1" hidden><i class="far fa-calendar"></i><p>Nothing booked for this day.</p></li>
                 </ul>
-                <div class="ck-empty" data-ck-day-empty hidden><i class="far fa-calendar"></i><p>Nothing booked for this day.</p></div>
                 <?php else: ?>
                     <div class="ck-empty"><i class="far fa-calendar"></i><p>Nothing booked in the next 7 days.</p></div>
                 <?php endif; ?>
@@ -3961,20 +3969,17 @@ $currency_symbol = getSetting('currency_symbol');
                     const paged = !!(list && typeof list.rhPagerRefresh === 'function');
                     let shown = 0;
                     if (list) {
-                        Array.prototype.forEach.call(list.children, function (row) {
+                        list.querySelectorAll(':scope > li[data-ck-from]').forEach(function (row) {
                             const on = (row.dataset.ckFrom || '') <= p.to && (row.dataset.ckTo || '') >= p.from;
                             if (on) { row.removeAttribute('data-filter-hidden'); shown++; } else { row.setAttribute('data-filter-hidden', '1'); }
                             if (!paged) row.hidden = !on;
                         });
-                        list.hidden = shown === 0; // before the pager re-measures, so it measures the list on screen
-                        if (paged) {
-                            list.rhPagerRefresh(true);
-                            const nav = list.nextElementSibling;
-                            if (nav && nav.matches('[data-admin-auto-pagination-nav]')) nav.style.display = shown === 0 ? 'none' : '';
-                        }
                     }
+                    // The empty message sits inside the list, so an empty period keeps the list, and the pager
+                    // ("Showing 0 of 0") stays in its place (owner 2026-11-26).
+                    if (empty) empty.hidden = shown > 0;
+                    if (paged) list.rhPagerRefresh(true);
                     if (empty) {
-                        empty.hidden = shown > 0;
                         const text = empty.querySelector('p');
                         if (text) text.textContent = (block.dataset.ckEmpty || 'Nothing') + ' ' + p.phrase + '.';
                     }
@@ -3993,10 +3998,13 @@ $currency_symbol = getSetting('currency_symbol');
                         try { n = JSON.parse(c.dataset.ckCounts || '{}'); } catch (e) { n = {}; }
                         c.textContent = String(typeof n[p.key] === 'number' ? n[p.key] : 0);
                     });
-                    // Room service is live orders: its tab shows under Today only.
+                    // Room service is live orders: its tab shows under Today only. It keeps its space (invisible, not
+                    // removed) so the tab row never re-wraps and the card keeps one height.
                     let lost = false;
                     panel.querySelectorAll('[data-ck-tab][data-ck-today-only]').forEach(function (t) {
-                        t.hidden = !isToday;
+                        t.classList.toggle('ck-tab--off', !isToday);
+                        t.setAttribute('aria-hidden', isToday ? 'false' : 'true');
+                        t.tabIndex = isToday ? 0 : -1;
                         if (!isToday && t.classList.contains('is-active')) lost = true;
                     });
                     // Show the period's block first so the lists can be measured, then filter them.
@@ -4005,7 +4013,7 @@ $currency_symbol = getSetting('currency_symbol');
                     });
                     if (!isToday) panel.querySelectorAll('[data-ck-block="ahead"]').forEach(function (block) { filterBlock(block, p); });
                     if (lost) {
-                        const first = panel.querySelector('[data-ck-tab]:not([hidden])');
+                        const first = panel.querySelector('[data-ck-tab]:not([hidden]):not(.ck-tab--off)');
                         if (first) first.click();
                     } else if (isToday) {
                         const pane = panel.querySelector('[data-ck-pane]:not([hidden])');
@@ -4040,16 +4048,13 @@ $currency_symbol = getSetting('currency_symbol');
                         }
                         if (!paged) row.hidden = !on;
                     });
-                    if (paged) {
-                        list.rhPagerRefresh(true);
-                        // A day with nothing booked shows only the empty message, not "Showing 0 of 0".
-                        const nav = list.nextElementSibling;
-                        if (nav && nav.matches('[data-admin-auto-pagination-nav]')) nav.style.display = shown === 0 ? 'none' : '';
-                    }
+                    // The empty message is inside the list, so a day with nothing booked keeps the pager
+                    // ("Showing 0 of 0") in its place (owner 2026-11-26).
+                    if (empty) empty.hidden = shown > 0 || rows.length === 0;
+                    if (paged) list.rhPagerRefresh(true);
                     week.querySelectorAll('.ck-days [data-ck-day]').forEach(function (b) {
                         b.classList.toggle('is-active', b.dataset.ckDay === day);
                     });
-                    if (empty) empty.hidden = shown > 0 || rows.length === 0;
                     if (reset) reset.hidden = day === '';
                 }
                 week.querySelectorAll('[data-ck-day]').forEach(function (btn) {
