@@ -879,9 +879,10 @@ if (!function_exists('rh_inv_surcharge_note')) {
      * Group invoice rate note for ONE room with a seasonal / rate-plan surcharge (its own rate_plan_discount < 0 per
      * night, with a label): "Festive Season surcharge +K82,855.20 a night x 3 nights = +K248,565.60, already in this
      * room's rate". Information only (the surcharge is inside the room line). Plain text; '' when none applies.
-     * $money: callable(float): string (the document's money format).
+     * $money: callable(float): string (the document's money format). $factor: null = the amounts as stored; a number
+     * (exclusive mode: 1 / (1 + v + l) with the row's own rates) puts them on the net basis of the lines beside it.
      */
-    function rh_inv_surcharge_note(array $row, int $nights, callable $money): string
+    function rh_inv_surcharge_note(array $row, int $nights, callable $money, ?float $factor = null): string
     {
         $label = trim((string)($row['rate_plan_label'] ?? ''));
         $perNight = -(float)($row['rate_plan_discount'] ?? 0);
@@ -889,6 +890,10 @@ if (!function_exists('rh_inv_surcharge_note')) {
             return '';
         }
         $nights = max(1, $nights);
+        if ($factor !== null) {
+            return $label . ' surcharge +' . $money(round($perNight * $factor, 2)) . ' a night x ' . $nights . ($nights === 1 ? ' night' : ' nights')
+                . ' = +' . $money(round($perNight * $nights * $factor, 2)) . ", already in this room's rate";
+        }
         return $label . ' surcharge +' . $money($perNight) . ' a night x ' . $nights . ($nights === 1 ? ' night' : ' nights')
             . ' = +' . $money(round($perNight * $nights, 2)) . ", already in this room's rate";
     }
@@ -984,9 +989,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
                 'cancel_lead' => $drCancelLead && !$drNoRoom];
         }
     }
-    // Exclusive mode prints net lines, so the amounts printed beside them are nets too (owner 2026-11-26): the room
-    // description's "+ children / + package" and the rate-plan discount, with the row's own rates (rh_doc_row_rates):
-    // child and discount / (1 + v + l), package / (1 + v). Inclusive / off: null, every amount prints as stored.
+    // Exclusive mode prints net lines, so every amount printed beside them is a net too (owner 2026-11-26): the room
+    // description (rh_booked_rate_line doc_basis: nightly rate, children, package), the rate-plan discount and the
+    // surcharge, with the row's own rates (rh_doc_row_rates): room-basis amounts / (1 + v + l), package / (1 + v).
+    // Inclusive / off: null, every amount prints as stored.
     $exclRates = static function (array $row, float $pkgAll): ?array {
         $pkgAll = max(0.0, $pkgAll);
         $dl = rh_doc_stay_lines($row, $pkgAll);
@@ -995,17 +1001,11 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         }
         return rh_doc_row_rates($row, (float)$dl['lines_total'], (float)$dl['vat'], (float)$dl['levy'], $pkgAll);
     };
-    // A rh_booked_rate_line() result with its child and package amounts on the document's basis, plus the all-in
-    // figures it was built with (child_all / package_all) so the guest_text fragments can be swapped.
-    $brOnBasis = static function (array $row, array $br) use ($exclRates): array {
-        $br['child_all'] = (float)($br['child'] ?? 0);
-        $br['package_all'] = (float)($br['package'] ?? 0);
-        $rt = !empty($br['ok']) && ($br['child_all'] > 0 || $br['package_all'] > 0) ? $exclRates($row, $br['package_all']) : null;
-        if ($rt !== null) {
-            $br['child'] = $br['child_all'] > 0 ? round($br['child_all'] / (1 + $rt['vat'] + $rt['levy']), 2) : 0.0;
-            $br['package'] = $br['package_all'] > 0 ? $rt['pkg_net'] : 0.0;
-        }
-        return $br;
+    // The factor that puts a room-basis amount (rate-plan discount / surcharge) of one row on the lines' basis:
+    // 1 / (1 + v + l) in exclusive mode, null otherwise (amount as stored).
+    $exclRoomFactor = static function (array $row, float $pkgAll) use ($exclRates): ?float {
+        $rt = $exclRates($row, $pkgAll);
+        return $rt === null ? null : 1 / (1 + $rt['vat'] + $rt['levy']);
     };
     // Header for a group: the group's overall dates (earliest check-in to latest check-out), the room count and every
     // live room's guests. Single room: the booking's own figures, as before. The room count = every room the invoice
@@ -1051,6 +1051,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     if ($leadNoRoom || $leadCancelled) {
         $ratePlanDiscount = 0.0;
         $ratePlanSurcharge = 0.0;
+    }
+    // Exclusive: the lead's surcharge information row on the room line's net basis too (lead row's own rates).
+    if ($ratePlanSurcharge > 0 && ($rpF = $exclRoomFactor($booking, $pkgTotal)) !== null) {
+        $ratePlanSurcharge = round($ratePlanSurcharge * $rpF, 2);
     }
     if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
         // Exclusive: the discount on the room line's net basis, / (1 + v + l) with the lead row's own rates.
@@ -1286,9 +1290,14 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
 
     // An admin-customised DB template (payment_invoice_document) keeps being honoured;
     // the stock seeded copy is ignored in favour of the kit layout below.
-    $customTemplate = function_exists('hotel_default_payment_invoice_document_html')
-        ? rh_inv_custom_template('payment_invoice_document', hotel_default_payment_invoice_document_html())
-        : rh_inv_custom_template('payment_invoice_document');
+    // A sample render ($preload) may pass its own template HTML (preload 'custom_template'); never read from the DB then.
+    if ($preload !== null && isset($preload['custom_template'])) {
+        $customTemplate = (string)$preload['custom_template'];
+    } else {
+        $customTemplate = function_exists('hotel_default_payment_invoice_document_html')
+            ? rh_inv_custom_template('payment_invoice_document', hotel_default_payment_invoice_document_html())
+            : rh_inv_custom_template('payment_invoice_document');
+    }
     if ($customTemplate !== '' && !$statementMode) {
         return rh_inv_legacy_room_template(get_defined_vars(), $customTemplate);
     }
@@ -1311,8 +1320,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     if (!function_exists('rh_booked_rate_line')) {
         require_once __DIR__ . '/../includes/booked-rate.php';
     }
-    $accomSub = static function (array $row) use ($cur, $brOnBasis): string {
-        $br = $brOnBasis($row, rh_booked_rate_line($row, null, ['currency' => $cur, 'room_name' => '']));
+    // Exclusive mode (doc_basis): the nightly rate, children and package are the nets of the lines beside it, worded
+    // "excl. VAT and levy", so the whole description is on the Amount column's basis.
+    $accomSub = static function (array $row) use ($cur): string {
+        $br = rh_booked_rate_line($row, null, ['currency' => $cur, 'room_name' => '', 'doc_basis' => true]);
         if (!$br['ok']) {
             return 'Accommodation';
         }
@@ -1330,7 +1341,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         return 'Accommodation - booked at ' . rh_booked_rate_money($br['per_night'], $cur) . ' a night'
             . ($disc ? ' after the ' . $planLabel . ' discount' : '')
             . ($surch ? ' including the ' . $planLabel . ' surcharge' : '')
-            . ($incl ? ', ' . implode(' and ', $incl) . ' included' : '')
+            . ($incl ? (!empty($br['net']) ? ', excl. ' . implode(' and ', $incl) : ', ' . implode(' and ', $incl) . ' included') : '')
             . ' x ' . $n . ($n === 1 ? ' night' : ' nights')
             . ($br['child'] > 0 ? ' + children ' . rh_booked_rate_money($br['child'], $cur) : '')
             . ($br['package'] > 0 ? ' + package ' . rh_booked_rate_money($br['package'], $cur) : '');
@@ -1428,7 +1439,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             } else {
                 // The lead row carries the package and rate-plan columns; the other rooms have none.
                 $grmSrc = $gi === $pkgRowIdx ? $booking : $grm;
-                $grmSurch = rh_inv_surcharge_note($grmSrc, $ratePlanNightsOf($grmSrc), $money);
+                $grmSurch = rh_inv_surcharge_note($grmSrc, $ratePlanNightsOf($grmSrc), $money, $exclRoomFactor($grmSrc, $gi === $pkgRowIdx ? $pkgTotal : 0.0));
                 $itemRows[] = [
                     $title . rh_inv_sub($accomSub($grmSrc))
                         . ($grmSurch !== '' ? rh_inv_sub($grmSurch) : '')
@@ -1852,22 +1863,12 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                     . '; paid on this room ' . $paidHere . ' (in the payment history)'), '1', $grmRoom, $grmRoom);
             } else {
                 $brSrc = $gi === $pkgRowIdx ? $booking : $grm;
-                $br = function_exists('rh_booked_rate_line') ? rh_booked_rate_line($brSrc, null, ['currency' => $curTxt, 'room_name' => '']) : ['ok' => false];
-                $brGuest = (string)($br['guest_text'] ?? '');
-                if (!empty($br['ok'])) {
-                    // Exclusive: "+ children / + package" on the net basis of the lines beside it.
-                    $brN = $brOnBasis($brSrc, $br);
-                    if ($brN['child'] > 0 && abs($brN['child'] - $brN['child_all']) > BALANCE_TOLERANCE / 2) {
-                        $brGuest = str_replace(' + children ' . rh_booked_rate_money($brN['child_all'], $curTxt), ' + children ' . rh_booked_rate_money($brN['child'], $curTxt), $brGuest);
-                    }
-                    if ($brN['package'] > 0 && abs($brN['package'] - $brN['package_all']) > BALANCE_TOLERANCE / 2) {
-                        $brGuest = str_replace(' + package ' . rh_booked_rate_money($brN['package_all'], $curTxt), ' + package ' . rh_booked_rate_money($brN['package'], $curTxt), $brGuest);
-                    }
-                }
-                $rateTxt = !empty($br['ok']) ? 'Booked at ' . str_replace(['×', '·'], ['x', '-'], $brGuest) : '';
+                // doc_basis: exclusive mode prints the rate, children and package as the nets of the lines beside it.
+                $br = function_exists('rh_booked_rate_line') ? rh_booked_rate_line($brSrc, null, ['currency' => $curTxt, 'room_name' => '', 'doc_basis' => true]) : ['ok' => false];
+                $rateTxt = !empty($br['ok']) ? 'Booked at ' . str_replace(['×', '·'], ['x', '-'], (string)$br['guest_text']) : '';
                 $surchTxt = rh_inv_surcharge_note($brSrc, $ratePlanNightsOf($brSrc), static function (float $v) use ($currency_symbol): string {
                     return $currency_symbol . ' ' . number_format($v, 2);
-                });
+                }, $exclRoomFactor($brSrc, $gi === $pkgRowIdx ? $pkgTotal : 0.0));
                 $chargeRows .= $roomRowHtml($title . $subHtml($rateTxt) . $subHtml($surchTxt)
                     . ($removed !== '' ? $subHtml($removed . ' - still billed; paid on this room ' . $paidHere) : ''),
                     (string)$grmNights, $grmRoom / max(1, $grmNights), $grmRoom);
@@ -2006,7 +2007,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
 
             // {{booked_rate}}: "Superior Suite - K356,000 x 3 nights", the nightly price the booking was made at
             // (one line per room for a group, with the room's own guest when entered - Bundle B), never today's price.
-            // Plain "x" / "-": PDF core font.
+            // Exclusive mode: on the lines' net basis ($docBasis, rh_booked_rate_line doc_basis). Plain "x" / "-": PDF core font.
             $bookedRateHtml = '';
             $brPdo = (isset($pdo) && $pdo instanceof PDO) ? $pdo : (($GLOBALS['pdo'] ?? null) instanceof PDO ? $GLOBALS['pdo'] : null);
             if ($brPdo !== null && (int)($booking['id'] ?? 0) > 0) {
@@ -2018,7 +2019,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                     // A group: the rooms of the charges table, in its order (rh_inv_group_rooms: lead, live rooms by
                     // number, then the closed rooms that carry money, marked the same way).
                     foreach (array_values($group_bookings) as $brRow) {
-                        $brOne = rh_booked_rate_for_booking($brPdo, (int)($brRow['id'] ?? 0), false, true);
+                        $brOne = rh_booked_rate_for_booking($brPdo, (int)($brRow['id'] ?? 0), false, true, true);
                         if (!empty($brOne['ok'])) {
                             $brMark = (string)($brRow['rh_inv_removed'] ?? '');
                             $brTexts[] = ($brMark !== '' ? '(' . $brMark . ') ' : '') . $brOne['guest_text'];
@@ -2026,7 +2027,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                     }
                 }
                 if (!$brTexts) {
-                    $brTexts = rh_booked_rate_group_texts($brPdo, (int)$booking['id']);
+                    $brTexts = rh_booked_rate_group_texts($brPdo, (int)$booking['id'], true);
                 }
                 // A group: one line per room, however many rooms (never the "6 rooms: ...; ..." run-on line).
                 $brLines = $brTexts;

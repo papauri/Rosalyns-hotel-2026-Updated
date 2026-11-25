@@ -4581,12 +4581,19 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
         $levyPct = max($levyPct, (float)($r['tourism_levy_percent'] ?? 0));
         $vatPct = max($vatPct, (float)($r['vat_rate'] ?? 0));
         $pd = (float)($r['rate_plan_discount'] ?? 0);
+        // Exclusive: the room line is net, so the discount / surcharge notes are too: / (1 + v + l) with the row's own
+        // rates (rh_doc_row_rates). Other modes: as stored.
+        $pdF = null;
+        if ($dl['mode'] === 'exclusive' && abs($pd) > BALANCE_TOLERANCE) {
+            $pdRt = rh_doc_row_rates($r, (float)$dl['lines_total'], (float)$dl['vat'], (float)$dl['levy'], max(0.0, (float)($r['package_total'] ?? 0)));
+            $pdF = 1 / (1 + $pdRt['vat'] + $pdRt['levy']);
+        }
         if ($pd > 0 && trim((string)($r['rate_plan_label'] ?? '')) !== '') {
-            $disc += $pd * max(1, $n);
+            $disc += $pdF !== null ? round($pd * max(1, $n) * $pdF, 2) : $pd * max(1, $n);
             $planLabels[trim((string)$r['rate_plan_label'])] = true;
         } elseif ($pd < -BALANCE_TOLERANCE && trim((string)($r['rate_plan_label'] ?? '')) !== '') {
             // Negative = a surcharge (e.g. festive season); it is already inside the room rate.
-            $surch += -$pd * max(1, $n);
+            $surch += $pdF !== null ? round(-$pd * max(1, $n) * $pdF, 2) : -$pd * max(1, $n);
             $surchLabels[trim((string)$r['rate_plan_label'])] = true;
         }
     }

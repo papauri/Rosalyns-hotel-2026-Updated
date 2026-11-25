@@ -9,8 +9,10 @@
  *   rh_room_today_price(array $b, ?array $combo = null): ?float    PURE: today's price for the room/occupancy/joined room
  *   rh_room_today_price_lookup(PDO $pdo, array $b): array{price:?float,combo_name:?string}   reads rooms/room_combinations
  *
- *   rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true): array   reads one booking -> line
- *   rh_booked_rate_group_texts(PDO $pdo, int $bookingId): string[]   guest_text of every room in the booking's group
+ *   rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true, bool $withGuest = false,
+ *              bool $docBasis = false): array   reads one booking -> line
+ *   rh_booked_rate_group_texts(PDO $pdo, int $bookingId, bool $docBasis = false): string[]   guest_text of every room
+ *              in the booking's group ($docBasis: exclusive-mode documents get the net figures, see rh_booked_rate_line)
  *   rh_booked_rate_group_lines(array $guestTexts): string[]   PURE: "Room: ..." / "Room 1: ..." / "6 rooms: ..."
  *   rh_booked_rate_room_receipt_lines(PDO $pdo, int $bookingId): string[]   one room of a group: its own room, guest,
  *              dates, rate + "Part of group REF (N rooms)"; anything else as before (rh_booked_rate_room_lines: PURE)
@@ -33,7 +35,8 @@ if (!function_exists('rh_booked_rate_text')) {
      * PURE. $split: rh_booked_stay_split() result (room_gross, package_gross, nights).
      * $opts: currency, today (?float list price today), child (child supplement inside room_gross, ALREADY on the all-in
  *        basis: rh_booked_rate_child_gross()),
-     *        discount_per_night (rate_plan_discount), room_name, has_vat, has_levy, status.
+     *        discount_per_night (rate_plan_discount), room_name, has_vat, has_levy, status,
+     *        net (the figures are nets: guest_text says "excl." and the result carries 'net' => true).
      */
     function rh_booked_rate_text(array $split, array $opts = []): array
     {
@@ -82,8 +85,9 @@ if (!function_exists('rh_booked_rate_text')) {
         }
         $room = trim((string)($opts['room_name'] ?? ''));
         // Plain hyphen: the PDF core fonts (helvetica) have no em dash.
+        // $opts['net']: the figures are nets (an exclusive-mode document, rh_booked_rate_line doc_basis), so "excl.".
         $guest = ($room !== '' ? $room . ' - ' : '') . $m($perNight) . ' × ' . $nightWord
-            . ($incl ? ' (a night, incl. ' . implode(' and ', $incl) . ')' : '')
+            . ($incl ? ' (a night, ' . (!empty($opts['net']) ? 'excl. ' : 'incl. ') . implode(' and ', $incl) . ')' : '')
             . ($child > $tol ? ' + children ' . $m($child) : '')
             . ($pkg > $tol ? ' + package ' . $m($pkg) : '');
 
@@ -107,6 +111,9 @@ if (!function_exists('rh_booked_rate_text')) {
         $out['guest_text'] = $guest;
         $out['today_text'] = $todayText;
         $out['cancelled'] = strtolower((string)($opts['status'] ?? '')) === 'cancelled';
+        if (!empty($opts['net'])) {
+            $out['net'] = true; // only set on the net basis, so every other result keeps its exact keys
+        }
         return $out;
     }
 }
@@ -192,7 +199,9 @@ if (!function_exists('rh_booked_rate_line')) {
      * The booked-rate line for one bookings row (needs total_with_vat / total_amount / vat_amount, number_of_nights,
      * package_total, child_supplement_total; optional rate_plan_discount, tourism_levy_amount, status, room_name).
      * $todayPrice: today's list price (staff screens; rh_room_today_price_lookup()), null = no today note.
-     * $opts: currency (default the currency_symbol setting), room_name.
+     * $opts: currency (default the currency_symbol setting), room_name, doc_basis (a guest document's line: in
+     * exclusive mode the document prints net lines, so the nightly rate, children and package are its nets,
+     * rh_doc_stay_lines(), worded "excl. VAT and tourism levy"; any other mode: unchanged).
      */
     function rh_booked_rate_line(array $booking, ?float $todayPrice = null, array $opts = []): array
     {
@@ -207,7 +216,8 @@ if (!function_exists('rh_booked_rate_line')) {
                 $cur = 'MWK';
             }
         }
-        return rh_booked_rate_text(rh_booked_stay_split($booking), [
+        $split = rh_booked_stay_split($booking);
+        $o = [
             'currency' => $cur,
             'today' => $todayPrice,
             'child' => rh_booked_rate_child_gross((float)($booking['child_supplement_total'] ?? 0), rh_booking_has_levy($booking)),
@@ -216,7 +226,21 @@ if (!function_exists('rh_booked_rate_line')) {
             'has_vat' => (float)($booking['vat_amount'] ?? 0) > 0,
             'has_levy' => (float)($booking['tourism_levy_amount'] ?? 0) > 0,
             'status' => (string)($booking['status'] ?? ''),
-        ]);
+        ];
+        if (!empty($opts['doc_basis'])) {
+            if (!function_exists('rh_doc_stay_lines')) {
+                require_once __DIR__ . '/pricing.php';
+            }
+            // The same figures as the document's own lines (child / (1 + v + l), package / (1 + v), room = the rest),
+            // so the description agrees with the Amount column.
+            $dl = rh_doc_stay_lines($booking, max(0.0, (float)($booking['package_total'] ?? 0)));
+            if ($dl['mode'] === 'exclusive') {
+                $split = ['room_gross' => round($dl['room'] + $dl['child'], 2), 'package_gross' => $dl['pkg'], 'nights' => $split['nights']];
+                $o['child'] = $dl['child'];
+                $o['net'] = true;
+            }
+        }
+        return rh_booked_rate_text($split, $o);
     }
 }
 
@@ -225,9 +249,10 @@ if (!function_exists('rh_booked_rate_for_booking')) {
      * Read one room booking and return its booked-rate line (see rh_booked_rate_line). $withToday: add today's price
      * note (staff screens only, never guest documents). $withGuest (Bundle B): the room name carries the room's own
      * guest when one was entered ("Deluxe Room – Mr Banda", rh_room_label_with_guest; never the booker's name in its
-     * place). Read-only; a missing booking or read error gives ok = false.
+     * place). $docBasis: a guest document's line (rh_booked_rate_line doc_basis). Read-only; a missing booking or read
+     * error gives ok = false.
      */
-    function rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true, bool $withGuest = false): array
+    function rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true, bool $withGuest = false, bool $docBasis = false): array
     {
         $empty = rh_booked_rate_text(['room_gross' => 0, 'nights' => 1]);
         if ($bookingId <= 0) {
@@ -252,9 +277,9 @@ if (!function_exists('rh_booked_rate_for_booking')) {
             $name = (string)($b['room_name'] ?? '');
             return rh_booked_rate_line($b, $today, ['room_name' => function_exists('rh_room_label_with_guest')
                 ? rh_room_label_with_guest($name, $guest)
-                : trim($name . ' – ' . $guest, ' –')]);
+                : trim($name . ' – ' . $guest, ' –'), 'doc_basis' => $docBasis]);
         }
-        return rh_booked_rate_line($b, $today);
+        return rh_booked_rate_line($b, $today, $docBasis ? ['doc_basis' => true] : []);
     }
 }
 
@@ -295,11 +320,12 @@ if (!function_exists('rh_booked_rate_group_texts')) {
      * guest_text of every room in a booking's group (bookings.primary_booking_id: the lead, then its secondaries
      * in id order; the same rooms the group invoice lists), never today's price. A booking outside a group gives
      * just its own line. Deleted rooms are left out, and so is another room of the group that was cancelled,
-     * expired or a no-show. Read-only; a read error falls back to the booking's own line.
+     * expired or a no-show. $docBasis: a guest document's lines (rh_booked_rate_line doc_basis). Read-only; a read
+     * error falls back to the booking's own line.
      *
      * @return string[]
      */
-    function rh_booked_rate_group_texts(PDO $pdo, int $bookingId): array
+    function rh_booked_rate_group_texts(PDO $pdo, int $bookingId, bool $docBasis = false): array
     {
         if ($bookingId <= 0) {
             return [];
@@ -324,7 +350,7 @@ if (!function_exists('rh_booked_rate_group_texts')) {
         }
         $out = [];
         foreach ($ids as $id) {
-            $br = rh_booked_rate_for_booking($pdo, $id, false);
+            $br = rh_booked_rate_for_booking($pdo, $id, false, false, $docBasis);
             if ($br['ok']) {
                 $out[] = $br['guest_text'];
             }

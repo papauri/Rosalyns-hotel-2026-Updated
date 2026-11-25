@@ -123,14 +123,16 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     $bd = rh_booking_total_breakdown($disc);
     [$sum, $tot] = btb_sum($bd);
     $dl = array_values(array_filter($bd['lines'], fn($l) => stripos($l['label'], 'Discount') === 0))[0] ?? [];
-    ok("[$mode] discount: shown as a note with the plan name, total still adds up", ($dl['kind'] ?? '') === 'note' && strpos($dl['hint'], 'Early bird') !== false && $dl['value'] === '-K 30,000.00' && abs($sum - $tot) <= BALANCE_TOLERANCE, json_encode($dl));
+    // exclusive: the room line is net, so the note is too: 30,000 / 1.185 = 25,316.46 (owner 2026-11-26); inclusive as stored
+    $rpExp = $mode === 'exclusive' ? 'K 25,316.46' : 'K 30,000.00';
+    ok("[$mode] discount: shown as a note with the plan name ($rpExp), total still adds up", ($dl['kind'] ?? '') === 'note' && strpos($dl['hint'], 'Early bird') !== false && $dl['value'] === '-' . $rpExp && abs($sum - $tot) <= BALANCE_TOLERANCE, json_encode($dl));
 
     // rate plan SURCHARGE (negative rate_plan_discount): its own note "+K", never added, no discount line (RP-2)
     $sur = $mk($night * $nights, 'price', 0.0, ['rate_plan_label' => 'Festival Season', 'rate_plan_discount' => -10000]);
     $bd = rh_booking_total_breakdown($sur);
     [$sum, $tot] = btb_sum($bd);
     $sl = array_values(array_filter($bd['lines'], fn($l) => stripos($l['label'], 'Surcharge') === 0))[0] ?? [];
-    ok("[$mode] surcharge: a note '+K 30,000.00' naming the plan, no discount line, total unchanged and adds up", ($sl['kind'] ?? '') === 'note' && strpos($sl['hint'] ?? '', 'Festival Season') !== false && ($sl['value'] ?? '') === '+K 30,000.00' && !btb_has($bd, 'Discount') && abs($sum - $tot) <= BALANCE_TOLERANCE && abs($tot - rh_booking_full_total($sur)) <= BALANCE_TOLERANCE, json_encode($bd));
+    ok("[$mode] surcharge: a note '+$rpExp' naming the plan, no discount line, total unchanged and adds up", ($sl['kind'] ?? '') === 'note' && strpos($sl['hint'] ?? '', 'Festival Season') !== false && ($sl['value'] ?? '') === '+' . $rpExp &&!btb_has($bd, 'Discount') && abs($sum - $tot) <= BALANCE_TOLERANCE && abs($tot - rh_booking_full_total($sur)) <= BALANCE_TOLERANCE, json_encode($bd));
 
     // group of two rooms (plain + child)
     $bd = rh_booking_total_breakdown([$plain, $kid]);
@@ -224,11 +226,50 @@ $dP = $descAmt($invDTxt, 'package');
 ok('[exclusive invoice] description: + children 150,000/1.185 and + package 60,000/1.175 (the nets beside the lines)', $dC !== null && abs($dC - $L['child']) < 0.005 && $dP !== null && abs($dP - $L['pkg']) < 0.005, json_encode([$dC, $dP, $L]) . ' ' . substr(preg_replace('/\s+/', ' ', $invDTxt), 0, 1500));
 $dNet = round(30000 / 1.185, 2);
 ok('[exclusive invoice] rate-plan discount on the room basis: 30,000/1.185 = 25,316.46 (not 30,000.00), room line before it = room + discount, lines still foot', strpos($invDTxt, number_format($dNet, 2)) !== false && strpos($invDTxt, '30,000.00') === false && strpos($invDTxt, number_format($L['room'] + $dNet, 2)) !== false && abs((float)$invDT['subtotal'] - (float)$invT['subtotal']) < 0.005 && abs((float)$invDT['total'] - (float)$invT['total']) < 0.005, json_encode($invDT) . ' ' . substr(preg_replace('/\s+/', ' ', $invDTxt), 0, 1500));
-// inclusive: the description and the discount print as stored, as before
+// the whole description on one basis: the nightly rate is the net room line / nights, worded "excl. VAT and levy"
+$perNet = round($L['room'] / 3, 2);
+$nightTxt = preg_match('/booked at [^0-9]*([0-9][0-9,]*\.[0-9]{2}) a night/', $invDTxt, $mm) ? (float)str_replace(',', '', $mm[1]) : null;
+ok('[exclusive invoice] description: nightly rate = net room line / nights, "excl. VAT and levy", never "VAT and levy included"', $nightTxt !== null && abs($nightTxt - $perNet) < 0.005 && strpos($invDTxt, 'excl. VAT and levy x 3 nights') !== false && strpos($invDTxt, 'VAT and levy included') === false, json_encode([$nightTxt, $perNet]) . ' ' . substr(preg_replace('/\s+/', ' ', $invDTxt), 0, 1200));
+// surcharge information row on the net basis: 5,000 a night x 3 = 15,000 all-in -> 15,000 / 1.185 = 12,658.23
+$invS = ['rate_plan_label' => 'Festive', 'rate_plan_discount' => -5000] + $invB;
+$invST = null;
+$invSTxt = html_entity_decode(strip_tags((string)buildInvoiceHTML($invS, 'BTB-INV-4', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', [], $invPre, false, $invST)), ENT_QUOTES, 'UTF-8');
+ok('[exclusive invoice] surcharge row: +12,658.23 (15,000/1.185), not 15,000.00', strpos($invSTxt, 'surcharge (already in the room rate) +MWK 12,658.23') !== false && strpos($invSTxt, '15,000.00') === false, substr(preg_replace('/\s+/', ' ', $invSTxt), 0, 1200));
+// the custom (admin-edited) template's group layout, rendered for real (preload custom_template): every room's
+// "Booked at ..." line and surcharge note on the net basis, so a missed swap fails here
+$invSec = $dsRow(600000, 150000, 0) + ['id' => -2, 'booking_reference' => 'BTB-DOC-2', 'rate_plan_label' => 'Festive', 'rate_plan_discount' => -5000] + $invB;
+$cgTpl = '<table>{{charges_table_rows}}</table>';
+$cgRender = function () use ($invD, $invSec, $invPre, $cgTpl): string {
+    $t = null;
+    return html_entity_decode(strip_tags((string)buildInvoiceHTML($invD, 'BTB-INV-5', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', [$invD, $invSec], ['custom_template' => $cgTpl] + $invPre, false, $t)), ENT_QUOTES, 'UTF-8');
+};
+$cgTxt = $cgRender();
+ok('[exclusive custom group] both rooms "Booked at" net: lead ' . number_format($perNet, 2) . ' a night excl. VAT and tourism levy + children 126,582.28 + package 51,063.83; no all-in amounts',
+    substr_count($cgTxt, '(a night, excl. VAT and tourism levy)') === 2 && strpos($cgTxt, 'incl. VAT') === false
+    && strpos($cgTxt, 'Booked at MWK ' . number_format($perNet, 2) . ' x 3 nights') !== false
+    && substr_count($cgTxt, '+ children MWK ' . number_format($L['child'], 2)) === 2 && strpos($cgTxt, '+ package MWK ' . number_format($L['pkg'], 2)) !== false
+    && strpos($cgTxt, '150,000.00') === false && strpos($cgTxt, '60,000.00') === false, substr(preg_replace('/\s+/', ' ', $cgTxt), 0, 1500));
+ok('[exclusive custom group] surcharge note net: +4,219.41 a night x 3 nights = +12,658.23', strpos($cgTxt, 'Festive surcharge +MWK 4,219.41 a night x 3 nights = +MWK 12,658.23') !== false, substr(preg_replace('/\s+/', ' ', $cgTxt), 0, 1500));
+// rh_booked_rate_line doc_basis: exclusive = the document's nets
+$brX = rh_booked_rate_line($cp, null, ['currency' => 'MWK', 'room_name' => '', 'doc_basis' => true]);
+ok('[exclusive] booked-rate doc_basis: per night = room line / 3, child and package = the document lines, worded excl.', !empty($brX['net']) && abs($brX['per_night'] - round($L['room'] / 3, 2)) < 0.005 && abs($brX['child'] - $L['child']) < 0.005 && abs($brX['package'] - $L['pkg']) < 0.005 && strpos($brX['guest_text'], 'excl. VAT and tourism levy') !== false, json_encode($brX));
+// inclusive: the description, discount, surcharge and custom group print as stored, as before
 $_SITE_SETTINGS['vat_pricing_mode'] = 'inclusive';
 $invIT = null;
 $invITxt = html_entity_decode(strip_tags((string)buildInvoiceHTML($invD, 'BTB-INV-3', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', [], $invPre, false, $invIT)), ENT_QUOTES, 'UTF-8');
 ok('[inclusive invoice] description + children 150,000.00, + package 60,000.00, discount 30,000.00 (unchanged)', abs((float)$descAmt($invITxt, 'children') - 150000) < 0.005 && abs((float)$descAmt($invITxt, 'package') - 60000) < 0.005 && strpos($invITxt, '30,000.00') !== false, substr(preg_replace('/\s+/', ' ', $invITxt), 0, 1500));
+ok('[inclusive invoice] description says "VAT and levy included", never "excl."', strpos($invITxt, 'VAT and levy included x 3 nights') !== false && strpos($invITxt, 'excl. VAT and levy x') === false, substr(preg_replace('/\s+/', ' ', $invITxt), 0, 1200));
+$invSTxt = html_entity_decode(strip_tags((string)buildInvoiceHTML($invS, 'BTB-INV-6', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', [], $invPre, false, $invST)), ENT_QUOTES, 'UTF-8');
+ok('[inclusive invoice] surcharge row +15,000.00 as stored', strpos($invSTxt, 'surcharge (already in the room rate) +MWK 15,000.00') !== false, substr(preg_replace('/\s+/', ' ', $invSTxt), 0, 1200));
+$cgTxt = $cgRender();
+ok('[inclusive custom group] "Booked at" all-in as before: incl. VAT and tourism levy, + children 150,000.00, + package 60,000.00, surcharge 5,000.00 a night = 15,000.00',
+    substr_count($cgTxt, '(a night, incl. VAT and tourism levy)') === 2 && substr_count($cgTxt, '+ children MWK 150,000.00') === 2 && strpos($cgTxt, '+ package MWK 60,000.00') !== false
+    && strpos($cgTxt, 'Festive surcharge +MWK 5,000.00 a night x 3 nights = +MWK 15,000.00') !== false, substr(preg_replace('/\s+/', ' ', $cgTxt), 0, 1500));
+foreach (['inclusive' => '1', 'off' => '0'] as $brMode => $brVat) {
+    $_SITE_SETTINGS['vat_enabled'] = $brVat;
+    ok("[$brMode] booked-rate doc_basis: identical to the plain line (no 'net' key)", rh_booked_rate_line($cp, null, ['currency' => 'MWK', 'room_name' => '', 'doc_basis' => true]) === rh_booked_rate_line($cp, null, ['currency' => 'MWK', 'room_name' => '']));
+}
+$_SITE_SETTINGS['vat_enabled'] = '1';
 $_SITE_SETTINGS['vat_pricing_mode'] = 'exclusive';
 // INCLUSIVE: byte-for-byte the old figures (lines = gross - levy; child and package as stored; room = the rest)
 $_SITE_SETTINGS['vat_pricing_mode'] = 'inclusive';
