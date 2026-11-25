@@ -63,6 +63,12 @@ when prompted."
   page and screen size, also on a short last page, after a filter or with nothing found ("Showing 0 of 0"). The
   dashboard movements card keeps one height: its list scrolls inside the card with the page buttons at the bottom.
   Guides: 99-admin-dashboard (one line, if it describes the card's paging). Assistant: none. Manager Guides: none.
+- 2026-11-26 Liwonde bb3a41c / Rosalyn's 2908d62 (owner FEATURE): Calendar, Housekeeping and Maintenance timelines:
+  with a night selected by keyboard, Left / Right past the last or first day shown moves the grid to the next /
+  previous dates (same step as the Next / Previous buttons) and the cursor lands on the next night in the same room,
+  like a spreadsheet. Shift+Right / Shift+Left keeps selecting across. Guides: 07-reception-bookings (calendar
+  keyboard line), 06-housekeeping (one line). Assistant: "how do I see further dates with the keyboard" -> arrow past
+  the edge. Manager Guides: none.
 
 ## Synced 2026-11-25 (owner prompted "sync guides, assistants and decisions"; guides + Assistant: commit "Guides + Assistant sync 2026-11-25" in both repos · Assistant: why-cancelled answer (reason from History, staff-only), Assistant cancel card uses rh_cancel_reason_check, counts_not_approved + count-measure hint, new arrivals_to_chase read · owner decisions 2026-11-24/25 written into guides + Assistant (cancel reason internal, guest emails unchanged; SMTP + copy lists unlocked) · Manager Guides: Stock, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed; POS and Kitchen Screens no change) - entries kept for reference
 
