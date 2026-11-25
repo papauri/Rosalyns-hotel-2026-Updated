@@ -71,6 +71,26 @@ when prompted."
   bookings cancel + no-show, tentative holds, conference/events/gym. Assistant: cancel card already asks the reason;
   answer "why was this cancelled" -> booking History. Manager Guide: Bookings.
 
+- 2026-11-25 Liwonde b1148a5 / Rosalyn's c2ca585 (owner FEATURE): Hotel Settings > Email & PDF templates redesigned: a
+  grouped, searchable list instead of 28 tabs. "Suggest wording" (only when the Assistant is on and a model is ready, and
+  for people who may edit templates) offers 3 wordings per email template using only the template's own tags; Load
+  Default unchanged. Guides: templates page. Assistant: "how do I change the wording of an email". Manager Guide: no change.
+- 2026-11-25 Liwonde 4db16f3 / Rosalyn's 9f58022 + fixes 7ee6eeb / e92a3f4 (owner FEATURE): new automated email
+  "Payment reminder before arrival": confirmed bookings still owing get a reminder at each day in "Payment reminders
+  before arrival" (default 30, 15, 4 days before arrival), once per stage, stops when paid; groups get one email (the
+  whole group's balance, earliest arrival). New "CC on guest reminders" setting copies every guest reminder email.
+  All automated emails need the master switch on. Guides: Automated Emails page. Assistant: "when do guests get payment
+  reminders / who is copied". Manager Guide: Money and End of Day (one line).
+- 2026-11-25 Liwonde b32252c / Rosalyn's 009ff7b + fixes 7ee6eeb / e92a3f4 (owner FEATURE): front office "Arrivals with a
+  balance to chase": Dashboard Needs attention item (red when anyone arrives within the smallest reminder day), linking to
+  Bookings filtered to the same rows (Balance due shows the whole group's balance, "Group balance, N rooms"), plus a
+  daily staff email (Automated Emails, off by default; To empty = the hotel's main email, optional CC). Window = the
+  largest reminder day. Guides: Dashboard + Bookings + Automated Emails. Assistant: "who still owes before arrival".
+  Manager Guide: Daily checklist (check the item each morning).
+- 2026-11-25 Liwonde d9475a0 / Rosalyn's 8926fd4 (owner FEATURE): Automated Emails > Recent activity has filters (job,
+  sent/skipped/failed, dates, search) and 10/25/50/All pages instead of the last 100; every column has a "?". Guides:
+  Automated Emails page. Assistant: "did the reminder go to X / why was it skipped". Manager Guide: no change.
+
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
 ### Whole-group payment receipts show the group total and every room (2026-11-20, owner fault) - Liwonde 7d5c105 / Rosalyn's 3781b20

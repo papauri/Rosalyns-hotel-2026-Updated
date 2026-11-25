@@ -33,6 +33,7 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
 - Port of Liwonde b32252c shipped as 009ff7b (dashboard item, bookings.php?chase=arrivals, daily job arrivals_chase).
 - Settings written: automated_job_arrivals_chase = 1, automated_job_arrivals_chase_cc = Gerald Msukwa + P.Msukwa; To left empty = email_main (the hotel's main email). Before: neither existed. Backup `backups/arrivals-chase-before-20261125-005513.json`.
 - Same NOTE as below: gated by automated_email_master (0 here) and needs the owner's deploy of 009ff7b.
+- Follow-ups (code only, no DB change): Recent activity filters 8926fd4 (Liwonde d9475a0); small fixes e92a3f4 (Liwonde 7ee6eeb): chase list shows the group balance, same lead for list + reminders, email date = earliest arrival, every due group reached, overpaid room offsets the group. Deploy needed.
 
 ## Live data change 2026-11-25: payment reminders before arrival (owner authorised the DB update, pre-authorised Rosalyn's changes)
 - Port of Liwonde 4db16f3 shipped as 9f58022 (job prearrival_payment_reminders, template prearrival_payment_reminder, CC on guest reminders).
