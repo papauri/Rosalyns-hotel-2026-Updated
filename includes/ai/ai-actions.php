@@ -963,7 +963,7 @@ function rh_ai_pv_cancel_booking(PDO $db, array $user, array $a): array
         : 'The cancellation rule set in Booking Settings decides what happens to money paid. Refunds are recorded by staff on screen; this card never works one out.';
     $card = rh_ai_card_base('Cancel booking', $help, $rows, 'Cancel booking', [
         'danger' => true,
-        'fields' => [['name' => 'reason', 'label' => 'Reason for cancelling', 'type' => 'text', 'value' => $reason, 'required' => true]],
+        'fields' => [['name' => 'reason', 'label' => 'Reason for cancelling (staff only: kept on the booking History, never in the guest email)', 'type' => 'text', 'value' => $reason, 'required' => true, 'max' => 500]],
     ]);
     if ($feeQuoted !== null && $feeQuoted > BALANCE_TOLERANCE) {
         $card['warn'][] = rh_ai_has_perm((int)($user['id'] ?? 0), 'waive_cancellation_fee')
@@ -998,10 +998,17 @@ function rh_ai_pv_cancel_booking(PDO $db, array $user, array $a): array
         $card['warn'][] = $rooms . '. No cancellation email goes to the guest: only a confirmed booking gets one.';
     }
     $steps = [];
+    // Cancel reasons required (2026-11-25): the screens' own rule (includes/cancel-reason.php: at least 5 characters; the
+    // old automatic "Cancelled by admin" and a bare "Other" refused), checked here too so the card never replays a reason
+    // the screen would refuse. The reason stays internal (History, audit, System Logs); the guest email never shows it.
+    require_once dirname(__DIR__) . '/cancel-reason.php';
+    $reasonCheck = $reason === '' ? null : rh_cancel_reason_check($reason);
     if ($reason === '') {
         $card['notes'][] = 'Type the reason before confirming.';
+    } elseif (empty($reasonCheck['ok'])) {
+        $card['notes'][] = (string)$reasonCheck['error'];
     } else {
-        $f = [['action', 'update_status'], ['id', (string)(int)$b['id']], ['status', 'cancelled'], ['cancellation_reason', $reason], ['scope', $scope]];
+        $f = [['action', 'update_status'], ['id', (string)(int)$b['id']], ['status', 'cancelled'], ['cancellation_reason', (string)$reasonCheck['reason']], ['scope', $scope]];
         if ($wouldEmail) {
             $f[] = ['email_guest', $emailGuest ? '1' : '0']; // left out otherwise: the screen's old behaviour (no email)
         }

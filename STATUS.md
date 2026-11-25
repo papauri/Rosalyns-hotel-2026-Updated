@@ -29,6 +29,11 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   `MSP/usage-reports/<date>.md` + a row in `MSP/usage-reports/HISTORY.md`. COST_LOG.md is retired.
   Baseline 10-16 Nov: 22,793 calls, 50 per hotel commit, 95% Opus, 53 agent runs past today's caps.
 
+## Shipped 2026-11-25: Guides + Assistant sync (owner prompted; port of Liwonde e48fc69)
+- Staff guides (Rosalyn's branding kept), Assistant answers (why cancelled, unapproved counts, arrivals to chase) and the
+  owner decisions (cancel reason internal; SMTP + copy lists unlocked) as in Liwonde e48fc69. Code only, no DB change.
+  GUIDES_AI_SYNC.md identical to Liwonde's again. Manager Guides rebuilt the same day (outside the repos).
+
 ## Live data change 2026-11-25: front office daily "arrivals with a balance to chase" email (owner pre-authorised)
 - Port of Liwonde b32252c shipped as 009ff7b (dashboard item, bookings.php?chase=arrivals, daily job arrivals_chase).
 - Settings written: automated_job_arrivals_chase = 1, automated_job_arrivals_chase_cc = Gerald Msukwa + P.Msukwa; To left empty = email_main (the hotel's main email). Before: neither existed. Backup `backups/arrivals-chase-before-20261125-005513.json`.

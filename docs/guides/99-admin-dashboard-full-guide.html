@@ -215,6 +215,7 @@
     <li><strong>Overdue arrivals (no-show?)</strong>: arrival date passed, never checked in.</li>
     <li><strong>Bookings awaiting confirmation</strong>.</li>
     <li><strong>Departures with a balance</strong>: collect before they leave.</li>
+    <li><strong>Arrivals with a balance to chase</strong>: confirmed bookings arriving soon that still owe money. It opens the Bookings list filtered to them. The hint follows the <em>Payment reminders before arrival</em> days setting. See <a href="13-finance-payments.html#pay-before-arrival">Payment reminders before arrival</a>.</li>
     <li><strong>Refunds to approve</strong>.</li>
     <li><strong>Conference enquiries to answer</strong>.</li>
     <li><strong>Unread contact messages</strong>.</li>
@@ -407,7 +408,7 @@
     <li>A safety backup of your current data is taken first. The success message names that safety copy, so a restore can be undone by restoring it. Success: <em>"The database was restored from ..."</em>. If the backup file is damaged, the page says so and nothing is changed. If a restore stops part-way, the message names the safety copy to restore.</li>
     <li><strong>Backups run by themselves.</strong> The system takes one backup a day, the first time anyone opens the website or admin after 01:00. No cron job or server set-up is needed. It still runs when the automated emails are switched off (the backup has its own switch under <strong>Automated Emails</strong>).</li>
     <li>Backups less than 48 hours old are never removed automatically. Older ones are kept as 14 daily, 8 weekly and 12 monthly backups. The rest are removed automatically.</li>
-    <li><strong>Emails</strong> go to the <strong>Admin email</strong> set in <strong>Email Settings</strong>. If no admin email is set, no emails go out, so set one there. The system sends an email when a backup fails (at most once a day), when no backup has been made for 36 hours (at most once a day), and a weekly reminder to download a copy and keep it off the server, if no copy has been downloaded for 7 days. The backup file itself is never emailed, because it holds guest data.</li>
+    <li><strong>Emails</strong> go to the <strong>Staff copy email</strong> set in the <strong>Email server and sender</strong> card. If no Staff copy email is set, no emails go out, so set one there. The system sends an email when a backup fails (at most once a day), when no backup has been made for 36 hours (at most once a day), and a weekly reminder to download a copy and keep it off the server, if no copy has been downloaded for 7 days. The backup file itself is never emailed, because it holds guest data.</li>
   </ul>
   <h3>How to restore a backup</h3>
   <ol class="steps">
@@ -647,7 +648,7 @@
     <li>Each message has status buttons (new, read, replied, archived). Message: <em>"Inquiry status updated to "x"."</em></li>
     <li><strong>Reply via Email</strong> opens a window: give a subject (under 255 characters) and message (under 5,000), then click <strong>Send Reply</strong>. Success: <em>"Reply sent to &lt;guest&gt; from &lt;hotel address&gt;."</em></li>
     <li><strong>Delete</strong> asks <em>"Delete this inquiry? This cannot be undone."</em> and then says <em>"Inquiry deleted."</em></li>
-    <li>If the hotel's sender address is missing, the reply cannot be sent: <em>"Hotel sender email is not configured. Set the Email From Address in email settings first."</em> Fix it in <a href="19-hotel-settings.html#email-config">Hotel Settings &rarr; Email Configuration</a>.</li>
+    <li>If the hotel's sender address is missing, the reply cannot be sent: <em>"Hotel sender email is not configured. Set the Email From Address in email settings first."</em> Fix it in <a href="19-hotel-settings.html#email-config">Hotel Settings &rarr; Email server and sender</a>.</li>
   </ul>
 
   <h2 id="headers" data-module="website_cms">Section Headers</h2>
@@ -686,7 +687,7 @@
       <tr><td>A menu item you expect is missing</td><td>You lack the permission, or the module is off.</td><td>Ask the administrator to check Staff &amp; Access and Settings &rarr; Modules.</td></tr>
       <tr><td><em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> (even with the right password)</td><td>5 wrong passwords lock the account for 15 minutes. The same message also appears for a wrong username, a wrong email or a switched-off account.</td><td>Wait, or use <strong>Forgot Password?</strong> Ask the administrator if it continues.</td></tr>
       <tr><td><em>"Your session expired. Please try signing in again."</em></td><td>The sign-in page was open too long.</td><td>Sign in again.</td></tr>
-      <tr><td><em>"We could not send the reset email right now. Please try again in a few minutes or contact your administrator."</em></td><td>Email sending is not working.</td><td>Ask the administrator to check <a href="19-hotel-settings.html#email-config">Email Configuration</a>.</td></tr>
+      <tr><td><em>"We could not send the reset email right now. Please try again in a few minutes or contact your administrator."</em></td><td>Email sending is not working.</td><td>Ask the administrator to check <a href="19-hotel-settings.html#email-config">Email server and sender</a>.</td></tr>
       <tr><td><em>"Invalid form token. Please refresh and try again."</em> or <em>"Security token invalid. Refresh the page."</em></td><td>The page was open too long.</td><td>Reload the page and repeat the action.</td></tr>
       <tr><td>The red <strong>System needs attention</strong> box</td><td>A backup is old, disk space is low, a hold sweep has stopped or the database is down.</td><td>Open <strong>Backups</strong> or <strong>System Logs</strong> from the box. Tell the administrator.</td></tr>
       <tr><td><em>"Only administrators can perform a restore."</em></td><td>You do not have the admin role.</td><td>Ask an administrator.</td></tr>

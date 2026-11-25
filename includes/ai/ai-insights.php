@@ -755,6 +755,26 @@ function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
         $out['counts_waiting_for_approval'] = (int)$db->query("SELECT COUNT(*) FROM stock_counts WHERE status = 'submitted'")->fetchColumn();
     } catch (Throwable $e) {
     }
+    // Counts not approved yet, still being counted or submitted (the Stock Reports notice, admin/stock-reports.php):
+    // stock on hand only changes when a count is approved, so an import's opening count left unapproved shows its items
+    // at 0 and Projected profit at 0 (sync 2026-11-25). is_opening came with a later migration: without it, none are.
+    try {
+        try {
+            $uc = $db->query("SELECT SUM(status = 'draft') AS draft, SUM(status = 'submitted') AS submitted, SUM(is_opening = 1) AS opening
+                                FROM stock_counts WHERE status IN ('draft', 'submitted')")->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            $uc = $db->query("SELECT SUM(status = 'draft') AS draft, SUM(status = 'submitted') AS submitted, 0 AS opening
+                                FROM stock_counts WHERE status IN ('draft', 'submitted')")->fetch(PDO::FETCH_ASSOC);
+        }
+        $ucN = (int)($uc['draft'] ?? 0) + (int)($uc['submitted'] ?? 0);
+        if ($ucN > 0) {
+            $out['counts_not_approved'] = ['total' => $ucN, 'still_being_counted' => (int)($uc['draft'] ?? 0), 'submitted_waiting' => (int)($uc['submitted'] ?? 0),
+                'opening_counts' => (int)($uc['opening'] ?? 0),
+                'rule' => 'Stock on hand only changes when a count is approved. Until then Inventory and Projected profit leave these counts out: an opening count (for example from an import) that is not approved leaves its items at 0 and Projected profit at 0. Approve it on Stock Count.',
+                'link' => 'stock-count.php'];
+        }
+    } catch (Throwable $e) {
+    }
     $b = rh_ai_stock_budget($db);
     if ($b !== null) {
         $out['stock_budget_this_month'] = $b;

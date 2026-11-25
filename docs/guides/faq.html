@@ -73,6 +73,10 @@
     <summary>Who changed this setting?</summary>
     <p>Open <strong>System Logs</strong> and look at the <strong>Settings changes</strong> section. Each entry shows when, who, the page, the setting, and the value before and after. Secrets such as passwords show as hidden. See <a href="99-admin-dashboard-full-guide.html#logs-settings">See who changed a setting</a>.</p>
   </details>
+  <details class="faq" id="faq-setting-not-saved">
+    <summary>My settings save says "Not saved … was changed by … since you opened this page."</summary>
+    <p>Someone else saved that setting after you opened the page. Nothing was overwritten: your change was not saved. Reload the page, check the value that is there now, make your change again and save. A setting that is locked (for example the VAT settings or the Tourism Levy) also asks for your own password first. See <a href="19-hotel-settings.html#levy">Tourism Levy</a>.</p>
+  </details>
   <details class="faq" id="faq-find-setting">
     <summary>How do I find a setting quickly?</summary>
     <p>Use the search box at the top of <strong>Hotel Settings</strong>, for example "levy" or "SMTP". The group filter narrows the page to one group. Press <strong>Esc</strong> or click <strong>Clear</strong> to show everything again. See <a href="19-hotel-settings.html#screen">What is on the screen</a>.</p>
@@ -337,7 +341,7 @@
 
   <details class="faq" id="faq-reminder-emails" data-module="bookings">
     <summary>Which emails go out automatically, and how do I stop or test them?</summary>
-    <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong> lists every automatic job (payment reminders, quotation and tentative-hold reminders, pre-arrival and review emails, gym renewals, the nightly backup) with a switch each, a master switch, <strong>Run now</strong> and <strong>Send test to me</strong>. See <a href="19-hotel-settings.html#automated-emails">Automated Emails</a>.</p>
+    <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong> lists every automatic job (payment reminders, payment reminders before arrival, the arrivals to chase email, quotation and tentative-hold reminders, pre-arrival and review emails, gym renewals, the nightly backup) with a switch each, a master switch, <strong>Run now</strong> and <strong>Send test to me</strong>. See <a href="19-hotel-settings.html#automated-emails">Automated Emails</a>.</p>
   </details>
 
   <details class="faq" id="faq-offline-till" data-module="pos">
@@ -468,9 +472,13 @@
     <p>A shortage worth at least the minimum value is shaded <strong>orange</strong> when it reaches the <strong>alert at variance</strong> share of the expected stock, and <strong>red</strong> when it reaches the <strong>needs approval above</strong> share (red needs a second approver). The yellow box above the lines counts them, for example <em>"2 lines over the alert level."</em> Surpluses and small shortages are not shaded. Change the limits in Hotel Settings. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
   </details>
 
+  <details class="faq" id="faq-projected-profit-zero" data-module="stock">
+    <summary>Projected profit shows 0, or the stock is 0 on hand. Why?</summary>
+    <p>Look at the top of <strong>Stock</strong> &rarr; <strong>Projected profit</strong>. If it says <em>"The opening stock count is not approved yet"</em> or <em>"A stock count is not approved yet"</em>, the count has not been approved. Click the link in the notice (the count's reference), then approve it with <strong>Approve &amp; correct stock</strong>. Until then the stock is not counted in, so projected profit stays 0. See <a href="08-stock-orders.html">Stock</a>.</p>
+  </details>
   <details class="faq" id="faq-count-reminder" data-module="stock">
     <summary>What is "No stock count approved for N days — start one."? Can I turn it off?</summary>
-    <p>It is the stock count reminder. It shows at the top of <strong>Stock Overview</strong> and <strong>Stock Count</strong> when no count has been approved for the number of days you chose. Click <strong>start one</strong> to begin a count. To change it or switch it off, open <strong>Hotel Settings</strong> &rarr; <strong>Hotel details &amp; policies</strong> &rarr; <strong>Restaurant &amp; stock</strong> and change <strong>Remind to count stock after (days, 0 = off)</strong>, then click <strong>Save Hotel Details</strong>. No email is sent. See <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
+    <p>It is the stock count reminder. It shows at the top of <strong>Stock Overview</strong> and <strong>Stock Count</strong> when no count has been approved for the number of days you chose. Click <strong>start one</strong> to begin a count. To change it or switch it off, open <strong>Hotel Settings</strong> &rarr; <strong>Hotel details &amp; policies</strong> &rarr; <strong>Restaurant &amp; stock</strong> and change <strong>Remind to count stock after (days, 0 = off)</strong>, then click <strong>Save hotel details</strong>. No email is sent. See <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
   </details>
 
   <details class="faq" id="faq-needs-review" data-module="stock">

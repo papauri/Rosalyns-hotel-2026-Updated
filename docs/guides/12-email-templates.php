@@ -305,12 +305,14 @@ $totalShown = 0;
     <li>Click the tab for the message you want, for example <strong>Confirmed Email</strong> or <strong>Receipt PDF</strong>. A green dot means the template is active. A yellow dot means <em>Not configured</em>. Only the templates for the parts of the business that are switched on appear.</li>
     <li>Change the <strong>Subject line</strong> (PDF templates have one too, but it is not shown on the document).</li>
     <li>Change the <strong>HTML body</strong>. Click a tag under <strong>Placeholders</strong> to put it where your cursor is, or type <code>{{</code> and pick from the suggestions. <strong>Format</strong> tidies the layout.</li>
-    <li>Optional: open <strong>Plain text version</strong> to write a text-only copy for mail programs that cannot show HTML.</li>
+    <li>Optional: open <strong>Plain text version</strong> (optional) to write a text-only copy for mail programs that cannot show HTML. Leave it empty and the plain text is made from the HTML automatically. If you wrote it by hand and then change the HTML, a note says the plain text still has the old wording. Clear the box to make it again from the HTML.</li>
     <li>Tick or untick <strong>Active</strong>. When a template is not active the system uses its built-in wording instead. The one exception is <strong>Receipt Email</strong>: if it is not active, no receipt is emailed by itself.</li>
-    <li>Click <strong>Preview</strong>. The preview also refreshes by itself as you type. If it shows <strong>Unsaved Changes</strong>, your edits are not saved yet.</li>
+    <li>Click <strong>Preview</strong>. The preview also refreshes by itself as you type. If it shows <strong>Unsaved changes:</strong>, the preview shows your edits, and they are not saved yet.</li>
     <li>To test, use <strong>Send as Test Email</strong>: check the address and click <strong>Send</strong>. You must preview first. You will see <em>Sent to address!</em>, or <em>Enter a valid email address.</em>, or <em>Generate a preview first.</em> The email subject starts with [TEST]. PDF tabs send a real PDF attachment.</li>
     <li>Click <strong>Save All Templates</strong>. You will see <em>"Booking email templates updated successfully!"</em></li>
   </ol>
+  <h3>Suggest wording (optional)</h3>
+  <p>The <strong>Suggest wording</strong> button shows only when the Assistant is connected and you may edit templates. It asks the Assistant for up to 3 new wordings for that one email, with the same layout and tags. Nothing changes in the editor until you click <strong>Use this</strong>, and nothing is saved until you click <strong>Save All Templates</strong>. <strong>Load Default</strong> is not touched. If the HTML box is empty, the button says <em>"There is no wording yet. Press Load Default first, then ask for suggestions."</em> Only the wording, the subject and the tag names are sent. Never a guest, a booking or a link.</p>
   <h3 id="which-tab">Which tab is which message</h3>
   <table>
     <thead><tr><th>The message the guest gets</th><th>Tab to open</th></tr></thead>
@@ -338,6 +340,7 @@ $totalShown = 0;
   <p>This message is pre-filled when staff share a receipt on WhatsApp from the <strong>Money</strong> &rarr; <strong>Receipts</strong> page. That page only has a link to this card. Needs <strong>Edit message templates</strong>; without it the text is view-only.</p>
 
   <h2 id="tags">Tag reference</h2>
+  <p><strong>Payment policy.</strong> The <code>{{payment_policy}}</code> tag prints the Payment policy text from Hotel Settings (the <strong>Payment policy</strong> card, with <strong>Save payment policy</strong>, up to 1000 characters). It fills in the Room Quote Email and the quotation PDF. The list below is grouped by email. The search box finds a tag or a word in any group.</p>
   <form method="get" action="">
     <p>
       <label for="q">Search for a tag or a word</label><br>

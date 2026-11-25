@@ -198,7 +198,7 @@ function rh_ai_route_target_ok(string $target): bool
 function rh_ai_route_renderable(): array
 {
     return ['hotel_info', 'order_status', 'gym_watch', 'search_bookings', 'room_rates', 'room_performance', 'arrivals_departures', 'in_house', 'room_board', 'who_is_online', 'my_access',
-        'get_booking', 'booking_history', 'upcoming_arrivals', 'booking_holds', 'blocked_dates', 'staff_activity', 'group_breakdown'];
+        'get_booking', 'booking_history', 'upcoming_arrivals', 'booking_holds', 'blocked_dates', 'staff_activity', 'group_breakdown', 'arrivals_to_chase'];
 }
 
 /**
@@ -449,7 +449,7 @@ function rh_ai_template_render(string $tool, array $args, array $result): string
         return '';
     }
     $desk = ['booking_history' => static fn() => rh_ai_desk_history_text($result), 'group_breakdown' => static fn() => rh_ai_desk_group_text($result), 'upcoming_arrivals' => static fn() => rh_ai_desk_upcoming_text($result),
-        'booking_holds' => static fn() => rh_ai_desk_holds_text($result), 'blocked_dates' => static fn() => rh_ai_desk_blocked_text($result),
+        'booking_holds' => static fn() => rh_ai_desk_holds_text($result), 'arrivals_to_chase' => static fn() => rh_ai_desk_chase_text($result), 'blocked_dates' => static fn() => rh_ai_desk_blocked_text($result),
         'staff_activity' => static fn() => rh_ai_desk_staff_text($result, ($args['from'] ?? '') === rh_ai_today() ? 'today' : 'in that time')];
     if (isset($desk[$tool])) {
         return empty($result['error']) ? trim((string)$desk[$tool]()) : '';

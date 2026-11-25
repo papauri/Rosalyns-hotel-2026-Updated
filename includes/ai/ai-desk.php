@@ -31,7 +31,7 @@ function rh_ai_desk_tools(): array
     $days = ['type' => 'integer', 'minimum' => 1, 'maximum' => 366, 'description' => 'How many days ahead (default ' . rh_ai_num('ai_upcoming_days') . ')'];
     return [
         'booking_history' => [
-            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus "stay": when the guest actually checked in and out, a cancellation, a no-show, stay date changes (extended / shortened) and room steps (moved), each with when and who, from the History panel itself (the answer to "when did X check out", "has X left", "who checked them in", "was X moved"; a step that is not there was not recorded), plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status), plus its emails from the Emails sent log (kind, sent / failed / not sent because staff chose not to, when, by whom, whether to the guest; the log has a start date, so an email before it is not in it). The answer to "who booked X" and "was the guest emailed". Give a booking_id or reference from this chat\'s results.',
+            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus "stay": when the guest actually checked in and out, a cancellation, a no-show, stay date changes (extended / shortened) and room steps (moved), each with when and who, from the History panel itself (the answer to "when did X check out", "has X left", "who checked them in", "was X moved", and "why was X cancelled": the cancellation or no-show "note" is the reason recorded on the History, internal to staff - the guest cancellation email never shows it; a step that is not there was not recorded), plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status), plus its emails from the Emails sent log (kind, sent / failed / not sent because staff chose not to, when, by whom, whether to the guest; the log has a start date, so an email before it is not in it). The answer to "who booked X" and "was the guest emailed". Give a booking_id or reference from this chat\'s results.',
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_booking_history', 'step' => 'Reading the booking\'s history',
         ],
@@ -51,6 +51,13 @@ function rh_ai_desk_tools(): array
             'description' => 'Bookings waiting to be confirmed: pending bookings and tentative holds, when each hold ends, the arrival date and what is still owed, the soonest to end first.',
             'schema' => ['properties' => (object)[]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_booking_holds', 'step' => 'Checking bookings waiting to be confirmed',
+        ],
+        // Sync 2026-11-25 (payment reminders before arrival + arrivals to chase): the Dashboard item / Bookings filter's
+        // own list (includes/arrivals-chase.php rh_arrivals_to_chase), never money worked out here.
+        'arrivals_to_chase' => [
+            'description' => 'Arrivals with a balance to chase ("who still owes before arrival"): confirmed groups arriving after today within the largest "Payment reminders before arrival" day, still owing, urgent ones first - the same list as the Dashboard item, the Bookings filter and the daily staff email. Balance = the whole group\'s balance (all its confirmed rooms together). Also the reminder settings: the days (default 30, 15, 4), whether the reminders and the master switch are on, and how many CC addresses get a copy.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_arrivals_to_chase', 'step' => 'Checking arrivals with a balance to chase',
         ],
         'blocked_dates' => [
             'description' => 'Dates closed for sale (the Blocked Dates screen): a whole room type, all rooms or one room, with the type of block and the note, from a date (default today) for a number of days.',
@@ -986,12 +993,27 @@ function rh_ai_stay_who(string $who): array
 /**
  * PURE. The stay facts from a History list (rh_booking_history, oldest first): the latest check-in, check-out,
  * cancellation and no-show steps, and the date changes and room steps (newest first, at most 5 each). Only the step's
- * own sentence and its date / room lines are kept - never a note or reason someone typed, never a money line.
+ * own sentence and its date / room lines are kept - never a note someone typed, never a money line. One exception
+ * (Cancel reasons required, 2026-11-25): the cancellation's "Reason: ..." line and the no-show's "No-show note: ..." go
+ * in a 'note' field (a vault free-text field, so it leaves only scrubbed and quoted as data), for "why was it cancelled".
  */
 function rh_ai_stay_facts_from(array $events): array
 {
     $one = static function (array $e): array {
         return ['at' => (string)($e['at'] ?? ''), 'what' => (string)($e['what'] ?? '')] + rh_ai_stay_who((string)($e['who'] ?? ''));
+    };
+    // The reason staff (or the guest, on the website) gave, as the History prints it; '' when none was recorded (cancels
+    // before reasons were required, or the old automatic "Cancelled by admin", which says nothing).
+    $reasonOf = static function (array $e, string $label): string {
+        foreach (preg_split('/\n/', (string)($e['detail'] ?? '')) as $ln) {
+            $ln = trim($ln);
+            $p = mb_strpos($ln, $label . ': ');
+            if ($p !== false && ($p === 0 || $label !== 'Reason')) {
+                $r = trim(mb_substr($ln, $p + mb_strlen($label) + 2));
+                return strcasecmp(rtrim($r, '. '), 'Cancelled by admin') === 0 ? '' : $r;
+            }
+        }
+        return '';
     };
     $out = ['checked_in' => null, 'checked_out' => null, 'cancelled' => null, 'no_show' => null, 'date_changes' => [], 'room_steps' => [], 'moved' => false];
     $assigned = 0;
@@ -1003,9 +1025,11 @@ function rh_ai_stay_facts_from(array $events): array
         } elseif ($kind === 'check_out') {
             $out['checked_out'] = $one($e);
         } elseif ($kind === 'cancel') {
-            $out['cancelled'] = $one($e);
+            $r = $reasonOf($e, 'Reason');
+            $out['cancelled'] = $one($e) + ($r !== '' ? ['note' => $r] : ['note_recorded' => 'no reason on the History']);
         } elseif ($kind === 'status' && preg_match('/no.?show/i', $what)) {
-            $out['no_show'] = $one($e);
+            $r = $reasonOf($e, 'No-show note');
+            $out['no_show'] = $one($e) + ($r !== '' ? ['note' => $r] : ['note_recorded' => 'no note on the History']);
         } elseif ($kind === 'edit' || $kind === 'room') {
             $lines = [];
             foreach (preg_split('/\n/', (string)($e['detail'] ?? '')) as $ln) {
@@ -1179,6 +1203,46 @@ function rh_ai_t_booking_holds(PDO $db, array $user, array $a): array
         'list' => $list ?: 'none', 'link' => 'bookings.php', 'link_label' => 'Open on Bookings'];
 }
 
+/**
+ * Arrivals with a balance to chase: rh_arrivals_to_chase() as it is (one list for the Dashboard, the Bookings filter
+ * ?chase=arrivals and the daily staff email). Money is the helper's own (group netted, floored at 0); nothing is
+ * recomputed. No phone or email. The reminder settings only for those who may open Automated Emails (booking_settings).
+ */
+function rh_ai_t_arrivals_to_chase(PDO $db, array $user, array $a): array
+{
+    require_once dirname(__DIR__) . '/arrivals-chase.php';
+    try {
+        $c = rh_arrivals_to_chase($db);
+    } catch (Throwable $e) {
+        error_log('ai arrivals_to_chase: ' . $e->getMessage());
+        return ['error' => 'The arrivals to chase could not be read just now. Open Bookings and pick the arrivals to chase filter.'];
+    }
+    $rows = (array)($c['rows'] ?? []);
+    $cap = rh_ai_num('ai_list_page_rows');
+    $list = [];
+    foreach (array_slice($rows, 0, $cap) as $r) {
+        $lr = is_array($r['last_reminder'] ?? null) ? $r['last_reminder'] : null;
+        $list[] = ['booking_id' => (int)$r['lead_id'], 'reference' => (string)$r['ref'], 'guest_name' => (string)$r['guest_name'], 'arrival' => (string)$r['arrival'],
+            'days_until' => (int)$r['days_until'], 'rooms' => (int)$r['rooms'], 'group_balance' => rh_ai_money((float)$r['balance']), 'urgent' => !empty($r['urgent']),
+            'last_reminder' => $lr ? ((int)$lr['stage'] . '-day reminder sent ' . substr((string)$lr['at'], 0, 10)) : 'none sent'];
+    }
+    $out = ['count' => count($rows), 'urgent' => (int)($c['urgent'] ?? 0), 'currency' => rh_ai_currency(),
+        'rule' => rh_arrivals_chase_rule_words((int)$c['window'], (int)$c['urgent_days']) . '. Balance is the whole group\'s (all its confirmed rooms netted), never one room.',
+        'list' => $list ?: 'none', 'more' => count($rows) > $cap ? (count($rows) - $cap) . ' more on Bookings' : null,
+        'link' => 'bookings.php?chase=arrivals', 'link_label' => 'Open arrivals to chase'];
+    if (rh_ai_perm_any($user, ['booking_settings'])) {
+        $out['reminder_settings'] = [
+            'days_before_arrival' => rh_auto_prearrival_days(),
+            'payment_reminders_before_arrival' => function_exists('rh_auto_job_enabled') && rh_auto_job_enabled('prearrival_payment_reminders') ? 'on' : 'off',
+            'daily_arrivals_to_chase_email' => function_exists('rh_auto_job_enabled') && rh_auto_job_enabled('arrivals_chase') ? 'on' : 'off',
+            'automated_emails_master_switch' => rh_auto_setting('automated_email_master') === '1' ? 'on' : 'off (no automated email goes out)',
+            'cc_on_guest_reminders' => count(rh_auto_reminder_cc_list()) . ' address(es)',
+            'where' => 'Settings > Automated Emails',
+        ];
+    }
+    return array_filter($out, static fn($v) => $v !== null);
+}
+
 /** Dates closed for sale, from the Blocked Dates screen's own helper (getBlockedDates). */
 function rh_ai_t_blocked_dates(PDO $db, array $user, array $a): array
 {
@@ -1331,12 +1395,17 @@ function rh_ai_desk_stay_intent(string $m, string $hotel = ''): ?array
             ['/^did ' . $W . ' cancel(?: (?:the|their|his|her) (?:booking|reservation|stay))?$/iu', true],
             ['/^who cancel(?:l)?ed ' . $W . $poss . '$/iu', false],
             ['/^who cancel(?:l)?ed (?:the )?(?:booking|reservation|stay) (?:for|of) ' . $W . '$/iu', false],
+            // "why was X cancelled" (sync 2026-11-25): the reason staff typed, from the booking's History
+            ['/^why (?:was|is|has|did) ' . $W . $poss . ' (?:been |get |got )?cancel(?:l)?ed$/iu', false, true],
+            ['/^why did ' . $W . ' cancel(?: (?:the|their|his|her) (?:booking|reservation|stay))?$/iu', false, true],
+            ['/^(?:what (?:was|is) the )?(?:cancel(?:l)?ation|cancel) reason (?:for|of|on) ' . $W . '$/iu', false, true],
         ],
         'no_show' => [
             ['/^(?:was|is|did) ' . $W . ' (?:marked |recorded )?(?:as )?(?:a )?no[\s\-]?show$/iu', true],
             ['/^did ' . $W . ' (?:not show(?: up)?|not turn up|not come)$/iu', true],
             ['/^' . $when . ' (?:was|did) ' . $W . ' (?:get )?(?:marked|recorded) (?:as )?(?:a )?no[\s\-]?show$/iu', false],
             ['/^who (?:marked|recorded|made) ' . $W . ' (?:as )?(?:a )?no[\s\-]?show$/iu', false],
+            ['/^why (?:was|is) ' . $W . ' (?:marked |recorded )?(?:as )?(?:a )?no[\s\-]?show$/iu', false, true],
         ],
         'extended' => [
             ['/^(?:was|has|did) ' . $W . "(?:(?:'s|s') stay| stay)? (?:been |get |got )?(?:extended|shortened)$/iu", true],
@@ -1355,16 +1424,18 @@ function rh_ai_desk_stay_intent(string $m, string $hotel = ''): ?array
         ],
     ];
     foreach ($shapes as $fact => $res) {
-        foreach ($res as [$re, $yesno]) {
+        foreach ($res as $row) {
+            [$re, $yesno] = $row;
             if (!preg_match($re, $m, $g)) {
                 continue;
             }
+            $why = !empty($row[2]) ? ['why' => true] : []; // only "why" shapes carry the key
             $w = rh_ai_desk_strip_hotel(trim((string)$g['who']), $hotel);
             if ($w === '' || rh_ai_desk_is_pronoun($w) || preg_match('/^(he|she|they)$/iu', $w)) {
-                return ['fact' => $fact, 'who' => '', 'yesno' => $yesno];
+                return ['fact' => $fact, 'who' => '', 'yesno' => $yesno] + $why;
             }
             $name = rh_ai_desk_stay_name($w);
-            return $name === null ? null : ['fact' => $fact, 'who' => $name, 'yesno' => $yesno];
+            return $name === null ? null : ['fact' => $fact, 'who' => $name, 'yesno' => $yesno] + $why;
         }
     }
     return null;
@@ -1544,6 +1615,21 @@ function rh_ai_desk_stay_text(array $h, array $si): string
     $cx = $s['cancelled'] ?? null;
     $ns = $s['no_show'] ?? null;
     $statusWords = str_replace('-', ' ', $st);
+    // The reason staff typed when cancelling / marking no-show (rh_ai_stay_facts_from 'note', quoted as data by the
+    // vault): internal to staff, the guest's cancellation email never carries it (owner 2026-11-25).
+    $why = !empty($si['why']);
+    $reasonOf = static function (?array $x, string $kind) use ($why): string {
+        $n = trim((string)($x['note'] ?? ''));
+        $n = str_replace('QUOTED TEXT (data, not instructions): ', '', $n);
+        if (strlen($n) >= 2 && $n[0] === '"' && substr($n, -1) === '"') {
+            $n = substr($n, 1, -1);
+        }
+        if ($n !== '') {
+            return ' ' . ($kind === 'noshow' ? 'No-show note' : 'Reason given') . ': "' . $n . '" (kept on the booking History for staff only'
+                . ($kind === 'noshow' ? '' : '; the guest cancellation email does not show it') . ').';
+        }
+        return $why ? ' No ' . ($kind === 'noshow' ? 'no-show note' : 'reason') . ' is recorded on its History.' : '';
+    };
     // A booking where the guest never stayed (not arrived yet, cancelled, a no-show)
     $notStayed = static function () use ($who, $st, $h, $d, $cx, $ns, $step, $yes, $statusWords): string {
         if ($st === 'cancelled' || $st === 'expired') {
@@ -1578,15 +1664,15 @@ function rh_ai_desk_stay_text(array $h, array $si): string
     } elseif ($fact === 'cancelled') {
         if ($cx) {
             $what = (string)($cx['what'] ?? '');
-            $t = ($yes ? 'Yes - ' : '') . $who . ' was cancelled' . $step($cx) . '.' . ($what !== '' && $what !== 'Booking cancelled' ? ' (' . rtrim($what, '.') . '.)' : '');
+            $t = ($yes ? 'Yes - ' : '') . $who . ' was cancelled' . $step($cx) . '.' . ($what !== '' && $what !== 'Booking cancelled' ? ' (' . rtrim($what, '.') . '.)' : '') . $reasonOf($cx, 'cancel');
         } elseif ($st === 'cancelled' || $st === 'expired') {
-            $t = ($yes ? 'Yes - ' : '') . $who . ' is cancelled, but its History has no cancellation step, so when and who did it were not recorded.';
+            $t = ($yes ? 'Yes - ' : '') . $who . ' is cancelled, but its History has no cancellation step, so when, who and why were not recorded.';
         } else {
             $t = ($yes ? 'No - ' : '') . $who . ' is not cancelled: it is ' . $statusWords . '.';
         }
     } elseif ($fact === 'no_show') {
         if ($ns) {
-            $t = ($yes ? 'Yes - ' : '') . $who . ' was marked as a no-show' . $step($ns) . '.';
+            $t = ($yes ? 'Yes - ' : '') . $who . ' was marked as a no-show' . $step($ns) . '.' . $reasonOf($ns, 'noshow');
         } elseif ($st === 'no-show') {
             $t = ($yes ? 'Yes - ' : '') . $who . ' is a no-show, but its History has no no-show step, so when and who did it were not recorded.';
         } else {
@@ -1719,6 +1805,48 @@ function rh_ai_desk_holds_intent(string $l): bool
     return (bool)preg_match('/^(?:which |what |any |list |show )?(?:the |our |all )?(?:pending|tentative|unconfirmed|provisional)(?: (?:and|or) (?:pending|tentative))? (?:bookings?|holds?|reservations?)(?: (?:waiting|to confirm|to be confirmed|expiring(?: soon| today)?))?$/u', $l)
         || preg_match('/^(?:which |what |any )?(?:bookings?|holds?|reservations?) (?:are |is )?(?:waiting(?: to be confirmed)?|to confirm|to be confirmed|need(?:ing)? (?:confirming|confirmation|to be confirmed)|not confirmed(?: yet)?|expiring(?: soon| today)?)$/u', $l)
         || preg_match('/^(?:any |the )?(?:tentative )?holds?(?: (?:expiring|ending))?(?: soon| today)?$/u', $l);
+}
+
+/**
+ * "who still owes before arrival", "arrivals to chase", "which arrivals still owe", "payment reminders before arrival".
+ * $l: lower case. Read only (the list and the reminder settings).
+ */
+function rh_ai_desk_chase_intent(string $l): bool
+{
+    $l = trim($l);
+    $arr = '(?:arrival|arriving|check[\s\-]?in|they arrive|they come|coming in)';
+    return (bool)preg_match('/^(?:which |what |any |list |show |the )?(?:upcoming )?arrivals? (?:to chase|with (?:a )?balances?(?: to chase| due| owing)?|(?:still )?owing(?: money)?|that (?:still )?owe(?: money)?|(?:who )?still owe(?: money)?)$/u', $l)
+        || preg_match('/^who (?:still )?(?:owes?|has (?:a )?balance|has not paid|hasn\'t paid|needs to pay)(?: money| anything)? (?:before|ahead of|prior to) (?:their |the )?' . $arr . '$/u', $l)
+        || preg_match('/^(?:which|what) (?:guests?|bookings?|groups?) (?:still )?(?:owes?|have (?:a )?balance|need to pay|have not paid)(?: money)? (?:before|ahead of|prior to) (?:their |the )?' . $arr . '$/u', $l)
+        || preg_match('/^(?:the |our )?(?:payment reminders? before (?:arrival|check[\s\-]?in)|pre[\s\-]?arrival (?:payment )?reminders?)(?: settings?| days| on| off)?$/u', $l)
+        || preg_match('/^(?:are|is) (?:the )?(?:payment reminders? before (?:arrival|check[\s\-]?in)|pre[\s\-]?arrival (?:payment )?reminders?) (?:on|off|switched on|turned on|working|going out)$/u', $l);
+}
+
+/** The arrivals to chase in words: the helper's own figures (group balance), urgent first, + the reminder settings. */
+function rh_ai_desk_chase_text(array $r): string
+{
+    if (!empty($r['error'])) {
+        return (string)$r['error'];
+    }
+    $cur = (string)($r['currency'] ?? '');
+    $n = (int)($r['count'] ?? 0);
+    $lines = [];
+    foreach (is_array($r['list'] ?? null) ? $r['list'] : [] as $x) {
+        $lines[] = ($x['urgent'] ? 'Urgent · ' : '') . '**' . $x['guest_name'] . '** (' . $x['reference'] . ') · arrives ' . date('D j M', strtotime((string)$x['arrival']))
+            . ' (in ' . (int)$x['days_until'] . ' day' . ((int)$x['days_until'] === 1 ? '' : 's') . ') · ' . (int)$x['rooms'] . ' room' . ((int)$x['rooms'] === 1 ? '' : 's')
+            . ' · group owes ' . rh_ai_fmt_cur($cur, $x['group_balance']) . ' · ' . $x['last_reminder'];
+    }
+    $t = $n === 0 ? 'No arrivals to chase: no confirmed group arriving in the window still owes money.'
+        : '**Arrivals to chase: ' . $n . '**' . ((int)($r['urgent'] ?? 0) > 0 ? ' (' . (int)$r['urgent'] . ' urgent)' : '') . rh_ai_local_lines($lines)
+            . (!empty($r['more']) ? "\n\n" . $r['more'] . '.' : '');
+    $t .= "\n\n" . rtrim((string)($r['rule'] ?? ''), '.') . '.';
+    if (is_array($r['reminder_settings'] ?? null)) {
+        $s = $r['reminder_settings'];
+        $t .= "\n\nPayment reminders before arrival: " . $s['payment_reminders_before_arrival'] . ', sent ' . implode(', ', array_map('intval', (array)$s['days_before_arrival']))
+            . ' days before arrival; CC on guest reminders: ' . $s['cc_on_guest_reminders'] . '; daily arrivals to chase email: ' . $s['daily_arrivals_to_chase_email']
+            . '; master switch: ' . $s['automated_emails_master_switch'] . '. Change them on ' . $s['where'] . '.';
+    }
+    return $t;
 }
 
 /** "blocked dates", "which dates are blocked next month", "is anything blocked": ['from','days','when'] or null. */
@@ -2083,6 +2211,17 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
         $list = is_array($res['list'] ?? null) ? $res['list'] : [];
         return ['text' => rh_ai_desk_upcoming_text($res, $up['when']), 'links' => $r['links'], 'chips' => count($list) === 1 ? ['Who booked them?', 'Arrivals today'] : ['Arrivals today'],
             'focus' => count($list) === 1 ? (int)$list[0]['booking_id'] : null, 'local' => ['tool' => 'upcoming_arrivals', 'view' => ['from' => $up['from'], 'next_date' => $res['next_date'] ?? null]]];
+    }
+    // 3b. Arrivals with a balance to chase (sync 2026-11-25): the Dashboard / Bookings filter list, read only
+    if (rh_ai_desk_chase_intent($l)) {
+        if (!rh_ai_tool_allowed($user, 'arrivals_to_chase')) {
+            return rh_ai_desk_declined($user, 'arrivals_to_chase');
+        }
+        $r = rh_ai_desk_read($db, $user, $conv, 'arrivals_to_chase', []);
+        if ($r === null) {
+            return null;
+        }
+        return ['text' => rh_ai_desk_chase_text((array)$r['result']), 'links' => $r['links'], 'chips' => []];
     }
     // 4. Bookings waiting to be confirmed
     if (rh_ai_desk_holds_intent($l)) {

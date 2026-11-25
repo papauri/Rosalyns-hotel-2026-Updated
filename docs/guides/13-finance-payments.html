@@ -215,6 +215,25 @@
   <h3>How a room guest name shows on these documents</h3>
   <p>A room in a group booking can have its own <strong>Guest name for this room</strong> (set when the booking is created or edited, see <a href="07-reception-bookings.html#create">How to create a booking</a>). When it has one, the room line on the group quotation, invoice and stay statement reads <em>Room &ndash; Name</em>, for example <em>Deluxe Room &ndash; Mr &amp; Mrs Banda</em>. It is only a label. The document is still addressed to the lead booker, who pays, and no amount changes.</p>
 
+  <h2 id="pay-before-arrival" data-module="bookings">Payment reminders before arrival, and arrivals to chase</h2>
+  <p>These run by themselves. Nobody has to click anything. The settings are in <strong>Settings</strong> &rarr; <strong>Automated Emails</strong> (permission <strong>Hotel Settings</strong>). Money is not moved by these emails. They only ask the guest to pay.</p>
+  <h3>Payment reminders before arrival</h3>
+  <ul>
+    <li>A guest whose confirmed booking still owes money is reminded to pay before check-in. The default days are <strong>30, 15 and 4</strong> days before arrival.</li>
+    <li>Each reminder goes once. A booking made late gets only the reminder that is due now, never the ones it missed.</li>
+    <li>The reminders stop as soon as the balance is paid. Bookings with an approved pay-later arrangement or on a company account are left out.</li>
+    <li>A group gets ONE email, to its lead guest, for the whole group.</li>
+    <li>If <strong>Copy (CC) on guest reminders</strong> lists addresses, they get an open copy. The guest can see them.</li>
+  </ul>
+  <h3>Arrivals with a balance to chase</h3>
+  <ul>
+    <li>Front office gets a daily email, <strong>Arrivals with a balance to chase</strong>. It lists the confirmed bookings arriving soon that still owe money, the urgent ones first, with the guest's phone, balance, amount paid and last payment reminder.</li>
+    <li>It is sent once a day soon after the trading day opens. A day with nothing to chase sends no email. Recent activity shows it as <em>skipped</em>.</li>
+    <li>The same list is on the Dashboard as <strong>Arrivals with a balance to chase</strong>, and in <strong>Bookings</strong> as the filter <strong>Arrivals with a balance to chase</strong>. In the list, Balance due shows the whole group's balance.</li>
+    <li>Who gets the email: the <strong>Arrivals to chase email goes to</strong> addresses in Automated Emails. If that box is empty, the Main contact email in Hotel Details is used.</li>
+  </ul>
+  <div class="warn"><p>If Recent activity shows <em>"Invalid address: (From)"</em>, the sending address in Email server and sender is missing or wrong. Fix it there, then click <strong>Run now</strong>.</p></div>
+
   <h2 id="receipt">How to send or reprint a receipt</h2>
   <p>A receipt is emailed to the guest by itself when a payment is saved as Paid or Completed. Use this to send it again, to a different address, or by WhatsApp.</p>
   <ol class="steps">
@@ -457,7 +476,7 @@
   <ol class="steps">
     <li>On the Accounting page open <strong>VAT settings</strong> (or click <strong>VAT</strong> at the top).</li>
     <li>It shows the VAT mode, Rate and VAT Registration No. Without the <strong>Change VAT &amp; refund settings</strong> permission you can only read it.</li>
-    <li>With permission, click <strong>Unlock to Edit</strong> and answer <strong>Yes, unlock to edit</strong>.</li>
+    <li>With permission, click <strong>Change (password needed)</strong>. Type <strong>your own password</strong> and click <strong>Unlock</strong>. The VAT fields stay open for 10 minutes or until you save, then lock again. A wrong password is refused; after 5 wrong tries it stops for 15 minutes.</li>
     <li>Choose the mode: <strong>No VAT</strong>, <strong>Prices include VAT</strong> (totals equal listed prices; documents show only the rate) or <strong>VAT added on top of prices</strong> (VAT is itemised).</li>
     <li>Enter <strong>VAT Rate (%)</strong> (0 to 100) and <strong>VAT Registration Number</strong>.</li>
     <li>Click <strong>Save VAT Settings</strong>. You will see <em>"VAT settings updated successfully."</em></li>

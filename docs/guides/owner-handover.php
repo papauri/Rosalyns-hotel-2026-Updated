@@ -104,11 +104,11 @@ $notify = $s('booking_notification_email') ?: ($s('admin_notification_email') ?:
   <table>
     <thead><tr><th>Item</th><th>Current value</th><th>Change it in</th></tr></thead>
     <tbody>
-      <tr><td>Online booking</td><td><?php echo $s('booking_system_enabled', '1') === '1' ? 'On' : '<strong>Off</strong>'; ?></td><td>Settings &rarr; Hotel Settings &rarr; Booking System Status</td></tr>
+      <tr><td>Online booking</td><td><?php echo $s('booking_system_enabled', '1') === '1' ? 'On' : '<strong>Off</strong>'; ?></td><td>Settings &rarr; Hotel Settings &rarr; Online booking</td></tr>
       <tr><td>Check-in from / check-out by</td><td><?php echo $show($s('check_in_time', '2:00 PM')); ?> / <?php echo $show($s('check_out_time', '11:00 AM')); ?></td><td>Settings &rarr; Hotel Settings &rarr; Hotel details &amp; policies</td></tr>
-      <tr><td>How far ahead guests can book</td><td><?php echo $e($s('max_advance_booking_days', '365')); ?> days</td><td>Settings &rarr; Hotel Settings &rarr; Advance Booking Configuration</td></tr>
+      <tr><td>How far ahead guests can book</td><td><?php echo $e($s('max_advance_booking_days', '365')); ?> days</td><td>Settings &rarr; Hotel Settings &rarr; Advance booking window</td></tr>
       <tr><td>Tentative (hold) bookings</td><td><?php echo $s('tentative_bookings_enabled', '1') === '1' ? 'On' : 'Off'; ?></td><td>Settings &rarr; Hotel Settings &rarr; Tentative Bookings</td></tr>
-      <tr><td>Tourism levy</td><td><?php echo $s('tourism_levy_enabled', '0') === '1' ? 'On' : 'Off'; ?></td><td>Settings &rarr; Hotel Settings &rarr; Tourism Levy / City Tax</td></tr>
+      <tr><td>Tourism levy</td><td><?php echo $s('tourism_levy_enabled', '0') === '1' ? 'On' : 'Off'; ?></td><td>Settings &rarr; Hotel Settings &rarr; Tourism levy (city tax)</td></tr>
       <tr><td>Room prices</td><td>Per room type and occupancy</td><td>Settings &rarr; Rooms; seasonal rules in Settings &rarr; Rate Plans</td></tr>
     </tbody>
   </table>
@@ -130,13 +130,13 @@ $notify = $s('booking_notification_email') ?: ($s('admin_notification_email') ?:
   <table>
     <thead><tr><th>Item</th><th>Current value</th><th>Change it in</th></tr></thead>
     <tbody>
-      <tr><td>Emails are sent from</td><td><?php echo $show($em('smtp_username')); ?> (sender name: <?php echo $show($em('email_from_name', $s('email_from_name'))); ?>)</td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
-      <tr><td>Reply-to and contact email</td><td><?php echo $show($em('email_from_email'), 'Blank (uses the main hotel email)'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
-      <tr><td>Backup reply-to emails (guests can see them)</td><td><?php echo $show($em('email_reply_to_backup'), 'None'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
-      <tr><td>Staff copy email (hidden copy of every email)</td><td><?php echo $show($em('email_admin_email'), 'None'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
-      <tr><td>Backup staff copy emails (hidden)</td><td><?php echo $show($em('email_admin_backup'), 'None'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
-      <tr><td>Mail server</td><td><?php echo $show($em('smtp_host')); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
-      <tr><td>New-booking alerts go to</td><td><?php echo $show((string)$notify); ?></td><td>Settings &rarr; Hotel Settings &rarr; Booking Notification Email</td></tr>
+      <tr><td>Emails are sent from</td><td><?php echo $show($em('smtp_username')); ?> (sender name: <?php echo $show($em('email_from_name', $s('email_from_name'))); ?>)</td><td>Settings &rarr; Hotel Settings &rarr; Email server and sender</td></tr>
+      <tr><td>Reply-to and contact email</td><td><?php echo $show($em('email_from_email'), 'Blank (uses the main hotel email)'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email server and sender</td></tr>
+      <tr><td>Backup reply-to emails (guests can see them)</td><td><?php echo $show($em('email_reply_to_backup'), 'None'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email server and sender</td></tr>
+      <tr><td>Staff copy email (hidden copy of every email)</td><td><?php echo $show($em('email_admin_email'), 'None'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email server and sender</td></tr>
+      <tr><td>Backup staff copy emails (hidden)</td><td><?php echo $show($em('email_admin_backup'), 'None'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email server and sender</td></tr>
+      <tr><td>Mail server</td><td><?php echo $show($em('smtp_host')); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email server and sender</td></tr>
+      <tr><td>New-booking alerts go to</td><td><?php echo $show((string)$notify); ?></td><td>Settings &rarr; Hotel Settings &rarr; Booking alerts and guest reminders</td></tr>
       <tr><td>Wording of guest emails and PDFs</td><td>Editable templates</td><td>Settings &rarr; Email Templates</td></tr>
     </tbody>
   </table>
@@ -196,7 +196,7 @@ $notify = $s('booking_notification_email') ?: ($s('admin_notification_email') ?:
   <ol class="steps">
     <li>Website address set to the real domain (Hotel Settings &rarr; Hotel details &amp; policies).</li>
     <li>Real bank details on invoices (same place).</li>
-    <li>Emails sent from a mailbox the hotel owns, and new-booking alerts going to a mailbox someone reads (Hotel Settings &rarr; Email Configuration / Booking Notification Email). Send yourself a test email.</li>
+    <li>Emails sent from a mailbox the hotel owns, and new-booking alerts going to a mailbox someone reads (Hotel Settings &rarr; Email server and sender, and Booking alerts and guest reminders). Send yourself a test email.</li>
     <li>Correct phone, email, WhatsApp and address in Footer Management.</li>
     <li>Room prices and occupancy prices checked (Settings &rarr; Rooms).</li>
     <li>Every staff member invited with the right role and permissions; test accounts deleted.</li>

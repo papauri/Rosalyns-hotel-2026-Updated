@@ -22,7 +22,7 @@
   <div class="facts">
     <dl>
       <dt>Who uses it</dt><dd>Anyone who signs in to the admin on a till, tablet, phone or office computer.</dd>
-      <dt>Where to find it</dt><dd>You install it from your browser. The hotel can change how often the install banner comes back in Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong> &rarr; <strong>PWA Install Banner</strong>.</dd>
+      <dt>Where to find it</dt><dd>You install it from your browser. The hotel can change how often the install banner comes back in Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong> &rarr; <strong>Install app banner</strong>.</dd>
       <dt>Permission needed</dt><dd>Installing needs none. Changing the banner setting needs <strong>Hotel Settings</strong>.</dd>
     </dl>
   </div>
@@ -47,7 +47,7 @@
   <ul>
     <li>The app is called <strong>&lt;hotel name&gt; Admin</strong> (for example <strong><span class="g-site-name">Rosalyns Beach Hotel</span> Admin</strong>). The name under the icon on your home screen is the hotel's short name, set in Hotel Settings &rarr; Hotel details &amp; policies &rarr; <strong>Short name (app icon / home screen)</strong>. The icon is the hotel logo.</li>
     <li>It opens full screen. There is no browser address bar.</li>
-    <li>It opens on the <strong>POS Till</strong> page. If you are not signed in yet, you sign in first as normal.</li>
+    <li>It opens on <strong>your own main page</strong>. Station staff open their station (for example the POS Till for the restaurant). Everyone else opens the <strong>Dashboard</strong>, or the first page they are allowed to open. If you are not signed in yet, you sign in first as normal.</li>
     <li>The app covers the whole admin, not only the till. You reach every page you have permission for, the same as in a browser.</li>
     <li>On devices that support it, pressing and holding the app icon offers four shortcuts: <strong>POS Till</strong>, <strong>Receive Stock</strong>, <strong>Kitchen Display</strong> and <strong>Dashboard</strong>.</li>
     <li>Installing does not change your sign-in, your permissions or any data. You can remove the app at any time, the same way you remove any other app.</li>
@@ -120,9 +120,9 @@
   <h2 id="setting">How to change how often the banner returns</h2>
   <p>This is the number of days the banner stays hidden after a staff member dismisses it.</p>
   <ol class="steps">
-    <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong>, then go to the card <strong>PWA Install Banner</strong> (near the bottom). The <strong>PWA</strong> link in the <strong>Jump to</strong> bar at the top takes you there.</li>
+    <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong>, then go to the card <strong>Install app banner</strong> (near the bottom). The <strong>PWA</strong> link in the <strong>Jump to</strong> bar at the top takes you there.</li>
     <li>In <strong>Re-show banner after dismissal (days)</strong>, type a whole number from 1 to 365. The default is 14. A <strong>1</strong> shows it every day. A <strong>365</strong> hides it for almost a year.</li>
-    <li>Click <strong>Save PWA Settings</strong>. You will see <em>"PWA install banner settings saved — staff will be prompted every N day(s) after dismissing."</em></li>
+    <li>Click <strong>Save banner setting</strong>. You will see <em>"PWA install banner settings saved — staff will be prompted every N day(s) after dismissing."</em></li>
   </ol>
   <p>Staff see the new number the next time they load an admin page. A banner that was already dismissed starts counting from the day it was dismissed, using the new number.</p>
 
@@ -153,7 +153,7 @@
       <tr><td>The banner keeps coming back</td><td>The waiting period is short.</td><td>Raise <strong>Re-show banner after dismissal (days)</strong> in Hotel Settings.</td></tr>
       <tr><td><em>"Dismiss period must be at least 1 day."</em> (shown as <em>"Error: Dismiss period must be at least 1 day."</em>)</td><td>You typed 0 or a negative number.</td><td>Type a number from 1 to 365.</td></tr>
       <tr><td><em>"Dismiss period cannot exceed 365 days."</em> (shown with <em>"Error: "</em> in front)</td><td>You typed more than 365.</td><td>Type a number from 1 to 365.</td></tr>
-      <tr><td>The app opens on the till when you wanted the dashboard</td><td>The app always starts on the POS Till page.</td><td>Open <strong>Dashboard</strong> from the menu, or press and hold the icon and choose <strong>Dashboard</strong>.</td></tr>
+      <tr><td>The app opens on a different page from the one you want</td><td>The app opens on your own main page. An app installed before this change may still open on the page it was installed with.</td><td>Close the app and open it again. If it still opens on the wrong page, remove it and install it again. You can always open <strong>Dashboard</strong> from the menu, or press and hold the icon and choose <strong>Dashboard</strong>.</td></tr>
       <tr><td><em>"You're offline"</em> / <em>"This page is not available offline."</em></td><td>No internet and that page was never opened on this device.</td><td>Reconnect and open the page once.</td></tr>
       <tr><td>The app shows the old name or logo</td><td>The device remembers the hotel name and logo for up to a day.</td><td>Wait a day, or remove the app and install it again.</td></tr>
       <tr><td>Staff see a page they do not expect to be in the app</td><td>The app is the whole admin.</td><td>Use <strong>Staff &amp; Access</strong> to give each person only the permissions they need.</td></tr>

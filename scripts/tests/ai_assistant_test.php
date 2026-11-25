@@ -1473,6 +1473,10 @@ if (!$chatReady) {
             $iw = rh_ai_t_inventory_watch($pdo, $adm3, []);
             $sa = rh_stock_alert_summary($pdo, 8);
             check($iw['alerts']['out'] === $sa['out'] && $iw['alerts']['low'] === $sa['low'], 'stock alerts equal the stock dashboard rule');
+            // Counts not approved (sync 2026-11-25): the Stock Reports notice's own rows (draft + submitted)
+            $ucDb = (int)$pdo->query("SELECT COUNT(*) FROM stock_counts WHERE status IN ('draft', 'submitted')")->fetchColumn();
+            check($ucDb === 0 ? !isset($iw['counts_not_approved']) : ((int)$iw['counts_not_approved']['total'] === $ucDb && strpos((string)$iw['counts_not_approved']['rule'], 'approved') !== false && strpos((string)$iw['counts_not_approved']['rule'], 'Projected profit at 0') !== false),
+                'counts not approved yet: the same draft + submitted counts the Stock Reports notice lists, with the rule (stock and Projected profit stay at 0 until approved)', json_encode($iw['counts_not_approved'] ?? null));
         }
     } finally {
         $pdo->rollBack();
@@ -3890,6 +3894,12 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
                 'stock item with a count measure: "2 bottles + 7 shots (67 shots)" alongside the number (2.23)', json_encode($sg['item'] ?? null));
             $att = rh_ai_stock_measure_rows($pdo, [['id' => $ginId, 'name' => 'AITest Qw Gin', 'unit' => 'bottle', 'current_quantity' => -(33 / 30)]]);
             check(rh_ai_stock_qty_words($att[0]) === 'short by 1 bottle + 3 shots (33 shots)', 'below zero with a count measure: "short by 1 bottle + 3 shots (33 shots)" (measure attached by id)', rh_ai_stock_qty_words($att[0]));
+            // "2.28 bottle" (sync 2026-11-25): a part bottle with no count measure says how to set one; a measured item does not
+            $pdo->prepare("INSERT INTO stock_ingredients (name, unit, current_quantity, min_quantity, reorder_point) VALUES ('AITest Qw Rum', 'bottle', 2.28, 0, 0)")->execute();
+            $sr = rh_ai_t_inventory_watch($pdo, $admL, ['item' => 'AITest Qw Rum']);
+            check(strpos((string)($sr['item']['count_measure'] ?? ''), 'Fill from bottle sizes') !== false && strpos((string)($sr['item']['count_measure'] ?? ''), 'Set count measure') !== false
+                && !isset($sg['item']['count_measure']) && !isset($si['item']['count_measure']),
+                'a part bottle with no count measure ("2.28 bottle"): set it by hand, Set count measure or Fill from bottle sizes; a measured item or a whole "2 kg" gets no hint', json_encode([$sr['item'] ?? null]));
         } else {
             echo "  (skip) count-measure words: migration 088 not applied here\n";
         }
@@ -4435,6 +4445,40 @@ check(($sfD['checked_in']['staff_name'] ?? '') === 'Jane Qd' && ($sfD['checked_i
     && ($sfD['date_changes'][0]['change'] ?? '') === 'Check-out date: 12 Nov 2026 → 13 Nov 2026' && $sfD['moved'] === true && ($sfD['room_steps'][0]['change'] ?? '') === 'Room: Room 5 → Room 7'
     && $sfD['cancelled'] === null && $sfD['no_show'] === null && strpos(json_encode($sfD), 'late lunch') === false && strpos(json_encode($sfD), 'jacket') === false && strpos(json_encode($sfD), 'K150') === false,
     'stay facts from the History steps: who and when for check-in / out, date changes and room moves - never a typed note or a money line', json_encode($sfD));
+// Why a booking was cancelled / a no-show (sync 2026-11-25): the reason on the History, staff-internal
+check($siD('why was Mr Banda cancelled') === ['fact' => 'cancelled', 'who' => 'Banda', 'yesno' => false, 'why' => true]
+    && $siD("why was Phiri's booking cancelled") === ['fact' => 'cancelled', 'who' => 'Phiri', 'yesno' => false, 'why' => true]
+    && $siD('cancellation reason for Moyo') === ['fact' => 'cancelled', 'who' => 'Moyo', 'yesno' => false, 'why' => true]
+    && $siD('why was Phiri a no-show') === ['fact' => 'no_show', 'who' => 'Phiri', 'yesno' => false, 'why' => true]
+    && $siD('why did they cancel') === ['fact' => 'cancelled', 'who' => '', 'yesno' => false, 'why' => true]
+    && $siD('who cancelled Mr Banda\'s booking') === ['fact' => 'cancelled', 'who' => 'Banda', 'yesno' => false],
+    '"why was X cancelled / a no-show", "cancellation reason for X": the stay question with why; other shapes keep no why key');
+$sfR = rh_ai_stay_facts_from([
+    ['at' => '2026-11-20 09:00:00', 'who' => 'Jane Qd (receptionist)', 'what' => 'Booking cancelled', 'detail' => "Status: Confirmed → Cancelled\nReason: Guest changed travel dates", 'kind' => 'cancel'],
+]);
+$sfA = rh_ai_stay_facts_from([
+    ['at' => '2026-11-20 09:00:00', 'who' => 'Jane Qd (receptionist)', 'what' => 'Booking cancelled', 'detail' => "Status: Confirmed → Cancelled\nReason: Cancelled by admin", 'kind' => 'cancel'],
+]);
+$sfN = rh_ai_stay_facts_from([
+    ['at' => '2026-11-21 12:00:00', 'who' => 'Jane Qd (receptionist)', 'what' => 'Booking no-show', 'detail' => 'Status: Confirmed → No-show - No-show note: Guest phoned, not coming', 'kind' => 'status'],
+]);
+$stR = rh_ai_desk_stay_text(['guest_name' => 'Qd Guest', 'reference' => 'LSH-QD1', 'status' => 'cancelled', 'stay' => $sfR], ['fact' => 'cancelled', 'who' => 'Qd', 'yesno' => false, 'why' => true]);
+$stA = rh_ai_desk_stay_text(['guest_name' => 'Qd Guest', 'reference' => 'LSH-QD1', 'status' => 'cancelled', 'stay' => $sfA], ['fact' => 'cancelled', 'who' => 'Qd', 'yesno' => false, 'why' => true]);
+$stN = rh_ai_desk_stay_text(['guest_name' => 'Qd Guest', 'reference' => 'LSH-QD1', 'status' => 'no-show', 'stay' => $sfN], ['fact' => 'no_show', 'who' => 'Qd', 'yesno' => false, 'why' => true]);
+check(($sfR['cancelled']['note'] ?? '') === 'Guest changed travel dates' && !isset($sfA['cancelled']['note']) && ($sfN['no_show']['note'] ?? '') === 'Guest phoned, not coming'
+    && strpos($stR, 'Reason given: "Guest changed travel dates"') !== false && strpos($stR, 'staff only') !== false && strpos($stR, 'does not show it') !== false
+    && strpos($stA, 'No reason is recorded on its History') !== false && strpos($stA, 'Cancelled by admin') === false
+    && strpos($stN, 'No-show note: "Guest phoned, not coming"') !== false && stripos($stR . $stN, 'guest sees') === false && stripos($stR . $stN, 'sent to the guest') === false,
+    'why cancelled / no-show: the History\'s Reason / No-show note, said as staff-only (the guest email never shows it); the old "Cancelled by admin" counts as no reason', json_encode([$stR, $stA, $stN]));
+// Arrivals to chase (sync 2026-11-25): the words, pure
+check(rh_ai_desk_chase_intent('who still owes before arrival') && rh_ai_desk_chase_intent('arrivals to chase') && rh_ai_desk_chase_intent('which arrivals still owe')
+    && rh_ai_desk_chase_intent('who owes before their check-in') && rh_ai_desk_chase_intent('payment reminders before arrival') && rh_ai_desk_chase_intent('are the payment reminders before arrival on')
+    && !rh_ai_desk_chase_intent('who owes money') && !rh_ai_desk_chase_intent('arrivals today') && !rh_ai_desk_chase_intent('when is the next arrival'),
+    '"who still owes before arrival", "arrivals to chase", "payment reminders before arrival": the arrivals-to-chase read; plain "who owes money" stays with balances');
+$rgC = rh_ai_desk_tools()['arrivals_to_chase'] ?? [];
+check(($rgC['perm'] ?? null) === ['bookings'] && ($rgC['module'] ?? null) === ['bookings'] && in_array('arrivals_to_chase', rh_ai_specialists()['front_desk']['tools'], true)
+    && in_array('arrivals_to_chase', rh_ai_specialists()['money']['tools'], true) && in_array('arrivals_to_chase', rh_ai_route_renderable(), true),
+    'arrivals_to_chase: a read with the Bookings permission and module, on the Front Desk and Money specialists');
 $ciD = static fn(string $q) => rh_ai_desk_card_intent(rh_ai_desk_clean($q));
 check(($ciD('check him in')['key'] ?? '') === 'check_in' && ($ciD('Check in Mr Banda')['who'] ?? '') === 'Banda' && ($ciD('check them out')['key'] ?? '') === 'check_out'
     && ($ciD('confirm their booking')['key'] ?? '') === 'confirm_booking' && ($ciD('put them in room 12')['room'] ?? '') === '12'
@@ -4785,6 +4829,18 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $b0 = $chatD('blocked dates', 0);
         check($b0['route'] === 'local' && strpos($b0['reply'], ': ' . (int)$bT['count'] . '**') !== false && strpos(json_encode($bT['blocked']), 'AITest Qd painting') !== false,
             '"blocked dates": the Blocked Dates screen\'s own list, counted the same', $b0['reply']);
+        // Arrivals to chase (sync 2026-11-25): the Dashboard / Bookings filter helper as it is, group balance, no contact details
+        require_once $root . '/includes/arrivals-chase.php';
+        $chT = rh_arrivals_to_chase($pdo);
+        $chA = rh_ai_t_arrivals_to_chase($pdo, $admD, []);
+        $ch0 = $chatD('who still owes before arrival', 0);
+        $chFirst = $chT['rows'][0] ?? null;
+        check($ch0['route'] === 'local' && !$GLOBALS['ai2_calls'] && (int)$chA['count'] === count($chT['rows']) && ($chA['link'] ?? '') === 'bookings.php?chase=arrivals'
+            && strpos(json_encode($chA), '"phone"') === false && strpos(json_encode($chA), '"email"') === false
+            && ($chFirst === null || ((string)$chA['list'][0]['reference'] === (string)$chFirst['ref'] && abs((float)$chA['list'][0]['group_balance'] - (float)$chFirst['balance']) <= BALANCE_TOLERANCE))
+            && strpos($ch0['reply'], $chFirst === null ? 'No arrivals to chase' : 'Arrivals to chase: ' . count($chT['rows'])) !== false
+            && isset($chA['reminder_settings']['days_before_arrival']) && $chA['reminder_settings']['days_before_arrival'] === rh_auto_prearrival_days(),
+            '"who still owes before arrival": rh_arrivals_to_chase as it is (same count, same group balance), the reminder days from the setting, no phone or email', $ch0['reply']);
 
         // Cards from plain words (prepared only; Confirm replays the screen)
         $g1 = $chatD('When is Mr Qdtoday coming', 0);
@@ -7255,6 +7311,17 @@ try {
             // 2. The cancel card posts the quoted fee as the screen's dialog does (else the screen refuses), never a lower one
             $pc6 = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4F6, 'reason' => 'AITest guest asked']);
             $pcL = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4Lg, 'reason' => 'AITest guest asked']);
+            // Cancel reasons required (sync 2026-11-25): the card refuses what the screen refuses, before any replay
+            $pcShort = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4F6, 'reason' => 'abc']);
+            $pcAdm = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4F6, 'reason' => 'Cancelled by admin']);
+            $pcOth = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4F6, 'reason' => 'Other (type below)']);
+            check(empty($pcShort['steps']) && strpos(implode(' ', (array)$pcShort['card']['notes']), 'at least 5 characters') !== false
+                && empty($pcAdm['steps']) && strpos(implode(' ', (array)$pcAdm['card']['notes']), 'Say why') !== false
+                && empty($pcOth['steps']) && strpos(implode(' ', (array)$pcOth['card']['notes']), 'Other') !== false
+                && !empty($pc6['steps']) && in_array(['cancellation_reason', 'AITest guest asked'], (array)$pc6['steps'][0]['fields'], true)
+                && strpos((string)($pc6['card']['fields'][0]['label'] ?? ''), 'never in the guest email') !== false,
+                'cancel card: a reason under 5 characters, "Cancelled by admin" or a bare "Other" gives no replay step (the screen rule); a good reason is posted as checked; the box says it stays staff-only',
+                json_encode([$pcShort['card']['notes'] ?? null, $pcAdm['card']['notes'] ?? null, $pcOth['card']['notes'] ?? null]));
             $pc6F = (array)($pc6['steps'][0]['fields'] ?? []);
             $pc6Rows = array_column((array)($pc6['card']['rows'] ?? []), 'new', 'label');
             check(in_array(['fee_quoted', '100000.00'], $pc6F, true) && !array_filter($pc6F, static fn($f) => strpos($f[0], 'fee_override') === 0)

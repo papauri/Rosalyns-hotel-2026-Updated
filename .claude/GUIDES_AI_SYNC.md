@@ -25,6 +25,38 @@ when prompted."
 
 ## Pending (oldest first)
 
+- 7994a1f / Rosalyn's 5c44967 (2026-11-25): Email & PDF templates: the preview and "Send test" of a PDF template now
+  show the layout guests actually get (a stored copy of the old default is replaced by the current layout; edited
+  wording shows as typed). Guide 12 / Assistant only if they say the test PDF can look different from the real one.
+
+- LATER (sync review 2026-11-25): includes/ai/ai-desk.php ~1821: a bare "pre-arrival reminders" question gets the
+  payment-reminder answer, but the pre-arrival reminder is a separate job; require "payment" in that pattern.
+- LATER (sync review 2026-11-25): guides 13 + 19 leave out the reservations-email fallback for the arrivals-to-chase
+  email recipient.
+- LATER (Assistant lead 2026-11-25): admin/bookings.php `modify_booking` has no "changed by someone else" version check
+  (Edit Booking has one). A PATCH for the owner to decide.
+- Manager Guides left out 2026-11-25 (pages full): Stock: the import crates/bottles and "Which price is right?" questions;
+  Staff and Permissions: the VAT/bank password line; Housekeeping and Maintenance: one "Rooms needing work" sentence.
+  The staff guides cover all three.
+- 2026-11-25 Liwonde a1fda1b / Rosalyn's 1687f9a (owner FEATURE + accuracy PATCH): (1) Booking details: an "i" next to
+  Paid (top strip and payment panel) lists each payment and refund on the booking: date, deposit / part / full payment,
+  method, receipt, time recorded, amount; refunds on the day paid out, money moved to guest credit labelled; pending rows
+  shown but not counted; adds up to Paid. (2) Dashboard Money "Taken this week" / Takings today now equal End of Day
+  "Cash collected": money moved onto a credit note is guest credit, not a refund, so it is no longer taken off.
+  (3) New dashboard card "This week's movements": money in by source, refunds paid out, Net taken (= Taken this week),
+  change on the 7 days before, money moved to guest credit apart (dashboard_takings permission).
+  Guides: 07-reception-bookings (Paid "i"), 99-admin-dashboard + 13-finance-payments (Money rule, new card).
+  Assistant: "when did the guest pay / part payments" -> the Paid "i"; "why does the dashboard differ from End of Day"
+  -> it no longer should; credit-note moves are guest credit. Manager Guide: Money and End of Day.
+- 2026-11-25 Liwonde 8b9a348 / Rosalyn's 74b80e3 (owner FEATURE): Bookings list: hover (or tap on a phone) the Status
+  or Payment pill for a short popup. Status: when, by whom and why (expired: hold ran out / not paid in time, room
+  released; cancelled: reason, how it was settled, fee kept, refund; no-show; checked in / out), or for open bookings
+  the hold time, pending lapse time, arrival and pay-by deadline. Payment: total, paid so far, balance due, credit,
+  latest payment, deposit, arrangement. Guides: 07-reception-bookings (Bookings list). Assistant: "why did this
+  booking expire / who cancelled it" -> hover the Status pill. Manager Guide: Bookings (one line).
+
+## Synced 2026-11-25 (owner prompted "sync guides, assistants and decisions"; guides + Assistant: commit "Guides + Assistant sync 2026-11-25" in both repos · Assistant: why-cancelled answer (reason from History, staff-only), Assistant cancel card uses rh_cancel_reason_check, counts_not_approved + count-measure hint, new arrivals_to_chase read · owner decisions 2026-11-24/25 written into guides + Assistant (cancel reason internal, guest emails unchanged; SMTP + copy lists unlocked) · Manager Guides: Stock, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed; POS and Kitchen Screens no change) - entries kept for reference
+
 - 2026-11-24 Liwonde 2cdb039 / Rosalyn's d089216 (owner FEATURE): Stock Items has a "Fill from bottle sizes" button: it
   works out shots (or glasses) per bottle from the item's bottle size and the Drink measures list sizes its menu items
   are sold in, shows a preview (new = ticked; items with a different measure or sold in several measures = unticked with
@@ -36,8 +68,8 @@ when prompted."
   actual) show a notice when a stock count is not approved yet, with a link to it. What a count finds goes into stock on
   hand only on approval, so an unapproved opening count (from an import) leaves items at 0 and projected profit at 0.
   Guide + Assistant answer for "why is projected profit 0": approve the count. Manager Guide: Stock.
-- 2026-11-24 bookings list overhaul (owner FEATURE; Liwonde 5d1d320 + 5af0c15 + Ship C commit "Bookings list Ship C" /
-  Rosalyn's c6f99e6 + f0e6169 + its port): Bookings page has one filter bar (search; date field + quick dates Today /
+- 2026-11-24 bookings list overhaul (owner FEATURE; Liwonde 5d1d320 + 5af0c15 + 926cb92 /
+  Rosalyn's c6f99e6 + f0e6169 + 532fdc5): Bookings page has one filter bar (search; date field + quick dates Today /
   Tomorrow / This week / Next 7 days / This month; room type, room, status, payment, source, group, made by; phone:
   Filters button), removable filter chips + Clear all, main tabs + "More" menu (Tentative, Expiring, Checked out,
   Cancelled, No-show, Groups, Deleted), Balance due column (amount under the total where it does not fit), sort
@@ -51,7 +83,7 @@ when prompted."
   change days or month; Shift-click / long press "Select <start> to here" extends the room's run across months; the
   bar and Block confirm name every selected night. Guides: calendar / blocked dates selection. Manager Guide:
   Bookings, Housekeeping and Maintenance.
-- 2026-11-24 (owner PATCH, commit "Calendar: Unblock / Extend judge off-screen nights" in both repos): the calendar and
+- 2026-11-24 (owner PATCH) Liwonde 4196fa3 / Rosalyn's 7f48f41: the calendar and
   Blocked Dates selection bar now checks every selected night, also ones in another month ("checking..." first);
   Unblock nights is offered for a room's own block only and unblocks just those nights; the booked count covers the
   whole selection. Guides: calendar / blocked dates selection. Manager Guide: Bookings.
@@ -61,7 +93,7 @@ when prompted."
   "Guest has left" per row; Staff Workload is one chip row. Maintenance list now shows only rooms out of order / under
   maintenance or with an open job (no longer every occupied room). Guides: housekeeping, room maintenance. Manager
   Guide: Housekeeping and Maintenance (screenshots + wording). Showcase SYNC QUEUE: both screens changed.
-- 2026-11-25 (owner FEATURE, commit "Cancel reasons required" in both repos): every staff cancel needs a reason (at
+- 2026-11-25 (owner FEATURE) Liwonde 510ff01 / Rosalyn's d7d7a8c: every staff cancel needs a reason (at
   least 5 characters; "Cancelled by admin" refused), picked from a ready-made list or typed ("Other" = type it): room
   bookings (booking page single/group, bookings list row + bulk, Cancel Hold, Assistant), Mark no-show (single + bulk
   note), conference / event / gym enquiries, gym members (status + Edit), gym slot bookings. Guest website cancel must
@@ -71,6 +103,63 @@ when prompted."
   bookings cancel + no-show, tentative holds, conference/events/gym. Assistant: cancel card already asks the reason;
   answer "why was this cancelled" -> booking History. Manager Guide: Bookings.
 
+- 2026-11-25 (owner PATCH) Liwonde 2efa7b7 / Rosalyn's 31480c5: help text now says what adding an
+  address does: Backup staff copy emails = hidden copy (BCC) of every email the system sends, guests never see it;
+  End-of-day report CC = copy of End of Day + daily report emails; station report CC = copy of kitchen/bar/coffee bar
+  reports. Guide: 19-hotel-settings (Email + Payments & documents) and automated emails. Assistant: "who gets a copy
+  of our emails" -> these three fields.
+
+- 2026-11-25 (owner FEATURE) Liwonde 5a8c3d6 / Rosalyn's 4d6a64c: Hotel Settings groups and cards fold (remembered);
+  bank details, restaurant service charge, tourism levy and VAT (Accounting Dashboard) are greyed out: "Change (password
+  needed)" asks your own password and opens that one section for 10 minutes; saving locks it again. Only users with
+  the VAT & refund settings permission. Guides: 19-hotel-settings, accounting VAT page. Assistant: "why can't I edit
+  the bank details / VAT" -> unlock with your password. Manager Guide: Money and End of Day.
+- 2026-11-25 Liwonde bd504f2 / Rosalyn's ec74e01 (owner PATCH): Import, step 3 asks "Is your count in crates/cases or in
+  bottles/cans?" once per sheet when the file has a Unit of Crate/Case/Pack, a Total Per Unit and a Served by bottle/can
+  (each option shows the price it gives); unit cells like "Bottle(750ML)" and "Shot(30ML)" are read with their size; a
+  decimal count (2.28) suggests "in bottles". Guide: import stock page (column layouts + this question). Assistant:
+  "why does the import ask crates or bottles". Manager Guide: Stock.
+- 2026-11-25 Liwonde a9a3c9c / Rosalyn's f937d03 (owner PATCH): Import, a Case/Pack Price and a Unit Price that disagree
+  ask "Which price is right?" for that item (each option shows the cost it gives); "Bottle(750ML)" in Unit Bought As is
+  read with its size. Guide: import stock page (questions list). Assistant: "the import asks which price is right".
+- 2026-11-25 Liwonde 088124a / Rosalyn's c645b6f (owner FEATURE): Import asks "When was this counted?" (date + time,
+  required) and compares the file with the stock at that time, so sales after the count are kept. Once an opening
+  count is approved, later imports make a regular stock count: shortages need a reason picked on Stock Count before it
+  is submitted, and a different manager approves it. Guide: import stock page + stock count page. Assistant: "how do I
+  import a second stock count". Manager Guide: Stock.
+
+- 2026-11-25 (owner PATCH) Liwonde f0b932f / Rosalyn's 597dad6: wording and layout only. Card titles in sentence
+  case (e.g. "Email server and sender", "Booking alerts and guest reminders", "Online booking"), one on/off status
+  block, solid "Save ..." buttons, SMTP fields two per row. Guide 19-hotel-settings: update card names and screenshots.
+
+- 2026-11-25 Liwonde f3a2bd4 / Rosalyn's 388027a (owner PATCH): Import step 3 "Put on the menu" now reads "X ticked to
+  add or change · Y already on the menu at this price" (was "0 of N on the menu"); each group says how many are
+  already on the menu, and its button says "All already on the menu" when nothing is left to add. Guide 23-import:
+  step 3 wording. Assistant: "why does it say 0 on the menu" = they are already on the menu at that price.
+- 2026-11-25 Liwonde f845c7e / Rosalyn's 3df06db (owner FEATURE + PATCH): (1) Create Booking's automatic quotation no
+  longer adds "Payment is due upon arrival. Please bring this quotation with you."; the quotation note is only what
+  staff type. (2) Plain text: when a template's plain-text box is empty, the plain version is made from the email
+  itself (never saved); the editor shows a plain-text preview; PDF/document templates have no plain-text box. (3) Every
+  template in Email Templates lists its tags, grouped, with what each one means. (4) New "Payment policy" box in
+  Booking Settings > Cancellation card (up to 1000 characters) and a {{payment_policy}} tag for any email template;
+  when set it replaces the built-in "Payment will be made at the hotel upon arrival..." line in the emails.
+  Guides: 05/booking settings (payment policy), email templates page (tag list, plain text). Assistant: "where do I
+  set the payment policy" / "which tag do I use" / "where does the quotation note come from" (typed by staff).
+- 2026-11-25 Liwonde 3378f74 / Rosalyn's bc626d5 (PATCH, staff complaint): the installed admin app now opens on each
+  person's own main page (station staff: their station; others: the dashboard or the first page they can open), no
+  longer always the POS Till. The "POS Till" app shortcut still opens the till. Guides: 15-pwa-install-guide line 50
+  ("It opens on the POS Till page") is now wrong. Assistant: "why does the app open on the POS" -> fixed; close and
+  reopen the app (or reinstall) if it still does. Manager Guide: POS and Kitchen Screens if it mentions the start page.
+- 2026-11-25 Liwonde 659b381..2706650 (9 commits) / Rosalyn's d0a5896 (owner FEATURE "Do all required"): two people
+  working on the same thing can no longer overwrite each other. (1) Edit Booking, room types, rooms, menu items and stock
+  items: a save after someone else changed it is refused ("changed by <name> at <time> since you opened it: reload").
+  (2) Stock count: only one open count per area + shift; a second person is sent to the open one. (3) Import: the same
+  file cannot be opened twice ("Open that import" button); answers made on an old screen are refused. (4) Automated
+  emails, WhatsApp, Facebook, Hotel details, Review sources save only the fields you changed; a field someone else changed
+  meanwhile is refused naming who/when; a page opened before the update asks for a reload. (5) "Also open right now"
+  banner names the other staff on the same booking / count / import / stock item (warning only, saving still allowed).
+  Guides: the editing pages above + settings pages. Assistant: answer "why did my save get refused / what is the yellow
+  banner". Manager Guide: Staff and Permissions (one line on working at the same time).
 - 2026-11-25 Liwonde b1148a5 / Rosalyn's c2ca585 (owner FEATURE): Hotel Settings > Email & PDF templates redesigned: a
   grouped, searchable list instead of 28 tabs. "Suggest wording" (only when the Assistant is on and a model is ready, and
   for people who may edit templates) offers 3 wordings per email template using only the template's own tags; Load
@@ -90,23 +179,6 @@ when prompted."
 - 2026-11-25 Liwonde d9475a0 / Rosalyn's 8926fd4 (owner FEATURE): Automated Emails > Recent activity has filters (job,
   sent/skipped/failed, dates, search) and 10/25/50/All pages instead of the last 100; every column has a "?". Guides:
   Automated Emails page. Assistant: "did the reminder go to X / why was it skipped". Manager Guide: no change.
-- 2026-11-25 Liwonde a1fda1b / Rosalyn's 1687f9a (owner FEATURE + accuracy PATCH): (1) Booking details: an "i" next to
-  Paid (top strip and payment panel) lists each payment and refund on the booking: date, deposit / part / full payment,
-  method, receipt, time recorded, amount; refunds on the day paid out, money moved to guest credit labelled; pending rows
-  shown but not counted; adds up to Paid. (2) Dashboard Money "Taken this week" / Takings today now equal End of Day
-  "Cash collected": money moved onto a credit note is guest credit, not a refund, so it is no longer taken off.
-  (3) New dashboard card "This week's movements": money in by source, refunds paid out, Net taken (= Taken this week),
-  change on the 7 days before, money moved to guest credit apart (dashboard_takings permission).
-  Guides: 07-reception-bookings (Paid "i"), 99-admin-dashboard + 13-finance-payments (Money rule, new card).
-  Assistant: "when did the guest pay / part payments" -> the Paid "i"; "why does the dashboard differ from End of Day"
-  -> it no longer should; credit-note moves are guest credit. Manager Guide: Money and End of Day.
-
-- 2026-11-25 Liwonde 8b9a348 / Rosalyn's 74b80e3 (owner FEATURE): Bookings list: hover (or tap on a phone) the Status
-  or Payment pill for a short popup. Status: when, by whom and why (expired: hold ran out / not paid in time, room
-  released; cancelled: reason, how it was settled, fee kept, refund; no-show; checked in / out), or for open bookings
-  the hold time, pending lapse time, arrival and pay-by deadline. Payment: total, paid so far, balance due, credit,
-  latest payment, deposit, arrangement. Guides: 07-reception-bookings (Bookings list). Assistant: "why did this
-  booking expire / who cancelled it" -> hover the Status pill. Manager Guide: Bookings (one line).
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 

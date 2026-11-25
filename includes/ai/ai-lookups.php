@@ -796,6 +796,25 @@ function rh_ai_stock_item_lookup(PDO $db, array $user, string $q, bool $fuzzy = 
     if ((float)$i['par_level'] > 0) {
         $one['par_level'] = round((float)$i['par_level'], 2);
     }
+    // "2.28 bottle" (sync 2026-11-25): a part quantity with no count measure set reads as a decimal of the stock unit
+    $qty = (float)$i['current_quantity'];
+    if (function_exists('rh_stock_measure_ready') && function_exists('rh_stock_measure_get') && rh_stock_measure_ready($db)
+        && array_key_exists('measure_per_big', $i) && rh_stock_measure_get($i) === null && abs($qty - round($qty)) > 0.0001) {
+        $one['count_measure'] = 'not set, so the part bottle shows as a decimal of the stock unit. Set it on Stock Items: on the item by hand, with Set count measure, or with Fill from bottle sizes. Stock and costs do not change.';
+    }
+    // Counted but not approved: stock on hand only changes when the count is approved on Stock Count
+    try {
+        $st = $db->prepare("SELECT sc.reference, sc.status FROM stock_count_lines l INNER JOIN stock_counts sc ON sc.id = l.count_id
+                            WHERE l.ingredient_id = ? AND sc.status IN ('draft', 'submitted') ORDER BY sc.id LIMIT 3");
+        $st->execute([(int)$i['id']]);
+        $pc = $st->fetchAll(PDO::FETCH_ASSOC);
+        if ($pc) {
+            $one['in_counts_not_approved'] = array_map(static fn($r) => ['count_ref' => (string)$r['reference'], 'status' => $r['status'] === 'draft' ? 'still being counted' : 'submitted, waiting for approval'], $pc);
+            $one['count_rule'] = 'The quantity above leaves these counts out until they are approved on Stock Count (an import\'s opening count too).';
+        }
+    } catch (Throwable $e) {
+        // no stock counts
+    }
     try {
         $st = $db->prepare("SELECT batch_number, quantity_remaining, expiry_date FROM stock_batches WHERE ingredient_id = ? AND status = 'active' AND quantity_remaining > 0
                             ORDER BY expiry_date IS NULL, expiry_date LIMIT " . $n);
