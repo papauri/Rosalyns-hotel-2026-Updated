@@ -204,5 +204,17 @@ ok('byLane counts a night once', eq(L.byLane(['10|2026-12-01', '10|2026-12-01'])
         && L.holds(jan, '2027-01-29') && !L.holds(jan, '2027-01-30'));
 }
 
+// Arrow keys past the edge page the grid (owner 2026-11-26): pastEdge names the night just off screen, else null.
+{
+    const edge = ['2026-12-30', '2026-12-31'];
+    ok('pastEdge: Right on the last night shown = the next night, also across the year end', L.pastEdge(edge, 1, 1) === '2027-01-01');
+    ok('pastEdge: Left on the first night shown = the night before', L.pastEdge(dates, 0, -1) === '2026-11-30');
+    ok('pastEdge: inside the range = null (the cursor just moves)', L.pastEdge(dates, 1, 1) === null && L.pastEdge(dates, 3, -1) === null);
+    ok('pastEdge: Up / Down (no sideways step), empty grid or a stale column = null',
+        L.pastEdge(dates, 3, 0) === null && L.pastEdge([], 0, 1) === null && L.pastEdge(dates, 7, 1) === null);
+    ok('Shift+Right past the edge: the rectangle reaches the off-screen night',
+        eq(L.rect(lanes, dates, { lane: '10', d: '2026-12-03' }, { lane: '10', d: L.pastEdge(dates, 3, 1) }), ['10|2026-12-03', '10|2026-12-04', '10|2026-12-05']));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1582,6 +1582,7 @@
                 return 'Room ' + (l ? l.number : lane) + ', night of ' + fmt(d) + (nightBooked(st, lane, d) ? ', booked' : '') + (blockAt(st, lane, d) ? ', blocked' : '');
             },
             locked: function () { return !!(st.busy || st.drag); },
+            page: function (dir) { go(st, addDays(st.start, dir * st.days), st.days); }, // arrow past the edge = Prev / Next
             onChange: function () { picksChanged(st); },
             cellMenu: function (api, hit) { return pickMenu(st, hit); },
             barMenu: function (api, bar) {

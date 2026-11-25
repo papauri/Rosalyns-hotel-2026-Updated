@@ -803,6 +803,8 @@
                 dayW: function () { return st.dayW || 44; },
                 selectable: function (lane, d) { return !!st.cfg.newFor && !!(st.lanesById && st.lanesById[lane]) && d >= st.data.today; },
                 cellLabel: function (lane, d) { var l = st.lanesById[lane]; return 'Room ' + (l ? l.number : lane) + ', ' + fmt(d); },
+                // Arrow past the edge = Prev / Next; not in a one-day mode whose columns are hours (Room Service).
+                page: st.A.fixedDays ? null : function (dir) { go(st, addDays(st.start, dir * st.days), st.days); },
                 onChange: function () { picksChanged(st); },
                 cellMenu: function (api, hit) { return cellMenu(st, hit); },
                 barIds: st.cfg.bulk ? function (bar) { return barIds(st, bar); } : null,

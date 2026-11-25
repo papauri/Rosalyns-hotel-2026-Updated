@@ -249,12 +249,19 @@
         out.missing.sort();
         return out;
     }
+    /** Left / Right arrow from column idx of the dates shown: the night just past the first / last one shown (the grid
+        then pages that way, like a spreadsheet following the cursor, owner 2026-11-26), or null while still inside. */
+    function pastEdge(dates, idx, dc) {
+        var c = idx + dc;
+        if (!dc || !dates.length || (c >= 0 && c < dates.length) || idx < 0 || idx >= dates.length) return null;
+        return dstr(dnum(dates[idx]) + dc);
+    }
 
     var logic = {
         dnum: dnum, dstr: dstr, key: key, parts: parts, rect: rect, byLane: byLane, runs: runs, oneRun: oneRun,
         bounds: bounds, countWords: countWords, nightsText: nightsText, pairs: pairs, plural: plural,
         span: span, keep: keep, colAt: colAt, colOf: colOf, colsMoved: colsMoved, where: where,
-        extendFrom: extendFrom, shiftAdd: shiftAdd, pressPlan: pressPlan,
+        extendFrom: extendFrom, shiftAdd: shiftAdd, pressPlan: pressPlan, pastEdge: pastEdge,
         holds: holds, windows: windows, judge: judge
     };
     if (typeof module === 'object' && module && module.exports) module.exports = logic;
@@ -432,7 +439,9 @@
      *      selectable(lane, d), cellLabel(lane, d), locked() true while a save / bar drag runs,
      *      onChange(api), cellMenu(api, hit) -> menu {title, items}, roomMenu / dayMenu optional (default cellMenu),
      *      barIds(barEl) -> ids a bar stands for (ops modes; omit = bars are not pickable), barMenu(api, barEl) -> menu,
-     *      roomClick: 'select' (the room name selects its row; a link in it still opens from the keyboard).
+     *      roomClick: 'select' (the room name selects its row; a link in it still opens from the keyboard),
+     *      page(dir) optional: show the previous (-1) / next (1) date range (the Prev / Next buttons); Left / Right past
+     *      the first / last night shown then pages and the cursor lands on the next night in the same room.
      */
     function cells(cfg) {
         var grid = cfg.grid, root = cfg.root, attr = cfg.laneAttr;
@@ -441,6 +450,7 @@
         var anchor = null; // {lane, d}
         var kb = null; // a run of Shift+Arrows: {base: picks before it, from, at: cell key, sig: picks after it}
         var cursor = null; // {lane, d} the cell with the Tab stop
+        var pageTo = null; // {lane, d} the cell to focus once the range an arrow paged to is drawn
         var drag = null, touch = null, ctxMuteUntil = 0;
         root.classList.add('has-cellsel');
 
@@ -538,6 +548,15 @@
             }
             tabStop();
             root.classList.toggle('has-picks', Object.keys(sel).length > 0 || Object.keys(bars).length > 0);
+            if (pageTo) {
+                // The range an arrow paged to is drawn: the cursor lands on its night. Not drawn and nothing loading
+                // (the load failed, or another range was chosen): drop it so it never grabs focus later.
+                // Focus is taken only from the grid or the page itself, never from a field the user went to meanwhile.
+                var act = document.activeElement;
+                if (act && act !== document.body && !grid.contains(act)) pageTo = null;
+                else if (cellOf(pageTo.lane, pageTo.d)) { var to = pageTo; pageTo = null; focusCell(to.lane, to.d); }
+                else if (!root.classList.contains('is-loading')) pageTo = null;
+            }
             if (cfg.onChange) cfg.onChange(api);
         }
         /** One Tab stop on the cells (the bars keep their own). */
@@ -855,8 +874,18 @@
             e.preventDefault();
             var lanes = lanesShown();
             var r2 = lanes.indexOf(lane) + dr, c2 = idx + dc;
-            if (r2 < 0 || r2 >= lanes.length || c2 < 0 || c2 >= dates.length) return;
-            var next = { lane: lanes[r2], d: dates[c2] };
+            if (r2 < 0 || r2 >= lanes.length) return;
+            // Left / Right past the first / last night shown: the grid pages that way (like Prev / Next) and the
+            // cursor lands on that night, like a spreadsheet following its cursor (owner 2026-11-26). A held key
+            // waits for the page it asked for (every arrow does, so the cursor never wanders the old range meanwhile);
+            // a page that failed to load is dropped here, so the arrows work again.
+            var loading = root.classList.contains('is-loading');
+            if (pageTo && !loading) pageTo = null;
+            if (pageTo) return;
+            var beyond = logic.pastEdge(dates, idx, dc);
+            if (beyond && (!cfg.page || loading)) return;
+            if (!beyond && (c2 < 0 || c2 >= dates.length)) return;
+            var next = { lane: lanes[r2], d: beyond || dates[c2] };
             if (e.shiftKey) {
                 // Shift+Arrow ADDS like Shift-click: the picks from before this run of Shift+Arrows stay, the extension
                 // grows from where the run started (the room's own run or the anchor) and can shrink back to it.
@@ -870,6 +899,7 @@
                 paint();
                 kb.sig = keys().sort().join();
             }
+            if (beyond) { pageTo = next; cfg.page(dc); return; }
             focusCell(next.lane, next.d);
         });
 
