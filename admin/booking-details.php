@@ -3033,6 +3033,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 ? array_merge($folio_summary, ['credit' => $folio_credit_balance])
                 : null,
         ]);
+        // Paid "i" (owner 2026-11-25): when the guest paid, each payment / refund with its date and amount. Only when
+        // the Paid figure comes from the folio summary, so the list reads the same rows and adds up to it.
+        $bd_paid_btn = '';
+        if (is_array($folio_summary) && !isset($folio_summary['error']) && isset($folio_summary['amount_paid'])) {
+            require_once __DIR__ . '/includes/booking-paid-breakdown.php';
+            $bd_paid_btn = rh_booking_paid_info_btn($pdo, (int)$booking_id, (float)$folio_amount_paid, (string)$currency_symbol);
+        }
         ?>
 
         <!-- Summary strip -->
@@ -3050,7 +3057,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <?php endif; ?>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Paid</span>
-                <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
+                <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong><?php echo $bd_paid_btn; ?>
             </div>
             <?php if ($bd_has_credit): ?>
             <div class="rh-strip__cell bd-strip__cell--balance is-credit">
@@ -3336,7 +3343,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <?php endif; ?>
                             <div class="payment-tax-row">
                                 <span>Paid</span>
-                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?><?php echo $bd_paid_btn; ?></strong>
                             </div>
                             <div class="payment-tax-row payment-tax-row--balance <?php echo $bd_has_due ? 'is-due' : 'is-settled'; ?>">
                                 <span><?php echo $bd_has_credit ? 'Credit owed to guest' : 'Balance'; ?></span>

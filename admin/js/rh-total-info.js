@@ -46,6 +46,7 @@
         var h = document.createElement('p');
         h.className = 'rh-info-pop__title';
         h.textContent = (data && data.title) || 'How this total is worked out';
+        el.setAttribute('aria-label', h.textContent); // the same popup also lists a booking's payments
         el.appendChild(h);
         var lines = data && Array.isArray(data.lines) ? data.lines : [];
         if (lines.length) {

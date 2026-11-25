@@ -91,6 +91,7 @@ $overdueDepartures = 0; // checked in past their checkout date
 $departureList = [];
 $weekAhead = [];
 $revenueTrend = [];
+$weekMoves = null; // the week's money movements card (set with the 7-day chart, dashboard_takings only)
 $is_card_insight_ajax = isset($_GET['ajax']) && $_GET['ajax'] === 'card_insight';
 $station_union_window = null;
 $station_union_start_sql = '';
@@ -190,25 +191,38 @@ $posNotFolioSql = " AND NOT (order_type = 'room_service' AND EXISTS (SELECT 1 FR
 // Takings counts money actually collected: the statuses the End of Day cash view uses (paid / completed,
 // plus payments since partly or fully refunded). 'partial' means not yet collected, so it is not takings.
 $ledgerCollectedSql = "payment_status IN ('paid','completed','refunded','partially_refunded')";
+// The End of Day cash view (eod-revenue.php rh_eod_cash_row_sql / finance-refunds.php rh_refund_payout_sql): every
+// credit-note row is guest credit, not money. A payment made WITH a note is credit used, not money in; money moved
+// ONTO a note is credit issued, not a refund paid out. Before 2026-11-25 the dashboard took those moves off takings.
+$cashRowSql = "COALESCE(payment_method, '') <> 'credit_note'";
 /**
  * Takings per day between two dates (Y-m-d, inclusive) in hotel time: ledger payments collected
  * (non-restaurant) plus POS sales paid (paid / completed / since-refunded / since-voided - the same sale
  * condition as End of Day, because the void of a paid order is paid back as a VOID refund row that is
  * subtracted below; room-service-on-folio left out), less refunds paid out that day. Days with no money are 0. Throws on a failed query so the
  * caller can show "unavailable" instead of a false 0.
+ * $parts (optional, by reference) receives the same money split by where it came from, for the week's money
+ * movements card: 'room' / 'conference' / 'event' / 'gym' (ledger by booking_type), 'pos', 'refunds' (positive) and
+ * 'moved_to_credit' (information only, never taken off). Sources minus refunds always equals the sum of the days.
  */
-$takingsByDay = static function (string $from, string $to, bool $withLedger, bool $withPos) use ($pdo, $ledgerCollectedSql, $posNotFolioSql): array {
+$takingsByDay = static function (string $from, string $to, bool $withLedger, bool $withPos, ?array &$parts = null) use ($pdo, $ledgerCollectedSql, $posNotFolioSql, $cashRowSql): array {
     $by = [];
-    $add = static function (array $rows, int $sign) use (&$by): void {
-        foreach ($rows as $row) { $by[$row['d']] = ($by[$row['d']] ?? 0.0) + $sign * (float)$row['v']; }
+    $parts = ['room' => 0.0, 'conference' => 0.0, 'event' => 0.0, 'gym' => 0.0, 'pos' => 0.0, 'refunds' => 0.0, 'moved_to_credit' => 0.0];
+    $add = static function (array $rows, int $sign, ?string $part) use (&$by, &$parts): void {
+        foreach ($rows as $row) {
+            $by[$row['d']] = ($by[$row['d']] ?? 0.0) + $sign * (float)$row['v'];
+            $k = $part ?? (string)($row['t'] ?? '');
+            if (isset($parts[$k])) { $parts[$k] += (float)$row['v']; }
+            elseif ($k !== '') { $parts['room'] += (float)$row['v']; } // any other ledger type: never dropped from the split
+        }
     };
     if ($withLedger) {
-        $st = $pdo->prepare("SELECT DATE(payment_date) d, COALESCE(SUM(total_amount),0) v FROM payments
-            WHERE DATE(payment_date) BETWEEN ? AND ? AND {$ledgerCollectedSql}
+        $st = $pdo->prepare("SELECT DATE(payment_date) d, booking_type t, COALESCE(SUM(total_amount),0) v FROM payments
+            WHERE DATE(payment_date) BETWEEN ? AND ? AND {$ledgerCollectedSql} AND {$cashRowSql}
               AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'
-            GROUP BY DATE(payment_date)");
+            GROUP BY DATE(payment_date), booking_type");
         $st->execute([$from, $to]);
-        $add($st->fetchAll(PDO::FETCH_ASSOC), 1);
+        $add($st->fetchAll(PDO::FETCH_ASSOC), 1, null);
     }
     if ($withPos) {
         $st = $pdo->prepare("SELECT DATE(COALESCE(paid_at, created_at)) d, COALESCE(SUM(total_amount),0) v FROM stock_orders
@@ -216,17 +230,26 @@ $takingsByDay = static function (string $from, string $to, bool $withLedger, boo
               AND DATE(COALESCE(paid_at, created_at)) BETWEEN ? AND ?{$posNotFolioSql}
             GROUP BY DATE(COALESCE(paid_at, created_at))");
         $st->execute([$from, $to]);
-        $add($st->fetchAll(PDO::FETCH_ASSOC), 1);
+        $add($st->fetchAll(PDO::FETCH_ASSOC), 1, 'pos');
     }
     if ($withLedger || $withPos) {
         $typeSql = ($withLedger && $withPos) ? '' : ($withLedger ? " AND booking_type <> 'restaurant'" : " AND booking_type = 'restaurant'");
-        // A refund counts on the day it was paid out (rh_pay_count_day_sql), as End of Day and Reports.
-        $st = $pdo->prepare("SELECT " . rh_pay_count_day_sql() . " d, COALESCE(SUM(refund_amount),0) v FROM payments
-            WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND payment_type = 'refund'
-              AND refund_status IN ('completed','processing') AND deleted_at IS NULL{$typeSql}
+        // A refund counts on the day it was paid out (rh_pay_count_day_sql), as End of Day and Reports. Real payouts
+        // only (rh_refund_payout_sql): money moved onto a credit note is guest credit and stays in takings.
+        $st = $pdo->prepare("SELECT " . rh_pay_count_day_sql() . " d, COALESCE(SUM(" . rh_refund_amount_sql() . "),0) v FROM payments
+            WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND " . rh_refund_payout_sql() . "
+              AND deleted_at IS NULL{$typeSql}
             GROUP BY d");
         $st->execute([$from, $to]);
-        $add($st->fetchAll(PDO::FETCH_ASSOC), -1);
+        $add($st->fetchAll(PDO::FETCH_ASSOC), -1, 'refunds');
+        // Shown apart, never taken off: money moved onto a credit note in the period (guest credit issued).
+        // Read only when the caller asked for the split.
+        if (func_num_args() < 5) { return $by; }
+        $st = $pdo->prepare("SELECT COALESCE(SUM(" . rh_refund_amount_sql() . "),0) FROM payments
+            WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND " . rh_refund_to_credit_sql() . "
+              AND deleted_at IS NULL{$typeSql}");
+        $st->execute([$from, $to]);
+        $parts['moved_to_credit'] = (float)$st->fetchColumn();
     }
     return $by;
 };
@@ -373,7 +396,7 @@ if (!$is_card_insight_ajax) {
             // "cash collected" rule). One helper feeds this KPI and the 7-day chart so they agree.
             // POS sales sync into payments as booking_type='restaurant', so the ledger sum leaves those
             // rows out and the POS side is added once from stock_orders.
-            $r = $pdo->query("SELECT COUNT(*) c FROM payments WHERE DATE(payment_date)=CURDATE() AND {$ledgerCollectedSql} AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'")->fetch(PDO::FETCH_ASSOC);
+            $r = $pdo->query("SELECT COUNT(*) c FROM payments WHERE DATE(payment_date)=CURDATE() AND {$ledgerCollectedSql} AND {$cashRowSql} AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'")->fetch(PDO::FETCH_ASSOC);
             $finance['payments_today'] = (int)$r['c'];
             $finance['revenue_today']  = (float)($takingsByDay($today, $today, true, $pos_rev_needed)[$today] ?? 0);
             $finance['ledger_today']   = (float)($takingsByDay($today, $today, true, false)[$today] ?? 0); // everything except the till
@@ -498,10 +521,21 @@ if (!$is_card_insight_ajax) {
     $trendStart = array_key_first($revenueTrend);
     if ($show_takings) { // the 7-day chart is takings: shown only with dashboard_takings (till included, as in the KPI)
         try {
-            foreach ($takingsByDay($trendStart, $today, true, $pos_rev_needed) as $d => $v) {
+            $weekParts = null;
+            foreach ($takingsByDay($trendStart, $today, true, $pos_rev_needed, $weekParts) as $d => $v) {
                 if (isset($revenueTrend[$d])) { $revenueTrend[$d] += (float)$v; }
             }
-        } catch (Throwable $e) { $finance['failed'] = true; }
+            // Week's money movements card (owner 2026-11-25): the same 7 days and the same rule as the chart, split
+            // by where the money came from, with the 7 days before for comparison.
+            $prevEnd = date('Y-m-d', strtotime($trendStart . ' -1 day'));
+            $prevStart = date('Y-m-d', strtotime($trendStart . ' -7 day'));
+            $weekMoves = [
+                'from' => $trendStart, 'to' => $today, 'parts' => $weekParts,
+                'net' => array_sum($revenueTrend),
+                'prev_from' => $prevStart, 'prev_to' => $prevEnd,
+                'prev_net' => array_sum($takingsByDay($prevStart, $prevEnd, true, $pos_rev_needed)),
+            ];
+        } catch (Throwable $e) { $finance['failed'] = true; $weekMoves = null; }
     }
 }
 
@@ -1432,7 +1466,7 @@ if ($is_card_insight_ajax) {
                                                 COALESCE(created_at, CONCAT(payment_date, ' 00:00:00')) AS ts
                                          FROM payments
                                          WHERE DATE(payment_date) = CURDATE()
-                                           AND {$ledgerCollectedSql}
+                                           AND {$ledgerCollectedSql} AND {$cashRowSql}
                                            AND deleted_at IS NULL
                                            AND COALESCE(payment_type, '') <> 'refund'
                                            AND booking_type <> 'restaurant'
@@ -1458,14 +1492,14 @@ if ($is_card_insight_ajax) {
                                                 COALESCE(payment_reference, CONCAT('PAY-', id)) AS payment_reference,
                                                 COALESCE(booking_reference, booking_type, 'Refund') AS context_label,
                                                 COALESCE(payment_method, 'other') AS payment_method,
-                                                COALESCE(refund_amount, total_amount, 0) AS amount,
+                                                COALESCE(" . rh_refund_amount_sql() . ", 0) AS amount,
                                                 COALESCE((SELECT MIN(rh_pal.created_at) FROM payment_audit_log rh_pal
                                                           WHERE rh_pal.payment_id = payments.id AND rh_pal.action IN ('refund_processing','refund_completed')
                                                             AND rh_pal.field_name = 'refund_status' AND rh_pal.old_value = 'pending'),
                                                          created_at, CONCAT(payment_date, ' 00:00:00')) AS ts
                                          FROM payments
                                          WHERE " . rh_pay_count_day_sql() . " = CURDATE()
-                                           AND payment_type = 'refund' AND refund_status IN ('completed','processing')
+                                           AND " . rh_refund_payout_sql() . "
                                            AND deleted_at IS NULL"
                                            . ($pos_rev_needed ? '' : " AND booking_type <> 'restaurant'") . "
                                          ORDER BY ts DESC
@@ -2909,7 +2943,7 @@ $currency_symbol = getSetting('currency_symbol');
             <section class="ck-panel ck-money">
                 <header class="ck-panel__head">
                     <div>
-                        <h2 class="ck-panel__title">Money<?php echo $ckHelp('Money', 'The chart and the weekly figure are takings for the last 7 days ending today: money collected less refunds paid out, plus till sales. The lines below are for today only; open tabs and refunds pending are counted as they stand now.'); ?></h2>
+                        <h2 class="ck-panel__title">Money<?php echo $ckHelp('Money', 'The chart and the weekly figure are takings for the last 7 days ending today: payments received less refunds paid out in cash, bank or mobile money, plus till sales. The same rule as End of Day "Cash collected". Money moved onto a credit note is guest credit, not a refund, so it is not taken off; a payment made with a credit note is not new money, so it is not added. The lines below are for today only; open tabs and refunds pending are counted as they stand now.'); ?></h2>
                         <p class="ck-panel__sub"><?php echo $show_takings ? 'Money in less refunds paid out' : 'Today'; ?></p>
                     </div>
                     <div class="ck-panel__tools">
@@ -2953,6 +2987,51 @@ $currency_symbol = getSetting('currency_symbol');
                         <?php else: ?>
                         <li><span><i class="fas fa-rotate-left"></i> Refunds pending</span><strong><?php echo (int)$finance['refunds_pending']; ?></strong></li>
                         <?php endif; ?>
+                    <?php endif; ?>
+                </ul>
+            </section>
+            <?php endif; ?>
+
+            <?php if ($show_takings && is_array($weekMoves) && empty($finance['failed'])): ?>
+            <?php
+            // Week's money movements (owner 2026-11-25): the same 7 days and rule as the Money chart, split by source.
+            $wmP = $weekMoves['parts'];
+            $wmIn = $wmP['room'] + $wmP['conference'] + $wmP['event'] + $wmP['gym'] + $wmP['pos'];
+            $wmRange = date('j M', strtotime($weekMoves['from'])) . ' to ' . date('j M', strtotime($weekMoves['to']));
+            $wmPrevRange = date('j M', strtotime($weekMoves['prev_from'])) . ' to ' . date('j M', strtotime($weekMoves['prev_to']));
+            $wmDiff = $weekMoves['net'] - $weekMoves['prev_net'];
+            $wmPct = $weekMoves['prev_net'] > BALANCE_TOLERANCE ? round($wmDiff / $weekMoves['prev_net'] * 100) : null;
+            $wmSources = [
+                ['room', 'fa-bed', $mod_bookings ? 'Rooms' : 'Invoiced sales', $raw_bookings, 'Payments received on room bookings (deposits, part payments, balances and folio extras) dated in these 7 days.'],
+                ['conference', 'fa-briefcase', 'Conference', $raw_conference, 'Payments received on conference bookings dated in these 7 days.'],
+                ['event', 'fa-calendar-day', 'Events', $raw_events, 'Payments received on event bookings dated in these 7 days.'],
+                ['gym', 'fa-dumbbell', 'Gym', $raw_gym, 'Payments received on gym memberships and packages dated in these 7 days.'],
+                ['pos', 'fa-cash-register', isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales', $pos_rev_needed, 'Till sales paid in these 7 days (room service charged to a guest bill is left out: it is paid with the room).'],
+            ];
+            $wmLink = $dash_can_open_payments ? 'payments.php?start_date=' . urlencode($weekMoves['from']) . '&end_date=' . urlencode($weekMoves['to']) : '';
+            ?>
+            <!-- Week's money movements -->
+            <section class="ck-panel ck-week-moves">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">This week's movements<?php echo $ckHelp('This week\'s movements', 'Money in and out for the last 7 days ending today (' . $wmRange . '), by where it came from. Net taken is the same figure as "Taken this week" on the Money card and adds up the End of Day "Cash collected" of each day. The lines above it are by what was paid for (a room payment that covers meals stays under Rooms), so they do not match the End of Day department lines. Compared with the 7 days before (' . $wmPrevRange . ').'); ?></h2>
+                        <p class="ck-panel__sub"><?php echo htmlspecialchars($wmRange); ?></p>
+                    </div>
+                    <?php if ($wmLink !== ''): ?>
+                    <div class="ck-panel__tools"><a class="ck-link" href="<?php echo htmlspecialchars($wmLink); ?>">Payments <i class="fas fa-arrow-right"></i></a></div>
+                    <?php endif; ?>
+                </header>
+                <ul class="ck-kv">
+                    <?php foreach ($wmSources as [$wmKey, $wmIcon, $wmLabel, $wmOn, $wmTip]): ?>
+                        <?php if (abs($wmP[$wmKey]) < BALANCE_TOLERANCE && !($wmOn && $wmKey === 'room')) { continue; } // no money from it this week: no line ?>
+                        <li><span><i class="fas <?php echo $wmIcon; ?>"></i> <?php echo $wmLabel; ?><?php echo $ckHelp(html_entity_decode(strip_tags($wmLabel), ENT_QUOTES, 'UTF-8'), $wmTip); ?></span><strong><?php echo $money($wmP[$wmKey]); ?></strong></li>
+                    <?php endforeach; ?>
+                    <li class="is-total"><span><i class="fas fa-arrow-down"></i> Money in<?php echo $ckHelp('Money in', 'All the lines above added together: money received in these 7 days, before refunds.'); ?></span><strong><?php echo $money($wmIn); ?></strong></li>
+                    <li><span><i class="fas fa-arrow-up"></i> Refunds paid out<?php echo $ckHelp('Refunds paid out', 'Refunds paid back to guests in cash, bank or mobile money, on the day each was paid out (approved or completed). Refunds still waiting for approval are not counted.'); ?></span><strong><?php echo $wmP['refunds'] > BALANCE_TOLERANCE ? '&minus;' : ''; ?><?php echo $money($wmP['refunds']); ?></strong></li>
+                    <li class="is-total"><span><i class="fas fa-scale-balanced"></i> Net taken<?php echo $ckHelp('Net taken', 'Money in less refunds paid out. The same figure as "Taken this week" on the Money card.'); ?></span><strong><?php echo $money($weekMoves['net']); ?></strong></li>
+                    <li><span><i class="fas fa-chart-line"></i> On the 7 days before<?php echo $ckHelp('On the 7 days before', 'Net taken this week compared with net taken from ' . $wmPrevRange . ' (' . html_entity_decode((string)$cur, ENT_QUOTES, 'UTF-8') . number_format($weekMoves['prev_net'], 2) . ').'); ?></span><strong><?php echo ($wmDiff > 0 ? '+' : ($wmDiff < 0 ? '&minus;' : '')) . $money(abs($wmDiff)); ?><?php echo $wmPct !== null ? ' (' . ($wmPct > 0 ? '+' : ($wmPct < 0 ? '&minus;' : '')) . abs($wmPct) . '%)' : ''; ?></strong></li>
+                    <?php if ($wmP['moved_to_credit'] > BALANCE_TOLERANCE): ?>
+                    <li><span><i class="fas fa-ticket"></i> Moved to guest credit<?php echo $ckHelp('Moved to guest credit', 'Money moved onto a credit note in these 7 days (an overpayment or a refund kept as credit). No money left the business, so it is not taken off Net taken; the guest can use it later. Goodwill credit notes are not in it (End of Day "Guest credit issued" counts those too).'); ?></span><strong><?php echo $money($wmP['moved_to_credit']); ?></strong></li>
                     <?php endif; ?>
                 </ul>
             </section>

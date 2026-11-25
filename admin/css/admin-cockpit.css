@@ -823,6 +823,7 @@ a.ck-daychip--warn:hover { text-decoration: underline; }
 .ck-kv li > [role="button"]:hover { color: var(--ck-gold); }
 .ck-kv li > [role="button"]:focus-visible { outline: 3px solid var(--ck-gold-on-dark); outline-offset: 2px; }
 .ck-kv li.is-total { font-weight: 600; }
+.ck-kv span i.help { color: inherit; margin-right: 0; } /* "?" helper on a line: not the gold line icon */
 .ck-attn__item[role="button"] { cursor: pointer; }
 .ck-attn__item[role="button"]:focus-visible { outline: 3px solid var(--ck-gold-on-dark); outline-offset: 2px; }
 .ck-attn__item .ck-link { padding: 0; font-size: 12px; }
