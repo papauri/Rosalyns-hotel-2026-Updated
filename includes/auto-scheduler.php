@@ -46,6 +46,12 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_email_job_pending_expired' => '1',
             'automated_email_job_unpaid_reminder' => '1',
             'automated_email_job_unpaid_release' => '1',
+            // Payment reminders before arrival (owner 2026-11-25): OFF until switched on; one email per stage, days
+            // before check-in, newest stage only (never the missed earlier ones).
+            'automated_email_job_prearrival_payment' => '0',
+            'prearrival_payment_reminder_days'  => '30,15,4',
+            // Visible copy (CC) on every guest reminder the timer sends (owner 2026-11-25). Never on test sends.
+            'automated_email_reminder_cc'       => '',
             'automated_backup_enabled'          => '1',
             'automated_job_recurring_maintenance' => '1',
             'automated_job_stock_expiry'        => '1',
@@ -96,15 +102,15 @@ if (!function_exists('rh_auto_defaults')) {
         return [
             'overdue_payment_reminders' => [
                 'label' => 'Overdue payment reminders', 'fn' => 'rh_job_overdue_payment_reminders',
-                'toggle' => 'automated_email_job_overdue', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'setting',
+                'toggle' => 'automated_email_job_overdue', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'setting', 'guest_cc' => true,
             ],
             'quotation_expiry_reminder' => [
                 'label' => 'Quotation expiry reminders', 'fn' => 'rh_job_quotation_expiry_reminder',
-                'toggle' => 'automated_email_job_quotation', 'toggle_default' => '1', 'interval' => 360, 'legacy' => false, 'bcc' => 'setting',
+                'toggle' => 'automated_email_job_quotation', 'toggle_default' => '1', 'interval' => 360, 'legacy' => false, 'bcc' => 'setting', 'guest_cc' => true,
             ],
             'tentative_hold_reminder' => [
                 'label' => 'Tentative hold reminders', 'fn' => 'rh_job_tentative_hold_reminder',
-                'toggle' => 'automated_email_job_tentative', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
+                'toggle' => 'automated_email_job_tentative', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global', 'guest_cc' => true,
             ],
             'tentative_expired_notice' => [
                 'label' => 'Tentative hold expired notices', 'fn' => 'rh_job_tentative_expired_notice',
@@ -117,7 +123,12 @@ if (!function_exists('rh_auto_defaults')) {
             // Both unpaid-confirmed jobs also need unpaid_confirmed_release_hours > 0 (default 0 = off).
             'unpaid_confirmed_reminder' => [
                 'label' => 'Confirmed-but-unpaid payment reminders', 'fn' => 'rh_job_unpaid_confirmed_reminder',
-                'toggle' => 'automated_email_job_unpaid_reminder', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
+                'toggle' => 'automated_email_job_unpaid_reminder', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global', 'guest_cc' => true,
+            ],
+            // Payment reminders before arrival (owner 2026-11-25): stages from prearrival_payment_reminder_days.
+            'prearrival_payment_reminders' => [
+                'label' => 'Payment reminders before arrival', 'fn' => 'rh_job_prearrival_payment_reminders',
+                'toggle' => 'automated_email_job_prearrival_payment', 'toggle_default' => '0', 'interval' => 60, 'legacy' => false, 'bcc' => 'global', 'guest_cc' => true,
             ],
             'unpaid_confirmed_release' => [
                 'label' => 'Confirmed-but-unpaid room release', 'fn' => 'rh_job_unpaid_confirmed_release',
@@ -125,7 +136,7 @@ if (!function_exists('rh_auto_defaults')) {
             ],
             'prearrival_reminders' => [
                 'label' => 'Pre-arrival reminders', 'fn' => 'rh_job_prearrival_reminders',
-                'toggle' => 'booking_prearrival_reminder_enabled', 'toggle_default' => '0', 'interval' => 60, 'legacy' => true, 'bcc' => 'global',
+                'toggle' => 'booking_prearrival_reminder_enabled', 'toggle_default' => '0', 'interval' => 60, 'legacy' => true, 'bcc' => 'global', 'guest_cc' => true,
             ],
             'poststay_review_requests' => [
                 'label' => 'Post-stay review requests', 'fn' => 'rh_job_poststay_review_requests',
@@ -211,12 +222,39 @@ if (!function_exists('rh_auto_defaults')) {
         }
     }
 
-    /** Set the automated-send policy read by rh_automated_email_adjust() in config/email.php. */
-    function rh_auto_ctx_begin(bool $bcc): void
+    /**
+     * The "Copy (CC) on guest reminders" list (owner 2026-11-25): comma/semicolon/space separated, each address
+     * checked, invalid ones dropped, duplicates removed (case-insensitive). $raw null = the saved setting.
+     *
+     * @return string[]
+     */
+    function rh_auto_reminder_cc_list(?string $raw = null): array
+    {
+        if ($raw === null) {
+            $raw = rh_auto_setting('automated_email_reminder_cc');
+        }
+        $out = [];
+        foreach (preg_split('/[\s,;]+/', (string)$raw) ?: [] as $p) {
+            $p = trim($p);
+            if ($p === '' || filter_var($p, FILTER_VALIDATE_EMAIL) === false) {
+                continue;
+            }
+            $out[strtolower($p)] = $out[strtolower($p)] ?? $p; // the first spelling is kept
+        }
+        return array_values($out);
+    }
+
+    /**
+     * Set the automated-send policy read by rh_automated_email_adjust() / rh_automated_email_cc() in config/email.php.
+     * $guestCc: this job is a guest reminder, so the reminder CC list goes on its emails (never on test sends:
+     * rh_automated_email_cc() returns nothing while the test recipient redirect is set).
+     */
+    function rh_auto_ctx_begin(bool $bcc, bool $guestCc = false): void
     {
         $GLOBALS['rh_automated_ctx'] = [
             'redirect' => trim(rh_auto_setting('automated_email_test_recipient')),
             'bcc'      => $bcc,
+            'cc'       => $guestCc ? rh_auto_reminder_cc_list() : [],
         ];
         // Email send log: every email a job sends is "by System (scheduler)", even when the scheduler runs inside a
         // staff member's page request (includes/email-send-log.php).
@@ -452,7 +490,7 @@ if (!function_exists('rh_auto_defaults')) {
                     if (!function_exists($job['fn'])) {
                         throw new RuntimeException('job function missing: ' . $job['fn']);
                     }
-                    rh_auto_ctx_begin($bcc);
+                    rh_auto_ctx_begin($bcc, !empty($job['guest_cc']));
                     $res = $job['fn']($pdo, ['test_mode' => $testMode]);
                     $out['jobs'][$name] = ['status' => 'ran'] + $res;
                     updateSetting($jobKey, (string)time());

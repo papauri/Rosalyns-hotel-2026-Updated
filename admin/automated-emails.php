@@ -35,7 +35,8 @@ $companyNote = 'Needs the Company statement emails permission';
 $aeSpec = [];
 foreach (['automated_email_master', 'automated_email_reminder_stages', 'automated_email_test_recipient', 'automated_email_payment_terms_days',
     'automated_email_lookback_days', 'automated_email_quotation_days', 'automated_email_interval_minutes', 'automated_email_bcc_hotel',
-    'automated_job_daily_reports_cc', 'automated_job_station_reports_to', 'automated_job_station_reports_cc', 'automated_job_company_statements_cc'] as $aeK) {
+    'automated_job_daily_reports_cc', 'automated_job_station_reports_to', 'automated_job_station_reports_cc', 'automated_job_company_statements_cc',
+    'prearrival_payment_reminder_days', 'automated_email_reminder_cc'] as $aeK) {
     $aeSpec[$aeK] = rh_auto_defaults()[$aeK] ?? '';
 }
 foreach ($jobs as $aeJob) {
@@ -114,6 +115,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         updateSetting('automated_email_reminder_stages', implode(',', $stages));
                     }
                 }
+                // Payment reminders before arrival (owner 2026-11-25): the same parser the job uses (1..365, each once, largest first).
+                if ($posted('prearrival_payment_reminder_days')) {
+                    $aeV = implode(',', rh_auto_prearrival_days($aeRaw('prearrival_payment_reminder_days')));
+                    if ($aeWrite('prearrival_payment_reminder_days', $aeV, $aeRaw('prearrival_payment_reminder_days'))) {
+                        updateSetting('prearrival_payment_reminder_days', $aeV);
+                    }
+                }
+                // Visible copy (CC) on every guest reminder the timer sends (owner 2026-11-25): valid addresses only.
+                if ($posted('automated_email_reminder_cc')) {
+                    $aeV = $cleanList('automated_email_reminder_cc', 'guest reminders copy (CC)');
+                    if ($aeWrite('automated_email_reminder_cc', $aeV, $aeRaw('automated_email_reminder_cc'))) {
+                        updateSetting('automated_email_reminder_cc', $aeV);
+                    }
+                }
                 // The test recipient and the master switch decide where (and whether) the timed report emails go, so they
                 // need 'timed_report_emails' too (owner 2026-11-13, L16). Without it they are NOT written.
                 if ($canTimedReports && $posted('automated_email_test_recipient')) {
@@ -190,8 +205,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 // Only the switches this form showed are written: a form opened before a job existed never switches it off.
-                // A form without the list predates 'station_reports' (2026-11-12), the only job added since.
-                $shownJobs = isset($_POST['jobs_shown']) ? (array)$_POST['jobs_shown'] : array_diff(array_keys($jobs), ['station_reports']);
+                // A form without the list predates 'station_reports' (2026-11-12); every job added since is left out too.
+                $shownJobs = isset($_POST['jobs_shown']) ? (array)$_POST['jobs_shown'] : array_diff(array_keys($jobs), ['station_reports', 'prearrival_payment_reminders']);
                 foreach ($jobs as $jobName => $job) {
                     if (!in_array($jobName, $shownJobs, true)) {
                         continue;
@@ -279,7 +294,7 @@ if ($tableReady) {
 $esc = static function ($v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 };
-$editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_reminder_3', 'quotation_expiry_reminder', 'tentative_booking_reminder', 'tentative_booking_expired'];
+$editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_reminder_3', 'quotation_expiry_reminder', 'tentative_booking_reminder', 'tentative_booking_expired', 'prearrival_payment_reminder'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -407,6 +422,13 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                     <input type="number" id="qdays" name="automated_email_quotation_days" class="form-control" min="1" max="30" value="<?php echo (int)$cfg['automated_email_quotation_days']; ?>"></div>
             </div>
 
+            <h3>Payment reminders before arrival</h3>
+            <div class="ae-grid">
+                <div class="form-group"><label for="predays">Payment reminders before arrival (days before check-in)</label>
+                    <input type="text" id="predays" name="prearrival_payment_reminder_days" class="form-control" value="<?php echo $esc($cfg['prearrival_payment_reminder_days']); ?>" placeholder="30,15,4" autocomplete="off">
+                    <p class="help-text">How many days before check-in a guest whose confirmed booking still owes money is reminded to pay, e.g. 30,15,4 (up to 6). Each reminder goes once. A booking made later gets only the reminder due now (booked 10 days out: the 15-day one, then the 4-day one), never the ones it missed. It stops once the balance is paid. Bookings with an approved pay-later arrangement or on a company account are left out. A group gets one email, to its lead guest, for the whole group. Works only while the "Payment reminders before arrival" job above is ticked.</p></div>
+            </div>
+
             <h3>Delivery</h3>
             <div class="ae-grid">
                 <div class="form-group"><label for="interval">Run interval (minutes)</label>
@@ -414,6 +436,9 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                 <div class="form-group"><label for="testrcpt">Test recipient (leave EMPTY in production)</label>
                     <input type="email" id="testrcpt" name="automated_email_test_recipient" class="form-control" value="<?php echo $esc($cfg['automated_email_test_recipient']); ?>" placeholder="empty = send to real customers"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
                     <p class="help-text">When set, every automated email and every report email (End of Day Email, Station Report Email) goes only to this address, marked [TEST], with no copies; the End of Day WhatsApp is not sent.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
+                <div class="form-group"><label for="remindercc">Copy (CC) on guest reminders</label>
+                    <input type="text" id="remindercc" name="automated_email_reminder_cc" class="form-control" value="<?php echo $esc($cfg['automated_email_reminder_cc']); ?>" placeholder="empty = no copy" autocomplete="off">
+                    <p class="help-text">These addresses get an open copy (CC) of every reminder sent to a guest: overdue payment, payment before arrival, confirmed-but-unpaid, quotation expiry, tentative hold and pre-arrival reminders. The guest can see them. Not on expired notices, review requests or report emails. Separate several addresses with commas. Not used on test sends.</p></div>
                 <div class="form-group"><label for="reportcc">Copy (CC) on the daily reports email</label>
                     <input type="text" id="reportcc" name="automated_job_daily_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_daily_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
                     <p class="help-text">Shown openly as a copy on every daily reports email. Separate several addresses with commas. Not used on test sends.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>

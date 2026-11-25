@@ -128,6 +128,34 @@ function rh_automated_email_adjust(string &$to, string &$subject, bool &$bccAdmi
 }
 
 /**
+ * Visible copies (CC) on a guest reminder the scheduler sends (owner 2026-11-25). A guest-reminder job puts the
+ * "Copy (CC) on guest reminders" list in $GLOBALS['rh_automated_ctx']['cc'] (includes/auto-scheduler.php). Nothing
+ * outside the scheduler, nothing while the test recipient redirect is set (test mode and "Send test to me"), never
+ * the To address, valid addresses only, each once. An address that is also the hotel's hidden copy gets the CC only:
+ * the hidden-copy helpers skip addresses already on the message.
+ *
+ * @return string[]
+ */
+function rh_automated_email_cc(string $to): array
+{
+    $ctx = $GLOBALS['rh_automated_ctx'] ?? null;
+    if (!is_array($ctx) || trim((string)($ctx['redirect'] ?? '')) !== '') {
+        return [];
+    }
+    $seen = [strtolower(trim($to)) => true];
+    $out = [];
+    foreach ((array)($ctx['cc'] ?? []) as $addr) {
+        $addr = trim((string)$addr);
+        if ($addr === '' || !filter_var($addr, FILTER_VALIDATE_EMAIL) || isset($seen[strtolower($addr)])) {
+            continue;
+        }
+        $seen[strtolower($addr)] = true;
+        $out[] = $addr;
+    }
+    return $out;
+}
+
+/**
  * Send email using PHPMailer
  *
  * @param string $to Recipient email
@@ -190,6 +218,10 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             // Recipients: From = SMTP mailbox, Reply-To = hotel contact (includes/email-identity.php)
             rh_mail_apply_identity($mail, (string)$fromAddress, (string)($email_from_name ?: $email_site_name));
             $mail->addAddress($to, $toName ?? '');
+            // Guest reminders from the scheduler: the reminder copy list as visible copies (never on test sends)
+            foreach (rh_automated_email_cc($to) as $ccAddr) {
+                $mail->addCC($ccAddr);
+            }
 
             // One hidden copy to the staff copy email when the switch is on (never when it is the To)
             rh_mail_add_staff_bcc($mail, $to, $bccAdmin);
@@ -315,6 +347,11 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
 
             rh_mail_apply_identity($mail, (string)$fromAddress, (string)($email_from_name ?: $email_site_name));
             $mail->addAddress($to, $toName ?? '');
+            // Guest reminders from the scheduler: the reminder copy list as visible copies (never on test sends).
+            // Added first, so an address also given as a hidden copy below is not copied twice.
+            foreach (rh_automated_email_cc($to) as $ccAddr) {
+                $mail->addCC($ccAddr);
+            }
             // Copy addresses (receipts: invoice copies + "CC emails" from the payment form) are hidden
             // copies: the guest never sees the hotel's internal addresses.
             rh_mail_add_hidden_copies($mail, array_map('strval', (array)($options['cc'] ?? [])), $to);
@@ -2146,6 +2183,34 @@ function ensureBookingEmailTemplateDefaults()
                     ['Total',       '{{currency_symbol}} {{quote_total}}', true],
                 ])
                 . '<tr><td style="padding:0 0 24px;"></td></tr>'
+        ),
+    ];
+
+    // Payment reminders before arrival (owner 2026-11-25, includes/auto-email-jobs.php rh_job_prearrival_payment_reminders):
+    // one per stage (days before check-in) while a confirmed booking still owes money.
+    $defaults['prearrival_payment_reminder'] = [
+        'name'    => 'Payment reminder before arrival',
+        'subject' => 'Payment reminder: balance due before your arrival on {{check_in_date_formatted}} — {{booking_reference}}',
+        'html'    => hotel_premium_email_html(
+            'Your stay begins in {{days_until_arrival}}: {{balance_due}} still to pay',
+            hotel_premium_email_body(
+                '{{guest_name}}',
+                '<p style="margin:0 0 16px;">We look forward to welcoming you to <strong>{{site_name}}</strong> in {{days_until_arrival}}, on <strong>{{check_in_date_formatted}}</strong>. Our records show a balance of <strong>{{balance_due}}</strong> still to pay on booking <strong>{{booking_reference}}</strong>.</p>'
+                    . '<p style="margin:0 0 16px;">Please settle the balance before you arrive, as set out in our payment policy below. If you have already paid, thank you &mdash; please reply with your proof of payment so we can update our records.</p>'
+            )
+                . hotel_premium_email_summary_rows('Booking Summary', [
+                    ['Booking',            '{{booking_reference}}'],
+                    ['Room',               '{{room_name}}'],
+                    ['Check-in',           '{{check_in_date_formatted}}'],
+                    ['Days until arrival', '{{days_until_arrival}}'],
+                    ['Total',              '{{total_amount}}'],
+                    ['Paid so far',        '{{amount_paid}}'],
+                    ['Balance due',        '{{balance_due}}', true],
+                ])
+                . '<tr><td style="padding:0 48px 16px;">{{group_rooms_block}}</td></tr>'
+                . '<tr><td style="padding:0 48px 24px;font-size:13px;line-height:1.8;color:#5c5549;">{{pay_instructions}}</td></tr>'
+                . '<tr><td style="padding:0 48px 24px;font-size:12px;line-height:1.8;color:#5c5549;">{{payment_policy}}</td></tr>'
+                . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">Questions? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a> &middot; {{phone_main}}.</td></tr>'
         ),
     ];
 
@@ -5616,6 +5681,76 @@ function sendUnpaidConfirmedReminderEmail(array $booking, string $deadline)
         return sendEmail($booking['guest_email'], $booking['guest_name'], 'Payment reminder - keep your room - ' . $booking['booking_reference'], $htmlBody);
     } catch (Exception $e) {
         error_log("Send Unpaid Confirmed Reminder Email Error: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
+ * The payment reminder before arrival (owner 2026-11-25), ready to send: the saved template (Email Templates page),
+ * the built-in default when none is saved. null = the template is switched off in the editor (the job then sends
+ * nothing). $info: days_until (int), total, paid, balance (floats, hotel currency). $booking is the booking row the
+ * email is about (a group's primary room with the group's money in $info).
+ *
+ * @return array{subject:string,html_body:string,text_body:string}|null
+ */
+function rh_prearrival_payment_email_build(array $booking, array $info): ?array
+{
+    global $pdo;
+    $key = 'prearrival_payment_reminder';
+    $row = getBookingEmailTemplateConfig($key, []);
+    if ((int)($row['is_active'] ?? 1) !== 1) {
+        return null;
+    }
+    if (empty($row['subject']) || empty($row['html_body'])) {
+        $def = hotel_booking_template_defaults_map()[$key] ?? null;
+        if (!is_array($def)) {
+            return null;
+        }
+        $row = ['subject' => $def['subject'], 'html_body' => $def['html'], 'text_body' => ''];
+    }
+    $room = null;
+    if (!empty($booking['room_id']) && isset($pdo) && $pdo instanceof PDO) {
+        $st = $pdo->prepare('SELECT * FROM rooms WHERE id = ?');
+        $st->execute([(int)$booking['room_id']]);
+        $room = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+    $cur = (string)getSetting('currency_symbol', 'MWK');
+    $money = static function ($v) use ($cur): string {
+        return $cur . ' ' . number_format((float)$v, 2);
+    };
+    $days = max(0, (int)($info['days_until'] ?? 0));
+    $ref = (string)($booking['booking_reference'] ?? '');
+    $vars = buildBookingEmailVariables($booking, $room, [
+        'days_until_arrival' => $days === 1 ? '1 day' : $days . ' days',
+        'total_amount'       => $money($info['total'] ?? 0),
+        'amount_paid'        => $money($info['paid'] ?? 0),
+        'balance_due'        => $money($info['balance'] ?? 0),
+        'amount_due'         => number_format((float)($info['balance'] ?? 0), 2),
+        'pay_instructions'   => function_exists('rh_auto_pay_instructions') ? rh_auto_pay_instructions($ref, 'room') : '',
+    ]);
+    if (!array_key_exists('payment_policy', $vars)) {
+        $vars['payment_policy'] = rh_email_payment_policy_html();
+    }
+    return rh_render_booking_email_template_row($key, $row, $vars);
+}
+
+/**
+ * Send the payment reminder before arrival to $to. $tpl from rh_prearrival_payment_email_build(); null = build it here.
+ * Plain text is made from the HTML by sendEmail() when the template has none.
+ */
+function sendPrearrivalPaymentReminderEmail(array $booking, array $info, string $to, string $toName, ?array $tpl = null)
+{
+    $emailCtx = rh_email_context(['kind' => 'prearrival_payment_reminder'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
+    try {
+        if ($tpl === null) {
+            $tpl = rh_prearrival_payment_email_build($booking, $info);
+        }
+        if ($tpl === null) {
+            return ['success' => false, 'message' => 'Template switched off'];
+        }
+        return sendEmail($to, $toName, (string)$tpl['subject'], (string)$tpl['html_body'], (string)($tpl['text_body'] ?? ''));
+    } catch (Exception $e) {
+        error_log('Send Pre-arrival Payment Reminder Email Error: ' . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }

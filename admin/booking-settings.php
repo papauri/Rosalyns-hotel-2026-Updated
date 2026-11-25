@@ -64,6 +64,7 @@ $booking_template_defs_master = [
     'booking_received' => 'Booking Received Email',
     'booking_confirmed' => 'Booking Confirmed Email',
     'booking_reminder' => 'Check-in Reminder Email',
+    'prearrival_payment_reminder' => 'Payment Reminder Before Arrival Email',
     'booking_cancelled' => 'Booking Cancelled Email',
     'payment_invoice' => 'Room Invoice Email',
     'payment_invoice_document' => 'Room Invoice PDF',
@@ -96,6 +97,7 @@ $booking_template_defs_master = [
 $booking_template_module_map = [
     'booking_received' => 'bookings', 'booking_confirmed' => 'bookings',
     'booking_reminder' => 'bookings', 'booking_cancelled' => 'bookings',
+    'prearrival_payment_reminder' => 'bookings',
     'payment_invoice' => 'bookings', 'payment_invoice_document' => 'bookings',
     'tentative_booking_created' => 'bookings', 'tentative_booking_reminder' => 'bookings',
     'tentative_booking_expired' => 'bookings', 'tentative_booking_converted' => 'bookings',
@@ -135,6 +137,7 @@ $booking_template_short_names = [
     'booking_received' => 'Received Email',
     'booking_confirmed' => 'Confirmed Email',
     'booking_reminder' => 'Reminder Email',
+    'prearrival_payment_reminder' => 'Pre-arrival Payment',
     'booking_cancelled' => 'Cancelled Email',
     'payment_invoice' => 'Room Invoice Email',
     'payment_invoice_document' => 'Room Invoice PDF',
@@ -727,6 +730,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{amount_due}}'               => number_format(4175, 2),
             '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
             '{{days_overdue}}'             => '3',
+            '{{days_until_arrival}}'       => '15 days',
             '{{account_reference}}'        => 'BK-PREVIEW-001',
             '{{days_left}}'                => '2 days from now',
             '{{quote_total}}'              => number_format(4500, 2),
@@ -1321,6 +1325,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{amount_due}}'               => number_format(4175, 2),
                 '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
                 '{{days_overdue}}'             => '3',
+                '{{days_until_arrival}}'       => '15 days',
+                '{{amount_paid}}'              => $currencySymbol . number_format(1000, 2),
                 '{{account_reference}}'        => 'BK-PREVIEW-001',
                 '{{days_left}}'                => '2 days from now',
                 '{{quote_total}}'              => number_format(4500, 2),
@@ -3235,7 +3241,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 if (in_array($key, $booking_document_template_keys, true)) {
                     return 'PDF documents';
                 }
-                if (strpos($key, 'payment_reminder_') === 0 || $key === 'quotation_expiry_reminder') {
+                if (strpos($key, 'payment_reminder_') === 0 || $key === 'quotation_expiry_reminder' || $key === 'prearrival_payment_reminder') {
                     return 'Reminders & other';
                 }
                 if (strpos($key, 'conference_') === 0 || strpos($key, 'event_') === 0) {
@@ -3257,6 +3263,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 'booking_received' => 'Sent to the guest when their booking request is received.',
                 'booking_confirmed' => 'Sent to the guest when their booking is confirmed.',
                 'booking_reminder' => 'Sent to the guest as a reminder before they check in.',
+                'prearrival_payment_reminder' => 'Sent to the guest before arrival while a confirmed booking still owes money.',
                 'booking_cancelled' => 'Sent to the guest when their booking is cancelled.',
                 'payment_invoice' => 'Sent with the invoice for a room booking.',
                 'payment_invoice_document' => 'The invoice PDF for a room booking.',

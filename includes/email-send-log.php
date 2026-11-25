@@ -38,6 +38,7 @@ if (!function_exists('rh_email_kinds')) {
             'pending_expired' => ['Unconfirmed booking expired'],
             'unpaid_reminder' => ['Unpaid booking reminder'],
             'unpaid_released' => ['Unpaid booking released'],
+            'prearrival_payment_reminder' => ['Payment reminder before arrival'],
             'payment_reminder' => ['Payment reminder'],
             'quotation_reminder' => ['Quotation expiry reminder'],
             'pre_arrival' => ['Before-arrival'],
@@ -456,6 +457,7 @@ if (!function_exists('rh_email_kinds')) {
             'pending_expired' => ['auto:pending_expired_notice:'],
             'unpaid_reminder' => ['auto:unpaid_confirmed_reminder:', 'email:' . md5('Payment reminder sent')],
             'unpaid_released' => ['auto:unpaid_confirmed_release:'],
+            'prearrival_payment_reminder' => ['auto:prearrival_payment_reminders:', 'email:' . md5('prearrival_payment_reminder')],
             'payment_reminder' => ['auto:overdue_payment_reminders:'],
             'quotation_reminder' => ['auto:quotation_expiry_reminder:'],
             'pre_arrival' => ['comm:pre_arrival'],                // guest_communication_log stages

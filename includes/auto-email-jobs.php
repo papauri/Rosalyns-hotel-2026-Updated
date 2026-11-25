@@ -11,6 +11,9 @@
  *  - quotation_expiry_reminder  sent quotations that expire within automated_email_quotation_days.
  *  - tentative_hold_reminder    one reminder per hold, tentative_reminder_hours before it lapses.
  *  - tentative_expired_notice   guest + hotel notice once a hold has lapsed (last 24 h).
+ *  - prearrival_payment_reminders  confirmed bookings that still owe money before arrival; stages from
+ *                               prearrival_payment_reminder_days (default 30,15,4 days before check-in),
+ *                               only the current stage, once per stage, once per group (owner 2026-11-25).
  *  - nightly_backup             runs the backup engine (includes/db-backup.php) once a day after 01:00;
  *                               rh_backup_alert() emails the administrator when it fails, when no good
  *                               backup exists for 36 hours, or when no off-site copy was downloaded for 7 days.
@@ -1138,6 +1141,248 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
+    /* ── payment reminders before arrival (owner 2026-11-25) ─────────── */
+
+    /**
+     * PURE. The "days before check-in" stages: whole numbers 1..365, each once, largest first, at most
+     * 6 (the largest ones; more would read as spam). Nothing usable = [30, 15, 4]. $raw null = the saved setting.
+     *
+     * @return int[]
+     */
+    function rh_auto_prearrival_days(?string $raw = null): array
+    {
+        if ($raw === null) {
+            $raw = rh_auto_setting('prearrival_payment_reminder_days');
+        }
+        $out = [];
+        foreach (preg_split('/[\s,;]+/', (string)$raw) ?: [] as $p) {
+            $p = trim($p);
+            if ($p === '' || !ctype_digit($p)) {
+                continue;
+            }
+            $n = (int)$p;
+            if ($n >= 1 && $n <= 365) {
+                $out[$n] = $n;
+            }
+        }
+        $out = array_values($out);
+        rsort($out);
+        $out = array_slice($out, 0, 6);
+        return $out ?: [30, 15, 4];
+    }
+
+    /**
+     * PURE. The stage due now for a stay $daysUntil days away: the smallest stage D with $daysUntil <= D, so a booking
+     * made 10 days out gets the 15-day stage now and never the 30-day one. 0 = none (arrival today or past, or further
+     * away than the largest stage).
+     */
+    function rh_auto_prearrival_stage(int $daysUntil, array $days): int
+    {
+        if ($daysUntil <= 0) {
+            return 0;
+        }
+        $pick = 0;
+        foreach ($days as $d) {
+            $d = (int)$d;
+            if ($d >= $daysUntil && ($pick === 0 || $d < $pick)) {
+                $pick = $d;
+            }
+        }
+        return $pick;
+    }
+
+    /**
+     * Groups (by lead id: primary_booking_id, else the booking itself) with a confirmed room arriving within the largest
+     * stage that still owes money. Leaves out pay-later arrangements and company-billed bookings (own or lead's).
+     *
+     * @return int[]
+     */
+    function rh_auto_prearrival_candidates(PDO $pdo, int $maxDays): array
+    {
+        $noArr = rh_checkin_arrangement_exclude_sql('b');
+        $st = $pdo->prepare("SELECT DISTINCT COALESCE(NULLIF(b.primary_booking_id, 0), b.id) AS root FROM bookings b
+            WHERE b.status = 'confirmed' AND b.deleted_at IS NULL
+              AND b.check_in_date > CURDATE() AND b.check_in_date <= (CURDATE() + INTERVAL ? DAY)
+              AND b.amount_due > ?{$noArr}
+            ORDER BY root LIMIT 200");
+        $st->execute([max(1, $maxDays), BALANCE_TOLERANCE]);
+        return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Read-only, fresh from the database: what the reminder for group/booking $root would say right now.
+     * ['send' => false, 'why' => ...] when nothing is due, else ['send' => true, 'stage' => D, 'days_until', 'total',
+     * 'paid', 'balance', 'lead' => booking row (with room_name), 'email', 'name', 'rooms' => confirmed room count].
+     * Rules: confirmed rooms only; the whole group is left out when any live room is checked in, has a pay-later
+     * arrangement or is on a company account, or when a room was created / confirmed less than 24 hours ago;
+     * money is the confirmed rooms' amount_paid / amount_due; the stage follows the earliest confirmed arrival.
+     */
+    function rh_auto_prearrival_plan(PDO $pdo, int $root, array $days, ?int $today = null): array
+    {
+        $today = $today ?? strtotime(date('Y-m-d'));
+        $st = $pdo->prepare("SELECT b.*, COALESCE(r.name, '') AS room_name,
+                (GREATEST(b.created_at, COALESCE(b.converted_to_confirmed_at, b.created_at)) > (NOW() - INTERVAL 24 HOUR)) AS is_recent
+            FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
+            WHERE (b.id = ? OR b.primary_booking_id = ?) AND b.deleted_at IS NULL
+              AND b.status NOT IN ('cancelled', 'no-show', 'expired', 'checked-out')
+            ORDER BY b.id");
+        $st->execute([$root, $root]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!$rows) {
+            return ['send' => false, 'why' => 'gone'];
+        }
+        $noArr = rh_checkin_arrangement_exclude_sql('b');
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM bookings b WHERE (b.id = ? OR b.primary_booking_id = ?) AND b.deleted_at IS NULL
+              AND b.status NOT IN ('cancelled', 'no-show', 'expired', 'checked-out'){$noArr}");
+        $chk->execute([$root, $root]);
+        if ((int)$chk->fetchColumn() !== count($rows)) {
+            return ['send' => false, 'why' => 'pay_later_or_company'];
+        }
+        // Staff "Confirm" on a pending booking does not set converted_to_confirmed_at; it logs a status change on the
+        // booking timeline. A room confirmed that way in the last 24 hours also counts as recent (QA 2026-11-25).
+        $justConfirmed = false;
+        try {
+            $ids = array_map(static fn($r) => (int)$r['id'], $rows);
+            $tl = $pdo->prepare("SELECT COUNT(*) FROM booking_timeline_logs WHERE booking_id IN ("
+                . implode(',', array_fill(0, count($ids), '?')) . ") AND action_type = 'status_change' AND new_value = 'confirmed'
+                AND created_at > (NOW() - INTERVAL 24 HOUR)");
+            $tl->execute($ids);
+            $justConfirmed = (int)$tl->fetchColumn() > 0;
+        } catch (Throwable $e) {
+            $justConfirmed = false; // no timeline table: the 24-hour rule falls back to created / converted dates
+        }
+        $confirmed = [];
+        foreach ($rows as $r) {
+            $s = strtolower((string)$r['status']);
+            if ($s === 'checked-in') {
+                return ['send' => false, 'why' => 'arrived'];
+            }
+            if ($s === 'confirmed') {
+                if (!empty($r['is_recent']) || $justConfirmed) {
+                    return ['send' => false, 'why' => 'recent'];
+                }
+                $confirmed[] = $r;
+            }
+        }
+        if (!$confirmed) {
+            return ['send' => false, 'why' => 'not_confirmed'];
+        }
+        $first = null;
+        $paid = 0.0;
+        $balance = 0.0;
+        foreach ($confirmed as $r) {
+            $ci = strtotime((string)$r['check_in_date']);
+            if ($ci !== false && ($first === null || $ci < $first)) {
+                $first = $ci;
+            }
+            $paid += max(0.0, (float)($r['amount_paid'] ?? 0));
+            $balance += max(0.0, (float)($r['amount_due'] ?? 0));
+        }
+        if ($balance <= BALANCE_TOLERANCE) {
+            return ['send' => false, 'why' => 'paid'];
+        }
+        $daysUntil = $first === null ? 0 : (int)round(($first - $today) / 86400);
+        $stage = rh_auto_prearrival_stage($daysUntil, $days);
+        if ($stage === 0) {
+            return ['send' => false, 'why' => 'no_stage', 'days_until' => $daysUntil];
+        }
+        // Sent to the group's lead (the lead room, or the room that stands in for a cancelled lead).
+        $leadId = count($rows) > 1 && function_exists('rh_booking_group_effective_lead') ? rh_booking_group_effective_lead($pdo, $root) : $root;
+        $lead = null;
+        foreach ($rows as $r) {
+            if ((int)$r['id'] === $leadId) {
+                $lead = $r;
+            }
+        }
+        $lead = $lead ?? $confirmed[0];
+        $email = trim((string)($lead['guest_email'] ?? ''));
+        $name = (string)($lead['guest_name'] ?? '');
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            foreach ($confirmed as $r) {
+                if (filter_var(trim((string)$r['guest_email']), FILTER_VALIDATE_EMAIL)) {
+                    $email = trim((string)$r['guest_email']);
+                    $name = (string)$r['guest_name'];
+                    break;
+                }
+            }
+        }
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['send' => false, 'why' => 'no_email'];
+        }
+        unset($lead['is_recent']);
+        return ['send' => true, 'stage' => $stage, 'days_until' => $daysUntil, 'paid' => round($paid, 2),
+            'balance' => round($balance, 2), 'arrival' => date('Y-m-d', (int)$first), 'total' => round($paid + $balance, 2), 'lead' => $lead, 'email' => $email,
+            'name' => $name, 'rooms' => count($confirmed)];
+    }
+
+    /**
+     * Payment reminders before arrival (owner 2026-11-25): a confirmed booking (a group once, to its lead, for the whole
+     * group's balance) that still owes money gets the reminder of the stage due now, each stage at most once, never the
+     * missed earlier ones; it stops by itself once paid. Pending bookings are left out (they lapse unpaid on their own).
+     */
+    function rh_job_prearrival_payment_reminders(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        if (!rh_auto_module_on('bookings')) {
+            return $res;
+        }
+        if (!function_exists('logBookingEvent')) {
+            require_once __DIR__ . '/booking-timeline.php';
+        }
+        $job = 'prearrival_payment_reminders';
+        $prefix = !empty($o['test_mode']) ? 'test:' : '';
+        $days = rh_auto_prearrival_days();
+
+        foreach (rh_auto_prearrival_candidates($pdo, max($days)) as $root) {
+            if (!rh_scheduler_budget_ok()) {
+                $res['deferred'] = true;
+                break;
+            }
+            $res['checked']++;
+            $plan = rh_auto_prearrival_plan($pdo, $root, $days); // fresh: a payment made a second ago stops the email
+            if (empty($plan['send'])) {
+                $res['skipped']++;
+                continue;
+            }
+            $lead = $plan['lead'];
+            $ref = (string)$lead['booking_reference'];
+            $info = ['days_until' => $plan['days_until'], 'total' => $plan['total'], 'paid' => $plan['paid'], 'balance' => $plan['balance']];
+            $tpl = rh_prearrival_payment_email_build($lead, $info);
+            if ($tpl === null) {
+                $res['skipped']++; // template switched off in the editor = job sends nothing
+                continue;
+            }
+            $stage = $prefix . 'pre:' . $plan['stage'];
+            if (!rh_auto_log_claim($pdo, $job, 'room', $root, $stage, $plan['email'], (string)$tpl['subject'])) {
+                $res['skipped']++; // this stage was already sent / is being sent
+                continue;
+            }
+            try {
+                rh_scheduler_budget_spend();
+                $r = sendPrearrivalPaymentReminderEmail($lead, $info, $plan['email'], $plan['name'], $tpl);
+                if (!empty($r['success'])) {
+                    rh_auto_log_finish($pdo, $job, 'room', $root, $stage, 'sent');
+                    if ($prefix === '' && function_exists('logBookingEvent')) {
+                        logBookingEvent((int)$lead['id'], $ref, 'Payment reminder before arrival sent (' . $plan['days_until'] . ((int)$plan['days_until'] === 1 ? ' day' : ' days') . ' before)', 'reminder',
+                            'Guest reminded to pay ' . getSetting('currency_symbol', 'MWK') . ' ' . number_format($plan['balance'], 2)
+                                . ' before arriving on ' . date('j M Y', strtotime($plan['arrival']))
+                                . ($plan['rooms'] > 1 ? ' (whole group, ' . $plan['rooms'] . ' rooms)' : '') . '. Sent to ' . $plan['email'] . '.',
+                            null, null, 'system', null, 'Scheduler',
+                            ['email_type' => 'prearrival_payment_reminder', 'stage_days' => $plan['stage'], 'balance' => $plan['balance']]);
+                    }
+                    $res['sent']++;
+                } else {
+                    rh_auto_log_finish($pdo, $job, 'room', $root, $stage, 'failed', (string)($r['message'] ?? 'unknown'));
+                    $res['errors'][] = $ref . ': ' . (string)($r['message'] ?? 'send failed');
+                }
+            } catch (Throwable $e) {
+                rh_auto_log_finish($pdo, $job, 'room', $root, $stage, 'failed', $e->getMessage());
+                $res['errors'][] = $ref . ': ' . $e->getMessage();
+            }
+        }
+        return $res;
+    }
+
     /**
      * Release a confirmed booking that still has no payment: re-check under a row lock, cancel it with nothing
      * retained (nothing was ever paid), free the room stock and any assigned unit, and write the reason to the
@@ -1743,6 +1988,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             'quotation_expiry_reminder' => 'Quotation expiry reminder',
             'tentative_booking_reminder' => 'Tentative hold reminder',
             'tentative_booking_expired' => 'Tentative hold expired',
+            'prearrival_payment_reminder' => 'Payment reminder before arrival',
             'prearrival_reminders' => 'Pre-arrival reminder',
             'poststay_review_requests' => 'Post-stay review request',
             'gym_membership_renewal' => 'Gym membership renewal',
@@ -1826,6 +2072,13 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                     'number_of_nights' => 3, 'total_amount' => 480000,
                     'tentative_expires_at' => date('Y-m-d H:i:s', strtotime($key === 'tentative_booking_reminder' ? '+20 hours' : '-1 hour'))];
                 return $key === 'tentative_booking_reminder' ? sendTentativeBookingReminderEmail($b) : sendTentativeBookingExpiredEmail($b);
+            }
+            if ($key === 'prearrival_payment_reminder') {
+                $roomId = (int)$GLOBALS['pdo']->query('SELECT id FROM rooms ORDER BY id LIMIT 1')->fetchColumn();
+                $b = ['id' => 0, 'booking_reference' => 'SAMPLE-1001', 'guest_name' => 'Sample Guest', 'guest_email' => $to, 'room_id' => $roomId,
+                    'check_in_date' => date('Y-m-d', strtotime('+15 days')), 'check_out_date' => date('Y-m-d', strtotime('+18 days')),
+                    'number_of_nights' => 3, 'total_amount' => 480000];
+                return sendPrearrivalPaymentReminderEmail($b, ['days_until' => 15, 'total' => 480000, 'paid' => 200000, 'balance' => 280000], $to, 'Sample Guest');
             }
             if ($key === 'prearrival_reminders') {
                 return sendPreArrivalReminderEmail(['guest_email' => $to, 'guest_name' => 'Sample Guest', 'booking_reference' => 'SAMPLE-1001',
