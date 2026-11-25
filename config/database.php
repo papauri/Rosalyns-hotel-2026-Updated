@@ -4492,7 +4492,9 @@ function rh_booking_full_total(array $row): float
  * the SAME stored figures as rh_doc_stay_lines(): (gross - VAT - levy) less the child charge's and packages' own nets.
  * A child charge is priced all-in like the room (VAT + levy inside), a package all-in with VAT only; both are split with
  * the booking's own stored rates. An old row with a VAT or levy amount but no stored % gets the rate from its own
- * amounts (VAT is on every net, the levy on the room + child nets), never from today's settings. Display only, no queries.
+ * amounts (VAT is on every net, the levy on the room + child nets), never from today's settings (rh_doc_row_rates).
+ * Exclusive mode: rh_doc_stay_lines() already splits them the same way, so its room and child lines are returned as
+ * they are. Display only, no queries.
  *
  * @return array{room:float,child:float,nights:int}
  */
@@ -4502,28 +4504,23 @@ function rh_booking_room_net(array $r): array
         require_once __DIR__ . '/../includes/pricing.php';
     }
     $dl = rh_doc_stay_lines($r, max(0.0, (float)($r['package_total'] ?? 0)));
+    $nights = (int)($r['number_of_nights'] ?? 0);
+    if ($dl['mode'] === 'exclusive') {
+        // Exclusive: the document lines are already nets (child and packages split with the same rates), so the room
+        // line is the room alone without VAT or levy.
+        return ['room' => max(0.0, $dl['room']), 'child' => $dl['child'], 'nights' => $nights];
+    }
     // VAT switched off: a leftover vat_amount on an old row is not inside the total, so nothing to take out.
     $vatIn = $dl['mode'] !== 'off' ? $dl['vat'] : 0.0;
     $levy = $dl['levy'];
     $netAll = round($dl['gross'] - $vatIn - $levy, 2); // room + child + packages, all without VAT or levy
-    $v = 0.0;
-    if ($vatIn > BALANCE_TOLERANCE) {
-        $v = max(0.0, (float)($r['vat_rate'] ?? 0)) / 100;
-        if ($v <= 0 && $netAll > BALANCE_TOLERANCE) {
-            $v = $vatIn / $netAll;
-        }
-    }
-    $pkgNet = $dl['pkg'] > BALANCE_TOLERANCE ? round($dl['pkg'] / (1 + $v), 2) : 0.0;
-    $l = 0.0;
-    if ($levy > BALANCE_TOLERANCE) {
-        $l = max(0.0, (float)($r['tourism_levy_percent'] ?? 0)) / 100;
-        if ($l <= 0 && $netAll - $pkgNet > BALANCE_TOLERANCE) {
-            $l = $levy / ($netAll - $pkgNet);
-        }
-    }
+    $rt = rh_doc_row_rates($r, $netAll, $vatIn, $levy, $dl['pkg']);
+    $v = $rt['vat'];
+    $l = $rt['levy'];
+    $pkgNet = $rt['pkg_net'];
     $childNet = $dl['child'] > BALANCE_TOLERANCE ? round($dl['child'] / (1 + $v + $l), 2) : 0.0;
     $room = round($netAll - $childNet - $pkgNet, 2);
-    return ['room' => max(0.0, $room), 'child' => $childNet, 'nights' => (int)($r['number_of_nights'] ?? 0)];
+    return ['room' => max(0.0, $room), 'child' => $childNet, 'nights' => $nights];
 }
 
 /**

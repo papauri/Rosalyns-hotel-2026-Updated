@@ -994,6 +994,70 @@ if (!function_exists('rh_rate_plan_dropped')) {
     }
 }
 
+if (!function_exists('rh_doc_row_rates')) {
+    /**
+     * PURE. The VAT and levy rates (fractions) one bookings row was priced with, to split its all-in child and package
+     * amounts into nets: the row's stored vat_rate / tourism_levy_percent, else worked out from the row's own amounts
+     * (VAT is on every net, the levy on the room + child nets; packages carry VAT only). Never today's settings.
+     * $netAll = gross - VAT - levy (room + child + packages, all net); $vatIn = the VAT inside the gross (0 when VAT is
+     * off); $pkgAllIn = the packages all-in. pkg_net = the packages' net.
+     *
+     * @return array{vat:float,levy:float,pkg_net:float}
+     */
+    function rh_doc_row_rates(array $b, float $netAll, float $vatIn, float $levy, float $pkgAllIn): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $v = 0.0;
+        if ($vatIn > $tol) {
+            $v = max(0.0, (float)($b['vat_rate'] ?? 0)) / 100;
+            if ($v <= 0 && $netAll > $tol) {
+                $v = $vatIn / $netAll;
+            }
+        }
+        $pkgNet = $pkgAllIn > $tol ? round($pkgAllIn / (1 + $v), 2) : 0.0;
+        $l = 0.0;
+        if ($levy > $tol) {
+            $l = max(0.0, (float)($b['tourism_levy_percent'] ?? 0)) / 100;
+            if ($l <= 0 && $netAll - $pkgNet > $tol) {
+                $l = $levy / ($netAll - $pkgNet);
+            }
+        }
+        return ['vat' => $v, 'levy' => $l, 'pkg_net' => $pkgNet];
+    }
+}
+
+if (!function_exists('rh_doc_pkg_rows_on_basis')) {
+    /**
+     * PURE. booking_packages rows (price_amount, total_cost: all-in as stored) on the same basis as the document's
+     * package subtotal ($docPkg = rh_doc_stay_lines(...)['pkg'], $pkgAllIn = the package_total passed to it).
+     * Exclusive mode prints net lines, so each row is scaled by docPkg / pkgAllIn and, when the rows add up to the
+     * stored package_total, the last row takes the rounding so the rows foot to $docPkg exactly. Any other mode, or
+     * nothing to scale: the rows unchanged.
+     */
+    function rh_doc_pkg_rows_on_basis(array $rows, string $mode, float $docPkg, float $pkgAllIn): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        if ($mode !== 'exclusive' || !$rows || $docPkg <= $tol || $pkgAllIn <= $tol || abs($docPkg - $pkgAllIn) <= $tol / 2) {
+            return $rows;
+        }
+        $f = $docPkg / $pkgAllIn;
+        $allIn = 0.0;
+        $sum = 0.0;
+        $last = null;
+        foreach ($rows as $k => $r) {
+            $allIn += (float)($r['total_cost'] ?? 0);
+            $rows[$k]['price_amount'] = round((float)($r['price_amount'] ?? 0) * $f, 2);
+            $rows[$k]['total_cost'] = round((float)($r['total_cost'] ?? 0) * $f, 2);
+            $sum += $rows[$k]['total_cost'];
+            $last = $k;
+        }
+        if ($last !== null && abs($allIn - $pkgAllIn) <= $tol) {
+            $rows[$last]['total_cost'] = round($rows[$last]['total_cost'] + round($docPkg - $sum, 2), 2);
+        }
+        return $rows;
+    }
+}
+
 if (!function_exists('rh_doc_stay_lines')) {
     /**
      * The room figures a guest DOCUMENT (quotation, invoice, statement) prints for one booking row, built from the
@@ -1003,11 +1067,15 @@ if (!function_exists('rh_doc_stay_lines')) {
      * and rh_booking_gross_sql() use). total_amount is net + levy, so the display amounts are:
      *   inclusive / off : gross - levy   (VAT sits inside the lines; levy is its own line)
      *   exclusive       : gross - VAT - levy   (net lines; VAT is its own line)
-     * Packages and the child supplement are stored on the price basis (the same basis the lines print on) and are
-     * split out of the display amount; the room line is what remains.
+     * The child supplement and packages are stored ALL-IN in every mode (owner 2026-10-24: price = net x (1 + VAT +
+     * levy); the levy is on the room and child nets only, packages carry VAT only). inclusive / off: they print as
+     * stored. exclusive: they print as their nets, child / (1 + v + l) and package / (1 + v), with the row's own rates
+     * (rh_doc_row_rates: the stored vat_rate / tourism_levy_percent, else worked out from the row's amounts, never
+     * today's settings), so every line is on the same net basis. The room line is what remains, so the lines foot.
      *
-     * @param array $b           bookings row (total_amount, vat_amount, total_with_vat, tourism_levy_amount, child_supplement_total)
-     * @param float $pkgPriceTotal package add-ons inside this row, on the price basis (primary booking only)
+     * @param array $b           bookings row (total_amount, vat_amount, total_with_vat, tourism_levy_amount, child_supplement_total,
+     *                           vat_rate, tourism_levy_percent)
+     * @param float $pkgPriceTotal package add-ons inside this row, all-in as stored (package_total; primary booking only)
      * @return array{mode:string,gross:float,vat:float,levy:float,lines_total:float,room:float,child:float,pkg:float,subtotal:float,total:float}
      */
     function rh_doc_stay_lines(array $b, float $pkgPriceTotal = 0.0): array
@@ -1022,6 +1090,12 @@ if (!function_exists('rh_doc_stay_lines')) {
         $lines = round($gross - $levy - ($mode === 'exclusive' ? $vat : 0.0), 2);
         $child = max(0.0, (float)($b['child_supplement_total'] ?? 0));
         $pkg   = max(0.0, $pkgPriceTotal);
+        if ($mode === 'exclusive' && ($child > 0 || $pkg > 0)) {
+            $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+            $rt = rh_doc_row_rates($b, $lines, $vat, $levy, $pkg);
+            $pkg = $rt['pkg_net'];
+            $child = $child > $tol ? round($child / (1 + $rt['vat'] + $rt['levy']), 2) : 0.0;
+        }
         $room  = round($lines - $child - $pkg, 2);
         if ($room < 0) {
             // Stored child/package figures larger than the booking (legacy rows): fold into the room line.

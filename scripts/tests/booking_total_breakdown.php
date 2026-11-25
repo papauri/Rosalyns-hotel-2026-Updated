@@ -5,7 +5,8 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  * Usage (project root): php scripts/tests/booking_total_breakdown.php
  *   - Pure (no DB writes; VAT mode forced in the in-memory settings cache): VAT inclusive AND exclusive, plain stay,
  *     child charge, manager override (final gross), rate plan discount, group of two rooms, folio extras/paid/balance,
- *     old row (total_with_vat 0), unusable row (degrades with a message).
+ *     old row (total_with_vat 0), unusable row (degrades with a message). Document lines (rh_doc_stay_lines): exclusive
+ *     prints the child and packages as nets and still foots (invoice package rows too, read-only render); inclusive unchanged.
  *   - Pages (scripts/tests/page_harness.php, rolled back): the Bookings list, the dashboard pending card and the
  *     booking details page carry the button and its data.
  */
@@ -100,6 +101,17 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     $kn0 = rh_booking_room_net(['tourism_levy_percent' => 0, 'vat_rate' => 0] + $kid);
     ok("[$mode] child: no stored levy/VAT % -> same room and child net as with the stored rates", abs($kn0['room'] - $kn['room']) <= 0.02 && abs($kn0['child'] - $kn['child']) <= 0.02, json_encode([$kn0, $kn]));
 
+    // package + child (stored all-in in EVERY mode, exclusive too): room net is the room alone; package carries VAT only
+    $pkgAmt = 60000.0;
+    $tp = rh_stay_totals_with_package($night * $nights + $childSup + $pkgAmt, $pkgAmt, true);
+    $kp = ['number_of_nights' => $nights, 'total_amount' => round($tp['net'] + $tp['levy'], 2), 'vat_amount' => $tp['vat'],
+        'tourism_levy_amount' => $tp['levy'], 'tourism_levy_percent' => 1, 'vat_rate' => 17.5,
+        'total_with_vat' => $tp['total_with_vat'], 'child_supplement_total' => $childSup, 'package_total' => $pkgAmt];
+    $pn = rh_booking_room_net($kp);
+    $pn0 = rh_booking_room_net(['tourism_levy_percent' => 0, 'vat_rate' => 0] + $kp);
+    ok("[$mode] package + child: room net = room / 1.185, child net = child / 1.185 (stored rates)", abs($pn['room'] - $night * $nights / 1.185) <= 0.02 && abs($pn['child'] - $childSup / 1.185) <= 0.02, json_encode($pn));
+    ok("[$mode] package + child: no stored levy/VAT % -> same split", abs($pn0['room'] - $pn['room']) <= 0.02 && abs($pn0['child'] - $pn['child']) <= 0.02, json_encode([$pn0, $pn]));
+
     // manager override = final gross, nothing separate
     $ovr = $mk(250000.0, 'final', 0.0);
     $bd = rh_booking_total_breakdown($ovr);
@@ -146,6 +158,87 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     $bd = rh_booking_total_breakdown($plain, ['folio' => ['booking_base_amount' => $kept, 'extras_total' => 0, 'grand_total' => $kept, 'amount_paid' => 0, 'balance_due' => $kept]]);
     $adds = 0.0; foreach ($bd['lines'] as $l) { if ($l['label'] === 'Original total' || $l['label'] === 'Cancellation adjustment') { $adds += btb_num($l['value']); } }
     ok("[$mode] cancelled: original + adjustment = amount kept", btb_has($bd, 'Cancellation adjustment') && abs($adds - $kept) <= BALANCE_TOLERANCE, json_encode($bd));
+}
+
+// Document lines (rh_doc_stay_lines) in EXCLUSIVE mode, owner 2026-11-26 "fix the exclusive mode document split": the child
+// charge and packages are stored all-in in every mode, so exclusive prints them as nets (child / (1+v+l), package / (1+v))
+// on the same basis as the net lines; inclusive is unchanged. 17.5% VAT, 1% levy.
+$_SITE_SETTINGS['vat_enabled'] = '1';
+$_SITE_SETTINGS['vat_rate'] = '17.5';
+$_SITE_SETTINGS['tourism_levy_enabled'] = '1';
+$_SITE_SETTINGS['tourism_levy_percent'] = '1';
+$dsRow = function (float $room, float $child, float $pkg): array {
+    $t = $pkg > 0 ? rh_stay_totals_with_package($room + $child + $pkg, $pkg, true) : rh_stay_totals($room + $child, 'price', true);
+    return ['number_of_nights' => 3, 'total_amount' => round($t['net'] + $t['levy'], 2), 'vat_amount' => $t['vat'],
+        'tourism_levy_amount' => $t['levy'], 'tourism_levy_percent' => 1, 'vat_rate' => 17.5, 'total_with_vat' => $t['total_with_vat'],
+        'child_supplement_total' => $child, 'package_total' => $pkg];
+};
+$_SITE_SETTINGS['vat_pricing_mode'] = 'exclusive';
+// the owner's probe: room 900,000 + child 150,000 all-in -> room 759,493.67, child 126,582.28 (was 736,075.95 / 150,000)
+$probe = $dsRow(900000, 150000, 0);
+foreach (['stored rates' => $probe, 'no stored %' => ['vat_rate' => 0, 'tourism_levy_percent' => 0] + $probe] as $lbl => $pr) {
+    $L = rh_doc_stay_lines($pr);
+    ok("[exclusive doc] probe ($lbl): room 759,493.67, child 126,582.28, room + child = lines", abs($L['room'] - 759493.67) < 0.005 && abs($L['child'] - 126582.28) < 0.005 && abs($L['room'] + $L['child'] - $L['lines_total']) < 0.005, json_encode($L));
+}
+// room + child + package, stored rates and the % columns at 0 (rates from the row's own amounts)
+$cp = $dsRow(900000, 150000, 60000);
+foreach (['stored rates' => [$cp, 0.005], 'no stored %' => [['vat_rate' => 0, 'tourism_levy_percent' => 0] + $cp, 0.02]] as $lbl => [$pr, $tolX]) {
+    $L = rh_doc_stay_lines($pr, (float)$pr['package_total']);
+    ok("[exclusive doc] room + child + package ($lbl): room = 900,000/1.185, child = 150,000/1.185, package = 60,000/1.175", abs($L['room'] - 900000 / 1.185) <= $tolX && abs($L['child'] - 150000 / 1.185) <= $tolX && abs($L['pkg'] - 60000 / 1.175) <= $tolX, json_encode($L));
+    ok("[exclusive doc] room + child + package ($lbl): the lines foot to lines_total, + VAT + levy = total", abs($L['room'] + $L['child'] + $L['pkg'] - $L['lines_total']) < 0.005 && abs($L['lines_total'] + $L['vat'] + $L['levy'] - $L['total']) < 0.005, json_encode($L));
+    $N = rh_booking_room_net($pr);
+    ok("[exclusive doc] room net ($lbl) = the document's room and child lines (no second split)", abs($N['room'] - $L['room']) < 0.005 && abs($N['child'] - $L['child']) < 0.005, json_encode([$N, $L]));
+}
+// a legacy row whose package is bigger than the booking still folds into the room line
+$big = ['number_of_nights' => 2, 'total_amount' => 101000, 'vat_amount' => 17500, 'tourism_levy_amount' => 1000, 'total_with_vat' => 118500, 'child_supplement_total' => 0, 'vat_rate' => 17.5, 'tourism_levy_percent' => 1];
+$L = rh_doc_stay_lines($big, 200000);
+ok('[exclusive doc] legacy package bigger than the booking: folded into the room line', $L['pkg'] == 0.0 && abs($L['room'] - $L['lines_total']) < 0.005, json_encode($L));
+// booking_packages rows go on the same net basis and add up to the package line exactly (last row takes the rounding)
+$pkRows = [['package_name' => 'Dinner', 'quantity' => 1, 'price_amount' => 40000, 'total_cost' => 40000], ['package_name' => 'Boat', 'quantity' => 2, 'price_amount' => 10000, 'total_cost' => 20000]];
+$L = rh_doc_stay_lines($cp, 60000);
+$nr = rh_doc_pkg_rows_on_basis($pkRows, 'exclusive', $L['pkg'], 60000);
+ok('[exclusive doc] package rows: each / 1.175, rows add up to the package line', abs($nr[0]['total_cost'] - 40000 / 1.175) <= 0.01 && abs($nr[1]['total_cost'] - 20000 / 1.175) <= 0.01 && abs($nr[1]['price_amount'] - 10000 / 1.175) <= 0.01 && abs($nr[0]['total_cost'] + $nr[1]['total_cost'] - $L['pkg']) < 0.005, json_encode($nr));
+ok('[inclusive doc] package rows unchanged', rh_doc_pkg_rows_on_basis($pkRows, 'inclusive', 60000, 60000) === $pkRows && rh_doc_pkg_rows_on_basis($pkRows, 'off', 60000, 60000) === $pkRows);
+// the invoice (read-only render, sample data via $preload): package rows print net and the item lines foot to the subtotal
+require_once $root . '/config/invoice.php';
+$invB = $cp + ['id' => 0, 'booking_reference' => 'BTB-DOC-1', 'guest_name' => 'Doc Test', 'guest_email' => 'doc@example.invalid', 'guest_phone' => '000',
+    'room_name' => 'Test Room', 'check_in_date' => '2030-01-10', 'check_out_date' => '2030-01-13', 'adult_guests' => 2, 'child_guests' => 1,
+    'child_charge_mode' => 'fixed', 'child_charge_amount' => 50000, 'free_children' => 0, 'rate_plan_discount' => 0, 'rate_plan_label' => '', 'primary_booking_id' => null, 'status' => 'confirmed'];
+$invT = null;
+$invH = buildInvoiceHTML($invB, 'BTB-INV-1', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', [],
+    ['packages' => $pkRows, 'folio_charges' => [], 'payments' => [], 'summary' => ['grand_total' => $cp['total_with_vat'], 'amount_paid' => 0.0, 'balance_due' => $cp['total_with_vat']]], false, $invT);
+$invTxt = html_entity_decode(strip_tags((string)$invH), ENT_QUOTES, 'UTF-8');
+$has = fn(float $v): bool => strpos($invTxt, number_format($v, 2)) !== false;
+ok('[exclusive invoice] room, child and both package rows print on the net basis (no all-in package amounts)', $has($L['room']) && $has($L['child']) && $has($nr[0]['total_cost']) && $has($nr[1]['total_cost']) && !$has(40000) && !$has(20000), substr(preg_replace('/\s+/', ' ', $invTxt), 0, 1500));
+ok('[exclusive invoice] room + child + package rows = the printed subtotal; + VAT + levy = total', abs($L['room'] + $L['child'] + $nr[0]['total_cost'] + $nr[1]['total_cost'] - (float)($invT['subtotal'] ?? -1)) < 0.005 && abs((float)$invT['subtotal'] + (float)$invT['vat'] + (float)$invT['levy'] - (float)$invT['total']) < 0.005, json_encode($invT));
+// the room description's "+ children / + package" amounts and the rate-plan discount sit on the same net basis (exclusive only)
+$descAmt = function (string $txt, string $what): ?float {
+    return preg_match('/\+ ' . $what . ' [^0-9]*([0-9][0-9,]*\.[0-9]{2})/', $txt, $m) ? (float)str_replace(',', '', $m[1]) : null;
+};
+$invD = ['rate_plan_label' => 'Early bird', 'rate_plan_discount' => 10000] + $invB; // 10,000 a night x 3 = 30,000 all-in
+$invPre = ['packages' => $pkRows, 'folio_charges' => [], 'payments' => [], 'summary' => ['grand_total' => $cp['total_with_vat'], 'amount_paid' => 0.0, 'balance_due' => $cp['total_with_vat']]];
+$invDT = null;
+$invDTxt = html_entity_decode(strip_tags((string)buildInvoiceHTML($invD, 'BTB-INV-2', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', [], $invPre, false, $invDT)), ENT_QUOTES, 'UTF-8');
+$dC = $descAmt($invDTxt, 'children');
+$dP = $descAmt($invDTxt, 'package');
+ok('[exclusive invoice] description: + children 150,000/1.185 and + package 60,000/1.175 (the nets beside the lines)', $dC !== null && abs($dC - $L['child']) < 0.005 && $dP !== null && abs($dP - $L['pkg']) < 0.005, json_encode([$dC, $dP, $L]) . ' ' . substr(preg_replace('/\s+/', ' ', $invDTxt), 0, 1500));
+$dNet = round(30000 / 1.185, 2);
+ok('[exclusive invoice] rate-plan discount on the room basis: 30,000/1.185 = 25,316.46 (not 30,000.00), room line before it = room + discount, lines still foot', strpos($invDTxt, number_format($dNet, 2)) !== false && strpos($invDTxt, '30,000.00') === false && strpos($invDTxt, number_format($L['room'] + $dNet, 2)) !== false && abs((float)$invDT['subtotal'] - (float)$invT['subtotal']) < 0.005 && abs((float)$invDT['total'] - (float)$invT['total']) < 0.005, json_encode($invDT) . ' ' . substr(preg_replace('/\s+/', ' ', $invDTxt), 0, 1500));
+// inclusive: the description and the discount print as stored, as before
+$_SITE_SETTINGS['vat_pricing_mode'] = 'inclusive';
+$invIT = null;
+$invITxt = html_entity_decode(strip_tags((string)buildInvoiceHTML($invD, 'BTB-INV-3', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', [], $invPre, false, $invIT)), ENT_QUOTES, 'UTF-8');
+ok('[inclusive invoice] description + children 150,000.00, + package 60,000.00, discount 30,000.00 (unchanged)', abs((float)$descAmt($invITxt, 'children') - 150000) < 0.005 && abs((float)$descAmt($invITxt, 'package') - 60000) < 0.005 && strpos($invITxt, '30,000.00') !== false, substr(preg_replace('/\s+/', ' ', $invITxt), 0, 1500));
+$_SITE_SETTINGS['vat_pricing_mode'] = 'exclusive';
+// INCLUSIVE: byte-for-byte the old figures (lines = gross - levy; child and package as stored; room = the rest)
+$_SITE_SETTINGS['vat_pricing_mode'] = 'inclusive';
+foreach (['probe' => [$probe, 0.0], 'child + package' => [$cp, 60000.0], 'no stored %' => [['vat_rate' => 0, 'tourism_levy_percent' => 0] + $cp, 60000.0]] as $lbl => [$pr, $pk]) {
+    $L = rh_doc_stay_lines($pr, $pk);
+    $lines = round($pr['total_with_vat'] - $pr['tourism_levy_amount'], 2);
+    $want = ['mode' => 'inclusive', 'gross' => round($pr['total_with_vat'], 2), 'vat' => (float)$pr['vat_amount'], 'levy' => (float)$pr['tourism_levy_amount'],
+        'lines_total' => $lines, 'room' => round($lines - $pr['child_supplement_total'] - $pk, 2), 'child' => (float)$pr['child_supplement_total'], 'pkg' => $pk,
+        'subtotal' => $lines, 'total' => round($pr['total_with_vat'], 2)];
+    ok("[inclusive doc] $lbl: unchanged (old formula, identical array)", $L === $want, json_encode([$L, $want]));
 }
 
 // VAT off with a leftover vat_amount on the row: no VAT line, lines still add up
