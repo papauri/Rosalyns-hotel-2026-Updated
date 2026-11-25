@@ -32,7 +32,17 @@ when prompted."
   + faq (they quote "included in the room rate above"; add the new line). Assistant: "what is the room rate without
   VAT / levy" -> that popup line. Manager Guide: Money and End of Day (one line, optional). (Arrived mid-sync 2026-11-26.)
 
-- 2026-11-26 Liwonde (uncommitted, ROOM_PACKAGES_FIX_PLAN.md, owner PATCH): room packages now follow stay changes.
+- 2026-11-26 Liwonde (CONF_PACKAGES_PLAN.md, owner FEATURE): Conference packages. New admin page Conference Packages
+  (conference-packages.php; view: conference, edit catalog: conference_rooms): per event / per day / per delegate per
+  day, per conference room, inclusions. Clients tick packages on the conference page; staff add/remove/keep them on
+  the enquiry (conference_financials) and can now change delegates and room in the event-change form. Per-day and
+  per-delegate packages reprice when days/delegates/room change; a package the new room doesn't offer is flagged.
+  VAT on venue + packages, no levy. Quotation, invoice, emails list the package lines; the deposit line shows the
+  amount (was the yes/no flag). Reports: Conference export by event date, confirmed only, plus a packages section;
+  EOD has a conference packages line. Guides: conference page + a packages section (Help now opens #conf-amount).
+  Assistant: conference answers should include package lines. Manager Guide: none.
+
+- 2026-11-26 Liwonde (d9a3bb8 / Rosalyn's 5559e09, ROOM_PACKAGES_FIX_PLAN.md, owner PATCH): room packages now follow stay changes.
   Shorter/longer stays and adult changes work per-night and per-person-per-night packages out again (per-stay kept);
   in a group the lead room's party package is recalculated from the party's adults x the lead's nights, History
   "Package recalculated" (lead) / "Party package recalculated" (the changed room). Edit Booking and the date-change

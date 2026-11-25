@@ -117,6 +117,12 @@ $checks[] = ['WARN', 'Company payment lines whose payment or booking is missing'
     "SELECT l.id FROM billing_remittance_lines l LEFT JOIN payments p ON p.id = l.payment_id LEFT JOIN bookings b ON b.id = l.booking_id WHERE p.id IS NULL OR b.id IS NULL"];
 $checks[] = ['WARN', 'Company payments whose company is missing',
     "SELECT r.id FROM billing_remittances r LEFT JOIN billing_accounts a ON a.id = r.billing_account_id WHERE a.id IS NULL"];
+// Conference packages (migration 092): lines go with their enquiry; the enquiry's package_total is the sum of its lines.
+$checks[] = ['WARN', 'Conference package lines whose enquiry is missing',
+    "SELECT x.id FROM conference_inquiry_packages x LEFT JOIN conference_inquiries ci ON ci.id = x.inquiry_id WHERE ci.id IS NULL"];
+$checks[] = ['FAIL', 'Conference enquiries whose package total differs from their package lines',
+    "SELECT ci.id FROM conference_inquiries ci LEFT JOIN (SELECT inquiry_id, SUM(total_cost) AS s FROM conference_inquiry_packages GROUP BY inquiry_id) l
+      ON l.inquiry_id = ci.id WHERE ABS(COALESCE(ci.package_total, 0) - COALESCE(l.s, 0)) > 0.01"];
 $checks[] = ['WARN', 'Bookings on a company account that no longer exists',
     "SELECT b.id FROM bookings b LEFT JOIN billing_accounts a ON a.id = b.billing_account_id WHERE b.billing_account_id IS NOT NULL AND a.id IS NULL"];
 

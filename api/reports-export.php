@@ -764,9 +764,11 @@ function exportConferenceReport($output, string $start_date, string $end_date, s
     fputcsv($output, ['CONFERENCE INQUIRY STATUS']);
     fputcsv($output, ['Status', 'Count', 'Total Value (incl. VAT)', 'Amount Paid']);
 
+    // Dated by the event (event_date), end day included once (< end + 1 day); every status listed. Revenue
+    // figures below count only confirmed / completed events (same as the Reports screen).
     $confStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count, COALESCE(SUM(" . rh_conf_gross_sql() . "), 0) as value, COALESCE(SUM(amount_paid), 0) as paid
-        FROM conference_inquiries WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        FROM conference_inquiries WHERE event_date >= ? AND event_date < DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status
     ");
     $confStmt->execute([$start_date, $end_date]);
@@ -780,9 +782,9 @@ function exportConferenceReport($output, string $start_date, string $end_date, s
 
     $roomStmt = $pdo->prepare("
         SELECT cr.name, cr.capacity, COUNT(ci.id) as events, COALESCE(AVG(ci.number_of_attendees), 0) as avg_att,
-               COALESCE(SUM(" . rh_conf_gross_sql('ci') . "), 0) as revenue
+               COALESCE(SUM(CASE WHEN ci.status IN ('confirmed','completed') THEN " . rh_conf_gross_sql('ci') . " ELSE 0 END), 0) as revenue
         FROM conference_rooms cr LEFT JOIN conference_inquiries ci ON cr.id = ci.conference_room_id
-            AND ci.created_at >= ? AND ci.created_at <= DATE_ADD(?, INTERVAL 1 DAY) AND ci.status != 'cancelled'
+            AND ci.event_date >= ? AND ci.event_date < DATE_ADD(?, INTERVAL 1 DAY) AND ci.status != 'cancelled'
         WHERE cr.is_active = 1 GROUP BY cr.id, cr.name, cr.capacity ORDER BY events DESC
     ");
     $roomStmt->execute([$start_date, $end_date]);
@@ -790,6 +792,29 @@ function exportConferenceReport($output, string $start_date, string $end_date, s
         fputcsv($output, [$row['name'], $row['capacity'], $row['events'], round($row['avg_att']), $currency_symbol . ' ' . number_format($row['revenue'], 2)]);
     }
     fputcsv($output, []);
+
+    // Conference packages sold (owner 2026-11-26): same filter, confirmed / completed only, VAT included at the
+    // rate locked on each booking.
+    if (rh_conf_has_packages($pdo)) {
+        fputcsv($output, ['CONFERENCE PACKAGES']);
+        fputcsv($output, ['Package', 'Times sold', 'Revenue (incl. VAT)']);
+        $pkgStmt = $pdo->prepare("
+            SELECT cip.package_name, COUNT(*) AS times_sold,
+                   COALESCE(SUM(cip.total_cost * (CASE WHEN COALESCE(ci.total_with_vat, 0) > 0 AND COALESCE(ci.total_amount, 0) > 0
+                       THEN ci.total_with_vat / ci.total_amount ELSE 1 END)), 0) AS revenue
+            FROM conference_inquiry_packages cip
+            INNER JOIN conference_inquiries ci ON ci.id = cip.inquiry_id
+            WHERE ci.status IN ('confirmed','completed')
+              AND ci.event_date >= ? AND ci.event_date < DATE_ADD(?, INTERVAL 1 DAY)
+            GROUP BY cip.package_name
+            ORDER BY revenue DESC, cip.package_name ASC
+        ");
+        $pkgStmt->execute([$start_date, $end_date]);
+        while ($row = $pkgStmt->fetch(PDO::FETCH_ASSOC)) {
+            fputcsv($output, [rpx_cell((string)$row['package_name']), (int)$row['times_sold'], $currency_symbol . ' ' . number_format((float)$row['revenue'], 2)]);
+        }
+        fputcsv($output, []);
+    }
 
     fputcsv($output, ['GYM INQUIRIES']);
     fputcsv($output, ['Status', 'Count']);

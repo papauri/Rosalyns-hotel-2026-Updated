@@ -421,6 +421,38 @@ if ($mod_bookings) {
     }
 }
 
+// Conference packages (owner 2026-11-26): same basis as conference revenue in eod-revenue.php, i.e. confirmed /
+// completed enquiries whose event starts on the report day. VAT included via the row's LOCKED VAT factor.
+$conf_packages = ['revenue' => 0.0, 'sold' => 0, 'top' => '', 'top_revenue' => 0.0];
+if ($mod_conference) {
+    try {
+        require_once __DIR__ . '/../includes/conference-pricing.php';
+        if (rh_conf_has_packages($pdo)) {
+            $cpStmt = $pdo->prepare("SELECT COALESCE(SUM(" . rh_conf_package_gross_sql() . "),0)
+                FROM conference_inquiries WHERE status IN ('confirmed','completed') AND event_date = :d");
+            $cpStmt->execute([':d' => $report_date]);
+            $conf_packages['revenue'] = (float)$cpStmt->fetchColumn();
+
+            $lineGross = "cip.total_cost * (CASE WHEN COALESCE(ci.total_with_vat,0) > 0 AND COALESCE(ci.total_amount,0) > 0 THEN ci.total_with_vat / ci.total_amount ELSE 1 END)";
+            $clStmt = $pdo->prepare("SELECT cip.package_name, COUNT(*) AS cnt, SUM($lineGross) AS rev
+                FROM conference_inquiry_packages cip
+                INNER JOIN conference_inquiries ci ON ci.id = cip.inquiry_id
+                WHERE ci.status IN ('confirmed','completed') AND ci.event_date = :d
+                GROUP BY cip.package_name ORDER BY cnt DESC, rev DESC, cip.package_name ASC");
+            $clStmt->execute([':d' => $report_date]);
+            foreach ($clStmt->fetchAll(PDO::FETCH_ASSOC) as $i => $cl) {
+                $conf_packages['sold'] += (int)$cl['cnt'];
+                if ($i === 0) {
+                    $conf_packages['top'] = (string)$cl['package_name'];
+                    $conf_packages['top_revenue'] = (float)$cl['rev'];
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('EOD conference packages: ' . $e->getMessage());
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 9) Tomorrow preview
 // ---------------------------------------------------------------------------
@@ -1148,7 +1180,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
         if ($mod_bookings) { $detailTabs['rooms'] = ['Room types', null]; }
         $detailTabs['trend'] = ['7-day trend', null];
         $detailTabs['insight'] = ['Yield &amp; guests', null];
-        if ($mod_bookings || $eod_billing) { $detailTabs['pricing'] = ['Pricing &amp; quotes', null]; }
+        if ($mod_bookings || $eod_billing || $mod_conference) { $detailTabs['pricing'] = ['Pricing &amp; quotes', null]; }
         $detailTabs['ops'] = ['Housekeeping &amp; more', null];
         $hkOpen = (int)$housekeeping['pending'] + (int)$housekeeping['in_progress'];
         ?>
@@ -1898,7 +1930,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     </div>
                 </div>
 
-                <?php if ($mod_bookings || $eod_billing): ?>
+                <?php if ($mod_bookings || $eod_billing || $mod_conference): ?>
                 <!-- Pricing & quotes -->
                 <div class="ck-pane" role="tabpanel" data-ck-pane="pricing" hidden>
                     <h3 class="eod-pane-title">Pricing, packages &amp; quotations</h3>
@@ -1916,6 +1948,22 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                 echo $kv('Surcharges added', $money($dynamic_pricing['total_surcharge_added']) . $sub('rate-plan surcharges &times; nights, already in the room rates'));
                                 echo $kv('Package add-on revenue', $money($dynamic_pricing['package_revenue']) . $sub((int)$dynamic_pricing['packages_booked'] . ' package' . ((int)$dynamic_pricing['packages_booked'] === 1 ? '' : 's') . ' on bookings made today, VAT included'), 'eod-good');
                                 if ($dynamic_pricing['top_package']) { echo $kv('Top package', htmlspecialchars($dynamic_pricing['top_package']) . $sub('most booked package today')); }
+                                ?>
+                            </ul>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ($mod_conference): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Conference packages <a class="eod-link" href="conference-management.php">Open &rarr;</a></h4>
+                            <?php if ((int)$conf_packages['sold'] === 0): ?>
+                                <div class="ck-empty"><i class="fas fa-box"></i><p>No packages on conferences held today.</p></div>
+                            <?php else: ?>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                echo $kv('Conference package revenue <i class="help" data-tip="Package lines on confirmed or completed conferences whose event starts on this day, VAT included at the rate locked on each booking. Already inside conference revenue.">?</i>', $money($conf_packages['revenue']) . $sub('VAT included'), 'eod-good');
+                                echo $kv('Packages sold <i class="help" data-tip="Number of package lines on confirmed or completed conferences whose event starts on this day.">?</i>', (string)(int)$conf_packages['sold']);
+                                if ($conf_packages['top'] !== '') { echo $kv('Top conference package <i class="help" data-tip="The package on the most conferences held this day; the figure is its revenue, VAT included.">?</i>', htmlspecialchars($conf_packages['top'], ENT_QUOTES, 'UTF-8') . $sub($money($conf_packages['top_revenue']))); }
                                 ?>
                             </ul>
                             <?php endif; ?>

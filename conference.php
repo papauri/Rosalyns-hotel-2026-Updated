@@ -284,11 +284,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Server-side price: half-day rate for short single-day events, else daily rate x days
         $conf_price = rh_conf_price($room, $event_date, $sanitized_data['end_date'], $start_time, $end_time);
-        $total_amount = $conf_price['amount'];
+        $venue_amount = round((float)$conf_price['amount'], 2);
 
-        // Quoted rates are VAT-inclusive, so record the split without inflating the
-        // quote — otherwise the enquiry lands in admin with vat_amount = 0 and the
-        // tax silently disappears from the conference books.
+        // Packages the guest ticked (owner 2026-11-26): each must be offered for this room, else the form is refused
+        // (never silently dropped). Priced on the same basis as the room rate; per day / per delegate per day use the
+        // event's days and attendees. The lines are snapshots, so a later catalog change never touches this enquiry.
+        $confHasPackages = rh_conf_has_packages($pdo);
+        $package_lines = [];
+        $package_total = 0.0;
+        $postedPkgIds = array_values(array_unique(array_filter(array_map('intval', (array)($_POST['package_ids'] ?? [])), static function ($v) {
+            return $v > 0;
+        })));
+        if ($postedPkgIds) {
+            if (!$confHasPackages || count($postedPkgIds) > 20) {
+                throw new Exception('One of the packages you picked is not offered for this room. Please pick again.');
+            }
+            $offered = [];
+            foreach (rh_conf_packages_for_room($pdo, (int)$room['id']) as $offeredPkg) {
+                $offered[(int)$offeredPkg['id']] = $offeredPkg;
+            }
+            $pkgDays = rh_conf_days($event_date, $sanitized_data['end_date']);
+            $pkgDelegates = rh_conf_delegates((int)$attendees);
+            foreach ($postedPkgIds as $pkgId) {
+                if (!isset($offered[$pkgId])) {
+                    throw new Exception('One of the packages you picked is not offered for this room. Please pick again.');
+                }
+                $pkgRow = $offered[$pkgId];
+                $lineCost = rh_conf_package_cost((string)$pkgRow['price_type'], (float)$pkgRow['price_amount'], $pkgDays, $pkgDelegates);
+                $package_lines[] = [
+                    'package_id' => $pkgId,
+                    'package_name' => (string)$pkgRow['name'],
+                    'price_type' => (string)$pkgRow['price_type'],
+                    'unit_price' => round((float)$pkgRow['price_amount'], 2),
+                    'days' => $pkgDays,
+                    'delegates' => $pkgDelegates,
+                    'total_cost' => $lineCost,
+                ];
+                $package_total += $lineCost;
+            }
+            $package_total = round($package_total, 2);
+        }
+        $total_amount = round($venue_amount + $package_total, 2);
+        if (!rh_conf_total_fits($total_amount)) {
+            throw new Exception('This enquiry is too large to take online. Please contact us directly and we will prepare a quotation.');
+        }
+
+        // Record the VAT split on the full amount (room hire + packages) without inflating the quote: in inclusive
+        // mode the rates already contain VAT, in exclusive mode VAT is added on top. (Rosalyn's had this; Liwonde saved
+        // vat 0 and passed undefined figures to the emails.)
         $conference_vat        = vat_components((float)$total_amount);
         $conference_vat_rate   = $conference_vat['rate'];
         $conference_vat_amount = $conference_vat['vat'];
@@ -301,17 +344,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ref_check->execute([$inquiry_reference]);
         } while ($ref_check->rowCount() > 0);
 
-        // Insert inquiry
-        $insert_stmt = $pdo->prepare("
-            INSERT INTO conference_inquiries (
-                inquiry_reference, conference_room_id, company_name, contact_person,
+        // Insert inquiry, its package lines and the end date together (all or nothing).
+        $insertCols = 'inquiry_reference, conference_room_id, company_name, contact_person,
                 email, phone, event_date, start_time, end_time, number_of_attendees,
                 event_type, special_requirements, catering_required, av_equipment, total_amount,
-                vat_rate, vat_amount, total_with_vat
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-
-        $insert_stmt->execute([
+                vat_rate, vat_amount, total_with_vat';
+        $insertArgs = [
             $inquiry_reference,
             $room_id,
             $company_name,
@@ -329,14 +367,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $total_amount,
             $conference_vat_rate,
             $conference_vat_amount,
-            $conference_total_wv
-        ]);
+            $conference_total_wv,
+        ];
+        if ($confHasPackages) {
+            // The room rates used for this price, so a later rate change is never mistaken for a manual price.
+            $insertCols .= ', package_total, booked_daily_rate, booked_half_day_rate';
+            $insertArgs[] = $package_total;
+            $insertArgs[] = round((float)($room['daily_rate'] ?? 0), 2);
+            $insertArgs[] = (isset($room['half_day_rate']) && $room['half_day_rate'] !== '') ? round((float)$room['half_day_rate'], 2) : null;
+        }
+        $pdo->beginTransaction();
+        try {
+            $insert_stmt = $pdo->prepare('INSERT INTO conference_inquiries (' . $insertCols . ') VALUES (' . implode(', ', array_fill(0, count($insertArgs), '?')) . ')');
+            $insert_stmt->execute($insertArgs);
 
-        // Multi-day events: store the last day (column is optional - migration 061)
-        $new_inquiry_id = $pdo->lastInsertId();
-        if ($confHasEndDate && !empty($sanitized_data['end_date'])) {
-            $pdo->prepare("UPDATE conference_inquiries SET end_date = ? WHERE id = ?")
-                ->execute([$sanitized_data['end_date'], $new_inquiry_id]);
+            // Multi-day events: store the last day (column is optional - migration 061)
+            $new_inquiry_id = (int)$pdo->lastInsertId();
+            if ($confHasEndDate && !empty($sanitized_data['end_date'])) {
+                $pdo->prepare("UPDATE conference_inquiries SET end_date = ? WHERE id = ?")
+                    ->execute([$sanitized_data['end_date'], $new_inquiry_id]);
+            }
+            if ($package_lines) {
+                $lineIns = $pdo->prepare("INSERT INTO conference_inquiry_packages
+                    (inquiry_id, package_id, package_name, price_type, unit_price, days, delegates, total_cost, added_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)");
+                foreach ($package_lines as $pl) {
+                    $lineIns->execute([$new_inquiry_id, $pl['package_id'], $pl['package_name'], $pl['price_type'], $pl['unit_price'], min(65535, $pl['days']), min(65535, $pl['delegates']), $pl['total_cost']]);
+                }
+            }
+            $pdo->commit();
+        } catch (Throwable $insEx) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $insEx;
         }
 
         // Set success and generate reference after validation passes
@@ -345,7 +409,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Prepare enquiry data for email functions
         $enquiry_data = [
-            'id' => $pdo->lastInsertId(),
+            'id' => $new_inquiry_id,
             'inquiry_reference' => $inquiry_reference,
             'conference_room_id' => $room_id,
             'company_name' => $company_name,
@@ -362,8 +426,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'catering_required' => $catering,
             'av_equipment' => $av_equipment,
             'total_amount' => $total_amount,
+            'vat_rate' => $conference_vat_rate,
             'vat_amount' => $conference_vat_amount,
-            'total_with_vat' => $conference_total_wv
+            'total_with_vat' => $conference_total_wv,
+            'package_total' => $package_total,
+            'package_lines' => $package_lines,
         ];
 
         // Send confirmation email to customer
@@ -549,6 +616,43 @@ function resolveConferenceImage(?string $imagePath): string
 
         <!-- Inquiry Modal -->
         <?php
+        // Packages the guest can add (owner 2026-11-26): only the ones offered for the chosen room are shown (JS filters
+        // by data-rooms); the server checks again and prices them itself (the estimate below is display only).
+        $confPubPackages = [];
+        if (rh_conf_has_packages($pdo)) {
+            try {
+                $confPubPackages = $pdo->query("SELECT id, name, short_description, price_type, price_amount, applies_to, conference_room_ids FROM conference_packages WHERE is_active = 1 ORDER BY sort_order ASC, name ASC")->fetchAll(PDO::FETCH_ASSOC);
+            } catch (PDOException $e) {
+                $confPubPackages = [];
+            }
+        }
+        $confPubTypes = rh_conf_price_types();
+        $confPubOldIds = $inquiry_error !== '' ? array_map('intval', (array)($_POST['package_ids'] ?? [])) : [];
+        $confPkgFieldset = '';
+        if ($confPubPackages) {
+            $confPkgItems = '';
+            foreach ($confPubPackages as $cpp) {
+                $cppId = (int)$cpp['id'];
+                $cppRooms = (string)$cpp['applies_to'] === 'rooms' ? implode(',', rh_conf_package_room_ids($cpp)) : 'all';
+                $cppType = (string)$cpp['price_type'];
+                $confPkgItems .= '<div class="checkbox-group conf-pkg-pick__item" data-rooms="' . htmlspecialchars($cppRooms, ENT_QUOTES, 'UTF-8') . '">'
+                    . '<input type="checkbox" name="package_ids[]" id="confPkg' . $cppId . '" value="' . $cppId . '" data-type="' . htmlspecialchars($cppType, ENT_QUOTES, 'UTF-8') . '" data-price="' . htmlspecialchars((string)round((float)$cpp['price_amount'], 2), ENT_QUOTES, 'UTF-8') . '"' . (in_array($cppId, $confPubOldIds, true) ? ' checked' : '') . '>'
+                    . '<label for="confPkg' . $cppId . '"><span class="conf-pkg-pick__name">' . htmlspecialchars((string)$cpp['name'], ENT_QUOTES, 'UTF-8') . '</span> '
+                    . '<span class="conf-pkg-pick__price">' . htmlspecialchars($currency_symbol . rh_conf_money_words((float)$cpp['price_amount']) . ' ' . ($confPubTypes[$cppType] ?? ''), ENT_QUOTES, 'UTF-8') . '</span>'
+                    . (trim((string)($cpp['short_description'] ?? '')) !== '' ? '<small class="conf-pkg-pick__desc">' . htmlspecialchars((string)$cpp['short_description'], ENT_QUOTES, 'UTF-8') . '</small>' : '')
+                    . '</label></div>';
+            }
+            $confPkgFieldset = '<fieldset class="conf-pkg-pick" id="confPkgPick">'
+                . '<legend>Add packages (optional)</legend>'
+                . '<p class="conf-pkg-pick__hint">Priced for your dates and number of attendees.</p>'
+                . $confPkgItems
+                . '<p class="conf-pkg-pick__estimate" id="confPkgEstimate" aria-live="polite"></p>'
+                . '</fieldset>';
+        }
+        $confPubRates = [];
+        foreach ($conference_rooms as $cpr) {
+            $confPubRates[(int)$cpr['id']] = ['daily' => round((float)$cpr['daily_rate'], 2), 'half' => round((float)($cpr['half_day_rate'] ?? 0), 2)];
+        }
         $modalContent = '
         <form method="POST" action="" id="inquiryForm">
             <input type="hidden" name="conference_room_id" id="selectedRoomId">
@@ -609,7 +713,7 @@ function resolveConferenceImage(?string $imagePath): string
             <div class="form-row">
                 <div class="form-group">
                     <label>Number of Attendees *</label>
-                    <input type="number" name="number_of_attendees" value="' . $confOld('number_of_attendees') . '" min="1" inputmode="numeric" required>
+                    <input type="number" name="number_of_attendees" id="number_of_attendees" value="' . $confOld('number_of_attendees') . '" min="1" inputmode="numeric" required>
                 </div>
                 <div class="form-group">
                     <label>Event Type</label>
@@ -624,6 +728,8 @@ function resolveConferenceImage(?string $imagePath): string
                     </select>
                 </div>
             </div>
+
+            ' . $confPkgFieldset . '
 
             <div class="form-group">
                 <label>AV Equipment Requirements</label>
@@ -711,12 +817,70 @@ function resolveConferenceImage(?string $imagePath): string
             window.openInquiryModal = function openInquiryModal(roomId, roomName) {
                 document.getElementById('selectedRoomId').value = roomId;
                 document.getElementById('selectedRoomName').value = roomName;
+                confPkgRefresh();
 
                 if (inquiryModal) {
                     inquiryModal.classList.add('modal--active');
                     document.body.classList.add('modal-open');
                 }
             };
+
+            // Packages offered for the chosen room + a live estimate (same rules as the server; the server prices it again).
+            const CONF_PUB_RATES = <?php echo json_encode((object)$confPubRates, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            const CONF_PUB_CUR = <?php echo json_encode((string)$currency_symbol, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            function confPkgMoney(v) {
+                return CONF_PUB_CUR + Number(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+            }
+            function confPkgDays() {
+                const s = document.getElementById('event_date')?.value || '';
+                const e = document.getElementById('end_date')?.value || s;
+                if (!s) return 1;
+                const diff = (Date.parse(e + 'T00:00:00Z') - Date.parse(s + 'T00:00:00Z')) / 86400000;
+                return (isNaN(diff) || diff < 0) ? 1 : Math.round(diff) + 1;
+            }
+            function confPkgVenue(roomId, days) {
+                const r = CONF_PUB_RATES[roomId];
+                if (!r) return null;
+                if (days === 1 && r.half > 0) {
+                    const st = document.getElementById('start_time')?.value || '';
+                    const et = document.getElementById('end_time')?.value || '';
+                    if (st && et) {
+                        const mins = (parseInt(et.slice(0, 2), 10) * 60 + parseInt(et.slice(3, 5), 10)) - (parseInt(st.slice(0, 2), 10) * 60 + parseInt(st.slice(3, 5), 10));
+                        if (mins <= 300) return r.half;
+                    }
+                }
+                return r.daily * days;
+            }
+            function confPkgRefresh() {
+                const pick = document.getElementById('confPkgPick');
+                if (!pick) return;
+                const roomId = String(document.getElementById('selectedRoomId')?.value || '');
+                let offered = 0;
+                pick.querySelectorAll('.conf-pkg-pick__item').forEach(function (item) {
+                    const rooms = item.getAttribute('data-rooms') || 'all';
+                    const ok = rooms === 'all' || rooms.split(',').indexOf(roomId) !== -1;
+                    const cb = item.querySelector('input[type="checkbox"]');
+                    item.hidden = !ok;
+                    if (cb) { cb.disabled = !ok; if (!ok) cb.checked = false; }
+                    if (ok) offered++;
+                });
+                pick.hidden = offered === 0;
+                const est = document.getElementById('confPkgEstimate');
+                if (!est) return;
+                const days = confPkgDays();
+                const delegates = Math.max(1, parseInt(document.getElementById('number_of_attendees')?.value || '1', 10) || 1);
+                const venue = confPkgVenue(roomId, days);
+                let pk = 0;
+                pick.querySelectorAll('input[name="package_ids[]"]:checked').forEach(function (cb) {
+                    const price = parseFloat(cb.getAttribute('data-price') || '0') || 0;
+                    const type = cb.getAttribute('data-type');
+                    pk += type === 'per_delegate_per_day' ? price * delegates * days : (type === 'per_day' ? price * days : price);
+                });
+                pk = Math.round(pk * 100) / 100;
+                est.textContent = venue === null ? '' : 'Estimated total: ' + confPkgMoney(venue) + ' venue + ' + confPkgMoney(pk) + ' packages = '
+                    + confPkgMoney(venue + pk) + '. Our team confirms the final price.';
+            }
+            ['input', 'change'].forEach(function (ev) { document.getElementById('inquiryForm')?.addEventListener(ev, confPkgRefresh); });
 
             function closeInquiryModal() {
                 if (inquiryModal) {

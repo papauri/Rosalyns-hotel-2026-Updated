@@ -284,6 +284,10 @@ Still open (routed by the orchestrator):
 ### 4.4 Closed / confirmed (no action)
 - `''` passed to `sendReportEmail` was the text body, not a BCC.
 - PATCH RP-2 fixed earlier (discounts / surcharges apart; packages skip deleted / cancelled / no-show).
+- Conference packages (dept-events-gym-lead, 2026-11-26, CONF_PACKAGES_PLAN.md): conference revenue in
+  `rh_eod_earned_revenue` now uses `rh_conf_gross_sql()` (no VAT twice in inclusive mode when total_with_vat is 0).
+  The Pricing pane gains "Conference packages" (revenue incl. VAT at the locked rate, packages sold, top package):
+  confirmed / completed conferences whose event starts on the day; already inside conference revenue, not added again.
 - Expected arrivals exclude tentative (shown apart).
 - F&B double count via non-room-service folio orders is not reachable today (only room-service orders carry a
   booking); if that changes, exclude any order with a linked `booking_charges` row (eod-revenue.php,

@@ -340,11 +340,20 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
             : $baseAmount + $vatAmount;
     }
 
-    $depositRequired = (float)($enquiry['deposit_required'] ?? 0);
+    // deposit_required is a 0/1 flag; the money is deposit_amount (fault 2: the flag printed as "MWK1").
+    $depositRequired = (!empty($enquiry['deposit_required']) && (float)($enquiry['deposit_amount'] ?? 0) > 0)
+        ? round((float)$enquiry['deposit_amount'], 2) : 0.0;
     $roomName = (string)($room['name'] ?? 'Conference Room');
     $eventType = (string)($enquiry['event_type'] ?? 'Conference Event');
     $attendees = max(1, (int)($enquiry['number_of_attendees'] ?? 1));
     require_once __DIR__ . '/conference-pricing.php';
+    // Stored package lines (conference_inquiry_packages); room hire is the rest of total_amount.
+    $pkgLines = $enquiry['package_lines'] ?? null;
+    if (!is_array($pkgLines)) {
+        global $pdo;
+        $pkgLines = ($pdo instanceof PDO) ? rh_conf_package_lines($pdo, (int)($enquiry['id'] ?? 0)) : [];
+    }
+    $venueAmount = $pkgLines ? rh_conf_venue_amount($enquiry) : $baseAmount;
     $eventDate = !empty($enquiry['event_date'])
         ? rh_conf_format_range((string)$enquiry['event_date'], $enquiry['end_date'] ?? null, 'l, F j, Y')
         : 'To be confirmed';
@@ -386,13 +395,25 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
         $totals[] = ['label' => 'Deposit required', 'value' => $fmt($depositRequired), 'type' => 'strong'];
     }
 
+    // Room hire, then one row per package line at its stored total (they add up to total_amount).
+    $subStyle = 'color:' . hotel_brand_tokens()['colors']['muted_dark'] . ';font-size:7.5pt;';
+    $quoteItems = [[rh_pdf_e(($pkgLines ? 'Room hire - ' : 'Conference package - ') . $roomName), rh_pdf_e($fmt($venueAmount))]];
+    $pkgRowsHtml = '';
+    foreach ($pkgLines as $pl) {
+        $plName = (string)($pl['package_name'] ?? 'Package');
+        $plText = rh_conf_line_text($pl);
+        $plCost = (float)($pl['total_cost'] ?? 0);
+        $quoteItems[] = [rh_pdf_e($plName) . '<br/><span style="' . $subStyle . '">' . rh_pdf_e($plText) . '</span>', rh_pdf_e($fmt($plCost))];
+        $pkgRowsHtml .= '<tr><td>' . $esc($plName) . ' (' . $esc($plText) . ')</td><td style="text-align:right;">' . $esc($fmt($plCost)) . '</td></tr>';
+    }
+
     $body = rh_pdf_section_title('Price breakdown') . rh_pdf_spacer(2)
         . rh_pdf_items_table(
             [
                 ['label' => 'Description', 'width' => 78],
                 ['label' => 'Amount', 'width' => 22, 'align' => 'right'],
             ],
-            [[rh_pdf_e('Conference package - ' . $roomName), rh_pdf_e($fmt($baseAmount))]]
+            $quoteItems
         )
         . rh_pdf_spacer(2) . rh_pdf_totals_table($totals);
 
@@ -429,6 +450,7 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
             'deposit_amount' => $esc($fmt($depositRequired)),
             'payment_policy' => nl2br($esc($paymentPolicy)),
             'quotation_notes' => nl2br($esc($notes)),
+            'package_lines' => $pkgRowsHtml, // escaped <tr> rows, '' without packages
         ],
         'Conference Quotation ' . $quoteRef,
         $kitHtml,

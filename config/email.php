@@ -3637,6 +3637,43 @@ function sendAdminNotificationEmail(array $booking)
     }
 }
 
+if (!function_exists('rh_conf_email_packages_html')) {
+    /**
+     * The "Packages" block for conference emails: one row per stored package line (name, how it is charged, line
+     * total) plus room hire. Every value is escaped here (loadEmailTemplate inserts values raw). '' without packages.
+     * Uses $row['package_lines'] when the caller has them (conference.php), else the stored lines by id.
+     * Amounts are the stored figures: before VAT when the enquiry was priced with VAT on top.
+     */
+    function rh_conf_email_packages_html(array $row): string
+    {
+        global $pdo;
+        require_once __DIR__ . '/../includes/conference-pricing.php';
+        $lines = $row['package_lines'] ?? null;
+        if (!is_array($lines)) {
+            $lines = ($pdo instanceof PDO) ? rh_conf_package_lines($pdo, (int)($row['id'] ?? 0)) : [];
+        }
+        if (!$lines) {
+            return '';
+        }
+        $e = static function ($v): string {
+            return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+        };
+        $cur = (string)getSetting('currency_symbol', 'MWK');
+        $exclVat = (float)($row['total_with_vat'] ?? 0) > (float)($row['total_amount'] ?? 0) + BALANCE_TOLERANCE;
+        $cell = 'padding:6px 0;border-top:1px solid #e1dbce;font-size:13px;color:#5c5549;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;';
+        $rows = '<tr><td style="' . $cell . '">Room hire</td><td style="' . $cell . 'text-align:right;white-space:nowrap;">'
+            . $e($cur . ' ' . number_format(rh_conf_venue_amount($row), 0)) . '</td></tr>';
+        foreach ($lines as $pl) {
+            $rows .= '<tr><td style="' . $cell . '">' . $e($pl['package_name'] ?? 'Package')
+                . '<br><span style="font-size:11px;color:#9b8f7e;">' . $e(rh_conf_line_text($pl)) . '</span></td>'
+                . '<td style="' . $cell . 'text-align:right;white-space:nowrap;">' . $e($cur . ' ' . number_format((float)($pl['total_cost'] ?? 0), 0)) . '</td></tr>';
+        }
+        return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0;">'
+            . '<tr><td colspan="2" style="padding:0 0 6px;font-size:11px;font-weight:bold;letter-spacing:0.1em;text-transform:uppercase;color:#9b8f7e;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Packages'
+            . ($exclVat ? ' (before VAT)' : '') . '</td></tr>' . $rows . '</table>';
+    }
+}
+
 /**
  * Send conference enquiry email (sent when customer submits enquiry)
  */
@@ -3672,7 +3709,8 @@ function sendConferenceEnquiryEmail(array $data)
             'event_type' => $data['event_type'] ?? '',
             'catering_required' => $data['catering_required'] ?? false,
             'av_equipment' => $data['av_equipment'] ?? '',
-            'special_requirements' => $data['special_requirements'] ?? ''
+            'special_requirements' => $data['special_requirements'] ?? '',
+            'packages_html' => rh_conf_email_packages_html($data), // escaped by the helper
         ];
 
         // Try to load template, fall back to hardcoded HTML if template not found
@@ -3701,7 +3739,8 @@ function sendConferenceEnquiryEmail(array $data)
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Attendees:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . (int) $data['number_of_attendees'] . '</td></tr></table>
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Estimated Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . $currency_symbol . ' ' . $total_amount . '</td></tr></table>
-            </div>
+            </div>' . (($pkgHtml = rh_conf_email_packages_html($data)) !== '' ? '
+            <div style="background: #FAF6F0; border: 1px solid #e1dbce; padding: 16px 20px; margin: 20px 0; border-radius: 10px;">' . $pkgHtml . '</div>' : '') . '
 
             <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                 <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">What Happens Next?</h3>
@@ -3809,7 +3848,8 @@ function sendConferenceAdminNotificationEmail(array $data)
             'total_amount' => $total_amount,
             'catering_required' => $data['catering_required'] ?? false,
             'av_equipment' => $data['av_equipment'] ?? '',
-            'special_requirements' => $data['special_requirements'] ?? ''
+            'special_requirements' => $data['special_requirements'] ?? '',
+            'packages_html' => rh_conf_email_packages_html($data), // escaped by the helper
         ];
 
         // Try to load template, fall back to hardcoded HTML if template not found
@@ -3846,6 +3886,10 @@ function sendConferenceAdminNotificationEmail(array $data)
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Estimated Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . $currency_symbol . ' ' . $total_amount . '</td></tr></table>
             </div>';
+            if (($pkgHtml = rh_conf_email_packages_html($data)) !== '') {
+                $htmlBody .= '
+            <div style="background: #FAF6F0; border: 1px solid #e1dbce; padding: 16px 20px; margin: 20px 0; border-radius: 10px;">' . $pkgHtml . '</div>';
+            }
 
             if ($data['catering_required']) {
                 $htmlBody .= '
@@ -4060,7 +4104,8 @@ function sendConferenceConfirmedEmail(array $enquiry)
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Attendees:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . (int) $enquiry['number_of_attendees'] . '</td></tr></table>
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . $currency_symbol . ' ' . $total_amount . '</td></tr></table>
-            </div>
+            </div>' . (($pkgHtml = rh_conf_email_packages_html($enquiry)) !== '' ? '
+            <div style="background: #FAF6F0; border: 1px solid #e1dbce; padding: 16px 20px; margin: 20px 0; border-radius: 10px;">' . $pkgHtml . '</div>' : '') . '
 
             <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
                 <h3 style="color: #155724; margin-top: 0;;text-align:left;">✅ Booking Status: Confirmed</h3>
@@ -7549,6 +7594,10 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
             . '<strong>Attendees:</strong> ' . (int)($enquiry['number_of_attendees'] ?? 1) . '<br>'
             . '<strong>Total:</strong> ' . htmlspecialchars($currency, ENT_QUOTES, 'UTF-8') . number_format($totalAmount, 0) . '<br>'
             . '<strong>Valid Until:</strong> ' . $validUntil->format('F j, Y') . '</p>';
+        $pkgHtml = rh_conf_email_packages_html($enquiry);
+        if ($pkgHtml !== '') {
+            $htmlBody .= '<div style="margin:16px 0;">' . $pkgHtml . '</div>';
+        }
 
         if ($notes !== '') {
             $htmlBody .= '<p><strong>Notes:</strong><br>' . nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')) . '</p>';
@@ -7569,6 +7618,7 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
                     '{{quotation_reference}}' => htmlspecialchars($quoteRef, ENT_QUOTES, 'UTF-8'),
                     '{{quote_reference}}' => htmlspecialchars($quoteRef, ENT_QUOTES, 'UTF-8'),
                     '{{conference_room}}' => htmlspecialchars((string)($room['name'] ?? 'Conference Room'), ENT_QUOTES, 'UTF-8'),
+                    '{{package_lines}}' => $pkgHtml, // escaped by the helper, '' without packages
                     '{{event_type}}' => htmlspecialchars((string)($enquiry['event_type'] ?? 'Conference Event'), ENT_QUOTES, 'UTF-8'),
                     '{{event_date}}' => htmlspecialchars($eventDate, ENT_QUOTES, 'UTF-8'),
                     '{{event_time}}' => htmlspecialchars($eventTime, ENT_QUOTES, 'UTF-8'),

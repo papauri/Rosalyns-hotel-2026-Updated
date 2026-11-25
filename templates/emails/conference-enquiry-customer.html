@@ -80,6 +80,10 @@ img{border:0;height:auto;line-height:100%;outline:none;text-decoration:none;}
         </table>
       </td></tr>
 
+      {{#if packages_html}}
+      <tr><td style="padding:0 48px 24px;">{{packages_html}}</td></tr>
+      {{/if}}
+
       {{#if event_type}}
       <tr><td style="padding:0 48px 24px;">
         <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border:1px solid #d3cbc0;background:rgba(211,203,192,0.15);">

@@ -443,6 +443,7 @@ try {
 }
 
 // Handle enquiry status updates
+$conf_reopen_id = 0; // set by the package / event-change actions so the Details window opens again after the save
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
     try {
         if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -463,7 +464,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             throw new Exception('Enquiry not found!');
         }
 
-        if (in_array($action, ['record_payment', 'resend_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_financials')) {
+        if (in_array($action, ['record_payment', 'resend_invoice', 'send_quotation', 'update_amount', 'add_package', 'remove_package', 'keep_package'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_financials')) {
             throw new Exception('You do not have permission to handle conference invoicing or pricing.');
         }
 
@@ -768,40 +769,107 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 throw new Exception('End time must be after start time.');
             }
 
-            $schedRoomId = (int)($enquiry['conference_room_id'] ?? 0);
-            $schedRoomStmt = $pdo->prepare("SELECT * FROM conference_rooms WHERE id = ?");
-            $schedRoomStmt->execute([$schedRoomId]);
-            $schedRoom = $schedRoomStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-            // Suggested price on the old and new schedule; a manual amount (differs from the old suggestion) is kept
-            // unless staff tick "replace" - and only users with pricing permission can change the amount at all.
-            $oldSuggest = rh_conf_price($schedRoom, (string)$enquiry['event_date'], $enquiry['end_date'] ?? null, (string)$enquiry['start_time'], (string)$enquiry['end_time']);
-            $newSuggest = rh_conf_price($schedRoom, $newStart, $newEnd, $newFrom, $newTo);
-            $oldTotal = (float)($enquiry['total_amount'] ?? 0);
-            $wasManual = $oldTotal > BALANCE_TOLERANCE && abs($oldTotal - $oldSuggest['amount']) > BALANCE_TOLERANCE;
+            // Delegates and conference room can change here too (owner 2026-11-26): both change the price, so both need
+            // pricing permission. Dates and times stay open to every conference user, as before. Package lines always
+            // follow the new days / delegates; only the room-hire (venue) suggestion is gated by pricing permission.
             $canPrice = hasPermission((int)($user['id'] ?? 0), 'conference_financials');
-            $replaceAmount = $canPrice && (!$wasManual || !empty($_POST['recalculate_amount']))
-                && abs($newSuggest['amount'] - $oldTotal) > BALANCE_TOLERANCE && $newSuggest['amount'] > 0;
+            $postedRoomId = (isset($_POST['conference_room_id']) && (string)$_POST['conference_room_id'] !== '') ? (int)$_POST['conference_room_id'] : null;
+            $postedAttendees = null;
+            if (isset($_POST['number_of_attendees']) && trim((string)$_POST['number_of_attendees']) !== '') {
+                $attRaw = trim((string)$_POST['number_of_attendees']);
+                if (!ctype_digit($attRaw) || (int)$attRaw < 1 || (int)$attRaw > 500) {
+                    throw new Exception('Delegates must be a whole number from 1 to 500.');
+                }
+                $postedAttendees = (int)$attRaw;
+            }
+            $confPkgs = rh_conf_has_packages($pdo);
+            $tol = (float)BALANCE_TOLERANCE;
 
             require_once __DIR__ . '/includes/finance-account-sync.php';
             $pdo->beginTransaction();
             try {
-                if ($schedRoomId > 0) {
-                    $pdo->prepare("SELECT id FROM conference_rooms WHERE id = ? FOR UPDATE")->execute([$schedRoomId]);
+                // Lock order: the enquiry row first, then the old and new rooms in id order. Everything below is decided
+                // from this locked row, never from the unlocked read at the top of the handler.
+                $lockSt = $pdo->prepare("SELECT * FROM conference_inquiries WHERE id = ? FOR UPDATE");
+                $lockSt->execute([$enquiry_id]);
+                $locked = $lockSt->fetch(PDO::FETCH_ASSOC);
+                if (!$locked) {
+                    throw new Exception('Enquiry not found!');
                 }
-                if ((string)($enquiry['status'] ?? '') === 'confirmed' && $schedRoomId > 0) {
-                    if ($clash = conferenceFindClash($pdo, $schedRoomId, $enquiry_id, $newStart, $newEnd, $newFrom, $newTo)) {
-                        throw new Exception('This room is already confirmed for those dates under ' . ($clash['inquiry_reference'] ?: 'another enquiry') . '. Choose different dates or times.');
+                if (!in_array((string)($locked['status'] ?? ''), ['pending', 'confirmed'], true)) {
+                    throw new Exception('Only pending or confirmed enquiries can be rescheduled.');
+                }
+                if ($newStart < date('Y-m-d') && $newStart !== (string)($locked['event_date'] ?? '')) {
+                    throw new Exception('An event cannot be rescheduled to a date in the past.');
+                }
+                $oldRoomId = (int)($locked['conference_room_id'] ?? 0);
+                $newRoomId = $postedRoomId ?? $oldRoomId;
+                $oldAttendees = (int)($locked['number_of_attendees'] ?? 0);
+                $newAttendees = $postedAttendees ?? $oldAttendees;
+                $roomChanged = $newRoomId !== $oldRoomId;
+                if (($roomChanged || $newAttendees !== $oldAttendees) && !$canPrice) {
+                    throw new Exception('Changing the delegates or the conference room changes the price, so it needs conference pricing permission.');
+                }
+                $lockIds = array_values(array_unique(array_filter([$oldRoomId, $newRoomId], static function ($v) {
+                    return $v > 0;
+                })));
+                sort($lockIds);
+                if ($lockIds) {
+                    $pdo->prepare("SELECT id FROM conference_rooms WHERE id IN (" . implode(',', array_fill(0, count($lockIds), '?')) . ") ORDER BY id FOR UPDATE")->execute($lockIds);
+                }
+                $roomSt = $pdo->prepare("SELECT * FROM conference_rooms WHERE id = ?");
+                $roomSt->execute([$oldRoomId]);
+                $oldRoom = $roomSt->fetch(PDO::FETCH_ASSOC) ?: [];
+                $newRoom = $oldRoom;
+                if ($roomChanged) {
+                    $roomSt->execute([$newRoomId]);
+                    $newRoom = $roomSt->fetch(PDO::FETCH_ASSOC) ?: [];
+                    if (!$newRoom || empty($newRoom['is_active'])) {
+                        throw new Exception('Choose an active conference room.');
                     }
                 }
-                $pdo->prepare("UPDATE conference_inquiries SET event_date = ?, end_date = ?, start_time = ?, end_time = ?, updated_at = NOW() WHERE id = ?")
-                    ->execute([$newStart, $newEnd, $newFrom, $newTo, $enquiry_id]);
-                if ($replaceAmount) {
+
+                // Is the room-hire price manual? Compared with the price on the OLD schedule at the rates saved at booking
+                // (a later room-rate change is not a manual price). Enquiries from before the rates were saved use the
+                // current rates, as before.
+                $oldVenue = $confPkgs ? rh_conf_venue_amount($locked) : round((float)($locked['total_amount'] ?? 0), 2);
+                $oldSuggest = rh_conf_price(rh_conf_booked_room($locked, $oldRoom), (string)$locked['event_date'], $locked['end_date'] ?? null, (string)$locked['start_time'], (string)$locked['end_time']);
+                $wasManual = $oldVenue > $tol && abs($oldVenue - $oldSuggest['amount']) > $tol;
+                // New suggestion: same room = the booked rates; a different room = that room's current rates.
+                $priceRoom = $roomChanged ? $newRoom : rh_conf_booked_room($locked, $oldRoom);
+                $newSuggest = rh_conf_price($priceRoom, $newStart, $newEnd, $newFrom, $newTo);
+                $replaceAmount = $canPrice && (!$wasManual || !empty($_POST['recalculate_amount']))
+                    && abs($newSuggest['amount'] - $oldVenue) > $tol && $newSuggest['amount'] > 0;
+
+                if ((string)($locked['status'] ?? '') === 'confirmed' && $newRoomId > 0) {
+                    if ($clash = conferenceFindClash($pdo, $newRoomId, $enquiry_id, $newStart, $newEnd, $newFrom, $newTo)) {
+                        throw new Exception('This room is already confirmed for those dates under ' . ($clash['inquiry_reference'] ?: 'another enquiry') . '. Choose different dates, times or room.');
+                    }
+                }
+                $sets = 'event_date = ?, end_date = ?, start_time = ?, end_time = ?, number_of_attendees = ?, conference_room_id = ?';
+                $args = [$newStart, $newEnd, $newFrom, $newTo, $newAttendees, $newRoomId];
+                if ($confPkgs && ($roomChanged || $replaceAmount)) {
+                    // The rates this venue price now rests on (new room, or the rates of a refreshed price).
+                    $sets .= ', booked_daily_rate = ?, booked_half_day_rate = ?';
+                    $args[] = round((float)($priceRoom['daily_rate'] ?? 0), 2);
+                    $args[] = (isset($priceRoom['half_day_rate']) && $priceRoom['half_day_rate'] !== '') ? round((float)$priceRoom['half_day_rate'], 2) : null;
+                }
+                $args[] = $enquiry_id;
+                $pdo->prepare("UPDATE conference_inquiries SET {$sets}, updated_at = NOW() WHERE id = ?")->execute($args);
+
+                $schedRes = null;
+                if ($confPkgs) {
+                    $schedRes = rh_conf_apply_totals($pdo, $enquiry_id, $replaceAmount ? round($newSuggest['amount'], 2) : null, ['room_changed' => $roomChanged]);
+                } elseif ($replaceAmount) {
                     $schedAmount = round($newSuggest['amount'], 2);
+                    if (!rh_conf_total_fits($schedAmount)) {
+                        throw new Exception(rh_conf_too_big_message());
+                    }
                     $schedVat = vat_components($schedAmount);
                     $pdo->prepare("UPDATE conference_inquiries SET total_amount = ?, vat_rate = ?, vat_amount = ?, total_with_vat = ? WHERE id = ?")
                         ->execute([$schedAmount, $schedVat['rate'], $schedVat['vat'], $schedVat['total'], $enquiry_id]);
                     syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
+                    $schedRes = ['old_total' => $oldVenue, 'new_total' => $schedAmount, 'old_venue' => $oldVenue, 'new_venue' => $schedAmount, 'changes' => []];
                 }
                 $pdo->commit();
             } catch (Throwable $schedEx) {
@@ -810,29 +878,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 }
                 throw $schedEx;
             }
-            $message = 'Event dates updated (' . $newSuggest['label'] . ').';
+            $schedRef = (string)($locked['inquiry_reference'] ?? ('#' . $enquiry_id));
+            if ($schedRes && (abs($schedRes['new_total'] - $schedRes['old_total']) > $tol || !empty($schedRes['changes']))) {
+                $what = 'event changed (' . $newSuggest['label'] . ', ' . $newAttendees . ' delegates' . ($roomChanged ? ', room ' . (string)($newRoom['name'] ?? '') : '') . ')';
+                logActivity((int)($user['id'] ?? 0), 'conference_price_change', rh_conf_change_log_text($schedRef, $what, $schedRes));
+            }
+            $message = 'Event updated (' . $newSuggest['label'] . ($newAttendees !== $oldAttendees ? ', ' . $newAttendees . ' delegates' : '') . ($roomChanged ? ', moved to ' . (string)($newRoom['name'] ?? 'the new room') : '') . ').';
             if ($replaceAmount) {
-                $message .= ' Amount recalculated to ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . '.';
-            } elseif ($wasManual && abs($newSuggest['amount'] - $oldTotal) > BALANCE_TOLERANCE) {
-                $message .= ' The manually set amount was kept (suggested price for these dates: ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . ').';
+                $message .= ' Venue price recalculated to ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . '.';
+            } elseif ($wasManual && abs($newSuggest['amount'] - $oldVenue) > $tol) {
+                $message .= ' The manually set venue price was kept (suggested price: ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . ').';
             }
+            if ($schedRes && !empty($schedRes['changes'])) {
+                $message .= ' Packages repriced; total now ' . getSetting('currency_symbol') . number_format((float)$schedRes['new_total'], 2) . '.';
+                foreach ($schedRes['changes'] as $chg) {
+                    if (!empty($chg['flagged'])) {
+                        $message .= ' Check package "' . $chg['name'] . '": ' . $chg['reason'] . ' (keep or remove it in Details).';
+                    }
+                }
+            }
+            if ($roomChanged || $newAttendees !== $oldAttendees) {
+                $capNow = (int)($newRoom['capacity'] ?? 0);
+                if ($capNow > 0 && $newAttendees > $capNow) {
+                    $message .= ' WARNING: ' . $newAttendees . ' delegates exceed this room\'s capacity of ' . $capNow . '.';
+                }
+            }
+            $conf_reopen_id = $enquiry_id;
         } elseif ($action === 'update_amount') {
+            // The figure staff type is the room-hire (venue) price; package lines are added on top (owner 2026-11-26).
             $amountRaw = $_POST['total_amount'] ?? '';
-            if (!is_numeric($amountRaw) || (float)$amountRaw < 0 || (float)$amountRaw > 99999999) {
-                throw new Exception('Total amount must be a number (0 or more).');
-            }
-            if ((string)($enquiry['status'] ?? '') === 'cancelled') {
-                throw new Exception('A cancelled booking\'s bill is void; its amount cannot be changed.');
+            if (!is_numeric($amountRaw) || (float)$amountRaw < 0) {
+                throw new Exception('The venue price must be a number (0 or more).');
             }
             $amount = round((float)$amountRaw, 2);
-            // Re-lock the VAT figures on the new amount (the balance is measured against the locked gross,
-            // so changing total_amount alone left amount_due on the old price), then resync from the ledger.
-            $newVat = vat_components($amount);
+            if ($amount > RH_CONF_MAX_TOTAL) {
+                throw new Exception(rh_conf_too_big_message());
+            }
+            $confPkgs = rh_conf_has_packages($pdo);
             $pdo->beginTransaction();
             try {
-                $stmt = $pdo->prepare("UPDATE conference_inquiries SET total_amount = ?, vat_rate = ?, vat_amount = ?, total_with_vat = ? WHERE id = ?");
-                $stmt->execute([$amount, $newVat['rate'], $newVat['vat'], $newVat['total'], $enquiry_id]);
-                syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
+                $lockSt = $pdo->prepare("SELECT * FROM conference_inquiries WHERE id = ? FOR UPDATE");
+                $lockSt->execute([$enquiry_id]);
+                $locked = $lockSt->fetch(PDO::FETCH_ASSOC);
+                if (!$locked) {
+                    throw new Exception('Enquiry not found!');
+                }
+                if ((string)($locked['status'] ?? '') === 'cancelled') {
+                    throw new Exception('A cancelled booking\'s bill is void; its amount cannot be changed.');
+                }
+                if ($confPkgs) {
+                    $amtRes = rh_conf_apply_totals($pdo, $enquiry_id, $amount);
+                } else {
+                    if (!rh_conf_total_fits($amount)) {
+                        throw new Exception(rh_conf_too_big_message());
+                    }
+                    // Re-lock the VAT figures on the new amount (the balance is measured against the locked gross,
+                    // so changing total_amount alone left amount_due on the old price), then resync from the ledger.
+                    $newVat = vat_components($amount);
+                    $pdo->prepare("UPDATE conference_inquiries SET total_amount = ?, vat_rate = ?, vat_amount = ?, total_with_vat = ? WHERE id = ?")
+                        ->execute([$amount, $newVat['rate'], $newVat['vat'], $newVat['total'], $enquiry_id]);
+                    syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
+                    $amtOld = round((float)($locked['total_amount'] ?? 0), 2);
+                    $amtRes = ['old_total' => $amtOld, 'new_total' => $amount, 'old_venue' => $amtOld, 'new_venue' => $amount, 'changes' => []];
+                }
                 $pdo->commit();
             } catch (Throwable $amtEx) {
                 if ($pdo->inTransaction()) {
@@ -840,7 +948,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 }
                 throw $amtEx;
             }
-            $message = 'Total amount updated successfully!';
+            logActivity((int)($user['id'] ?? 0), 'conference_price_change', rh_conf_change_log_text((string)($locked['inquiry_reference'] ?? ('#' . $enquiry_id)), 'venue price set', $amtRes));
+            $message = 'Venue price updated. Total now ' . getSetting('currency_symbol') . number_format((float)$amtRes['new_total'], 2) . '.';
+        } elseif (in_array($action, ['add_package', 'remove_package', 'keep_package'], true)) {
+            if (!rh_conf_has_packages($pdo)) {
+                throw new Exception('Conference packages are not set up on this system yet.');
+            }
+            require_once __DIR__ . '/includes/finance-account-sync.php';
+            $pkgWhat = '';
+            $pkgRes = null;
+            $pdo->beginTransaction();
+            try {
+                $lockSt = $pdo->prepare("SELECT * FROM conference_inquiries WHERE id = ? FOR UPDATE");
+                $lockSt->execute([$enquiry_id]);
+                $locked = $lockSt->fetch(PDO::FETCH_ASSOC);
+                if (!$locked) {
+                    throw new Exception('Enquiry not found!');
+                }
+                if (!in_array((string)($locked['status'] ?? ''), ['pending', 'confirmed'], true)) {
+                    throw new Exception('Packages can only be changed on pending or confirmed enquiries.');
+                }
+                if ($action === 'add_package') {
+                    $pkgId = (int)($_POST['package_id'] ?? 0);
+                    $pkgSt = $pdo->prepare("SELECT * FROM conference_packages WHERE id = ? AND is_active = 1");
+                    $pkgSt->execute([$pkgId]);
+                    $pkg = $pkgSt->fetch(PDO::FETCH_ASSOC);
+                    if (!$pkg) {
+                        throw new Exception('That package is not available.');
+                    }
+                    if (!rh_conf_package_allowed($pkg, (int)$locked['conference_room_id'])) {
+                        throw new Exception('This package is not offered for this enquiry\'s conference room.');
+                    }
+                    $dupSt = $pdo->prepare("SELECT COUNT(*) FROM conference_inquiry_packages WHERE inquiry_id = ? AND package_id = ?");
+                    $dupSt->execute([$enquiry_id, $pkgId]);
+                    if ((int)$dupSt->fetchColumn() > 0) {
+                        throw new Exception('This package is already on the enquiry.');
+                    }
+                    $pDays = rh_conf_days((string)$locked['event_date'], $locked['end_date'] ?? null);
+                    $pDelegates = rh_conf_delegates($locked);
+                    $line = [
+                        'price_type' => (string)$pkg['price_type'], 'unit_price' => round((float)$pkg['price_amount'], 2),
+                        'days' => $pDays, 'delegates' => $pDelegates,
+                    ];
+                    $line['total_cost'] = rh_conf_package_cost($line['price_type'], $line['unit_price'], $pDays, $pDelegates);
+                    $pdo->prepare("INSERT INTO conference_inquiry_packages
+                        (inquiry_id, package_id, package_name, price_type, unit_price, days, delegates, total_cost, added_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                        ->execute([$enquiry_id, $pkgId, (string)$pkg['name'], $line['price_type'], $line['unit_price'], min(65535, $pDays), min(65535, $pDelegates), $line['total_cost'], (int)($user['id'] ?? 0) ?: null]);
+                    $pkgWhat = 'package added: ' . $pkg['name'] . ' (' . rh_conf_line_text($line) . ' = ' . rh_conf_money_words($line['total_cost']) . ')';
+                    $pkgRes = rh_conf_apply_totals($pdo, $enquiry_id);
+                } else {
+                    $lineId = (int)($_POST['line_id'] ?? 0);
+                    $lineSt = $pdo->prepare("SELECT * FROM conference_inquiry_packages WHERE id = ? AND inquiry_id = ?");
+                    $lineSt->execute([$lineId, $enquiry_id]);
+                    $line = $lineSt->fetch(PDO::FETCH_ASSOC);
+                    if (!$line) {
+                        throw new Exception('That package line is no longer on this enquiry.');
+                    }
+                    if ($action === 'remove_package') {
+                        $pdo->prepare("DELETE FROM conference_inquiry_packages WHERE id = ? AND inquiry_id = ?")->execute([$lineId, $enquiry_id]);
+                        $pkgWhat = 'package removed: ' . $line['package_name'] . ' (' . rh_conf_line_text($line) . ' = ' . rh_conf_money_words((float)$line['total_cost']) . ')';
+                        $pkgRes = rh_conf_apply_totals($pdo, $enquiry_id);
+                    } else {
+                        $pdo->prepare("UPDATE conference_inquiry_packages SET needs_review = 0, review_reason = NULL WHERE id = ?")->execute([$lineId]);
+                        $pkgWhat = 'package kept after room change: ' . $line['package_name'] . ' (was: ' . (string)$line['review_reason'] . ')';
+                        $keepTotal = round((float)($locked['total_amount'] ?? 0), 2);
+                        $pkgRes = ['old_total' => $keepTotal, 'new_total' => $keepTotal, 'changes' => []];
+                    }
+                }
+                $pdo->commit();
+            } catch (Throwable $pkgEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $pkgEx;
+            }
+            logActivity((int)($user['id'] ?? 0), 'conference_price_change', rh_conf_change_log_text((string)($locked['inquiry_reference'] ?? ('#' . $enquiry_id)), $pkgWhat, $pkgRes));
+            $message = ucfirst($pkgWhat) . '. Total now ' . getSetting('currency_symbol') . number_format((float)$pkgRes['new_total'], 2) . '.';
+            $conf_reopen_id = $enquiry_id;
         } elseif ($action === 'update_notes') {
             $notes = $_POST['notes'] ?? '';
             $stmt = $pdo->prepare("UPDATE conference_inquiries SET notes = ? WHERE id = ?");
@@ -880,6 +1065,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 $qPdfSel->execute([$enquiry_id]);
                 $qPdfPaths = $qPdfSel->fetchAll(PDO::FETCH_COLUMN);
                 $pdo->prepare("DELETE FROM quotations WHERE booking_type = 'conference' AND booking_id = ?")->execute([$enquiry_id]);
+                // Its package lines go with it (no payments exist at this point, so no money is lost).
+                if (rh_conf_has_packages($pdo)) {
+                    $pdo->prepare("DELETE FROM conference_inquiry_packages WHERE inquiry_id = ?")->execute([$enquiry_id]);
+                }
                 $pdo->prepare("DELETE FROM conference_inquiries WHERE id = ?")->execute([$enquiry_id]);
                 $pdo->commit();
                 rh_unlink_quotation_pdfs($qPdfPaths);
@@ -918,7 +1107,24 @@ try {
     foreach ($conference_rooms as $confRoomRow) {
         $confRoomsById[(int)$confRoomRow['id']] = $confRoomRow;
     }
+    // Package lines per enquiry (one query for the whole list), shown in the Details window.
+    $confPkgLinesById = [];
+    $confPkgsOn = rh_conf_has_packages($pdo);
+    if ($confPkgsOn && $conference_enquiries) {
+        $confLineIds = array_map(static function ($r) {
+            return (int)$r['id'];
+        }, $conference_enquiries);
+        $confLineSt = $pdo->prepare("SELECT id, inquiry_id, package_id, package_name, price_type, unit_price, days, delegates, total_cost, needs_review, review_reason
+            FROM conference_inquiry_packages WHERE inquiry_id IN (" . implode(',', array_fill(0, count($confLineIds), '?')) . ") ORDER BY id");
+        $confLineSt->execute($confLineIds);
+        foreach ($confLineSt->fetchAll(PDO::FETCH_ASSOC) as $confLine) {
+            $confLine['line_text'] = rh_conf_line_text($confLine);
+            $confPkgLinesById[(int)$confLine['inquiry_id']][] = $confLine;
+        }
+    }
     foreach ($conference_enquiries as &$confEnqRow) {
+        $confEnqRow['package_lines'] = $confPkgLinesById[(int)$confEnqRow['id']] ?? [];
+        $confEnqRow['venue_amount'] = $confPkgsOn ? rh_conf_venue_amount($confEnqRow) : round((float)($confEnqRow['total_amount'] ?? 0), 2);
         $confEnqRow['gross_total'] = rh_conf_gross($confEnqRow);
         $confEnqRow['rp_total'] = rh_account_gross_total($confEnqRow);
         $confEnqRow['rp_paid'] = (float)($confEnqRow['amount_paid'] ?? 0);
@@ -926,7 +1132,8 @@ try {
         $confEnqRow['date_range_label'] = rh_conf_format_range($confEnqRow['event_date'] ?? null, $confEnqRow['end_date'] ?? null, 'M j, Y');
         $confRoomForPrice = $confRoomsById[(int)($confEnqRow['conference_room_id'] ?? 0)] ?? null;
         if (($confHasEndDate || $confHasHalfDayRate) && $confRoomForPrice && !empty($confEnqRow['event_date'])) {
-            $confSuggest = rh_conf_price($confRoomForPrice, (string)$confEnqRow['event_date'], $confEnqRow['end_date'] ?? null, (string)$confEnqRow['start_time'], (string)$confEnqRow['end_time']);
+            // Suggested room hire at the rates saved at booking (current rates for enquiries from before 092).
+            $confSuggest = rh_conf_price(rh_conf_booked_room($confEnqRow, $confRoomForPrice), (string)$confEnqRow['event_date'], $confEnqRow['end_date'] ?? null, (string)$confEnqRow['start_time'], (string)$confEnqRow['end_time']);
             $confEnqRow['suggested_amount'] = $confSuggest['amount'];
             $confEnqRow['price_label'] = $confSuggest['label'];
         }
@@ -939,6 +1146,9 @@ try {
 // ?id= (the link in the new-enquiry email): scroll to that enquiry and open its Details.
 // Whitelisted to a positive int and bound; only the integer ever reaches the page script.
 $conf_focus_id = rh_conf_focus_id($_GET);
+if ($conf_focus_id <= 0 && $conf_reopen_id > 0 && $error === '') {
+    $conf_focus_id = (int)$conf_reopen_id; // after a package / event change, open the same enquiry's Details again
+}
 $conf_focus_state = ''; // '' | 'listed' | 'filtered' (exists, hidden by the filter) | 'missing'
 if ($conf_focus_id > 0) {
     $conf_focus_state = 'missing';
@@ -1577,6 +1787,35 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
     <script>
         const CONFERENCE_CSRF_TOKEN = <?php echo json_encode($csrf_token); ?>;
         const CONF_HAS_END_DATE = <?php echo $confHasEndDate ? 'true' : 'false'; ?>;
+        <?php
+        // Package catalog + rooms for the Details window (ids, names and prices only; json_encode escapes for script).
+        $confJsCanPrice = hasPermission((int)($user['id'] ?? 0), 'conference_financials');
+        $confJsPkgs = [];
+        if (!empty($confPkgsOn)) {
+            try {
+                foreach ($pdo->query("SELECT * FROM conference_packages WHERE is_active = 1 ORDER BY sort_order, name")->fetchAll(PDO::FETCH_ASSOC) as $cjp) {
+                    $confJsPkgs[] = [
+                        'id' => (int)$cjp['id'], 'name' => (string)$cjp['name'], 'price_type' => (string)$cjp['price_type'],
+                        'price_amount' => (float)$cjp['price_amount'], 'all_rooms' => (string)$cjp['applies_to'] !== 'rooms',
+                        'room_ids' => rh_conf_package_room_ids($cjp),
+                    ];
+                }
+            } catch (PDOException $e) {
+                $confJsPkgs = [];
+            }
+        }
+        $confJsRooms = [];
+        foreach ($conference_rooms as $cjr) {
+            if (!empty($cjr['is_active'])) {
+                $confJsRooms[] = ['id' => (int)$cjr['id'], 'name' => (string)$cjr['name'], 'capacity' => (int)($cjr['capacity'] ?? 0)];
+            }
+        }
+        ?>
+        const CONF_CAN_PRICE = <?php echo $confJsCanPrice ? 'true' : 'false'; ?>;
+        const CONF_PKGS_ON = <?php echo !empty($confPkgsOn) ? 'true' : 'false'; ?>;
+        const CONF_PKG_CATALOG = <?php echo json_encode($confJsPkgs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const CONF_ROOM_LIST = <?php echo json_encode($confJsRooms, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const CONF_PRICE_TYPES = <?php echo json_encode(rh_conf_price_types(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         <?php if ($conf_focus_state === 'listed'): ?>
         // ?id= from the enquiry email: scroll to and flash the row, then open its Details.
         // In-app (SPA) navigation runs this straight after the swap, but the SPA then scrolls the
@@ -2007,6 +2246,99 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             });
         }
 
+        // ===== CONFERENCE PACKAGES (Details window) =====
+        function confMoney(n) {
+            return '<?php echo $currency; ?> ' + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+        function confAttr(s) {
+            return escapeHtml(String(s == null ? '' : s)).replace(/"/g, '&quot;');
+        }
+        function confRoomOptions(currentId) {
+            const cur = Number(currentId) || 0;
+            let html = '';
+            let found = false;
+            CONF_ROOM_LIST.forEach(function (r) {
+                if (r.id === cur) { found = true; }
+                html += '<option value="' + r.id + '"' + (r.id === cur ? ' selected' : '') + '>' + escapeHtml(r.name) + (r.capacity ? ' (up to ' + r.capacity + ')' : '') + '</option>';
+            });
+            if (!found && cur > 0) {
+                html = '<option value="' + cur + '" selected>Current room (inactive)</option>' + html;
+            }
+            return html;
+        }
+        function confPkgHiddenFields(enquiry, action) {
+            return '<input type="hidden" name="csrf_token" value="' + escapeHtml(CONFERENCE_CSRF_TOKEN || '') + '">'
+                + '<input type="hidden" name="enquiry_action" value="' + action + '">'
+                + '<input type="hidden" name="enquiry_id" value="' + Number(enquiry.id) + '">';
+        }
+        function confPackagesSection(enquiry) {
+            const lines = Array.isArray(enquiry.package_lines) ? enquiry.package_lines : [];
+            const editable = CONF_CAN_PRICE && (enquiry.status === 'pending' || enquiry.status === 'confirmed');
+            const roomId = Number(enquiry.conference_room_id) || 0;
+            const onIds = lines.map(function (l) { return Number(l.package_id) || 0; });
+            let rows = '';
+            lines.forEach(function (l) {
+                const flag = Number(l.needs_review) === 1;
+                rows += '<tr' + (flag ? ' class="conf-pkg-row--flag"' : '') + '>'
+                    + '<td data-label="Package">' + escapeHtml(l.package_name) + (flag ? ' <span class="badge badge-pending" title="' + confAttr(l.review_reason || '') + '">Check: ' + escapeHtml(l.review_reason || 'room changed') + '</span>' : '') + '</td>'
+                    + '<td data-label="Priced as">' + escapeHtml(l.line_text || '') + '</td>'
+                    + '<td class="num" data-label="Line total">' + confMoney(l.total_cost) + '</td>'
+                    + '<td class="conf-pkg-actions" data-label="">' + (editable ? (
+                        (flag ? '<form method="POST" class="conf-pkg-inline">' + confPkgHiddenFields(enquiry, 'keep_package') + '<input type="hidden" name="line_id" value="' + Number(l.id) + '"><button type="submit" class="btn btn-sm">Keep</button></form>' : '')
+                        + '<form method="POST" class="conf-pkg-inline" data-name="' + confAttr(l.package_name || '') + '" onsubmit="return confConfirmRemovePackage(this);">' + confPkgHiddenFields(enquiry, 'remove_package') + '<input type="hidden" name="line_id" value="' + Number(l.id) + '"><button type="submit" class="btn btn-sm btn-danger">Remove</button></form>'
+                    ) : '') + '</td>'
+                    + '</tr>';
+            });
+            const addable = CONF_PKG_CATALOG.filter(function (p) {
+                return onIds.indexOf(p.id) === -1 && (p.all_rooms || p.room_ids.indexOf(roomId) !== -1);
+            });
+            let addForm = '';
+            if (editable && addable.length) {
+                addForm = '<form method="POST" class="conf-pkg-add">' + confPkgHiddenFields(enquiry, 'add_package')
+                    + '<select name="package_id" required><option value="">Add a package...</option>'
+                    + addable.map(function (p) {
+                        return '<option value="' + p.id + '">' + escapeHtml(p.name) + ' (' + confMoney(p.price_amount) + ' ' + escapeHtml(CONF_PRICE_TYPES[p.price_type] || '') + ')</option>';
+                    }).join('')
+                    + '</select> <button type="submit" class="btn btn-sm">Add</button></form>';
+            }
+            if (!lines.length && !addForm) {
+                return '';
+            }
+            return '<div class="conf-pkg-block">'
+                + '<div class="detail-row"><strong>Venue price (room hire): <i class="help" data-tip="The room hire part of the total, at the rates saved at booking. Packages are listed below and added on top.">?</i></strong><span>' + confMoney(enquiry.venue_amount) + '</span></div>'
+                + '<h4 class="conf-pkg-title">Packages <i class="help" data-tip="Add-ons on this enquiry. Each line keeps the price it was added at; per day and per delegate per day lines follow the event days and delegates.">?</i></h4>'
+                + (lines.length ? '<div class="table-responsive"><table class="data-table conf-pkg-table"><thead><tr>'
+                    + '<th>Package</th>'
+                    + '<th>Priced as <i class="help" data-tip="Unit price saved on the line, times delegates and days where the package is priced that way.">?</i></th>'
+                    + '<th class="num">Line total <i class="help" data-tip="What this package adds to the enquiry total, in the same terms as the venue price.">?</i></th>'
+                    + '<th></th></tr></thead><tbody>' + rows + '</tbody>'
+                    + '<tfoot><tr><th colspan="2">Packages total</th><th class="num">' + confMoney(enquiry.package_total) + '</th><th></th></tr></tfoot></table></div>'
+                    : '<p class="form-hint">No packages on this enquiry.</p>')
+                + addForm
+                + '</div>';
+        }
+        function confConfirmRemovePackage(form) {
+            const name = form.getAttribute('data-name') || '';
+            if (form.dataset.confirmed === '1') {
+                return true;
+            }
+            requestConferenceConfirmation({
+                title: 'Remove package?',
+                message: 'The total is recalculated without it. You can add it again later at the current catalog price.',
+                details: [name || 'Package'],
+                confirmText: 'Remove package',
+                cancelText: 'Keep it',
+                tone: 'danger',
+                icon: 'fa-trash-alt'
+            }).then(function (ok) {
+                if (ok) {
+                    form.dataset.confirmed = '1';
+                    form.submit();
+                }
+            });
+            return false;
+        }
+
         // ===== ENQUIRY MODAL =====
         function showEnquiryDetails(enquiry) {
             const modal = document.getElementById('enquiryModal');
@@ -2074,8 +2406,9 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     <strong>Special Requirements:</strong>
                     <span>${escapeHtml(enquiry.special_requirements || 'None')}</span>
                 </div>
+                ${CONF_PKGS_ON ? confPackagesSection(enquiry) : ''}
                 <div class="detail-row">
-                    <strong>Total Amount:</strong>
+                    <strong>Total Amount: <i class="help" data-tip="Venue price (room hire) plus the package lines, as billed to the client<?php echo vat_mode() === 'off' ? '' : ', VAT included'; ?>. This is the figure on the quotation and invoice.">?</i></strong>
                     <span>${Number(enquiry.total_amount) > 0 ? '<?php echo $currency; ?> ' + Number(enquiry.gross_total || enquiry.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' <small><?php echo vat_mode() === 'off' ? '' : 'incl. VAT'; ?></small>' : 'Pending'}</span>
                 </div>
                 <div class="detail-row">
@@ -2109,20 +2442,31 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                 <input type="time" name="end_time" value="${escapeHtml((enquiry.end_time || '').substring(0, 5))}" required>
                             </div>
                         </div>
+                        ${CONF_CAN_PRICE ? `<div class="form-row">
+                            <div class="form-group">
+                                <label>Delegates: <i class="help" data-tip="Number of people at the event. Packages priced per delegate per day are repriced from this.">?</i></label>
+                                <input type="number" name="number_of_attendees" min="1" max="500" step="1" value="${Number(enquiry.number_of_attendees) || 1}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Conference room:</label>
+                                <select name="conference_room_id">${confRoomOptions(enquiry.conference_room_id)}</select>
+                            </div>
+                        </div>` : ''}
                         <div class="form-group checkbox-group">
-                            <label><input type="checkbox" name="recalculate_amount" value="1"> Replace the amount with the suggested price even if it was set manually</label>
+                            <label><input type="checkbox" name="recalculate_amount" value="1"> Replace the venue price with the suggested price even if it was set manually</label>
                         </div>
-                        <button type="submit" class="btn">Update Dates</button>
+                        <p class="form-hint">Packages priced per day or per delegate per day follow the new days and delegates at the price saved on each line. Packages priced per event stay as they are.</p>
+                        <button type="submit" class="btn">Update Event</button>
                     </form>` : ''}
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="${escapeHtml(CONFERENCE_CSRF_TOKEN || '')}">
                         <input type="hidden" name="enquiry_action" value="update_amount">
                         <input type="hidden" name="enquiry_id" value="${enquiry.id}">
                         <div class="form-group" style="margin-bottom: 10px;">
-                            <label>Update Total Amount<?php echo vat_mode() === 'exclusive' ? ' (before VAT; VAT is added on top)' : ''; ?>:</label>
-                            <input type="number" name="total_amount" step="0.01" value="${enquiry.total_amount || ''}" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                            <label>Venue price (room hire)<?php echo vat_mode() === 'exclusive' ? ' (before VAT; VAT is added on top)' : ''; ?>: <i class="help" data-tip="The room hire only. Package lines are added on top to make the total.">?</i></label>
+                            <input type="number" name="total_amount" step="0.01" min="0" value="${(enquiry.venue_amount !== undefined && enquiry.venue_amount !== null) ? enquiry.venue_amount : (enquiry.total_amount || '')}" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                         </div>
-                        <button type="submit" class="btn">Update Amount</button>
+                        <button type="submit" class="btn">Update Venue Price</button>
                     </form>
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="${escapeHtml(CONFERENCE_CSRF_TOKEN || '')}">

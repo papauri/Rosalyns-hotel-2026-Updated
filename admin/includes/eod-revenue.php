@@ -236,11 +236,13 @@ if (!function_exists('rh_eod_earned_revenue')) {
             error_log('rh_eod_earned_revenue gym: ' . $e->getMessage());
         }
 
-        // 4b) Conferences: confirmed / completed bookings earn their total (total_with_vat, falling back to
-        // total_amount + vat_amount when it is empty) on conference_inquiries.event_date. Cancelled and
-        // pending bookings earn nothing.
+        // 4b) Conferences: confirmed / completed bookings earn their gross total (venue + packages) on
+        // conference_inquiries.event_date. rh_conf_gross_sql(): the locked total_with_vat, else total_amount
+        // (inclusive mode, already gross) or total_amount + vat_amount (VAT on top), so VAT is never counted
+        // twice. Cancelled and pending bookings earn nothing.
         try {
-            $st = $pdo->prepare("SELECT COALESCE(SUM(COALESCE(NULLIF(total_with_vat,0), COALESCE(total_amount,0) + COALESCE(vat_amount,0))),0)
+            require_once __DIR__ . '/../../includes/conference-pricing.php';
+            $st = $pdo->prepare("SELECT COALESCE(SUM(" . rh_conf_gross_sql() . "),0)
                 FROM conference_inquiries
                 WHERE status IN ('confirmed','completed') AND event_date = ?");
             $st->execute([$date]);

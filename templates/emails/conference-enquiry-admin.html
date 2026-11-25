@@ -85,6 +85,10 @@ img{border:0;height:auto;line-height:100%;outline:none;text-decoration:none;}
         </table>
       </td></tr>
 
+      {{#if packages_html}}
+      <tr><td style="padding:0 48px 24px;">{{packages_html}}</td></tr>
+      {{/if}}
+
       {{#if event_type}}
       <tr><td style="padding:0 48px 24px;">
         <div style="background:rgba(201,169,97,0.08);border-left:3px solid #C9A961;padding:14px 16px;font-size:12px;line-height:1.7;color:#5c5549;">

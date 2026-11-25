@@ -766,3 +766,53 @@ body.cf-dragging { cursor: grabbing; user-select: none; -webkit-user-select: non
 .conf-list-notice--warn .conf-list-notice__title,
 .conf-list-notice--warn .conf-list-notice__text,
 .conf-list-notice--warn .conf-list-notice__link { color: var(--admin-warning-text, #4f3f2a); }
+
+/* Conference packages in the enquiry Details window (owner 2026-11-26) */
+.conf-pkg-block { margin: 8px 0 4px; }
+.conf-pkg-title { margin: 14px 0 8px; font-size: 1rem; font-weight: 600; }
+.conf-pkg-table { width: 100%; font-size: .9rem; }
+.conf-pkg-table th { text-align: left; }
+.conf-pkg-table .num { text-align: right; white-space: nowrap; }
+/* The "Check: ..." flag wraps under the package name in the staff's own words (no capitalising, never clipped). */
+.conf-pkg-table .badge { display: inline-block; max-width: 100%; margin-top: 4px; white-space: normal; text-transform: none; text-align: left; overflow-wrap: anywhere; }
+.conf-pkg-table tfoot th { font-weight: 600; border-top: 1px solid var(--admin-surface-border, #e5e7eb); }
+.conf-pkg-row--flag td { background: var(--admin-warning-bg, #fbf6ec); }
+.conf-pkg-actions { white-space: nowrap; text-align: right; }
+.conf-pkg-inline { display: inline-block; margin: 0 0 0 6px; }
+.conf-pkg-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.conf-pkg-add select { flex: 1 1 220px; min-width: 0; max-width: 100%; }
+.enquiry-details .form-hint { margin: 4px 0 10px; font-size: .85rem; color: var(--admin-muted-text, #6b7280); }
+@media (max-width: 600px) {
+    .conf-pkg-actions { white-space: normal; }
+    .conf-pkg-inline { margin: 4px 0 0; }
+    /* Phone: the modal's shared table-to-cards layout; the cards take the full width. */
+    .conf-pkg-table { display: block; }
+    .conf-pkg-table tbody, .conf-pkg-table tfoot { width: 100%; }
+    .conf-pkg-table tfoot { display: block; margin-top: 8px; }
+    .conf-pkg-table tfoot tr { display: flex; justify-content: space-between; gap: 8px; }
+    .conf-pkg-table tfoot th:empty { display: none; }
+    .conf-pkg-table td.num, .conf-pkg-table td.conf-pkg-actions { text-align: right; }
+    .conf-pkg-table td::before { text-align: left; }
+    .conf-pkg-table td[data-label="Package"] { flex-wrap: wrap; }
+    .conf-pkg-table td[data-label="Package"] .badge { margin-left: auto; }
+}
+
+/* Conference Packages catalog page (admin/conference-packages.php) */
+.cp-head-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.cp-howto { background: var(--admin-surface-muted, #f8f9fa); border: 1px solid var(--admin-surface-border, #e5e7eb); border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; font-size: 14px; line-height: 1.5; }
+.cp-empty { padding: 40px 16px; text-align: center; color: var(--admin-muted-text, #6b7280); }
+.cp-table .num { text-align: right; white-space: nowrap; }
+.cp-table .cp-sub { font-size: .85rem; color: var(--admin-muted-text, #6b7280); margin-top: 2px; }
+.cp-row--off td { opacity: .6; }
+.cp-actions { white-space: nowrap; text-align: right; }
+.cp-inline { display: inline-block; margin: 0 0 0 4px; }
+.cp-modal { max-width: 640px; width: 100%; }
+.cp-modal--small { max-width: 420px; }
+.cp-req { color: var(--admin-danger, #b42318); }
+.cp-room-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-room-check { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--admin-surface-border, #dee2e6); border-radius: 8px; font-size: 13px; cursor: pointer; }
+.cp-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; font-weight: 400; }
+@media (max-width: 600px) {
+    .cp-actions { white-space: normal; }
+    .cp-inline { margin: 4px 4px 0 0; }
+}

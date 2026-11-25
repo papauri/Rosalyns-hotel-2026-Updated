@@ -97,8 +97,9 @@ try {
             </div>
         <?php else:
             $event_date_fmt  = rh_conf_format_range($enquiry['event_date'] ?? null, $enquiry['end_date'] ?? null);
+            // The label comes from the rates saved on the enquiry at booking (a later room-rate change is not used).
             $conf_price_info = rh_conf_price(
-                ['daily_rate' => $enquiry['room_daily_rate'] ?? 0, 'half_day_rate' => $enquiry['room_half_day_rate'] ?? null],
+                rh_conf_booked_room($enquiry, ['daily_rate' => $enquiry['room_daily_rate'] ?? 0, 'half_day_rate' => $enquiry['room_half_day_rate'] ?? null]),
                 (string)($enquiry['event_date'] ?? ''),
                 $enquiry['end_date'] ?? null,
                 (string)($enquiry['start_time'] ?? ''),
@@ -109,6 +110,7 @@ try {
             $end_fmt         = !empty($enquiry['end_time'])   ? date('g:i A', strtotime($enquiry['end_time']))   : '—';
             $attendees       = (int)($enquiry['number_of_attendees'] ?? 0);
             $total           = rh_conf_gross($enquiry);
+            $conf_pkg_lines  = rh_conf_package_lines($pdo, (int)($enquiry['id'] ?? 0));
             $catering        = !empty($enquiry['catering_required']) && $enquiry['catering_required'] != '0';
             $event_type      = trim((string)($enquiry['event_type'] ?? ''));
             $av_equipment    = trim((string)($enquiry['av_equipment'] ?? ''));
@@ -167,6 +169,24 @@ try {
                                 </div>
                                 <?php endif; ?>
                             </div>
+
+                            <?php if ($conf_pkg_lines): ?>
+                            <div class="conf-extras" style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(139,115,85,0.08);">
+                                <div class="conf-extras-title"><i class="fas fa-box"></i> Packages</div>
+                                <div class="conf-detail-list">
+                                    <div class="conf-detail-row">
+                                        <span>Venue (<?php echo htmlspecialchars($conf_price_label); ?>)</span>
+                                        <span><?php echo htmlspecialchars($currency_symbol . number_format(rh_conf_venue_amount($enquiry), 0)); ?></span>
+                                    </div>
+                                    <?php foreach ($conf_pkg_lines as $conf_pkg_line): ?>
+                                    <div class="conf-detail-row">
+                                        <span><?php echo htmlspecialchars((string)$conf_pkg_line['package_name']); ?> <small style="display:block;color:#8A8175;"><?php echo htmlspecialchars(rh_conf_line_text($conf_pkg_line)); ?></small></span>
+                                        <span><?php echo htmlspecialchars($currency_symbol . number_format((float)$conf_pkg_line['total_cost'], 0)); ?></span>
+                                    </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                            <?php endif; ?>
 
                             <?php if ($event_type !== '' || $catering || $av_equipment !== ''): ?>
                             <div class="conf-stay-tags">

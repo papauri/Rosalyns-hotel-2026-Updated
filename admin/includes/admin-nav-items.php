@@ -28,6 +28,7 @@ function rh_admin_nav_groups(): array
         ],
         'Conference & Events' => [
             ['conference-management.php', 'fas fa-briefcase',      'Conference',       'conference',       '', 'conference'],
+            ['conference-packages.php',   'fas fa-box',            'Conference Packages', 'conference',    '', 'conference'],
             ['events-inquiries.php',      'fas fa-calendar-check', 'Event Bookings',   'events_bookings',  '', ['website_cms', 'events']],
             ['events-management.php',     'fas fa-calendar-alt',   'Events',           'events',           '', ['website_cms', 'events']],
         ],

@@ -103,6 +103,7 @@ $guestCountryData = [];
 $repeatGuests = [];
 $conferenceStats = [];
 $conferenceRoomStats = [];
+$conferencePackageStats = [];
 $recentBookings = [];
 $reviewStats = [];
 $gymInquiryStats = [];
@@ -622,7 +623,9 @@ try {
     // CONFERENCE TAB QUERIES
     // ============================================
 
-    // 20. Conference Inquiry Stats
+    // 20. Conference Inquiry Stats. Dated by the event (event_date), not by when the enquiry was typed in; the
+    // end day is included once (< end + 1 day). Every status is listed; the summary strip counts revenue only for
+    // confirmed / completed.
     $conferenceStatsStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count,
                COALESCE(SUM(" . rh_conf_gross_sql() . "), 0) as total_value,
@@ -630,21 +633,21 @@ try {
                COALESCE(SUM(amount_due), 0) as total_due,
                COALESCE(AVG({$conferenceFields['expected_attendees']}), 0) as avg_attendees
         FROM conference_inquiries
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE event_date >= ? AND event_date < DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status
     ");
     $conferenceStatsStmt->execute([$start_date, $end_date]);
     $conferenceStats = $conferenceStatsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 21. Conference Room Utilization
+    // 21. Conference Room Utilization (event_date basis; revenue only from confirmed / completed events)
     $conferenceRoomStmt = $pdo->prepare("
         SELECT cr.name as room_name, cr.capacity,
                COUNT(ci.id) as total_events,
-               COALESCE(SUM(" . rh_conf_gross_sql('ci') . "), 0) as total_revenue,
+               COALESCE(SUM(CASE WHEN ci.status IN ('confirmed','completed') THEN " . rh_conf_gross_sql('ci') . " ELSE 0 END), 0) as total_revenue,
                COALESCE(AVG(ci.{$conferenceFields['expected_attendees']}), 0) as avg_attendees
         FROM conference_rooms cr
         LEFT JOIN conference_inquiries ci ON cr.id = ci.conference_room_id
-            AND ci.created_at >= ? AND ci.created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+            AND ci.event_date >= ? AND ci.event_date < DATE_ADD(?, INTERVAL 1 DAY)
             AND ci.status NOT IN ('cancelled')
         WHERE cr.is_active = 1
         GROUP BY cr.id, cr.name, cr.capacity
@@ -652,6 +655,25 @@ try {
     ");
     $conferenceRoomStmt->execute([$start_date, $end_date]);
     $conferenceRoomStats = $conferenceRoomStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 21b. Conference packages sold (owner 2026-11-26): same event_date filter, confirmed / completed only.
+    // Revenue includes VAT at the rate locked on each booking (line total x the row's total_with_vat / total_amount).
+    $conferencePackageStats = [];
+    if ($mod_conference && rh_conf_has_packages($pdo)) {
+        $conferencePackageStmt = $pdo->prepare("
+            SELECT cip.package_name, COUNT(*) AS times_sold,
+                   COALESCE(SUM(cip.total_cost * (CASE WHEN COALESCE(ci.total_with_vat, 0) > 0 AND COALESCE(ci.total_amount, 0) > 0
+                       THEN ci.total_with_vat / ci.total_amount ELSE 1 END)), 0) AS revenue
+            FROM conference_inquiry_packages cip
+            INNER JOIN conference_inquiries ci ON ci.id = cip.inquiry_id
+            WHERE ci.status IN ('confirmed','completed')
+              AND ci.event_date >= ? AND ci.event_date < DATE_ADD(?, INTERVAL 1 DAY)
+            GROUP BY cip.package_name
+            ORDER BY revenue DESC, cip.package_name ASC
+        ");
+        $conferencePackageStmt->execute([$start_date, $end_date]);
+        $conferencePackageStats = $conferencePackageStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 
     // 22. Gym Inquiry Stats
     $gymStatsStmt = $pdo->prepare("
@@ -3124,6 +3146,33 @@ try {
                                         <span class="acct-bar__label"><?php echo $utilizationPct; ?>%</span>
                                     </div>
                                 </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+
+        <!-- Conference packages sold -->
+        <div class="rh-panel">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Conference Packages</h2></div>
+            <?php if (empty($conferencePackageStats)): ?>
+                <p class="acct-empty">No packages on confirmed or completed conferences in this period.</p>
+            <?php else: ?>
+                <table class="acct-table">
+                    <thead>
+                        <tr>
+                            <th>Package <i class="help" data-tip="The package name as it was when added to the booking.">?</i></th>
+                            <th>Times sold <i class="help" data-tip="Number of confirmed or completed conferences in this period (by event date) that include this package.">?</i></th>
+                            <th>Revenue (incl. VAT) <i class="help" data-tip="The package lines on those conferences, VAT included at the rate locked on each booking. Already inside conference revenue above.">?</i></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($conferencePackageStats as $cps): ?>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars((string)$cps['package_name']); ?></strong></td>
+                                <td><?php echo number_format((int)$cps['times_sold']); ?></td>
+                                <td><?php echo $currency_symbol . ' ' . number_format((float)$cps['revenue'], 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>

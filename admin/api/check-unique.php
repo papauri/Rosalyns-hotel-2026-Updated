@@ -67,6 +67,10 @@ $forms = [
         'scope' => ['day' => 'day_label', 'time' => 'time_label'],
         'message' => 'A class with this title already runs on these days at this time.',
     ],
+    'conference_package' => [
+        'table' => 'conference_packages', 'column' => 'name', 'page' => 'conference-packages.php',
+        'message' => 'A conference package with this name already exists.',
+    ],
     'room_package' => [
         'table' => 'room_packages', 'column' => 'name', 'page' => 'packages.php',
         'message' => 'A package with this name already exists.',

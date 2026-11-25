@@ -578,6 +578,8 @@ if (!function_exists('rh_inv_flat_invoice')) {
      * @param array $a title, invoice_number, issued, meta (rows), line_desc_html, qty, subtotal, vat_enabled,
      *                 vat_amount, vat_rate, total, amount_paid, amount_due, deposit (['required'=>bool,'amount'=>,'paid'=>]),
      *                 payments (signed), closing, site_name, email, phone, currency
+     *                 Optional 'lines' (list of ['desc_html','qty','unit','amount']) replaces the single line (conference
+     *                 room hire + package lines); without it the single line is printed as before.
      */
     function rh_inv_flat_invoice(array $a): string
     {
@@ -598,12 +600,25 @@ if (!function_exists('rh_inv_flat_invoice')) {
         $vatRate = (float)$a['vat_rate'];
         $mode = function_exists('vat_mode') ? vat_mode() : 'exclusive';
 
+        $itemRows = [];
+        if (!empty($a['lines']) && is_array($a['lines'])) {
+            foreach ($a['lines'] as $ln) {
+                $itemRows[] = [
+                    (string)($ln['desc_html'] ?? ''),
+                    rh_pdf_e((string)($ln['qty'] ?? 1)),
+                    rh_pdf_e($money($ln['unit'] ?? ($ln['amount'] ?? 0))),
+                    rh_pdf_e($money($ln['amount'] ?? 0)),
+                ];
+            }
+        } else {
+            $itemRows[] = [(string)$a['line_desc_html'], rh_pdf_e((string)($a['qty'] ?? 1)), rh_pdf_e($money($subtotal)), rh_pdf_e($money($subtotal))];
+        }
         $items = rh_pdf_items_table([
             ['label' => 'Description', 'width' => 46, 'align' => 'left'],
             ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
             ['label' => 'Unit', 'width' => 21, 'align' => 'right'],
             ['label' => 'Amount', 'width' => 23, 'align' => 'right'],
-        ], [[(string)$a['line_desc_html'], rh_pdf_e((string)($a['qty'] ?? 1)), rh_pdf_e($money($subtotal)), rh_pdf_e($money($subtotal))]]);
+        ], $itemRows);
 
         $totals = [];
         $dep = $a['deposit'] ?? [];
@@ -612,7 +627,7 @@ if (!function_exists('rh_inv_flat_invoice')) {
             $totals[] = [
                 'label' => 'Deposit paid',
                 'value' => $money($dep['paid'] ?? 0),
-                'type' => ((float)($dep['paid'] ?? 0) >= (float)($dep['amount'] ?? 0)) ? 'success' : 'danger',
+                'type' => ((float)($dep['paid'] ?? 0) + BALANCE_TOLERANCE >= (float)($dep['amount'] ?? 0)) ? 'success' : 'danger',
             ];
         }
         if ($mode === 'inclusive') {
@@ -3474,6 +3489,21 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
     $endTs   = strtotime((string)($enquiry['end_time'] ?? ''));
     $eventTime = ($startTs && $endTs) ? date('H:i', $startTs) . ' - ' . date('H:i', $endTs) : '';
 
+    // deposit_required / deposit_paid are 0/1 flags (fault 2): the money is deposit_amount, and the deposit
+    // paid is what has been paid towards it (the same rule as the payment snapshot).
+    $depositAmount = (!empty($enquiry['deposit_required']) && (float)($enquiry['deposit_amount'] ?? 0) > 0)
+        ? round((float)$enquiry['deposit_amount'], 2) : 0.0;
+    $depositPaid = $depositAmount > 0 ? max(0.0, min($amountPaid, $depositAmount)) : 0.0;
+
+    // Stored package lines: room hire is total_amount - package_total, each package its stored total_cost.
+    require_once __DIR__ . '/../includes/conference-pricing.php';
+    $pkgLines = rh_conf_package_lines($pdo, (int)($enquiry['id'] ?? 0));
+    $pkgRowsHtml = '';
+    foreach ($pkgLines as $pl) {
+        $pkgRowsHtml .= '<tr><td>' . htmlspecialchars((string)($pl['package_name'] ?? 'Package') . ' (' . rh_conf_line_text($pl) . ')', ENT_QUOTES, 'UTF-8')
+            . '</td><td style="text-align:right;">' . htmlspecialchars($currency_symbol . ' ' . number_format((float)($pl['total_cost'] ?? 0), 2), ENT_QUOTES, 'UTF-8') . '</td></tr>';
+    }
+
     // An admin-customised DB template keeps being honoured; the stock seeded copy is replaced by the kit layout.
     $customTemplate = function_exists('hotel_default_conference_invoice_document_html')
         ? rh_inv_custom_template('conference_invoice_document', hotel_default_conference_invoice_document_html())
@@ -3507,11 +3537,26 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
             'amount_paid' => htmlspecialchars($currency_symbol . ' ' . number_format($amountPaid, 2), ENT_QUOTES, 'UTF-8'),
             'balance_due' => htmlspecialchars($currency_symbol . ' ' . number_format($balanceDue, 2), ENT_QUOTES, 'UTF-8'),
             'booked_rate' => '', // room documents only
+            'package_lines' => $pkgRowsHtml, // escaped <tr> rows, '' without packages
         ], $customTemplate);
     }
 
     $desc = rh_pdf_e('Conference facilities' . (!empty($enquiry['room_name']) ? ' - ' . $enquiry['room_name'] : ''))
         . rh_inv_sub(trim((string)($enquiry['event_type'] ?? '')) . ($event_date !== '' ? ' | ' . $event_date : '') . ($eventTime !== '' ? ', ' . $eventTime : ''));
+    $invLines = [];
+    if ($pkgLines) {
+        $venue = rh_conf_venue_amount($enquiry);
+        $invLines[] = ['desc_html' => $desc, 'qty' => 1, 'unit' => $venue, 'amount' => $venue];
+        foreach ($pkgLines as $pl) {
+            $plCost = (float)($pl['total_cost'] ?? 0);
+            $invLines[] = [
+                'desc_html' => rh_pdf_e((string)($pl['package_name'] ?? 'Package')) . rh_inv_sub(rh_conf_line_text($pl)),
+                'qty' => 1,
+                'unit' => $plCost,
+                'amount' => $plCost,
+            ];
+        }
+    }
 
     return rh_inv_flat_invoice([
         'title' => 'Conference Invoice',
@@ -3531,6 +3576,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
             ['AV equipment', (string)($enquiry['av_equipment'] ?? '') !== '' ? (string)$enquiry['av_equipment'] : 'None'],
         ],
         'line_desc_html' => $desc,
+        'lines' => $invLines,
         'subtotal' => $subtotal,
         'vat_enabled' => $vatEnabled,
         'vat_amount' => $vatAmount,
@@ -3539,9 +3585,9 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
         'amount_paid' => $amountPaid,
         'amount_due' => $balanceDue,
         'deposit' => [
-            'required' => !empty($enquiry['deposit_required']) && $enquiry['deposit_required'] > 0,
-            'amount' => (float)($enquiry['deposit_amount'] ?? 0),
-            'paid' => (float)($enquiry['deposit_paid'] ?? 0),
+            'required' => $depositAmount > 0,
+            'amount' => $depositAmount,
+            'paid' => $depositPaid,
         ],
         'payments' => $payments,
         'closing' => 'Thank you for your payment! We look forward to hosting your event.',
