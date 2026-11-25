@@ -101,6 +101,13 @@ when prompted."
   Assistant: "when did the guest pay / part payments" -> the Paid "i"; "why does the dashboard differ from End of Day"
   -> it no longer should; credit-note moves are guest credit. Manager Guide: Money and End of Day.
 
+- 2026-11-25 Liwonde 8b9a348 / Rosalyn's 74b80e3 (owner FEATURE): Bookings list: hover (or tap on a phone) the Status
+  or Payment pill for a short popup. Status: when, by whom and why (expired: hold ran out / not paid in time, room
+  released; cancelled: reason, how it was settled, fee kept, refund; no-show; checked in / out), or for open bookings
+  the hold time, pending lapse time, arrival and pay-by deadline. Payment: total, paid so far, balance due, credit,
+  latest payment, deposit, arrangement. Guides: 07-reception-bookings (Bookings list). Assistant: "why did this
+  booking expire / who cancelled it" -> hover the Status pill. Manager Guide: Bookings (one line).
+
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
 ### Whole-group payment receipts show the group total and every room (2026-11-20, owner fault) - Liwonde 7d5c105 / Rosalyn's 3781b20
