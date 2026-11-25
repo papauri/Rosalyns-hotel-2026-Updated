@@ -29,6 +29,11 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   `MSP/usage-reports/<date>.md` + a row in `MSP/usage-reports/HISTORY.md`. COST_LOG.md is retired.
   Baseline 10-16 Nov: 22,793 calls, 50 per hotel commit, 95% Opus, 53 agent runs past today's caps.
 
+## Live data change 2026-11-25: payment reminders before arrival (owner authorised the DB update, pre-authorised Rosalyn's changes)
+- Port of Liwonde 4db16f3 shipped as 9f58022 (job prearrival_payment_reminders, template prearrival_payment_reminder, CC on guest reminders).
+- Settings written: automated_email_job_prearrival_payment = 1, prearrival_payment_reminder_days = 30,15,4, automated_email_reminder_cc = Gerald Msukwa + P.Msukwa (same addresses as eod_report_cc_emails). Before: none of the three existed. Backup `backups/prearrival-reminders-before-20261125-001843.json`.
+- NOTE: automated_email_master = 0 here since 2026-10-05, so NO guest email job sends (this one included) until the owner ticks the master switch; that would also start overdue, quotation expiry, tentative hold, expired notices and unpaid-confirmed reminders (their switches default on). Owner decision, not changed. Nothing sends before the owner deploys 9f58022 either.
+
 ## Live data change 2026-11-25: payment + cancellation terms (owner approved the DB write; "wording only")
 - Port of Liwonde f845c7e shipped as 3df06db (email templates: no fixed quote note, automatic plain text, tag glossary, Payment policy box in Booking Settings > Cancellation card).
 - Setting `payment_policy` now: full payment to secure the booking, 4-day window for payment, cash/cards/bank transfer, then cancellation terms 30+ days 30%, 15-29 days 50%, 1-14 days 50%, arrival day or later 100%. Was "Full payment is required upon check-in. We accept cash, credit cards, and bank transfers."
