@@ -73,6 +73,12 @@ when prompted."
   like a spreadsheet. Shift+Right / Shift+Left keeps selecting across. Guides: 07-reception-bookings (calendar
   keyboard line), 06-housekeeping (one line). Assistant: "how do I see further dates with the keyboard" -> arrow past
   the edge. Manager Guides: none.
+- 2026-11-26 Liwonde b145620 / Rosalyn's e2b0b3b (owner "Fix receipt template" + "reset"): the Receipt Email template
+  (Booking Settings > email templates) is now what the guest receives: its wording, with the receipt itself (details,
+  VAT, levy, tip, total, REFUND / CORRECTED banner) where the {{receipt_details_html}} tag sits; left out = added at the
+  end. Switched off = the old automatic layout (and no automatic receipt emails). The template was reset to the new
+  default at both hotels. Guides: 12-email-templates (receipt email note: the template now shapes the email, the new
+  tag). Assistant: none. Manager Guides: none.
 
 ## Synced 2026-11-25 (owner prompted "sync guides, assistants and decisions"; guides + Assistant: commit "Guides + Assistant sync 2026-11-25" in both repos · Assistant: why-cancelled answer (reason from History, staff-only), Assistant cancel card uses rh_cancel_reason_check, counts_not_approved + count-measure hint, new arrivals_to_chase read · owner decisions 2026-11-24/25 written into guides + Assistant (cancel reason internal, guest emails unchanged; SMTP + copy lists unlocked) · Manager Guides: Stock, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed; POS and Kitchen Screens no change) - entries kept for reference
 
