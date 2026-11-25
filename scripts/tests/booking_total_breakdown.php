@@ -96,6 +96,9 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     ok("[$mode] child: lines add up to the total", abs($sum - $tot) <= BALANCE_TOLERANCE && abs($tot - rh_booking_full_total($kid)) <= BALANCE_TOLERANCE, "$sum vs $tot");
     $kn = rh_booking_room_net($kid);
     ok("[$mode] child: room net excl. VAT & levy is the room alone (child net split out, both add to the net)", abs($kn['room'] - $night * $nights / 1.185) <= 0.02 && abs($kn['room'] + $kn['child'] - ($kid['total_with_vat'] - $kid['vat_amount'] - $kid['tourism_levy_amount'])) <= BALANCE_TOLERANCE, json_encode($kn));
+    // old row: VAT and levy amounts stored but no % -> the rates come from the row's own amounts, same split
+    $kn0 = rh_booking_room_net(['tourism_levy_percent' => 0, 'vat_rate' => 0] + $kid);
+    ok("[$mode] child: no stored levy/VAT % -> same room and child net as with the stored rates", abs($kn0['room'] - $kn['room']) <= 0.02 && abs($kn0['child'] - $kn['child']) <= 0.02, json_encode([$kn0, $kn]));
 
     // manager override = final gross, nothing separate
     $ovr = $mk(250000.0, 'final', 0.0);
@@ -121,6 +124,13 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     $bd = rh_booking_total_breakdown([$plain, $kid]);
     [$sum, $tot] = btb_sum($bd);
     ok("[$mode] group: total is the sum of the rooms and lines add up", abs($tot - (rh_booking_full_total($plain) + rh_booking_full_total($kid))) <= BALANCE_TOLERANCE && abs($sum - $tot) <= BALANCE_TOLERANCE && btb_has($bd, '2 rooms'), json_encode($bd));
+    $gl = array_values(array_filter($bd['lines'], fn($l) => $l['label'] === 'Room rate x nights (excl. VAT & levy)'))[0] ?? [];
+    if ($mode === 'inclusive') {
+        $gWant = round(rh_booking_room_net($plain)['room'] + rh_booking_room_net($kid)['room'], 2);
+        ok("[$mode] group: excl. line sums both rooms' nets, hint '3 nights x 2 rooms at K ... average'", ($gl['kind'] ?? '') === 'note' && abs(btb_num($gl['value'] ?? '') - $gWant) <= BALANCE_TOLERANCE && strpos($gl['hint'] ?? '', '3 nights x 2 rooms at K ') === 0 && substr($gl['hint'] ?? '', -7) === 'average', json_encode($gl));
+    } else {
+        ok("[$mode] group: no separate excl. VAT & levy line", empty($gl), json_encode($gl));
+    }
 
     // folio: extras, paid, balance due
     $extras = 20000.0; $paid = 150000.0;
@@ -188,10 +198,11 @@ foreach (['exclusive', 'inclusive'] as $mode) {
          VALUES ({$baseId}, '{$a}', {$roomId}, 'BTB Guest', 'btb@example.invalid', '000', '{$far}', '{$far2}', 3, 2, 2, 0, 'pending', 'unpaid',
                 303000, 52500, 3000, 1, 17.5, 355500, 0, 355500, '2000-01-01 00:00:00')",
     ];
-    $r = btb_run('admin/bookings.php', ['method' => 'GET', 'get' => ['search' => $tg], 'setup' => $setup, 'grep' => ['class="rh-info-btn"', 'data-rh-breakdown=', 'How this total is worked out', '>Total <i class="fas ', '355,500.00']]);
+    $r = btb_run('admin/bookings.php', ['method' => 'GET', 'get' => ['search' => $tg], 'setup' => $setup, 'grep' => ['class="rh-info-btn"', 'data-rh-breakdown=', 'How this total is worked out', 'bk-th-total" data-sort-key="total"', '355,500.00']]);
     $f = $r['found'] ?? [];
     ok("[$mode] bookings list: info button, data and aria-label present", !empty($f['class="rh-info-btn"']) && !empty($f['data-rh-breakdown=']) && !empty($f['How this total is worked out']), $r['raw'] ?? '');
-    ok("[$mode] bookings list: header reads Total (caption drawn by CSS ::after)", !empty($f['>Total <i class="fas ']));
+    // The Total header is a server-sort <th class="... bk-th-total"> (its "(incl. VAT & levy)" caption is CSS ::after).
+    ok("[$mode] bookings list: Total header present (sortable, caption drawn by CSS ::after)", !empty($f['bk-th-total" data-sort-key="total"']));
     $r = btb_run('admin/dashboard.php', ['method' => 'GET', 'get' => ['ajax' => 'card_insight', 'card' => 'pending_bookings'], 'setup' => $setup]);
     $cell = null;
     foreach (($r['json']['rows'] ?? []) as $row) { if (($row['reference']['label'] ?? '') === $a) { $cell = $row['total'] ?? null; } }
