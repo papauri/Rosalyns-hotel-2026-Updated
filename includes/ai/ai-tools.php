@@ -100,7 +100,7 @@ function rh_ai_tool_registry(): array
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_search_bookings',
         ],
         'get_booking' => [
-            'description' => 'One booking in detail: guest, room, dates, party, status, total, paid and balance (same figures as the booking screen), and what it includes (packages, rate plan, room extras, breakfast yes/no). The answer for what one booking cost, paid or owes. Give a booking_id or reference from this chat\'s results.',
+            'description' => 'One booking in detail: guest, room, dates, party, status, total, paid and balance (same figures as the booking screen), and what it includes (packages, rate plan, room extras, breakfast yes/no). The answer for what one booking cost, paid or owes. Each payment with its date (part payments, refunds) is not listed here: point to Booking details, the "i" next to Paid. Give a booking_id or reference from this chat\'s results.',
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_get_booking',
         ],
@@ -120,7 +120,7 @@ function rh_ai_tool_registry(): array
             'perm' => ['create_booking'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_room_rates', 'step' => 'Reading the room price list',
         ],
         'arrivals_departures' => [
-            'description' => 'Arrivals and departures for a day (default today), as on the Dashboard: who is still to arrive, who has no room assigned, who is due out and what they still owe.',
+            'description' => 'Arrivals and departures for a day (default today), as on the Dashboard: who is still to arrive, who has no room assigned, who is due out and what they still owe. The Dashboard movements card\'s arrows show Tomorrow, Next 7 days and Next 30 days too.',
             'schema' => ['properties' => ['date' => $date]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_arrivals_departures',
         ],

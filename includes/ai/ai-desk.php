@@ -31,7 +31,7 @@ function rh_ai_desk_tools(): array
     $days = ['type' => 'integer', 'minimum' => 1, 'maximum' => 366, 'description' => 'How many days ahead (default ' . rh_ai_num('ai_upcoming_days') . ')'];
     return [
         'booking_history' => [
-            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus "stay": when the guest actually checked in and out, a cancellation, a no-show, stay date changes (extended / shortened) and room steps (moved), each with when and who, from the History panel itself (the answer to "when did X check out", "has X left", "who checked them in", "was X moved", and "why was X cancelled": the cancellation or no-show "note" is the reason recorded on the History, internal to staff - the guest cancellation email never shows it; a step that is not there was not recorded), plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status), plus its emails from the Emails sent log (kind, sent / failed / not sent because staff chose not to, when, by whom, whether to the guest; the log has a start date, so an email before it is not in it). The answer to "who booked X" and "was the guest emailed". Give a booking_id or reference from this chat\'s results.',
+            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus "stay": when the guest actually checked in and out, a cancellation, a no-show, stay date changes (extended / shortened) and room steps (moved), each with when and who, from the History panel itself (the answer to "when did X check out", "has X left", "who checked them in", "was X moved", and "why was X cancelled": the cancellation or no-show "note" is the reason recorded on the History, internal to staff - the guest cancellation email never shows it; a step that is not there was not recorded; an expired booking is the hold running out or not paid or confirmed in time, room released; the Bookings list Status pill shows when, by whom and why on hover or tap), plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status), plus its emails from the Emails sent log (kind, sent / failed / not sent because staff chose not to, when, by whom, whether to the guest; the log has a start date, so an email before it is not in it). The answer to "who booked X" and "was the guest emailed". Give a booking_id or reference from this chat\'s results.',
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_booking_history', 'step' => 'Reading the booking\'s history',
         ],
@@ -43,7 +43,7 @@ function rh_ai_desk_tools(): array
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_group_breakdown', 'step' => 'Reading the group room by room',
         ],
         'upcoming_arrivals' => [
-            'description' => 'The next arrivals from a date (default today), soonest first: date, guest, room type, nights and status, and the date of the very next one. For "when is the next arrival" and arrivals on other days.',
+            'description' => 'The next arrivals from a date (default today), soonest first: date, guest, room type, nights and status, and the date of the very next one. For "when is the next arrival" and arrivals on other days. The Dashboard movements card\'s arrows show Tomorrow, Next 7 days and Next 30 days too.',
             'schema' => ['properties' => ['from' => $date, 'days' => $days]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_upcoming_arrivals', 'step' => 'Looking for the next arrivals',
         ],
@@ -1399,6 +1399,11 @@ function rh_ai_desk_stay_intent(string $m, string $hotel = ''): ?array
             ['/^why (?:was|is|has|did) ' . $W . $poss . ' (?:been |get |got )?cancel(?:l)?ed$/iu', false, true],
             ['/^why did ' . $W . ' cancel(?: (?:the|their|his|her) (?:booking|reservation|stay))?$/iu', false, true],
             ['/^(?:what (?:was|is) the )?(?:cancel(?:l)?ation|cancel) reason (?:for|of|on) ' . $W . '$/iu', false, true],
+            // "why did X expire", "when did this booking expire", "has X expired" (sync 2026-11-26): an expired booking
+            // is the same History step (the hold ran out / not paid in time); the Bookings Status pill shows it too
+            ['/^why (?:did|has|is|was) ' . $W . $poss . ' (?:been |get |got )?expired?$/iu', false, true, true],
+            ['/^' . $when . ' (?:did|was|has) ' . $W . $poss . ' (?:been )?expired?$/iu', false, false, true],
+            ['/^(?:has|did|is) ' . $W . $poss . ' (?:been )?expired?$/iu', true, false, true],
         ],
         'no_show' => [
             ['/^(?:was|is|did) ' . $W . ' (?:marked |recorded )?(?:as )?(?:a )?no[\s\-]?show$/iu', true],
@@ -1431,6 +1436,15 @@ function rh_ai_desk_stay_intent(string $m, string $hotel = ''): ?array
             }
             $why = !empty($row[2]) ? ['why' => true] : []; // only "why" shapes carry the key
             $w = rh_ai_desk_strip_hotel(trim((string)$g['who']), $hotel);
+            if (!empty($row[3])) {
+                // "expire" also fits stock and gym ("is milk expired", "has Banda's membership expired"): only a booking
+                // word, a titled / capitalised name or a booking reference, never "X's <other noun>" (review 2026-11-26)
+                if (preg_match('/^(?:this|the|that|their|his|her) (?:booking|reservation|stay|hold)$/iu', $w)) {
+                    return ['fact' => $fact, 'who' => '', 'yesno' => $yesno] + $why;
+                }
+                $name = preg_match("/(?:'s|s')\s/u", $w) ? null : rh_ai_desk_name($w);
+                return $name === null ? null : ['fact' => $fact, 'who' => $name, 'yesno' => $yesno] + $why;
+            }
             if ($w === '' || rh_ai_desk_is_pronoun($w) || preg_match('/^(he|she|they)$/iu', $w)) {
                 return ['fact' => $fact, 'who' => '', 'yesno' => $yesno] + $why;
             }
@@ -1615,6 +1629,9 @@ function rh_ai_desk_stay_text(array $h, array $si): string
     $cx = $s['cancelled'] ?? null;
     $ns = $s['no_show'] ?? null;
     $statusWords = str_replace('-', ' ', $st);
+    // An expired booking (admin/includes/booking-status-info.php, the Bookings Status pill): the hold ran out or it was
+    // not paid or confirmed in time, and the room was released (sync 2026-11-26)
+    $expiredWhy = 'the hold ran out or it was not paid or confirmed in time, so it was cancelled and the room released (free to book again).';
     // The reason staff typed when cancelling / marking no-show (rh_ai_stay_facts_from 'note', quoted as data by the
     // vault): internal to staff, the guest's cancellation email never carries it (owner 2026-11-25).
     $why = !empty($si['why']);
@@ -1631,8 +1648,11 @@ function rh_ai_desk_stay_text(array $h, array $si): string
         return $why ? ' No ' . ($kind === 'noshow' ? 'no-show note' : 'reason') . ' is recorded on its History.' : '';
     };
     // A booking where the guest never stayed (not arrived yet, cancelled, a no-show)
-    $notStayed = static function () use ($who, $st, $h, $d, $cx, $ns, $step, $yes, $statusWords): string {
-        if ($st === 'cancelled' || $st === 'expired') {
+    $notStayed = static function () use ($who, $st, $h, $d, $cx, $ns, $step, $yes, $statusWords, $expiredWhy): string {
+        if ($st === 'expired') {
+            return ($yes ? 'No - ' : '') . $who . ' did not stay: the booking expired' . ($cx ? $step($cx) : '') . ': ' . $expiredWhy;
+        }
+        if ($st === 'cancelled') {
             return ($yes ? 'No - ' : '') . $who . ' did not stay: the booking was cancelled' . ($cx ? $step($cx) : ' (no cancellation step is recorded on its History)') . '.';
         }
         if ($st === 'no-show') {
@@ -1662,10 +1682,14 @@ function rh_ai_desk_stay_text(array $h, array $si): string
             $t = $notStayed();
         }
     } elseif ($fact === 'cancelled') {
-        if ($cx) {
+        if ($cx && $st === 'expired') {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' expired' . $step($cx) . ': ' . $expiredWhy;
+        } elseif ($cx) {
             $what = (string)($cx['what'] ?? '');
             $t = ($yes ? 'Yes - ' : '') . $who . ' was cancelled' . $step($cx) . '.' . ($what !== '' && $what !== 'Booking cancelled' ? ' (' . rtrim($what, '.') . '.)' : '') . $reasonOf($cx, 'cancel');
-        } elseif ($st === 'cancelled' || $st === 'expired') {
+        } elseif ($st === 'expired') {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' expired: ' . $expiredWhy . ' Its History has no expiry step, so the exact time was not recorded.';
+        } elseif ($st === 'cancelled') {
             $t = ($yes ? 'Yes - ' : '') . $who . ' is cancelled, but its History has no cancellation step, so when, who and why were not recorded.';
         } else {
             $t = ($yes ? 'No - ' : '') . $who . ' is not cancelled: it is ' . $statusWords . '.';
@@ -1697,6 +1721,10 @@ function rh_ai_desk_stay_text(array $h, array $si): string
         }
     } else {
         $t = rh_ai_desk_history_text($h);
+    }
+    // The Bookings list Status pill shows the same when / by whom / why (sync 2026-11-26, Liwonde 8b9a348)
+    if (empty($s['error']) && in_array($st, ['cancelled', 'expired', 'no-show'], true) && in_array($fact, ['cancelled', 'no_show', 'checked_in', 'checked_out'], true)) {
+        $t .= "\n\nOn the Bookings list, hover the Status pill (tap it on a phone) for when, by whom and why.";
     }
     return $t . "\n\n" . rh_ai_booking_line($h);
 }
@@ -1744,7 +1772,7 @@ function rh_ai_desk_upcoming_intent(string $l): ?array
         || preg_match('/^who(?:\'s| is) (?:arriving|coming(?: in)?|checking in) next$/u', $l)) {
         return ['from' => rh_ai_today(), 'days' => rh_ai_num('ai_upcoming_days'), 'when' => ''];
     }
-    if (preg_match('/^(?:(?:any |the )?(?:arrivals?|check.?ins?)|who(?:\'s| is) (?:arriving|coming(?: in)?|checking in)) (this|next) (week|month)$/u', $l, $g)) {
+    if (preg_match('/^(?:(?:any |the )?(?:arrivals?|check.?ins?)|who(?:\'s| is) (?:arriving|coming(?: in)?|checking in)|who (?:arrives|checks in|comes in)) (this|next) (week|month)$/u', $l, $g)) {
         if ($g[2] === 'week') {
             $from = $g[1] === 'this' ? rh_ai_today() : date('Y-m-d', strtotime('monday next week'));
             $to = date('Y-m-d', strtotime(($g[1] === 'this' ? 'sunday this week' : 'sunday next week')));
@@ -1809,7 +1837,8 @@ function rh_ai_desk_holds_intent(string $l): bool
 
 /**
  * "who still owes before arrival", "arrivals to chase", "which arrivals still owe", "payment reminders before arrival".
- * $l: lower case. Read only (the list and the reminder settings).
+ * $l: lower case. Read only (the list and the reminder settings). A bare "pre-arrival reminders" is the other job (the
+ * pre-arrival reminder email in Booking Settings): rh_ai_desk_pointer_intent() answers it (sync 2026-11-26).
  */
 function rh_ai_desk_chase_intent(string $l): bool
 {
@@ -1818,8 +1847,8 @@ function rh_ai_desk_chase_intent(string $l): bool
     return (bool)preg_match('/^(?:which |what |any |list |show |the )?(?:upcoming )?arrivals? (?:to chase|with (?:a )?balances?(?: to chase| due| owing)?|(?:still )?owing(?: money)?|that (?:still )?owe(?: money)?|(?:who )?still owe(?: money)?)$/u', $l)
         || preg_match('/^who (?:still )?(?:owes?|has (?:a )?balance|has not paid|hasn\'t paid|needs to pay)(?: money| anything)? (?:before|ahead of|prior to) (?:their |the )?' . $arr . '$/u', $l)
         || preg_match('/^(?:which|what) (?:guests?|bookings?|groups?) (?:still )?(?:owes?|have (?:a )?balance|need to pay|have not paid)(?: money)? (?:before|ahead of|prior to) (?:their |the )?' . $arr . '$/u', $l)
-        || preg_match('/^(?:the |our )?(?:payment reminders? before (?:arrival|check[\s\-]?in)|pre[\s\-]?arrival (?:payment )?reminders?)(?: settings?| days| on| off)?$/u', $l)
-        || preg_match('/^(?:are|is) (?:the )?(?:payment reminders? before (?:arrival|check[\s\-]?in)|pre[\s\-]?arrival (?:payment )?reminders?) (?:on|off|switched on|turned on|working|going out)$/u', $l);
+        || preg_match('/^(?:the |our )?(?:payment reminders? before (?:arrival|check[\s\-]?in)|pre[\s\-]?arrival payment reminders?)(?: settings?| days| on| off)?$/u', $l)
+        || preg_match('/^(?:are|is) (?:the )?(?:payment reminders? before (?:arrival|check[\s\-]?in)|pre[\s\-]?arrival payment reminders?) (?:on|off|switched on|turned on|working|going out)$/u', $l);
 }
 
 /** The arrivals to chase in words: the helper's own figures (group balance), urgent first, + the reminder settings. */
@@ -2139,6 +2168,197 @@ function rh_ai_desk_group_intent(string $l): ?string
     return null;
 }
 
+/**
+ * PURE. Questions whose answer is where a screen shows it (Guides + Assistant sync 2026-11-26): no figure is worked out
+ * here, so nothing can disagree with the screen. $m: the cleaned question (any case).
+ *  - 'paid_dates': "when did the guest pay", "part payments for X", "payment dates" -> Booking details, the "i" next to Paid
+ *  - 'takings_vs_eod': "why does the dashboard differ from End of Day" -> the one Cash collected rule (Liwonde a1fda1b)
+ *  - 'tone': "how do I make the reminder firmer" -> Email Templates, the Tone picker beside Suggest wording
+ *  - 'calendar_keys': "how do I see further dates with the keyboard on the calendar" -> Left / Right past the edge
+ *  - 'prearrival': a bare "pre-arrival reminders" -> the pre-arrival reminder email (Booking Settings), not the payment
+ *    reminders before arrival (rh_ai_desk_chase_intent)
+ * Never an action: nothing here prepares a card. @return array ['key' => string, 'who' => string] or null
+ */
+function rh_ai_desk_pointer_intent(string $m): ?array
+{
+    $m = trim((string)preg_replace('/\s+/u', ' ', str_replace(['’', '‘'], "'", $m)), " \t\n\r\0\x0B,.!?");
+    if ($m === '' || mb_strlen($m) > 140) {
+        return null;
+    }
+    $l = mb_strtolower($m);
+    $W = '(?<who>.+?)';
+    $pay = [
+        '/^when (?:did|has) ' . $W . ' (?:pay|paid)(?: (?:for )?(?:the |their |his |her |this |that )?(?:booking|stay|deposit|balance|room|bill))?$/iu',
+        '/^when (?:was|were) ' . $W . "(?:'s|s')? (?:booking |stay |deposit |balance |bill )?(?:paid|payments? made)$/iu",
+        '/^(?:what are |show(?: me)? |list |see |check )?(?:the )?(?:part[\s\-]?payments?|payment dates|dates? of (?:the |each )?payments?|payment history)(?: (?:for|on|of) ' . $W . ')?$/iu', // never "payments made by card" (a finance question)
+        '/^(?:what are |show(?: me)? |list |see |check )?' . $W . "(?:'s|s') (?:part[\s\-]?payments?|payment dates|payment history)$/iu",
+        '/^(?:did|has) ' . $W . ' (?:pay|paid) in (?:parts|instalments|installments|part[\s\-]?payments)$/iu',
+        '/^(?:were|are|was) there (?:any )?part[\s\-]?payments?(?: (?:for|on) ' . $W . ')?$/iu',
+    ];
+    foreach ($pay as $re) {
+        if (!preg_match($re, $m, $g)) {
+            continue;
+        }
+        $w = trim((string)($g['who'] ?? ''));
+        if ($w === '' || rh_ai_desk_is_pronoun($w) || preg_match('/^(?:he|she|we|you|i|the|this|that|the guests?|the (?:deposit|stay|balance|bill|room)|this (?:deposit|stay|balance|bill|room))$/iu', $w)) {
+            return ['key' => 'paid_dates', 'who' => ''];
+        }
+        $name = rh_ai_desk_stay_name($w);
+        return $name === null ? null : ['key' => 'paid_dates', 'who' => $name];
+    }
+    // Dashboard takings vs End of Day: both words, and a question about them differing
+    if (preg_match('/\b(?:dashboard|takings today|taken this week)\b/u', $l) && preg_match('/\b(?:end of day|eod|cash collected)\b/u', $l)
+        && preg_match('/\b(?:differ\w*|different|match\w*|mismatch\w*|not the same|the same|disagree\w*|lower|higher|wrong)\b/u', $l)
+        && preg_match('/^(?:why|how come|does|do|is|are|should|what)\b/u', $l)) {
+        return ['key' => 'takings_vs_eod', 'who' => ''];
+    }
+    if (preg_match('/^why (?:is|are|does|has) (?:the )?(?:dashboard )?(?:takings today|taken this week)(?: figure)? (?:different|differ|lower|higher|wrong|changed|not matching)$/u', $l)) {
+        return ['key' => 'takings_vs_eod', 'who' => ''];
+    }
+    // The tone of an email: "how do I make the reminder sound firmer", "change the tone of the email"
+    if (preg_match('/\b(?:firmer|sound (?:more )?firm|more firm|tone|softer|friendlier|more polite|more formal|less formal|more concise|apologetic)\b/u', $l)
+        && preg_match('/\b(?:reminders?|emails?|templates?|wording|messages?)\b/u', $l)
+        && preg_match('/^(?:how (?:do|can|could|would|should) (?:i|we|you)|can (?:i|we)|is there a way to|is it possible to|make|change|where (?:do|can) (?:i|we))\b/u', $l)) {
+        return ['key' => 'tone', 'who' => ''];
+    }
+    // The calendar / timelines by keyboard
+    if (preg_match('/\b(?:keyboard|arrow keys?|left (?:and|or|\/) right(?: keys?| arrows?)?)\b/u', $l) && preg_match('/\b(?:calendar|timelines?|grid|housekeeping|maintenance)\b/u', $l)
+        && preg_match('/^(?:how|can|is there|where|what)\b/u', $l)) {
+        return ['key' => 'calendar_keys', 'who' => ''];
+    }
+    // A bare "pre-arrival reminders" (the payment ones are rh_ai_desk_chase_intent)
+    $pre = 'pre[\s\-]?arrival (?:reminders?|reminder emails?|emails?)';
+    if (preg_match('/^(?:the |our )?' . $pre . '(?: settings?| days| on| off)?$/u', $l)
+        || preg_match('/^(?:are|is|do|does) (?:the |our )?' . $pre . ' (?:on|off|switched on|turned on|working|going out|go out|sent|send)$/u', $l)
+        || preg_match('/^(?:how (?:do|can) (?:i|we) |where (?:do|can) (?:i|we) |can (?:i|we) )?(?:turn on|switch on|set up|setup|enable|change|turn off|switch off|find)(?: the| our)? ' . $pre . '$/u', $l)) {
+        return ['key' => 'prearrival', 'who' => ''];
+    }
+    return null;
+}
+
+/** The person may use the Assistant and has one of $perms; every module in $mods is on. */
+function rh_ai_desk_may(array $user, array $perms, array $mods = []): bool
+{
+    $uid = (int)($user['id'] ?? 0);
+    if ($uid <= 0 || !rh_ai_has_perm($uid, 'ai_assistant_use')) {
+        return false;
+    }
+    $ok = !$perms;
+    foreach ($perms as $p) {
+        if (rh_ai_has_perm($uid, $p)) {
+            $ok = true;
+            break;
+        }
+    }
+    foreach ($mods as $mo) {
+        if (!rh_ai_module_on($mo)) {
+            return false;
+        }
+    }
+    return $ok;
+}
+
+/** The Dashboard movements card's arrows, for people who see the Dashboard ('' otherwise). Never says its periods equal a week asked about. */
+function rh_ai_desk_movements_line(array $user): string
+{
+    if (!rh_ai_desk_may($user, ['dashboard'], ['bookings'])) {
+        return '';
+    }
+    return "\n\nOn the Dashboard, the ‹ › arrows beside the Today's movements title switch it between Today, Tomorrow, Next 7 days and Next 30 days (the later periods start tomorrow and are view only).";
+}
+
+/** The answer to rh_ai_desk_pointer_intent(): where the screen shows it, for people who may open that screen. */
+function rh_ai_desk_pointer_reply(PDO $db, array $user, int $conv, array $pi, array $state, int $pageBooking): array
+{
+    $no = static function () use ($user): array {
+        $help = rh_ai_can_help_line($user);
+        return ['text' => rh_ai_out_of_scope_line() . ($help !== '' ? "\n\n" . $help : ''), 'links' => [], 'chips' => ['What can I do here?'], 'route' => 'declined'];
+    };
+    $key = (string)($pi['key'] ?? '');
+    if ($key === 'paid_dates') {
+        if (!rh_ai_tool_allowed($user, 'get_booking')) {
+            return rh_ai_desk_declined($user, 'get_booking');
+        }
+        $id = 0;
+        $pre = '';
+        $who = (string)($pi['who'] ?? '');
+        if ($who !== '') {
+            $pick = rh_ai_desk_pick($db, $user, $conv, $who, $state, $pageBooking);
+            if (isset($pick['reply'])) {
+                return $pick['reply'];
+            }
+            $id = (int)$pick['id'];
+            if (isset($pick['row'])) {
+                $pre = rh_ai_booking_line((array)$pick['row']) . "\n\n";
+            }
+        } else {
+            $id = (int)($state['focus'] ?? 0) > 0 ? (int)$state['focus'] : $pageBooking;
+        }
+        $text = $pre . 'Each payment and its date are on **Booking details**: click the "i" next to **Paid** (in the top strip or the payment panel; tap it on a phone). '
+            . 'It lists every payment and refund on the booking: the date, deposit / part / full payment, method, receipt, the time it was recorded and the amount. '
+            . 'A refund shows on the day it was paid out, money moved to guest credit is labelled, and pending payments are shown but not counted, so the list adds up to Paid.';
+        $out = ['text' => $text, 'links' => [$id > 0 ? ['label' => 'Open the booking', 'url' => 'booking-details.php?id=' . $id] : ['label' => 'Open on Bookings', 'url' => 'bookings.php']],
+            'chips' => $id > 0 ? ['How much is their booking?'] : []];
+        if ($who !== '' && $id > 0) {
+            $out['focus'] = $id;
+            $out['focus_offer'] = 0;
+        }
+        return $out;
+    }
+    if ($key === 'takings_vs_eod') {
+        if (!rh_ai_desk_may($user, ['dashboard_takings'], ['finance'])) {
+            return $no();
+        }
+        return ['text' => 'They should match now. The Dashboard **Takings today** and **Taken this week** use the End of Day **"Cash collected"** rule: money collected (payments paid or completed) less refunds paid out that day, plus till sales where the till is in use. '
+            . 'Money moved onto a credit note is guest credit, not a refund, so it is not taken off; a payment made with a credit note is not added either.'
+            . "\n\nThe **This week's movements** card shows money moved to guest credit on its own line, and its Net taken is the same figure as Taken this week. If one day still looks different, compare the same day on both screens: a refund still awaiting approval or a payment still pending is not counted until it is paid out or paid.",
+            'links' => [['label' => 'Open the Dashboard', 'url' => 'dashboard.php']], 'chips' => []];
+    }
+    if ($key === 'tone') {
+        if (!rh_ai_desk_may($user, ['edit_templates'])) {
+            return $no();
+        }
+        if (!function_exists('rh_ai_ts_tones')) {
+            require_once __DIR__ . '/ai-template-suggest.php';
+        }
+        $tones = array_values(rh_ai_ts_tones());
+        return ['text' => 'On **Email Templates**, open the email (for example the payment reminder) and pick a **Tone** beside **Suggest wording**: ' . implode(', ', $tones) . '. '
+            . 'Firm gives a firmer reminder but stays polite: no tone adds threats, deadlines or consequences the original does not state. Mixed gives three versions, each in a different tone.'
+            . "\n\nPreview shows a version without changing your editor, Use this puts it in the editor, and nothing is saved until you press Save; Load Default is not touched. "
+            . 'Suggest wording shows only while the Assistant is connected, and PDF documents and the receipt email get no suggestions.',
+            'links' => [['label' => 'Open Email Templates', 'url' => 'email-templates.php']], 'chips' => []];
+    }
+    if ($key === 'calendar_keys') {
+        if (!rh_ai_desk_may($user, ['bookings', 'housekeeping', 'room_maintenance'])) {
+            return $no();
+        }
+        return ['text' => 'Select a night on the grid with the keyboard, then press **Left** or **Right**: past the first or last day shown, the grid moves to the previous or next dates (the same step as the Previous / Next buttons) and the cursor lands on the next night in the same room. '
+            . '**Shift+Left** / **Shift+Right** keeps selecting across. This works on the Calendar and on the Housekeeping and Maintenance timelines.',
+            'links' => [], 'chips' => []];
+    }
+    if ($key === 'prearrival') {
+        if (!rh_ai_desk_may($user, ['bookings', 'booking_settings'], ['bookings'])) {
+            return $no();
+        }
+        $where = rh_ai_settings_screen();
+        $t = 'Two different emails go out before arrival:'
+            . "\n- **Pre-arrival reminder email**: a reminder to the guest ahead of the stay, once per booking, 1 to 14 days before check-in. It is off until switched on: " . $where . ', card "Booking alerts and guest reminders", "Send pre-arrival reminder email to guests" and "Days before check-in".'
+            . "\n- **Payment reminders before arrival**: for a balance still owed (Settings > Automated Emails). Ask \"payment reminders before arrival\" for those days and the arrivals to chase.";
+        $links = [];
+        if (rh_ai_desk_may($user, ['booking_settings'])) {
+            require_once dirname(__DIR__) . '/arrivals-chase.php'; // auto-scheduler: rh_auto_job_enabled, rh_auto_setting
+            $on = function_exists('rh_auto_job_enabled') && rh_auto_job_enabled('prearrival_reminders');
+            $days = max(1, min(14, (int)getSetting('booking_prearrival_reminder_days', '1')));
+            $master = function_exists('rh_auto_setting') && rh_auto_setting('automated_email_master') === '1';
+            $t .= "\n\nPre-arrival reminder email now: **" . ($on ? 'on' : 'off') . '**, ' . $days . ' day' . ($days === 1 ? '' : 's') . ' before check-in'
+                . ($master ? '.' : '; the automated emails master switch is off, so no automated email goes out.');
+            $links[] = ['label' => 'Open ' . $where, 'url' => 'booking-settings.php'];
+        }
+        return ['text' => $t, 'links' => $links, 'chips' => ['Payment reminders before arrival']];
+    }
+    return $no();
+}
+
 function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, array $state, int $pageBooking = 0, string $raw = ''): ?array
 {
     $m = rh_ai_desk_clean($message);
@@ -2151,6 +2371,11 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
     // 2026-11-14): the booking's own History steps, local, zero tokens. Asked about something already done, so never a card.
     if (($si = rh_ai_desk_stay_question($db, $m)) !== null) {
         return rh_ai_desk_stay_reply($db, $user, $conv, $si, $state, $pageBooking);
+    }
+    // 0b. Where a screen shows it (sync 2026-11-26): payment dates, Dashboard vs End of Day, email tone, the calendar by
+    // keyboard, the pre-arrival reminder email. A pointer (and a booking link), never a figure worked out here, never a card.
+    if (($pi = rh_ai_desk_pointer_intent($m)) !== null) {
+        return rh_ai_desk_pointer_reply($db, $user, $conv, $pi, $state, $pageBooking);
     }
     // 1. A change one card does, straight from the words
     if (($ci = rh_ai_desk_card_intent($m)) !== null) {
@@ -2209,7 +2434,7 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
         }
         $res = (array)$r['result'];
         $list = is_array($res['list'] ?? null) ? $res['list'] : [];
-        return ['text' => rh_ai_desk_upcoming_text($res, $up['when']), 'links' => $r['links'], 'chips' => count($list) === 1 ? ['Who booked them?', 'Arrivals today'] : ['Arrivals today'],
+        return ['text' => rh_ai_desk_upcoming_text($res, $up['when']) . ($up['when'] !== '' ? rh_ai_desk_movements_line($user) : ''), 'links' => $r['links'], 'chips' => count($list) === 1 ? ['Who booked them?', 'Arrivals today'] : ['Arrivals today'],
             'focus' => count($list) === 1 ? (int)$list[0]['booking_id'] : null, 'local' => ['tool' => 'upcoming_arrivals', 'view' => ['from' => $up['from'], 'next_date' => $res['next_date'] ?? null]]];
     }
     // 3b. Arrivals with a balance to chase (sync 2026-11-25): the Dashboard / Bookings filter list, read only

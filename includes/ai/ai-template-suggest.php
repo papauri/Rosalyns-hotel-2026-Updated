@@ -8,8 +8,10 @@
  *  - Shown ONLY while the Assistant is connected (kill switch on, chat tables, cloud on and not blocked by NO_AI_SPEND,
  *    a provider key, a Fast or Primary model) AND the person has ai_assistant_use + edit_templates. Otherwise nothing
  *    is printed (no button, no script data) and the endpoint answers 404. Load Default is never touched.
- *  - Email templates only (no PDF documents). payment_receipt is left out too: its email body is laid out
- *    automatically, so new wording would never reach the guest.
+ *  - Email templates only (no PDF documents). payment_receipt is still left out (it has no purpose line here). Since
+ *    b145620 that template does drive the receipt email: its wording, with the receipt itself where
+ *    {{receipt_details_html}} sits (left out = added at the end); only a switched-off template uses the old automatic
+ *    layout. Offering suggestions for it is an owner decision (the tag would have to stay in its block).
  *  - Wording only, layout kept. The current HTML is read with a small tag scanner that records where each visible
  *    text block starts and ends; the new HTML is the original string with only those text ranges replaced (never a
  *    DOM re-serialisation, which would turn {{tags}} inside links into %7B%7B..%7D%7D). <head>, <style>, <script>,
@@ -174,7 +176,7 @@ function rh_ai_ts_threats(string $t): array
     return $hit;
 }
 
-/** May this template get suggestions: a known email template (never a PDF document, never the receipt email). */
+/** May this template get suggestions: a known email template (never a PDF document; the receipt email is not offered yet). */
 function rh_ai_ts_template_ok(string $key): bool
 {
     if ($key === '' || substr($key, -9) === '_document' || $key === 'payment_receipt') {

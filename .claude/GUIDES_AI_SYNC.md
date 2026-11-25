@@ -25,19 +25,36 @@ when prompted."
 
 ## Pending (oldest first)
 
-- 7994a1f / Rosalyn's 5c44967 (2026-11-25): Email & PDF templates: the preview and "Send test" of a PDF template now
-  show the layout guests actually get (a stored copy of the old default is replaced by the current layout; edited
-  wording shows as typed). Guide 12 / Assistant only if they say the test PDF can look different from the real one.
+- 2026-11-26 Liwonde ddda9f4 / Rosalyn's 537e6ce (owner FEATURE): the booking total popup ("How this total is worked
+  out") has a line "Room rate x nights (excl. VAT & levy)" with "N nights at X" right above the Tourism levy line (not
+  added; the total is unchanged); its levy/VAT hints now say "included in the all-in room rate (first line)". Booking
+  details > Payment breakdown shows "N nights × X" under "Room base (excl. VAT and levy)". Guides: 13-finance-payments
+  + faq (they quote "included in the room rate above"; add the new line). Assistant: "what is the room rate without
+  VAT / levy" -> that popup line. Manager Guide: Money and End of Day (one line, optional). (Arrived mid-sync 2026-11-26.)
 
-- LATER (sync review 2026-11-25): includes/ai/ai-desk.php ~1821: a bare "pre-arrival reminders" question gets the
-  payment-reminder answer, but the pre-arrival reminder is a separate job; require "payment" in that pattern.
-- LATER (sync review 2026-11-25): guides 13 + 19 leave out the reservations-email fallback for the arrivals-to-chase
-  email recipient.
 - LATER (Assistant lead 2026-11-25): admin/bookings.php `modify_booking` has no "changed by someone else" version check
   (Edit Booking has one). A PATCH for the owner to decide.
 - Manager Guides left out 2026-11-25 (pages full): Stock: the import crates/bottles and "Which price is right?" questions;
   Staff and Permissions: the VAT/bank password line; Housekeeping and Maintenance: one "Rooms needing work" sentence.
-  The staff guides cover all three.
+  The staff guides cover all three. Left out 2026-11-26: Money and End of Day: "Taken this week = End of Day Cash
+  collected" (its Net taken line covers it).
+- LATER (sync review 2026-11-26): includes/ai/ai-desk.php ~1625 can still call an expired booking "cancelled" and does
+  not quote a reason staff typed; a capitalised word ("is Milk expired") still reads as a booking name.
+- LATER (sync review 2026-11-26): a named "when did X pay" is answered first by includes/ai/ai-money.php ~619 (last
+  payment only); add the Paid "i" pointer there.
+- LATER (sync review 2026-11-26): the Assistant's pre-arrival days are clamped differently from
+  guest-lifecycle-lib.php:48.
+- LATER (Assistant lead 2026-11-26, accounting lead to review): `rh_dec_base` (ai-decisions) counts payments made with a
+  credit note as collected.
+- LATER (guides lead 2026-11-26): the KB search does not return the Bookings list Status-popup text for any query tried.
+- Owner decision (2026-11-26, open): offer "Suggest wording" for the Receipt Email template too? (It gets none now.)
+
+## Synced 2026-11-26 (owner prompted "assistant and guide sync"; guides + Assistant: commit "Guides + Assistant sync 2026-11-26" in both repos · guides 06, 07, 12, 13, 19, 99 (+ Liwonde-only brand fix in 01, 02, 14, 23; guide 07 Blocked Dates note) · Assistant: when-did-they-pay -> Paid "i", dashboard vs End of Day rule, email Tone, calendar arrow keys, bare pre-arrival question gets its own answer (payment chase needs "payment"), expired / cancelled / no-show answers point to the Status pill, movements arrows for tomorrow / next week, receipt comment per b145620, expiry questions never catch stock or gym questions · Manager Guides: Money and End of Day, Bookings, Daily checklist refreshed; others no change) - entries kept for reference
+
+- 7994a1f / Rosalyn's 5c44967 (2026-11-25): Email & PDF templates: the preview and "Send test" of a PDF template now
+  show the layout guests actually get (a stored copy of the old default is replaced by the current layout; edited
+  wording shows as typed). Guide 12 / Assistant only if they say the test PDF can look different from the real one.
+  (Neither did: no change.)
 - 2026-11-25 Liwonde a1fda1b / Rosalyn's 1687f9a (owner FEATURE + accuracy PATCH): (1) Booking details: an "i" next to
   Paid (top strip and payment panel) lists each payment and refund on the booking: date, deposit / part / full payment,
   method, receipt, time recorded, amount; refunds on the day paid out, money moved to guest credit labelled; pending rows
@@ -54,11 +71,26 @@ when prompted."
   the hold time, pending lapse time, arrival and pay-by deadline. Payment: total, paid so far, balance due, credit,
   latest payment, deposit, arrangement. Guides: 07-reception-bookings (Bookings list). Assistant: "why did this
   booking expire / who cancelled it" -> hover the Status pill. Manager Guide: Bookings (one line).
-- 2026-11-25 Liwonde 6006f77 (owner FEATURE): Dashboard "Today's movements" card: the ‹ › arrows beside the title switch
-  between Today, Tomorrow, Next 7 days and Next 30 days (round and round); counts, title and lists follow. Later periods
-  start tomorrow and are view-only (arrivals confirmed/pending, departures due out, events on any day). Room service
-  only under Today. Guides: 99-admin-dashboard. Assistant: "who arrives tomorrow / next week" -> the arrows on the
-  movements card. Manager Guide: Daily checklist (one line).
+- 2026-11-25 Liwonde 6006f77 / Rosalyn's 8937bde (owner FEATURE): Dashboard "Today's movements" card: the ‹ › arrows beside the title switch between Today,
+  Tomorrow, Next 7 days and Next 30 days (round and round); counts, title and lists follow. Later periods start tomorrow
+  and are view-only (arrivals confirmed/pending, departures due out, events on any day). Room service only under Today.
+  Guides: 99-admin-dashboard. Assistant: "who arrives tomorrow / next week" -> the arrows on the movements card.
+  Manager Guide: Daily checklist (one line).
+- 2026-11-26 Liwonde 46cc606 / Rosalyn's e8728f2 (owner FEATURE): Email Templates "Suggest wording" has a Tone choice
+  beside it: Mixed (default, three styles, each card says which), Friendly, Concise, Firm, Formal, Apologetic (three
+  versions in that tone). Firm stays polite: a version adding a threat, deadline or cancelling talk is never shown.
+  Suggestions only use tags that email really fills; the pre-arrival payment reminder now gets suggestions too. PDF
+  templates still get none (on purpose). Guides: 12-email-templates (a ready paragraph is in this session's
+  scratchpad guide-tone-para.diff; re-write it if gone). Assistant: "how do I make the reminder sound firmer" -> Tone.
+- 2026-11-26 Liwonde 4a2b04f / Rosalyn's f05cd8f (owner PATCH): the check-in reminder no longer shows guests a literal
+  "{{site_name}}"; VAT rates print as set (17.5, never "18" or "17.0") in the quotation email, invoice, receipt and
+  PDFs; template previews use the hotel's VAT rate and fill every tag. In the room invoice email {{total_amount}} is
+  the balance (owner rule 2026-11-15), now said in the tag list. Guides: 12-email-templates (tag list note).
+  Assistant: none.
+- 2026-11-26 Liwonde 402291f / Rosalyn's f5232e5 (owner PATCH): emails read cleanly with no phone number set (no
+  "or ."); the invoice email's check-out date matches its PDF; the receipt email's VAT row says "VAT"; template
+  previews show this hotel's own reference numbers; the pre-arrival payment reminder only mentions the payment policy
+  when one is set. Guides: none. Assistant: none.
 - 2026-11-26 Liwonde 3d02358 / Rosalyn's 9bce3d6 (owner PATCH): every list's page buttons stay in one place on every
   page and screen size, also on a short last page, after a filter or with nothing found ("Showing 0 of 0"). The
   dashboard movements card keeps one height: its list scrolls inside the card with the page buttons at the bottom.
@@ -69,12 +101,6 @@ when prompted."
   screen"). Assistant: none. Manager Guides: none.
   DONE 2026-11-26 (owner "fix the line"), this entry and the one above: 99-admin-dashboard "Today's movements" has the
   page-buttons line, commit "Guide: movements card page buttons" in both repos. Nothing else left for either.
-- 2026-11-26 Liwonde ddda9f4 / Rosalyn's 537e6ce (owner FEATURE): the booking total popup ("How this total is worked
-  out") has a line "Room rate x nights (excl. VAT & levy)" with "N nights at X" right above the Tourism levy line (not
-  added; the total is unchanged); its levy/VAT hints now say "included in the all-in room rate (first line)". Booking
-  details > Payment breakdown shows "N nights × X" under "Room base (excl. VAT and levy)". Guides: 13-finance-payments
-  + faq (they quote "included in the room rate above"; add the new line). Assistant: "what is the room rate without
-  VAT / levy" -> that popup line. Manager Guide: Money and End of Day (one line, optional).
 - 2026-11-26 Liwonde bb3a41c / Rosalyn's 2908d62 (owner FEATURE): Calendar, Housekeeping and Maintenance timelines:
   with a night selected by keyboard, Left / Right past the last or first day shown moves the grid to the next /
   previous dates (same step as the Next / Previous buttons) and the cursor lands on the next night in the same room,
@@ -1089,13 +1115,13 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
   link filters Payments by payment_date.
 - `rh_ai_t_guest_history` drops no-email bookings when one email is found; `balances_due` per-row fallback (speed).
 - (2026-11-24) System Logs has no words for action `drink_menu_from_stock` (admin/includes/staff-activity-lib.php, logs lead).
-- (2026-11-24) Guide 07 note box still names Block Single Date / Block Date Range (now on the List tab only).
-- (2026-11-24) Liwonde guides 01, 02, 14, 23 show "Rosalyns Beach Hotel" in <title>/brand (Liwonde only; old).
 - (2026-11-24) Manager Guide Bookings: Blocked Dates calendar + Extend / drag handles left out (page 2 full);
   the blocks-skip-booked-nights line is in Housekeeping and Maintenance instead.
 - (2026-11-24) Import guide has no screenshots in docs/guides; none out of date there.
 
 ## Synced
+- 2026-11-26 (owner prompted), DONE: Guides + Assistant, commit "Guides + Assistant sync 2026-11-26" in both repos (entries in the 'Synced 2026-11-26' section).
+  Manager Guides: Money and End of Day, Bookings, Daily checklist refreshed; the rest no change.
 - 2026-11-24 (owner prompted), DONE: Guides + Assistant, commit "Guides + Assistant sync 2026-11-24" in both repos (entries in the 'Synced 2026-11-24' section).
   Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed.
 - 2026-11-20 (owner prompted), DONE: Guides Rosalyn's 909510e / Liwonde 8704293; Assistant see TASKS.md SYNC 2026-11-20 (entries in the 'Synced 2026-11-20' section).

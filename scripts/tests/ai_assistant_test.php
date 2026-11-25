@@ -4475,6 +4475,55 @@ check(rh_ai_desk_chase_intent('who still owes before arrival') && rh_ai_desk_cha
     && rh_ai_desk_chase_intent('who owes before their check-in') && rh_ai_desk_chase_intent('payment reminders before arrival') && rh_ai_desk_chase_intent('are the payment reminders before arrival on')
     && !rh_ai_desk_chase_intent('who owes money') && !rh_ai_desk_chase_intent('arrivals today') && !rh_ai_desk_chase_intent('when is the next arrival'),
     '"who still owes before arrival", "arrivals to chase", "payment reminders before arrival": the arrivals-to-chase read; plain "who owes money" stays with balances');
+// Sync 2026-11-26: "pre-arrival" alone is the other job (the pre-arrival reminder email), only "pre-arrival payment" is the chase
+$piD = static fn(string $q) => rh_ai_desk_pointer_intent(rh_ai_desk_clean($q));
+check(!rh_ai_desk_chase_intent('pre-arrival reminders') && !rh_ai_desk_chase_intent('are the pre-arrival reminders on') && rh_ai_desk_chase_intent('pre-arrival payment reminders')
+    && rh_ai_desk_chase_intent('are the pre-arrival payment reminders on') && ($piD('pre-arrival reminders')['key'] ?? '') === 'prearrival' && ($piD('are the pre-arrival reminders on')['key'] ?? '') === 'prearrival'
+    && ($piD('how do I turn on pre-arrival reminders')['key'] ?? '') === 'prearrival' && $piD('pre-arrival payment reminders') === null && $piD('payment reminders before arrival') === null,
+    'a bare "pre-arrival reminders" is the pre-arrival reminder email answer, never the arrivals to chase; "pre-arrival payment reminders" stays the chase');
+// Sync 2026-11-26: where a screen shows it (payment dates, Dashboard vs End of Day, email tone, calendar keyboard)
+check($piD('when did the guest pay') === ['key' => 'paid_dates', 'who' => ''] && $piD('When did Mr Banda pay') === ['key' => 'paid_dates', 'who' => 'Banda']
+    && $piD('when did they pay') === ['key' => 'paid_dates', 'who' => ''] && $piD('when was the deposit paid') === ['key' => 'paid_dates', 'who' => '']
+    && $piD('part payments for Mr Banda') === ['key' => 'paid_dates', 'who' => 'Banda'] && ($piD('payment dates')['key'] ?? '') === 'paid_dates'
+    && ($piD('were there any part payments')['key'] ?? '') === 'paid_dates' && ($piD('did they pay in parts')['key'] ?? '') === 'paid_dates'
+    && $piD('record a payment') === null && $piD('how much did Mr Banda pay') === null && $piD('did Mr Banda pay') === null && $piD('show payments today') === null
+    && $piD('payments made by card') === null && $piD('list payments made by cash') === null && $piD('payment history for last week') === null,
+    '"when did the guest pay", "part payments for X", "payment dates": the Paid "i" pointer; recording a payment, "how much did X pay" and "did X pay" are not');
+check(($piD('why does the dashboard differ from end of day')['key'] ?? '') === 'takings_vs_eod' && ($piD('why is taken this week different')['key'] ?? '') === 'takings_vs_eod'
+    && ($piD('does the dashboard takings match the end of day cash collected')['key'] ?? '') === 'takings_vs_eod' && $piD('open the end of day report') === null && $piD('dashboard') === null,
+    '"why does the dashboard differ from End of Day", "why is Taken this week different": the one Cash collected rule');
+check(($piD('how do I make the reminder sound firmer')['key'] ?? '') === 'tone' && ($piD('how can I change the tone of the email')['key'] ?? '') === 'tone'
+    && ($piD('make the reminder firmer')['key'] ?? '') === 'tone' && $piD('how do I email the firm') === null && $piD('send a reminder') === null
+    && rh_ai_desk_card_intent(rh_ai_desk_clean('make the reminder firmer')) === null,
+    '"how do I make the reminder sound firmer", "change the tone of the email": the Tone picker pointer, never a card; "email the firm" is not a tone question');
+check(($piD('how do I see further dates with the keyboard on the calendar')['key'] ?? '') === 'calendar_keys' && ($piD('can I move the calendar with the arrow keys')['key'] ?? '') === 'calendar_keys'
+    && $piD('where are the room keys on housekeeping') === null && $piD('open the calendar') === null,
+    '"how do I see further dates with the keyboard on the calendar": Left / Right past the edge; "room keys" is not a keyboard question');
+// "why did X expire" (sync 2026-11-26): the cancel fact with why; an expired booking says expired, plus the Status pill pointer
+check($siD('why did Mr Banda expire') === ['fact' => 'cancelled', 'who' => 'Banda', 'yesno' => false, 'why' => true] && $siD('why did this booking expire') === ['fact' => 'cancelled', 'who' => '', 'yesno' => false, 'why' => true]
+    && $siD("why has Phiri's booking expired") === ['fact' => 'cancelled', 'who' => 'Phiri', 'yesno' => false, 'why' => true] && $siD('when did this booking expire') === ['fact' => 'cancelled', 'who' => '', 'yesno' => false]
+    && $siD('has Mr Banda expired') === ['fact' => 'cancelled', 'who' => 'Banda', 'yesno' => true]
+    && $siD("why did Mr Banda's booking expire") === ['fact' => 'cancelled', 'who' => 'Banda', 'yesno' => false, 'why' => true],
+    '"why did X expire", "when did this booking expire", "has X expired": the stay question about the cancellation / expiry step');
+check($siD('is milk expired') === null && $siD('when did chicken expire') === null && $siD("has Banda's membership expired") === null && $siD('when did it expire') === null,
+    'stock and gym "expire" questions ("is milk expired", "when did chicken expire", "has Banda\'s membership expired") are never a booking question');
+$stE0 = rh_ai_desk_stay_text(['guest_name' => 'Qd Guest', 'reference' => 'LSH-QD2', 'status' => 'expired', 'stay' => rh_ai_stay_facts_from([])], ['fact' => 'cancelled', 'who' => '', 'yesno' => false, 'why' => true]);
+$stE1 = rh_ai_desk_stay_text(['guest_name' => 'Qd Guest', 'reference' => 'LSH-QD2', 'status' => 'expired', 'stay' => rh_ai_stay_facts_from([
+    ['at' => '2026-11-20 09:00:00', 'who' => 'System', 'what' => 'Hold expired and the booking was cancelled', 'detail' => 'Status: Tentative → Expired', 'kind' => 'cancel']])], ['fact' => 'cancelled', 'who' => '', 'yesno' => true]);
+$stE2 = rh_ai_desk_stay_text(['guest_name' => 'Qd Guest', 'reference' => 'LSH-QD2', 'status' => 'expired', 'stay' => rh_ai_stay_facts_from([])], ['fact' => 'checked_in', 'who' => '', 'yesno' => true]);
+check(strpos($stE0, 'expired: the hold ran out or it was not paid or confirmed in time') !== false && strpos($stE0, 'is cancelled, but') === false && strpos($stE0, 'room released') !== false
+    && strpos($stE1, 'Yes - ') === 0 && strpos($stE1, 'expired on **Fri 20 Nov 2026, 09:00**') !== false && strpos($stE2, 'No - ') === 0 && strpos($stE2, 'the booking expired') !== false
+    && strpos($stE0 . $stE1 . $stE2, 'hover the Status pill (tap it on a phone)') !== false && substr_count($stE1, 'Status pill') === 1
+    && strpos($stR, 'hover the Status pill') !== false && strpos($stN, 'hover the Status pill') !== false,
+    'an expired booking is said as expired (hold ran out / not paid in time, room released), never "cancelled with no step"; cancelled, expired and no-show answers point to the Bookings Status pill', json_encode([$stE0, $stE1, $stE2]));
+check(rh_ai_desk_upcoming_intent('who arrives next week') !== null && (rh_ai_local_intent('who arrives tomorrow')[1]['_when'] ?? '') === 'tomorrow'
+    && (rh_ai_local_intent('who arrives tomorrow')[1]['_view'] ?? '') === 'arrivals',
+    '"who arrives tomorrow / next week" is read like "who is arriving"');
+$noUserD = ['id' => 0, 'role' => 'receptionist'];
+$prD = rh_ai_desk_pointer_reply($pdo, $noUserD, 0, ['key' => 'takings_vs_eod', 'who' => ''], [], 0);
+$prT = rh_ai_desk_pointer_reply($pdo, $noUserD, 0, ['key' => 'tone', 'who' => ''], [], 0);
+check(($prD['route'] ?? '') === 'declined' && ($prT['route'] ?? '') === 'declined' && rh_ai_desk_movements_line($noUserD) === '' && !rh_ai_desk_may($noUserD, []),
+    'the pointers check the person: without the Assistant / screen permission the answer is the out-of-scope line, and no movements-card line');
 $rgC = rh_ai_desk_tools()['arrivals_to_chase'] ?? [];
 check(($rgC['perm'] ?? null) === ['bookings'] && ($rgC['module'] ?? null) === ['bookings'] && in_array('arrivals_to_chase', rh_ai_specialists()['front_desk']['tools'], true)
     && in_array('arrivals_to_chase', rh_ai_specialists()['money']['tools'], true) && in_array('arrivals_to_chase', rh_ai_route_renderable(), true),
@@ -4841,6 +4890,24 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             && strpos($ch0['reply'], $chFirst === null ? 'No arrivals to chase' : 'Arrivals to chase: ' . count($chT['rows'])) !== false
             && isset($chA['reminder_settings']['days_before_arrival']) && $chA['reminder_settings']['days_before_arrival'] === rh_auto_prearrival_days(),
             '"who still owes before arrival": rh_arrivals_to_chase as it is (same count, same group balance), the reminder days from the setting, no phone or email', $ch0['reply']);
+
+        // Sync 2026-11-26: pointers answered locally (no model call, no figure worked out)
+        require_once $root . '/includes/ai/ai-template-suggest.php'; // rh_ai_ts_tones()
+        $pt1 = $chatD('when did the guest pay', 0);
+        $pt2 = $chatD('why does the dashboard differ from end of day', 0);
+        $pt3 = $chatD('how do I make the reminder sound firmer', 0);
+        $pt4 = $chatD('pre-arrival reminders', 0);
+        $pt5 = $chatD('how do I see further dates with the keyboard on the calendar', 0);
+        $mayTk = rh_ai_desk_may($admD, ['dashboard_takings'], ['finance']);
+        check($pt1['route'] === 'local' && $pt2['route'] === ($mayTk ? 'local' : 'declined') && $pt3['route'] === 'local' && $pt4['route'] === 'local' && $pt5['route'] === 'local' && !$GLOBALS['ai2_calls']
+            && strpos($pt1['reply'], 'the "i" next to **Paid**') !== false && strpos($pt1['reply'], 'pending payments are shown but not counted') !== false
+            && (!$mayTk || (strpos($pt2['reply'], '"Cash collected"') !== false && strpos($pt2['reply'], 'guest credit, not a refund') !== false))
+            && strpos($pt3['reply'], implode(', ', array_values(rh_ai_ts_tones()))) !== false && strpos($pt3['reply'], 'stays polite') !== false && empty($pt3['cards'])
+            && strpos($pt4['reply'], 'Booking alerts and guest reminders') !== false && strpos($pt4['reply'], 'Payment reminders before arrival') !== false && strpos($pt4['reply'], 'Arrivals to chase:') === false
+            && strpos($pt4['reply'], 'Pre-arrival reminder email now: **' . (rh_auto_job_enabled('prearrival_reminders') ? 'on' : 'off') . '**') !== false
+            && strpos($pt5['reply'], 'past the first or last day shown') !== false && strpos($pt5['reply'], 'Shift+Left') !== false,
+            'payment dates, Dashboard vs End of Day, email tone, pre-arrival reminders and the calendar keyboard: local pointers with the screen\'s own words, no model call, no card',
+            json_encode([$pt1['reply'], $pt2['reply'], $pt3['reply'], $pt4['reply'], $pt5['reply']]));
 
         // Cards from plain words (prepared only; Confirm replays the screen)
         $g1 = $chatD('When is Mr Qdtoday coming', 0);

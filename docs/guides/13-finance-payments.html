@@ -230,7 +230,7 @@
     <li>Front office gets a daily email, <strong>Arrivals with a balance to chase</strong>. It lists the confirmed bookings arriving soon that still owe money, the urgent ones first, with the guest's phone, balance, amount paid and last payment reminder.</li>
     <li>It is sent once a day soon after the trading day opens. A day with nothing to chase sends no email. Recent activity shows it as <em>skipped</em>.</li>
     <li>The same list is on the Dashboard as <strong>Arrivals with a balance to chase</strong>, and in <strong>Bookings</strong> as the filter <strong>Arrivals with a balance to chase</strong>. In the list, Balance due shows the whole group's balance.</li>
-    <li>Who gets the email: the <strong>Arrivals to chase email goes to</strong> addresses in Automated Emails. If that box is empty, the Main contact email in Hotel Details is used.</li>
+    <li>Who gets the email: the <strong>Arrivals to chase email goes to</strong> addresses in Automated Emails. If that box is empty, the Main contact email in Hotel Details is used. If that is empty too, the Reservations email in Hotel Details is used. If all three are empty, no email is sent and staff are told to add an address.</li>
   </ul>
   <div class="warn"><p>If Recent activity shows <em>"Invalid address: (From)"</em>, the sending address in Email server and sender is missing or wrong. Fix it there, then click <strong>Run now</strong>.</p></div>
 
@@ -277,6 +277,7 @@
 
   <h3 id="moved-to-credit">Moved to guest credit (not a refund)</h3>
   <p>When an overpayment or store credit is moved onto a credit note, no cash goes out. It is not a refund and is never in the refunds total. It shows on its own <strong>Moved to guest credit</strong> line on the Payments and Accounting pages, on Booking Details, and on End of Day as the <strong>Guest credit</strong> lines (issued, used, voided, expired unused, still owed). Net revenue on Accounting reads <em>Gross &minus; refunds &minus; moved to guest credit</em>.</p>
+  <p>The Dashboard follows the same rule. <strong>Taken this week</strong> and <strong>Takings today</strong> match End of Day <strong>Cash collected</strong> for the same days, and a credit-note move is not taken off them. The Dashboard card <strong>This week's movements</strong> shows money in by source, <strong>Refunds paid out</strong>, <strong>Net taken</strong> (the same figure as Taken this week) and <strong>Moved to guest credit</strong> on its own line. It needs <strong>See takings on the Dashboard</strong>.</p>
   <h2 id="settle">How to settle a pending refund</h2>
   <ol class="steps">
     <li>Open the refund line (reference starting with REF). A panel <strong>Settle this refund</strong> shows when it is Pending or Processing.</li>

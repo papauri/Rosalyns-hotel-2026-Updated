@@ -68,7 +68,7 @@ $d = [
     'levy_rate' => 'Tourism levy rate.',
     'levy_amount' => 'Tourism levy amount, or a dash when none.',
     'subtotal_amount' => 'Amount before VAT.',
-    'total_amount' => 'The total, with the currency symbol.',
+    'total_amount' => 'The total, with the currency symbol. In the Room Invoice Email it is the balance still to pay.',
     'logo_html' => 'The hotel logo as a picture.',
     'address' => 'The hotel address.',
     'days_overdue' => 'Days the account is overdue.',
@@ -141,6 +141,7 @@ $d = [
     'hotel_phone' => 'The hotel phone number.',
     'hotel_address' => 'The hotel address.',
     'receipt_number' => 'The receipt number.',
+    'receipt_details_html' => 'The receipt itself: details, VAT, levy, tip and total (receipt email body only). Put it where the receipt should show.',
     'payment_reference' => 'The payment reference.',
     'payment_date' => 'The payment date.',
     'payment_method' => 'How it was paid, in words.',
@@ -219,8 +220,8 @@ $groups = [
     ],
     [
         'title' => 'Receipt Email (and the receipt WhatsApp message)',
-        'applies' => 'The Receipt Email tab. The same tags work in the Receipt WhatsApp message card on this page.',
-        'tags' => ['site_name', 'guest_name', 'guest_email', 'guest_phone', 'receipt_number', 'booking_type', 'payment_reference', 'booking_reference', 'payment_date', 'payment_method', 'payment_type', 'payment_status', 'payment_amount', 'vat_amount', 'total_amount', 'description', 'contact_email', 'contact_phone', 'address', 'hotel_address', 'vat_number', 'vat_rate', 'vat_number_html', 'logo_html'],
+        'applies' => 'The Receipt Email tab: the wording of the email the guest gets. The receipt itself (details, VAT, levy, tip, total, and the REFUND or CORRECTED banner) goes where receipt_details_html sits; if you leave it out, the receipt is added at the end. The same tags work in the Receipt WhatsApp message card on this page.',
+        'tags' => ['site_name', 'guest_name', 'guest_email', 'guest_phone', 'receipt_number', 'booking_type', 'payment_reference', 'booking_reference', 'payment_date', 'payment_method', 'payment_type', 'payment_status', 'payment_amount', 'vat_amount', 'total_amount', 'description', 'contact_email', 'contact_phone', 'address', 'hotel_address', 'vat_number', 'vat_rate', 'vat_number_html', 'logo_html', 'receipt_details_html'],
     ],
     [
         'title' => 'Room Invoice PDF', 'module' => 'bookings',
@@ -313,6 +314,7 @@ $totalShown = 0;
   </ol>
   <h3>Suggest wording (optional)</h3>
   <p>The <strong>Suggest wording</strong> button shows only when the Assistant is connected and you may edit templates. It asks the Assistant for up to 3 new wordings for that one email, with the same layout and tags. Nothing changes in the editor until you click <strong>Use this</strong>, and nothing is saved until you click <strong>Save All Templates</strong>. <strong>Load Default</strong> is not touched. If the HTML box is empty, the button says <em>"There is no wording yet. Press Load Default first, then ask for suggestions."</em> Only the wording, the subject and the tag names are sent. Never a guest, a booking or a link.</p>
+  <p><strong>Tone.</strong> Beside the <strong>Suggest wording</strong> button is a <strong>Tone</strong> list. <strong>Mixed</strong> (the default) gives three versions in three different tones, and each card says which tone it is. <strong>Friendly</strong>, <strong>Concise</strong>, <strong>Firm</strong>, <strong>Formal</strong> and <strong>Apologetic</strong> give three versions all in the tone you pick. <strong>Firm</strong> stays polite: a version that adds a threat, a deadline or talk of cancelling is never shown. A suggestion only uses tags that the email really fills in. The payment reminder sent before arrival gets suggestions too. PDF templates and the Receipt Email get none.</p>
   <h3 id="which-tab">Which tab is which message</h3>
   <table>
     <thead><tr><th>The message the guest gets</th><th>Tab to open</th></tr></thead>
@@ -329,6 +331,7 @@ $totalShown = 0;
   </table>
   <p><strong>When each one goes out.</strong> A quotation goes with a front-desk booking that has no payment yet. An invoice goes out only when someone sends it, or at check-out when the guest still owes money (when nothing is owed, check-out sends a <strong>Stay Statement - paid in full</strong> instead, which is not a template tab). A receipt goes out by itself for every payment. A refund notice or credit note goes out when money goes back. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
   <div class="note"><p><strong>Switching the receipt off.</strong> On the <strong>Receipt Email</strong> tab, untick <strong>Active</strong> and click <strong>Save All Templates</strong>. No receipt is then emailed by itself, and staff see <em>"Receipt not emailed: payment receipt emails are switched off in Booking Settings - use Email receipt on the payment."</em> The <strong>Send Receipt</strong> button on a payment still works. Other tabs behave differently: an inactive tab only makes the system use its built-in wording.</p></div>
+  <p><strong>What the guest receives.</strong> The Receipt Email template is the email the guest gets, in your wording. Put <code>{{receipt_details_html}}</code> where the receipt itself should show: its details, VAT, levy, tip, total and, when it applies, the REFUND or CORRECTED banner. If you leave the tag out, the receipt is added at the end of the email. With the template switched off, the old automatic layout is used and no receipt is emailed by itself.</p>
   <p><strong>Load Default</strong> puts the built-in wording for that one tab into the boxes (you are asked to confirm). Nothing changes until you click Save All Templates. <strong>Reset All to Defaults</strong> overwrites every template with the built-in wording after you confirm, and shows <em>"All booking email and PDF templates were reset to the default design (N templates)."</em></p>
   <div class="warn"><p>Preview fills in every tag with sample details, but a real message fills in only the tags listed for that template below. A tag that is not on the list for that template stays on the email as plain <code>{{text}}</code>. Always check the list before you use a tag.</p></div>
   <h3 id="receipt-whatsapp">How to edit the receipt WhatsApp message</h3>

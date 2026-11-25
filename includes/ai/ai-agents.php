@@ -713,7 +713,7 @@ function rh_ai_local_intent(string $t): ?array
         }
         return ['arrivals_departures', $view];
     };
-    if (preg_match('/^(show |list |who are |who is |what are )?(the |today\'?s |todays )?(arrivals?|check.?ins?)( (for |due )?today)?\??$|^who(\'s| is) (arriving|checking in|coming in)( today)?\??$/u', $t)) {
+    if (preg_match('/^(show |list |who are |who is |what are )?(the |today\'?s |todays )?(arrivals?|check.?ins?)( (for |due )?today)?\??$|^who(\'s| is) (arriving|checking in|coming in)( today)?\??$|^who (arrives|checks in|comes in)( today)?\??$/u', $t)) {
         return $dated(['_view' => 'arrivals']);
     }
     if (preg_match('/^(show |list |who are |what are )?(the |today\'?s |todays )?(departures?|check.?outs?)( (for |due )?today)?\??$|^who(\'s| is) (leaving|checking out|due out)( today)?\??$/u', $t)) {
@@ -3257,6 +3257,9 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $r = rh_ai_run_tool($db, $user, $conv, $tool, $args);
         if ($r['ok']) {
             $text = rh_ai_local_format($tool, $view, $r['result']);
+            if ($text !== '' && $tool === 'arrivals_departures' && ($view['_view'] ?? '') === 'arrivals' && ($view['_when'] ?? '') === 'tomorrow') {
+                $text .= rh_ai_desk_movements_line($user); // sync 2026-11-26: the movements card's arrows show tomorrow too
+            }
             if ($text !== '') {
                 rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => $args, 'result' => $r['json'], 'agent' => 'local']);
                 $chips = rh_ai_followup_chips($user, [$tool]);
