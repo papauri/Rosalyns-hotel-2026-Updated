@@ -35,8 +35,13 @@ if (!function_exists('rh_lp_parse')) {
     /**
      * Page and size for one list from the query string. Bad input (missing, 0, negative, text, an array, a huge
      * number) = page 1; a size not on the list = 10. Returns [key, page, size, offset, total, capped, more, pages].
+     *
+     * $allMax > 0 (opt-in, owner rule "10 / 25 / 50 / All"): the picker also offers All and ?{key}_size=all is
+     * accepted. All shows every row on one page while the list has at most $allMax rows; above that (or when the
+     * count fails) it falls back to 100 per page and says so (rh_lp_clamp sets all_fallback). Lists that do not opt
+     * in are unchanged.
      */
-    function rh_lp_parse(array $get, string $key): array
+    function rh_lp_parse(array $get, string $key, int $allMax = 0): array
     {
         $rawPage = $get[$key . '_page'] ?? null;
         $page = (is_string($rawPage) || is_int($rawPage)) && preg_match('/^\d{1,6}$/', (string)$rawPage) ? (int)$rawPage : 1;
@@ -44,9 +49,15 @@ if (!function_exists('rh_lp_parse')) {
             $page = 1;
         }
         $rawSize = $get[$key . '_size'] ?? null;
+        $all = $allMax > 0 && is_string($rawSize) && strtolower(trim($rawSize)) === 'all';
         $size = (is_string($rawSize) || is_int($rawSize)) && in_array((int)$rawSize, rh_lp_sizes(), true) && preg_match('/^\d{1,3}$/', (string)$rawSize) ? (int)$rawSize : 10;
+        if ($all) {
+            $page = 1;
+            $size = $allMax; // provisional: rh_lp_clamp sets it to the counted rows
+        }
         return ['key' => $key, 'page' => $page, 'size' => $size, 'offset' => ($page - 1) * $size,
-            'total' => 0, 'capped' => false, 'unknown' => false, 'more' => false, 'pages' => 1];
+            'total' => 0, 'capped' => false, 'unknown' => false, 'more' => false, 'pages' => 1,
+            'all' => $all, 'all_max' => max(0, $allMax), 'all_fallback' => false];
     }
 
     /** How deep to count for this page: the usual cap, or as far as the page asked for (at most RH_LP_MAX_ROWS). */
@@ -72,6 +83,17 @@ if (!function_exists('rh_lp_parse')) {
         $total = max(0, $total);
         $p['capped'] = !$p['unknown'] && $total > $cap;
         $p['total'] = $p['capped'] ? $cap : $total;
+        if (!empty($p['all'])) {
+            // All: every row on one page while there are at most all_max; otherwise 100 per page (all_fallback).
+            if (!$p['unknown'] && !$p['capped'] && $p['total'] <= (int)($p['all_max'] ?? 0)) {
+                $p['size'] = max(1, $p['total']);
+            } else {
+                $p['all'] = false;
+                $p['all_fallback'] = true;
+                $p['size'] = 100;
+            }
+            $p['page'] = 1;
+        }
         $p['pages'] = max(1, (int)ceil($p['total'] / $p['size']));
         if ($p['capped'] || $p['unknown']) {
             $p['page'] = min($p['page'], rh_lp_max_page($p));
@@ -128,12 +150,13 @@ if (!function_exists('rh_lp_parse')) {
 
     /**
      * One page of a list: capped count ($countSql selects 1 per row, same WHERE), clamp, then $rowsSql (ending in its
-     * ORDER BY) with LIMIT size+1 OFFSET. Both use $args. Returns [p, rows of this page]. Query errors are thrown to
+     * ORDER BY) with LIMIT size+1 OFFSET. Both use $args. $allMax: the opt-in All choice (rh_lp_parse). Returns
+     * [p, rows of this page]. Query errors are thrown to
      * the caller (the page's own try/catch shows an empty list).
      */
-    function rh_lp_fetch(PDO $pdo, array $get, string $key, string $countSql, string $rowsSql, array $args = []): array
+    function rh_lp_fetch(PDO $pdo, array $get, string $key, string $countSql, string $rowsSql, array $args = [], int $allMax = 0): array
     {
-        $p = rh_lp_parse($get, $key);
+        $p = rh_lp_parse($get, $key, $allMax);
         $cap = rh_lp_cap_for($p);
         $p = rh_lp_clamp($p, rh_lp_count($pdo, $countSql, $args, $cap), $cap);
         $st = $pdo->prepare($rowsSql . rh_lp_limit_sql($p));
@@ -221,7 +244,7 @@ if (!function_exists('rh_lp_parse')) {
         if ($page > 1) {
             $q[$p['key'] . '_page'] = (string)$page;
         }
-        $q[$p['key'] . '_size'] = (string)$p['size'];
+        $q[$p['key'] . '_size'] = !empty($p['all']) ? 'all' : (string)$p['size'];
         return $base . '?' . http_build_query($q) . ($anchor !== '' ? '#' . $anchor : '');
     }
 
@@ -269,10 +292,16 @@ if (!function_exists('rh_lp_parse')) {
         }
         $o .= '<label class="pg-size">Show <select name="' . $h($p['key'] . '_size') . '" aria-label="Rows per page" style="min-height:44px;">';
         foreach (rh_lp_sizes() as $n) {
-            $o .= '<option value="' . $n . '"' . ($n === $p['size'] ? ' selected' : '') . '>' . $n . '</option>';
+            $o .= '<option value="' . $n . '"' . (empty($p['all']) && $n === $p['size'] ? ' selected' : '') . '>' . $n . '</option>';
+        }
+        if (!empty($p['all_max'])) {
+            $o .= '<option value="all"' . (!empty($p['all']) ? ' selected' : '') . '>All</option>';
         }
         $o .= '</select> per page</label><noscript><button type="submit" class="pg-btn">Show</button></noscript></form>';
         $o .= '</nav>';
+        if (!empty($p['all_fallback'])) {
+            $note = trim('All shows up to ' . number_format((int)$p['all_max']) . ' rows at once; this list is longer, so it shows 100 per page. ' . $note);
+        }
         if ($note !== '') {
             $o .= '<p class="log-events__foot">' . $h($note) . '</p>';
         }

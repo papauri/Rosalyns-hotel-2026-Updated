@@ -15,6 +15,8 @@ require_once __DIR__ . '/../includes/auto-email-jobs.php';
 require_once __DIR__ . '/../includes/daily-reports-send.php';
 require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
 require_once __DIR__ . '/../includes/settings-save-changed.php'; // save only the keys the person changed
+require_once __DIR__ . '/includes/log-pager.php'; // Recent activity pages (shared System Logs pager)
+require_once __DIR__ . '/includes/auto-email-log-filter.php'; // Recent activity filters (GET ae_*)
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -299,10 +301,30 @@ foreach (array_keys(rh_auto_defaults()) as $k) {
 $lastRun = (int)$cfg['scheduler_last_run'];
 $lastResult = json_decode($cfg['scheduler_last_result'], true);
 
+// Recent activity: GET filters (ae_*) + the shared pager (ae_page / ae_size, 10 / 25 / 50 / 100 / All).
 $logRows = [];
+$logJobKeys = [];
+$logF = rh_ael_parse([], []);
+$logP = rh_lp_clamp(rh_lp_parse([], 'ae', RH_AEL_ALL_MAX), 0);
+$logError = false;
 if ($tableReady) {
-    $logRows = $pdo->query('SELECT job, account_type, account_id, stage, recipient, subject, status, attempts, error, sent_at FROM automated_email_log ORDER BY id DESC LIMIT 100')->fetchAll(PDO::FETCH_ASSOC);
+    try {
+        $logJobKeys = $pdo->query('SELECT DISTINCT job FROM automated_email_log ORDER BY job')->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        $logF = rh_ael_parse($_GET, $logJobKeys);
+        [$logCountSql, $logRowsSql, $logArgs] = rh_ael_sql($logF);
+        [$logP, $logRows] = rh_lp_fetch($pdo, $_GET, 'ae', $logCountSql, $logRowsSql, $logArgs, RH_AEL_ALL_MAX);
+    } catch (Throwable $e) {
+        $logError = true;
+        $logRows = [];
+        error_log('automated emails activity list: ' . $e->getMessage());
+    }
 }
+$logCanOpenBooking = function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'booking-details.php');
+$logJobOptions = [];
+foreach ($logJobKeys as $logJk) {
+    $logJobOptions[(string)$logJk] = (string)($jobs[$logJk]['label'] ?? $logJk);
+}
+asort($logJobOptions, SORT_NATURAL | SORT_FLAG_CASE);
 
 $esc = static function ($v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
@@ -333,7 +355,18 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
         .ae-failed { background: #f8d7da; color: #721c24; }
         .ae-sending, .ae-skipped { background: #e9ecef; color: #495057; }
         .ae-warn { background: #fff3cd; color: #856404; border: 1px solid #ffe08a; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
-        .ae-scroll { overflow-x: auto; }
+        .ae-scroll { overflow-x: auto; max-width: 100%; }
+        .ae-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px 12px; align-items: end; margin: 0 0 10px; }
+        .ae-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; font-weight: 600; min-width: 0; }
+        .ae-filters select, .ae-filters input { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; font-weight: 400; }
+        .ae-filters__q { grid-column: span 2; }
+        .ae-filters__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .ae-filters__actions .btn-submit { min-height: 44px; }
+        .ae-filters__reset { display: inline-flex; align-items: center; min-height: 44px; }
+        .ae-count { margin: 0 0 8px; font-size: 0.85rem; }
+        .ae-nowrap { white-space: nowrap; }
+        .ae-break { overflow-wrap: anywhere; }
+        @media (max-width: 420px) { .ae-filters__q { grid-column: 1 / -1; } }
     </style>
 </head>
 
@@ -515,29 +548,103 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
             <p class="help-text">Tests use sample data, are sent only to your own admin email address, and record nothing.</p>
         </div>
 
-        <div class="settings-card">
-            <h2>Recent activity (last 100)</h2>
-            <div class="ae-scroll">
+        <div class="settings-card" id="ae-activity">
+            <h2>Recent activity</h2>
+            <?php if ($tableReady): ?>
+                <form method="get" action="automated-emails.php#ae-activity" class="ae-filters" aria-label="Filter the activity list">
+                    <label>Job
+                        <select name="ae_job">
+                            <option value="">Any job</option>
+                            <?php foreach ($logJobOptions as $logJk => $logJl): ?>
+                                <option value="<?php echo $esc($logJk); ?>" <?php echo $logF['job'] === $logJk ? 'selected' : ''; ?>><?php echo $esc($logJl); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Result
+                        <select name="ae_status">
+                            <option value="">Any result</option>
+                            <?php foreach (rh_ael_statuses() as $logSk => $logSl): ?>
+                                <option value="<?php echo $esc($logSk); ?>" <?php echo $logF['status'] === $logSk ? 'selected' : ''; ?>><?php echo $esc($logSl); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>From
+                        <input type="date" name="ae_from" value="<?php echo $esc($logF['from']); ?>">
+                    </label>
+                    <label>To
+                        <input type="date" name="ae_to" value="<?php echo $esc($logF['to']); ?>">
+                    </label>
+                    <label class="ae-filters__q">Search
+                        <input type="search" name="ae_q" value="<?php echo $esc($logF['q']); ?>" maxlength="<?php echo (int)RH_AEL_Q_MAX; ?>" placeholder="Email address, subject, stage, booking ref or ID">
+                    </label>
+                    <?php if ($logP['size'] !== 10 || !empty($logP['all'])): ?>
+                        <input type="hidden" name="ae_size" value="<?php echo !empty($logP['all']) ? 'all' : (int)$logP['size']; ?>">
+                    <?php endif; ?>
+                    <div class="ae-filters__actions">
+                        <button type="submit" class="btn-submit"><i class="fas fa-filter"></i> Show</button>
+                        <?php if ($logF['active']): ?>
+                            <a href="automated-emails.php#ae-activity" class="ae-filters__reset">Reset</a>
+                        <?php endif; ?>
+                    </div>
+                </form>
+                <p class="ae-count"><strong><?php echo $esc(rh_ael_count_line($logP)); ?></strong><?php echo $logF['active'] ? ' for these filters' : ''; ?>.</p>
+            <?php endif; ?>
+            <div class="ae-scroll" data-disable-auto-pagination>
                 <table class="ae-table">
-                    <thead><tr><th>When</th><th>Job</th><th>Account</th><th>Stage</th><th>Recipient</th><th>Status</th></tr></thead>
+                    <thead><tr>
+                        <th>When <i class="help" data-tip="When this email was first tried, in hotel time. A retry keeps the first time.">?</i></th>
+                        <th>Job <i class="help" data-tip="The automated job that sent it, named as in Settings above.">?</i></th>
+                        <th>Account <i class="help" data-tip="The booking, quotation, company or other record the email was about. A booking reference opens the booking. A dash means a run summary, not one record.">?</i></th>
+                        <th>Stage <i class="help" data-tip="Which step of the job it was, for example the first, second or final reminder. For a run summary: how many were sent and skipped.">?</i></th>
+                        <th>Recipient <i class="help" data-tip="The address the email was for, from the automated email log. In test mode it went to the test recipient instead (its stage starts with test:). Empty when nothing was sent.">?</i></th>
+                        <th>Result <i class="help" data-tip="Sent; Failed, with the reason (tried up to 3 times, an hour apart); Skipped, with why it was not needed; or Sending (still in progress).">?</i></th>
+                    </tr></thead>
                     <tbody>
                         <?php if (!$logRows): ?>
-                            <tr><td colspan="6">Nothing sent yet.</td></tr>
+                            <tr><td colspan="6"><?php
+                                if ($logError) {
+                                    echo 'The activity list could not be loaded just now. Please refresh the page.';
+                                } elseif ($logF['active']) {
+                                    echo 'No activity matches these filters.';
+                                } else {
+                                    echo 'Nothing sent yet.';
+                                }
+                            ?></td></tr>
                         <?php endif; ?>
-                        <?php foreach ($logRows as $row): ?>
+                        <?php foreach ($logRows as $row):
+                            $logType = (string)$row['account_type'];
+                            $logId = (int)$row['account_id'];
+                            $logStatus = (string)$row['status'];
+                            ?>
                             <tr>
-                                <td><?php echo $esc($row['sent_at']); ?></td>
+                                <td class="ae-nowrap"><?php echo $esc($row['sent_at']); ?></td>
                                 <td><?php echo $esc($jobs[$row['job']]['label'] ?? $row['job']); ?></td>
-                                <td><?php echo $esc(in_array($row['account_type'], ['run', 'trading_day'], true) ? '—' : $row['account_type'] . ' #' . $row['account_id']); ?></td>
-                                <td><?php echo $esc($row['account_type'] === 'run' ? $row['subject'] : $row['stage']); ?></td>
-                                <td><?php echo $esc($row['recipient']); ?></td>
-                                <td><span class="ae-badge ae-<?php echo $esc($row['status']); ?>"><?php echo $esc($row['status']); ?></span>
+                                <td>
+                                    <?php if (in_array($logType, ['run', 'trading_day'], true)): ?>
+                                        &mdash;
+                                    <?php elseif ($logType === 'room' && $logId > 0):
+                                        $logRef = trim((string)($row['booking_reference'] ?? ''));
+                                        $logRefLabel = $logRef !== '' ? $logRef : 'Booking #' . $logId;
+                                        ?>
+                                        <?php if ($logCanOpenBooking): ?>
+                                            <a href="booking-details.php?id=<?php echo $logId; ?>"><?php echo $esc($logRefLabel); ?></a>
+                                        <?php else: ?>
+                                            <?php echo $esc($logRefLabel); ?>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <?php echo $esc($logType . ' #' . $logId); ?>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo $esc($logType === 'run' ? $row['subject'] : $row['stage']); ?></td>
+                                <td class="ae-break"><?php echo $esc($row['recipient']); ?></td>
+                                <td><span class="ae-badge ae-<?php echo $esc($logStatus); ?>"><?php echo $esc(rh_ael_statuses()[$logStatus] ?? $logStatus); ?></span>
                                     <?php if (!empty($row['error'])): ?><br><small><?php echo $esc($row['error']); ?></small><?php endif; ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
+            <?php if ($tableReady && $logRows): echo rh_lp_render('automated-emails.php', $_GET, $logP, count($logRows), 'ae-activity', 'Activity pages', rh_lp_cap_note($logP)); endif; ?>
         </div>
     </div>
 
