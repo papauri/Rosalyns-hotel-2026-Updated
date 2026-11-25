@@ -90,6 +90,16 @@ when prompted."
 - 2026-11-25 Liwonde d9475a0 / Rosalyn's 8926fd4 (owner FEATURE): Automated Emails > Recent activity has filters (job,
   sent/skipped/failed, dates, search) and 10/25/50/All pages instead of the last 100; every column has a "?". Guides:
   Automated Emails page. Assistant: "did the reminder go to X / why was it skipped". Manager Guide: no change.
+- 2026-11-25 Liwonde a1fda1b / Rosalyn's 1687f9a (owner FEATURE + accuracy PATCH): (1) Booking details: an "i" next to
+  Paid (top strip and payment panel) lists each payment and refund on the booking: date, deposit / part / full payment,
+  method, receipt, time recorded, amount; refunds on the day paid out, money moved to guest credit labelled; pending rows
+  shown but not counted; adds up to Paid. (2) Dashboard Money "Taken this week" / Takings today now equal End of Day
+  "Cash collected": money moved onto a credit note is guest credit, not a refund, so it is no longer taken off.
+  (3) New dashboard card "This week's movements": money in by source, refunds paid out, Net taken (= Taken this week),
+  change on the 7 days before, money moved to guest credit apart (dashboard_takings permission).
+  Guides: 07-reception-bookings (Paid "i"), 99-admin-dashboard + 13-finance-payments (Money rule, new card).
+  Assistant: "when did the guest pay / part payments" -> the Paid "i"; "why does the dashboard differ from End of Day"
+  -> it no longer should; credit-note moves are guest credit. Manager Guide: Money and End of Day.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
