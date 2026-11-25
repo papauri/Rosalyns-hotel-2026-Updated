@@ -275,8 +275,8 @@ body.dashboard-insight-open {
 }
 
 /* Movements card (owner 2026-11-25): ‹ period › switcher beside the title rotates Today / Tomorrow /
-   Next 7 days / Next 30 days. The list area keeps one height on wider screens so the card never resizes
-   while flicking through; on phones the list follows its rows (10 per page) with a steady minimum. */
+   Next 7 days / Next 30 days. The list area keeps one height above 1024px so the card never resizes
+   while flicking through; on phones and tablets the list follows its rows (10 per page) with a steady minimum. */
 .ck-mv-head {
     display: flex;
     flex-wrap: wrap;
@@ -354,9 +354,10 @@ body.dashboard-insight-open {
     pointer-events: none;
 }
 
-/* Above 680px the card keeps one height: the list scrolls inside it and its pager sits pinned at the card's
-   bottom, outside the scrolling rows (owner 2026-11-26). */
-@media (min-width: 681px) {
+/* Above 1024px the card keeps one height: the list scrolls inside it and its pager sits pinned at the card's
+   bottom, outside the scrolling rows (owner 2026-11-26). Phones and tablets (up to 1024px) follow the rows, so
+   the pager sits right under the last row with no gap (owner 2026-11-26, the phone/tablet pager exception). */
+@media (min-width: 1025px) {
     .ck-today .ck-pane:not([hidden]) {
         display: flex;
         flex-direction: column;
@@ -407,7 +408,9 @@ body.dashboard-insight-open {
         width: 100%;
         justify-content: space-between;
     }
+}
 
+@media (max-width: 1024px) {
     .ck-today .ck-pane {
         min-height: 240px;
     }

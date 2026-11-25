@@ -320,11 +320,12 @@
             window.scrollTo({ top: y, behavior: 'smooth' });
         }
 
-        // Keep the pager in one place on every page, every screen size (owner 2026-11-26, replaces the 2026-11-22
-        // phone/tablet exception): measure the height of a full page once and pad the pager down by however much
-        // shorter the current page is (rows themselves never stretch). A short last page, a filter or an empty
-        // result never moves it up. The reference is a full page of ALL rows (filter ignored), so it holds through
-        // filters; it is measured again only on resize/load or a new rows-per-page choice.
+        // Keep the pager in one place on every page (owner 2026-11-26): measure the height of a full page once and
+        // pad the pager down by however much shorter the current page is (rows themselves never stretch). A short
+        // last page, a filter or an empty result never moves it up. The reference is a full page of ALL rows (filter
+        // ignored), so it holds through filters; it is measured again only on resize/load or a new rows-per-page
+        // choice. Phones and tablets (up to 1024px) are the exception: there the pager follows the last row (see
+        // pagerFollowsLastRow).
         var tallestPage = 0;
         var baseMargin = null;
 
@@ -374,7 +375,7 @@
 
         function holdPagerPosition() {
             // "All" is one page: nothing to line up with, so the pager follows the last row.
-            if (pageSize === 0 || !hostIsVisible()) {
+            if (pageSize === 0 || !hostIsVisible() || pagerFollowsLastRow()) {
                 nav.style.marginTop = '';
                 return;
             }
@@ -521,9 +522,16 @@
     // Bookings, Payments, Receipts, Credit notes, Reviews, Stock reports, Visitor analytics, System Logs and the gym
     // visit log send only one page of rows. A short page (the last one, a filter, nothing found) would pull the pager
     // up, so it is padded down by the rows that page is missing (rows-per-page choice - rows shown) x the height of a
-    // row on this page (or to the last full page of the same list seen in this tab). "All" is never padded.
+    // row on this page (or to the last full page of the same list seen in this tab). "All" is never padded, and
+    // neither is any pager on a phone or tablet (pagerFollowsLastRow).
     var SERVER_PAGER_SELECTOR = '[data-admin-pagination], .bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination';
     var PAGER_MEMORY_KEY = 'rh-pager-hold:';
+
+    // Phones + tablets (owner 2026-11-22, restored 2026-11-26): rows there are tall list rows, so padding a short page
+    // down to a full page left a big empty gap. Up to 1024px every pager (auto and server) follows the last row.
+    function pagerFollowsLastRow() {
+        return (window.innerWidth || document.documentElement.clientWidth || 0) <= 1024;
+    }
 
     function serverPagerSize(nav) {
         var sel = nav.querySelector('.pg-size select, select[aria-label="Rows per page"]');
@@ -589,6 +597,7 @@
         });
         navs.forEach(function (nav, index) {
             nav.style.marginTop = '';
+            if (pagerFollowsLastRow()) return;
             var size = serverPagerSize(nav);
             if (!size || !isShown(nav)) return;
             var list = serverPagerList(nav);
