@@ -4443,6 +4443,36 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         const bookedRoomGrossPerNight = Number(_bookedSplit.per_night) || 0;
         const bookedPackageGross = Number(_bookedSplit.package_gross) || 0;
         const currentTotal = Number(_bookedSplit.total_with_vat) || 0;
+        // Room packages for the new nights (owner 2026-11-26), same rule as rh_booking_package_requote() on save:
+        // per-night / per-person-per-night packages on this (lead) booking follow the new nights; per-stay are kept.
+        <?php
+        $bdPkQ = ($bd_closed ?? false) ? null : rh_booking_package_requote($pdo, $booking, max(1, (int)$booking['number_of_nights']));
+        $bdPkJs = null;
+        if ($bdPkQ !== null && $bdPkQ['self'] && !$bdPkQ['unverified']) {
+            $bdPkJs = ['persons' => (int)$bdPkQ['persons'], 'oldTotal' => round((float)$bdPkQ['old_total'], 2),
+                'grossFactor' => round((float)rh_stay_totals(1000000, 'price', false)['total_with_vat'] / 1000000, 6), 'rows' => []];
+            foreach ($bdPkQ['rows'] as $r) {
+                $bdPkJs['rows'][] = ['type' => (string)$r['price_type'], 'price' => round((float)$r['price_amount'], 2), 'total' => round((float)$r['old_total'], 2)];
+            }
+        }
+        ?>
+        const _bdPkg = <?php echo json_encode($bdPkJs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const _bdPkgNote = <?php echo json_encode(($bdPkQ !== null && $bdPkQ['unverified']) ? (string)$bdPkQ['note'] : '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        function bdPackageGross(newNights) {
+            if (!_bdPkg) return bookedPackageGross;
+            const n = Math.max(1, newNights);
+            let total = 0;
+            _bdPkg.rows.forEach(function(r) {
+                let t = r.total;
+                if ((r.type === 'per_night' || r.type === 'per_person_per_night') && r.price > 0.01) {
+                    const nt = Math.round(r.price * (r.type === 'per_night' ? n : Math.max(1, _bdPkg.persons) * n) * 100) / 100;
+                    if (Math.abs(nt - r.total) > 0.01) t = nt;
+                }
+                total += t;
+            });
+            total = Math.round(total * 100) / 100;
+            return Math.abs(total - _bdPkg.oldTotal) <= 0.01 ? bookedPackageGross : Math.round(total * _bdPkg.grossFactor * 100) / 100;
+        }
         const currentChildSupplement = <?php echo (float)($booking['child_supplement_total'] ?? 0); ?>;
         // RP-3: the discount a date change would remove (same rule as rh_rate_plan_dropped() on save), or null.
         const _planDrop = <?php echo json_encode(($bd_closed ?? false) ? null : rh_rate_plan_drop_js($pdo, $booking, (int)$booking['room_id']), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
@@ -4496,7 +4526,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         function bdRateLine(newNights, newTotal, addBack) {
             if (!_bookedRate.ok || !(newNights > 0)) return '';
             const nightWord = newNights === 1 ? '1 night' : newNights + ' nights';
-            const pkg = bookedPackageGross > 0.005 ? bookedPackageGross : 0;
+            const pkgNow = bdPackageGross(newNights);
+            const pkg = pkgNow > 0.005 ? pkgNow : 0;
             const child = _bookedRate.child > 0.005 && currentNights > 0 ? Math.round(_bookedRate.child * newNights / currentNights * 100) / 100 : 0;
             const roomOnly = Math.round((newTotal - pkg - child) * 100) / 100;
             let text = bdRateMoney(_bookedRate.per_night + (addBack || 0)) + ' \u00d7 ' + nightWord + ' = ' + bdRateMoney(roomOnly);
@@ -4633,8 +4664,15 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 dropEl.textContent = dropReason ? 'The ' + _planDrop.name + ' discount will be removed: ' + dropReason + '. ' + bdRateMoney(addBack) + ' a night is added back to the rate.' : '';
                 dropEl.hidden = !dropReason;
             }
-            const newTotal = (bookedRoomGrossPerNight + addBack) * newNights + bookedPackageGross;
+            const pkgNew = bdPackageGross(newNights);
+            const newTotal = Math.round(((bookedRoomGrossPerNight + addBack) * newNights + pkgNew) * 100) / 100;
             const amountDelta = newTotal - currentTotal;
+            let pkgNote = '';
+            if (Math.abs(pkgNew - bookedPackageGross) > 0.01) {
+                pkgNote = 'Package recalculated for ' + newNights + ' night' + (newNights !== 1 ? 's' : '') + ': ' + bdRateMoney(bookedPackageGross) + ' → ' + bdRateMoney(pkgNew) + '.';
+            } else if (_bdPkgNote && newNights !== currentNights) {
+                pkgNote = _bdPkgNote;
+            }
             const nightsDelta = newNights - currentNights;
 
             // Update preview
@@ -4652,7 +4690,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 nightsDeltaEl.style.color = '#666';
             }
 
-            document.getElementById('previewRateLine').textContent = bdRateLine(newNights, newTotal, addBack) || '-';
+            document.getElementById('previewRateLine').textContent = (bdRateLine(newNights, newTotal, addBack) || '-') + (pkgNote ? ' ' + pkgNote : '');
 
             document.getElementById('previewNewTotal').textContent = currencySymbol + Number(newTotal).toLocaleString('en-US', {
                 minimumFractionDigits: 2,

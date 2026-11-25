@@ -88,7 +88,9 @@ function rp3_old_reprice(array $b, int $newNights): array {
     $oldChild = (float)($b['child_supplement_total'] ?? 0);
     $newChild = $oldChild > 0 ? round($oldChild * ($newNights / $split['nights']), 2) : 0.0;
     return ['old_gross' => $split['total_with_vat'], 'new_gross' => $tt['total_with_vat'], 'delta' => round($tt['total_with_vat'] - $split['total_with_vat'], 2),
-        'totals' => $tt, 'per_night' => $split['per_night'], 'new_child_supplement' => $newChild];
+        'totals' => $tt, 'per_night' => $split['per_night'], 'new_child_supplement' => $newChild,
+        // Room packages (owner 2026-11-26) added three keys to the return; with no package they only report it unchanged.
+        'package_gross' => $split['package_gross'], 'package_gross_old' => $split['package_gross'], 'packages' => null];
 }
 
 /** A rate_plans row shaped like the database returns it (strings), priority DESC order is the caller's job. */

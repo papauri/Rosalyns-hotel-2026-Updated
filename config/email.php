@@ -14,6 +14,8 @@ require_once __DIR__ . '/database.php';
 // Shared document theme + PDF kit (brand tokens, rh_pdf_* helpers)
 require_once __DIR__ . '/document-theme.php';
 require_once __DIR__ . '/../includes/conference-pricing.php';
+// Room package wording (rh_pkg_label): "MWK 50,000 per night × 2 nights"
+require_once __DIR__ . '/../includes/pricing.php';
 // Email identity: From = SMTP mailbox, Reply-To/contact = hotel address, hidden copies, alert recipients
 require_once __DIR__ . '/../includes/email-identity.php';
 // Email send log (System Logs > Emails sent, booking History): who sent what, when, to whom
@@ -2392,12 +2394,14 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
             $pkgRows = $pkgStmt->fetchAll(PDO::FETCH_ASSOC);
             if (!empty($pkgRows)) {
                 $summaryRows = [];
+                // "Breakfast (MWK 50,000 per night × 2 nights)": units from the saved price and total (owner 2026-11-26).
+                $pkgMoney = static function (float $v) use ($currency): string {
+                    return $currency . ' ' . number_format($v, 0);
+                };
                 foreach ($pkgRows as $pkg) {
-                    $priceSuffix = $pkg['price_type'] === 'per_night' ? '/night' : '';
-                    $qty         = (int)$pkg['quantity'];
                     $label       = htmlspecialchars($pkg['package_name']);
                     $costFmt     = $currency . ' ' . number_format((float)$pkg['total_cost'], 0);
-                    $detail      = $qty > 1 ? " (x{$qty}{$priceSuffix})" : ($priceSuffix ? " ({$priceSuffix})" : '');
+                    $detail      = ' (' . htmlspecialchars(rh_pkg_label($pkg, (int)($booking['number_of_nights'] ?? 0), $pkgMoney, false, (string)$currency)) . ')';
                     $summaryRows[] = [$label . $detail, $costFmt];
                 }
                 if (function_exists('hotel_premium_email_summary_rows')) {
@@ -3497,12 +3501,14 @@ function sendAdminNotificationEmail(array $booking)
         $adminPackageRows = [];
         if (isset($pdo) && $bookingId > 0) {
             try {
-                $ap = $pdo->prepare('SELECT package_name, price_type, quantity, total_cost FROM booking_packages WHERE booking_id = ? ORDER BY id ASC');
+                $ap = $pdo->prepare('SELECT package_name, price_type, price_amount, quantity, total_cost FROM booking_packages WHERE booking_id = ? ORDER BY id ASC');
                 $ap->execute([$bookingId]);
+                $pkgMoney = static function (float $v) use ($currency): string {
+                    return $currency . ' ' . number_format($v, 0);
+                };
                 foreach ($ap->fetchAll(PDO::FETCH_ASSOC) as $pkg) {
-                    $suffix = $pkg['price_type'] === 'per_night' ? '/night' : '';
-                    $qty    = (int)$pkg['quantity'];
-                    $label  = htmlspecialchars($pkg['package_name']) . ($qty > 1 ? " x{$qty}" : '') . ($suffix ? " ({$suffix})" : '');
+                    // "Breakfast (MWK 50,000 per night × 2 nights)" (owner 2026-11-26).
+                    $label  = htmlspecialchars($pkg['package_name']) . ' (' . htmlspecialchars(rh_pkg_label($pkg, $nights, $pkgMoney, false, (string)$currency)) . ')';
                     $adminPackageRows[] = [$label, $currency . ' ' . number_format((float)$pkg['total_cost'], 0)];
                 }
             } catch (\Throwable $ignored) {}

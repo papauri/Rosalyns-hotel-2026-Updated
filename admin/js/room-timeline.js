@@ -1332,7 +1332,7 @@
                 }
                 return postAction({
                     action: 'upgrade_room_type', booking_id: b.id, new_room_id: lane.type_id, pricing: 'charge',
-                    reason_code: vals.reason, note: vals.note, send_email: '0'
+                    reason_code: vals.reason, note: vals.note, send_email: '0', package_ack: vals.package_ack || '0'
                 }).then(function (j1) {
                     // The type change is saved (and gave the booking a room of the new type); now the room it was
                     // dropped on. If that fails the type change stands: say so, never retry the paid part.
@@ -1372,12 +1372,25 @@
         var sync = function () { noteLab.textContent = noteNeeded() ? 'Note (required: who authorised it and why)' : 'Note (optional)'; };
         sel.addEventListener('change', sync);
         sync();
+        // A room package on the booking that the new type does not offer (rh_room_change_package_flags): staff confirm
+        // they told the guest, as on the Change room type form; the server refuses the change without it.
+        var pkgAck = null;
+        if (opt.quote.package_flag_text) {
+            var l3 = el('label', 'tl-field');
+            l3.appendChild(el('span', 'tl-field__label', 'Package: ' + opt.quote.package_flag_text));
+            pkgAck = document.createElement('input');
+            pkgAck.type = 'checkbox';
+            l3.appendChild(pkgAck);
+            l3.appendChild(document.createTextNode(' I have told the guest. Keep the package on the bill at the booked price.'));
+            wrap.appendChild(l3);
+        }
         body.appendChild(wrap);
         return function () {
             if (!sel.value) throw new Error('Choose a reason for the room change.');
             var note = String(ta.value || '').trim();
             if (noteNeeded() && note.length < 5) throw new Error('Add a short note explaining the room change (who authorised it and why).');
-            return { reason: sel.value, note: note };
+            if (pkgAck && !pkgAck.checked) throw new Error('Tick "I have told the guest" to keep the package, or choose another room type.');
+            return { reason: sel.value, note: note, package_ack: pkgAck && pkgAck.checked ? '1' : '0' };
         };
     }
     /* Touch, tablet, phone and keyboard: the rooms of this type the booking may move to, then the same confirm. */

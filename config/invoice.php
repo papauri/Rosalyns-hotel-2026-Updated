@@ -1142,7 +1142,16 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     }
     // booking_packages rows are stored all-in; exclusive mode prints net lines (rh_doc_stay_lines gives the package
     // subtotal as its net), so the rows go on that same basis and add up to it. Inclusive / off: unchanged.
-    $pkgRows = rh_doc_pkg_rows_on_basis($pkgRows, (string)($docLines[$pkgRowIdx]['mode'] ?? ''), (float)($docLines[$pkgRowIdx]['pkg'] ?? 0), max(0.0, $pkgTotal));
+    // Room packages (owner 2026-11-26): Qty = the units the row was charged for (older rows all say 1) and a plain
+    // "Per night × 2 nights" sub-line, worked out before any exclusive-mode rescale so the units stay whole.
+    $pkgNoMoney = static function (float $v): string {
+        return '';
+    };
+    foreach ($pkgRows as $pk => $pkr) {
+        $pkgRows[$pk]['quantity'] = rh_pkg_row_units($pkr);
+        $pkgRows[$pk]['pkg_sub'] = ucfirst(trim(rh_pkg_label($pkr, (int)($booking['number_of_nights'] ?? 0), $pkgNoMoney, false)));
+    }
+    $pkgRows = rh_doc_pkg_rows_on_basis($pkgRows,(string)($docLines[$pkgRowIdx]['mode'] ?? ''), (float)($docLines[$pkgRowIdx]['pkg'] ?? 0), max(0.0, $pkgTotal));
 
     // Totals — VAT per installation mode: exclusive adds on top of the room
     // base, inclusive extracts from it (total never inflates), off is zero.
@@ -1379,7 +1388,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     }
     foreach ($pkgRows as $pkg) {
         $planRows[] = [
-            rh_pdf_e($pkg['package_name']) . rh_inv_sub('Package add-on'),
+            rh_pdf_e($pkg['package_name']) . rh_inv_sub('Package add-on' . (!empty($pkg['pkg_sub']) ? ', ' . lcfirst((string)$pkg['pkg_sub']) : '')),
             rh_pdf_e((string)(int)$pkg['quantity']),
             rh_pdf_e($money((float)$pkg['price_amount'])),
             rh_pdf_e($money((float)$pkg['total_cost'])),
@@ -1790,7 +1799,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
         // Package add-on rows
         foreach ($pkgRows as $pkg) {
             $out .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($pkg['package_name']) . ' — Package Add-on</td>
+            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($pkg['package_name']) . ' — Package Add-on' . (!empty($pkg['pkg_sub']) ? ' (' . htmlspecialchars(lcfirst((string)$pkg['pkg_sub'])) . ')' : '') . '</td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$pkg['quantity'] . '</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$pkg['price_amount'], 2) . '</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$pkg['total_cost'], 2) . '</td>

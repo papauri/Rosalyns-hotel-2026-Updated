@@ -188,10 +188,15 @@ function rh_room_change_nights(array $b, ?string $today = null): array
 /**
  * Price a move of booking $b to room type $newRoom. Pure calculation.
  *
+ * $pkgRows: the booking's room packages with their catalogue rows (rh_room_change_package_rows()); null = not checked
+ * (pure callers). 'package_flags' lists the packages the new room type does not offer (owner 2026-11-26: staff are
+ * warned and must confirm they told the guest; the package stays on the bill at its booked price).
+ *
  * @return array{direction:string,stayed:int,affected:int,old_rack:float,new_rack:float,booked_night:float,
- *               current_total:float,charge_total:float,charge_delta:float,rack_value_delta:float,new_child_supplement:float,package_gross:float}
+ *               current_total:float,charge_total:float,charge_delta:float,rack_value_delta:float,new_child_supplement:float,
+ *               package_gross:float,package_flags:array<int,string>}
  */
-function rh_room_change_quote(array $b, array $oldRoom, array $newRoom): array
+function rh_room_change_quote(array $b, array $oldRoom, array $newRoom, ?array $pkgRows = null): array
 {
     $split = rh_booked_stay_split($b);
     [$stayed, $affected] = rh_room_change_nights($b);
@@ -229,7 +234,59 @@ function rh_room_change_quote(array $b, array $oldRoom, array $newRoom): array
         'rack_value_delta' => round($diff * $affected, 2),
         'new_child_supplement' => $newChild,
         'package_gross' => $split['package_gross'],
+        'package_flags' => rh_room_change_package_flags($pkgRows, (int)($newRoom['id'] ?? 0)),
     ];
+}
+
+/**
+ * The room packages saved on booking $b with their catalogue rows (applies_to, room_type_ids; catalogue = null when the
+ * package was deleted). Packages sit on a group's lead row only, so another room of a group has none to check.
+ *
+ * @return array<int,array{package_name:string,catalogue:?array}>
+ */
+function rh_room_change_package_rows(PDO $pdo, array $b): array
+{
+    if (!empty($b['primary_booking_id']) || (int)($b['id'] ?? 0) <= 0) {
+        return [];
+    }
+    $st = $pdo->prepare('SELECT bp.package_name, rp.id AS rp_id, rp.applies_to, rp.room_type_ids
+        FROM booking_packages bp LEFT JOIN room_packages rp ON rp.id = bp.package_id
+        WHERE bp.booking_id = ? ORDER BY bp.id ASC');
+    $st->execute([(int)$b['id']]);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $out[] = [
+            'package_name' => (string)$r['package_name'],
+            'catalogue' => $r['rp_id'] !== null ? ['applies_to' => (string)$r['applies_to'], 'room_type_ids' => (string)$r['room_type_ids']] : null,
+        ];
+    }
+    return $out;
+}
+
+/** PURE. Names of the packages in $pkgRows (rh_room_change_package_rows()) that room type $roomTypeId does not offer. */
+function rh_room_change_package_flags(?array $pkgRows, int $roomTypeId): array
+{
+    if (!$pkgRows || !function_exists('rh_package_allowed_for_type')) {
+        return [];
+    }
+    $names = [];
+    foreach ($pkgRows as $r) {
+        if (!rh_package_allowed_for_type($r['catalogue'] ?? null, $roomTypeId)) {
+            $names[] = (string)($r['package_name'] ?? '') !== '' ? (string)$r['package_name'] : 'A package';
+        }
+    }
+    return array_values(array_unique($names));
+}
+
+/** "Breakfast is not offered for Deluxe." / "Breakfast and Dinner are not offered for Deluxe." */
+function rh_room_change_package_flag_text(array $names, string $roomName): string
+{
+    if (!$names) {
+        return '';
+    }
+    $last = array_pop($names);
+    $list = $names ? implode(', ', $names) . ' and ' . $last : $last;
+    return $list . ($names ? ' are' : ' is') . ' not offered for ' . $roomName . '.';
 }
 
 /**
@@ -267,8 +324,10 @@ function rh_room_change_options(PDO $pdo, int $bookingId): array
     $rooms = $pdo->prepare("SELECT * FROM rooms WHERE is_active = 1 AND id <> ? ORDER BY price_per_night DESC, display_order ASC");
     $rooms->execute([(int)$b['room_id']]);
     $options = [];
+    $pkgRows = rh_room_change_package_rows($pdo, $b);
     foreach ($rooms->fetchAll(PDO::FETCH_ASSOC) as $room) {
-        $q = rh_room_change_quote($b, $old, $room);
+        $q = rh_room_change_quote($b, $old, $room, $pkgRows);
+        $q['package_flag_text'] = rh_room_change_package_flag_text($q['package_flags'], (string)$room['name']);
         $why = '';
         if ((int)($room['max_guests'] ?? 0) > 0 && (int)$b['number_of_guests'] > (int)$room['max_guests']) {
             $why = 'Sleeps ' . (int)$room['max_guests'] . ' (booking has ' . (int)$b['number_of_guests'] . ' guests)';
@@ -315,11 +374,14 @@ function rh_room_change_options(PDO $pdo, int $bookingId): array
 
 /**
  * Apply a room-type change. $pricing: 'charge' (reprice by the rack difference) or 'keep' (bill unchanged).
+ * $packageAck: staff confirmed they told the guest that a room package on the booking is not offered for the new type
+ * (owner 2026-11-26). Without it such a change is refused; with it the package stays on the bill and History says so.
  *
  * @return array{success:bool,message:string,data?:array}
  */
-function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, string $pricing, string $reasonCode, string $note, array $actor, bool $canKeepPrice): array
+function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, string $pricing, string $reasonCode, string $note, array $actor, bool $canKeepPrice, bool $packageAck = false): array
 {
+    $pkgFlagText = '';
     $pricing = $pricing === 'keep' ? 'keep' : 'charge';
     $note = mb_substr(trim($note), 0, 500);
     $actorId = (int)($actor['id'] ?? 0);
@@ -386,7 +448,11 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
             $newRoom['joined_pair'] = $joinedPair;
         }
 
-        $q = rh_room_change_quote($b, $oldRoom, $newRoom);
+        $q = rh_room_change_quote($b, $oldRoom, $newRoom, rh_room_change_package_rows($pdo, $b));
+        $pkgFlagText = rh_room_change_package_flag_text($q['package_flags'], (string)$newRoom['name']);
+        if ($pkgFlagText !== '' && !$packageAck) {
+            throw new RuntimeException($pkgFlagText . ' Tick "I have told the guest" to keep it on the bill at the booked price, or choose another room type. Nothing was changed.');
+        }
         $direction = $q['direction'];
         if ($direction === 'same') {
             $pricing = 'keep'; // same rack rate: nothing to charge or credit
@@ -530,6 +596,9 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
     $desc = $kind . ': ' . ($oldRoom['name'] ?? ('type #' . $b['room_id'])) . ' -> ' . $newRoom['name']
         . ' for ' . $q['affected'] . ' night(s)' . ($q['stayed'] > 0 ? ' (from tonight; ' . $q['stayed'] . ' night(s) already stayed kept at the booked rate)' : '') . '.'
         . $money . ' Reason: ' . (rh_room_change_reasons($direction)[$reasonCode] ?? $reasonCode) . ($note !== '' ? '. Note: ' . $note : '') . '.';
+    if ($pkgFlagText !== '') {
+        $desc .= ' Package check: ' . $pkgFlagText . ' Kept on the bill at the booked price; staff confirmed the guest was told.';
+    }
     if ((float)($fin['credit_balance'] ?? 0) > BALANCE_TOLERANCE) {
         $desc .= ' Guest now in credit ' . $currency . ' ' . number_format((float)$fin['credit_balance'], 2) . ' (refund or credit note).';
     }
@@ -540,6 +609,7 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
         'old_total' => $q['current_total'], 'new_total' => $newTotal, 'bill_delta' => $billDelta,
         'rack_value_delta' => $q['rack_value_delta'], 'nights_affected' => $q['affected'], 'nights_stayed' => $q['stayed'],
         'old_rack_night' => $q['old_rack'], 'new_rack_night' => $q['new_rack'], 'assigned_room' => $assigned,
+        'packages_not_offered' => $q['package_flags'],
     ];
     if (function_exists('logBookingAudit')) {
         logBookingAudit($bookingId, $direction === 'downgrade' ? 'downgraded' : 'upgraded',

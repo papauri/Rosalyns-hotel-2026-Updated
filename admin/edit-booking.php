@@ -299,25 +299,36 @@ $vatRate = (float)getSetting('vat_rate', 0);
 /**
  * Price the stay for edited dates / occupancy / children, keeping the guest's BOOKED rate:
  * new nightly = booked nightly + (rack for the new occupancy & children - rack for the old ones).
- * Packages are carried unchanged. $addBackNight: a rate-plan discount the new dates no longer qualify for
- * (rh_rate_plan_dropped(), only when the dates change), added back per night.
+ * Per-night and per-person-per-night packages follow the new nights / adults (owner 2026-11-26,
+ * rh_booking_package_requote(): the party's adults x the lead room's nights); per-stay packages are kept.
+ * $addBackNight: a rate-plan discount the new dates no longer qualify for
+ * (rh_rate_plan_dropped(), only when the dates change), added back per night. $adults: the new adult count.
  */
-function edit_booking_reprice(array $booking, array $roomType, int $nights, string $occupancy, int $children, float $addBackNight = 0.0): array
+function edit_booking_reprice(array $booking, array $roomType, int $nights, string $occupancy, int $children, float $addBackNight = 0.0, ?int $adults = null): array
 {
+    global $pdo;
     $split = rh_booked_stay_split($booking);
     $oldRack = rh_room_type_rack_night($roomType, $booking);
     $newRack = rh_room_type_rack_night($roomType, array_merge($booking, ['occupancy_type' => $occupancy, 'child_guests' => $children]));
     $newNight = max(0.0, $split['per_night'] + ($newRack - $oldRack) + max(0.0, $addBackNight));
-    $gross = round($newNight * max(1, $nights) + $split['package_gross'], 2);
+    $pq = rh_booking_package_requote($pdo, $booking, max(1, $nights), $adults);
+    $pkgGross = ($pq !== null && $pq['self'] && $pq['changed']) ? (float)$pq['new_gross'] : (float)$split['package_gross'];
+    $gross = round($newNight * max(1, $nights) + $pkgGross, 2);
+    // Levy on the room part only, never on the package (as booking.php saves it).
+    $tt = rh_stay_totals_with_package($gross, $pkgGross, rh_booking_has_levy($booking));
+    if ($pq !== null && $pq['changed']) {
+        $tt['packages'] = $pq; // saved by rh_write_booking_stay_totals()
+    }
     // Stored on the price basis (VAT and levy are not inside it), like create-booking and the documents expect.
     $childNight = rh_room_type_child_night($roomType, array_merge($booking, ['occupancy_type' => $occupancy, 'child_guests' => $children]));
     return [
-        // Levy on the room part only, never on the package (as booking.php saves it).
-        'totals' => rh_stay_totals_with_package($gross, $split['package_gross'], rh_booking_has_levy($booking)),
+        'totals' => $tt,
         'gross' => $gross,
         'per_night' => round($newNight, 2),
         'rack_delta_night' => round($newRack - $oldRack, 2),
         'child_supplement' => round($childNight * max(1, $nights), 2),
+        'package_gross' => $pkgGross,
+        'packages' => $pq,
     ];
 }
 
@@ -512,6 +523,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 $datesChanged = $check_in !== (string)$locked['check_in_date'] || $check_out !== (string)$locked['check_out_date'];
                 $occChanged = $occupancy_type !== (string)($locked['occupancy_type'] ?? 'single') || $child_guests !== (int)($locked['child_guests'] ?? 0);
                 $roomPointerChanged = (int)($individual_room_id ?? 0) !== (int)($locked['individual_room_id'] ?? 0);
+                // An adults-only change reprices only when it moves a per-person package of the party (owner 2026-11-26);
+                // without one the stay figures stay exactly as saved.
+                $adultsPkgChanged = false;
+                if ($adult_guests !== (int)($locked['adult_guests'] ?? 0)) {
+                    $ebPkProbe = rh_booking_package_requote($pdo, $locked, max(1, $number_of_nights), $adult_guests);
+                    $adultsPkgChanged = $ebPkProbe !== null && !empty($ebPkProbe['changed']);
+                }
 
                 if ($datesChanged || $roomPointerChanged) {
                     // Shared stay-change gate: booking / room-type / room locks; only NEW nights are re-checked.
@@ -560,13 +578,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 // Price follows the stay (never typed in): booked rate kept; occupancy / children add or remove the rack difference.
                 $newGross = $storedGross;
                 $ebDrop = ['removed' => false, 'per_night' => 0.0];
-                if ($can_edit_stay && ($datesChanged || $occChanged)) {
+                if ($can_edit_stay && ($datesChanged || $occChanged || $adultsPkgChanged)) {
                     // RP-3: a length-of-stay / weekend / seasonal discount the new dates no longer qualify for is removed (dates only).
                     if ($datesChanged) {
                         $ebDrop = rh_rate_plan_dropped($pdo, $locked, $check_in, $check_out, $number_of_nights, $room_id);
                     }
                     // Children are priced with the rule the booking was saved with (its snapshot), so editing never reprices on today's rule.
-                    $rp = edit_booking_reprice($locked, array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($locked))), $number_of_nights, $occupancy_type, $child_guests, (float)$ebDrop['per_night']);
+                    $rp = edit_booking_reprice($locked, array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($locked))), $number_of_nights, $occupancy_type, $child_guests, (float)$ebDrop['per_night'], $adult_guests);
                     // Kept for unused nights (D-R1a, only when nights are cut; notice = today). $locked = the row before the UPDATE.
                     $ebUn = null;
                     $ebUnChoice = null;
@@ -594,6 +612,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $newGross = $rp['gross'];
                     if (abs($newGross - $storedGross) > BALANCE_TOLERANCE) {
                         $changes['total_amount'] = ['old' => $currency_sym . ' ' . number_format($storedGross, 2), 'new' => $currency_sym . ' ' . number_format($newGross, 2)];
+                    }
+                    if (!empty($rp['packages']['changed'])) {
+                        $changes['package'] = ['old' => $currency_sym . ' ' . number_format((float)$rp['packages']['old_gross'], 2),
+                            'new' => $currency_sym . ' ' . number_format((float)$rp['packages']['new_gross'], 2)
+                                . (!$rp['packages']['self'] ? ' (party package on ' . $rp['packages']['lead_ref'] . ')' : '')];
                     }
                 }
 
@@ -740,6 +763,7 @@ $preview_data = [
     'currentTotal' => round($preview_split['total_with_vat'], 2),
     'occupancy' => (string)($booking['occupancy_type'] ?? 'single'),
     'children' => (int)($booking['child_guests'] ?? 0),
+    'adults' => max(1, (int)($booking['number_of_guests'] ?? 1) - (int)($booking['child_guests'] ?? 0)),
     'rack' => $preview_rack,
     'checkIn' => substr((string)$booking['check_in_date'], 0, 10),
     'checkOut' => substr((string)$booking['check_out_date'], 0, 10),
@@ -756,7 +780,29 @@ $preview_data['rate'] = $eb_rate['ok'] ? [
     'package' => round((float)$eb_rate['package'], 2),
     'cur' => (string)$eb_rate['currency'],
 ] : null;
-$back_url = 'booking-details.php?id=' . $booking_id;
+// Room packages for the preview (owner 2026-11-26): the same inputs rh_booking_package_requote() uses on save, so the
+// page can work per-night / per-person packages out again as the nights and adults change. null = no package.
+$preview_data['pkg'] = null;
+$ebPkPrev = $can_edit_stay ? rh_booking_package_requote($pdo, $booking, max(1, (int)$booking['number_of_nights'])) : null;
+if ($ebPkPrev !== null) {
+    $ebPkRows = [];
+    foreach ($ebPkPrev['rows'] as $r) {
+        $ebPkRows[] = ['type' => (string)$r['price_type'], 'price' => round((float)$r['price_amount'], 2), 'total' => round((float)$r['old_total'], 2)];
+    }
+    $preview_data['pkg'] = [
+        'self' => (bool)$ebPkPrev['self'],
+        'leadRef' => (string)$ebPkPrev['lead_ref'],
+        'leadNights' => (int)$ebPkPrev['old_nights'],
+        'otherAdults' => max(0, (int)$ebPkPrev['persons'] - max(0, (int)($booking['adult_guests'] ?? 0))),
+        'oldTotal' => round((float)$ebPkPrev['old_total'], 2),
+        // rh_stay_totals(x, 'price', false) gross-up as a factor (1 while prices are all-in).
+        'grossFactor' => round((float)rh_stay_totals(1000000, 'price', false)['total_with_vat'] / 1000000, 6),
+        'unverified' => (bool)$ebPkPrev['unverified'],
+        'note' => $ebPkPrev['unverified'] ? (string)$ebPkPrev['note'] : '',
+        'rows' => $ebPkRows,
+    ];
+}
+$back_url ='booking-details.php?id=' . $booking_id;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1048,6 +1094,7 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                             <small id="ebRateNew" style="display:block; color:#444; margin-top:2px;" hidden></small>
                         </div>
                     <?php endif; ?>
+                    <small id="ebPkgNote" style="display:block; color:#444; margin-top:6px;" role="status" hidden></small>
                     <small id="ebPlanDrop" style="display:block; color:#b42318; margin-top:8px;" role="status" hidden></small>
                     <div id="ebUnused" hidden style="margin-top:10px; padding:10px 12px; background:#fbf8f2; border:1px solid #e3d9c6; border-radius:6px; font-size:13px;">
                         <p id="ebUnusedText" style="margin:0 0 8px;" role="status"></p>
@@ -1126,18 +1173,52 @@ $back_url = 'booking-details.php?id=' . $booking_id;
 
             // The booked-rate line for the edited stay, built like rh_booked_rate_change_for_booking(): booked rate
             // × new nights, the children charge scaled by nights, the package kept as it is; it adds up to "After this change".
-            function rateLine(nights, total, night, occ, children, addBack) {
+            // Room packages, same rule as rh_booking_package_requote() on save (owner 2026-11-26): per-night and per-person-per-night
+            // packages follow the lead room's nights × the party's adults; per-stay packages are kept. Returns this booking's
+            // package (all-in), the party package after the change and a staff note.
+            function pkgQuote(nights, adults) {
+                const K = P.pkg;
+                const out = { gross: P.packageGross, changed: false, note: '' };
+                if (!K) return out;
+                if (K.unverified) {
+                    if ((K.self && nights !== K.leadNights) || adults !== P.adults) out.note = K.note;
+                    return out;
+                }
+                const n = K.self ? Math.max(1, nights) : Math.max(1, K.leadNights);
+                const persons = Math.max(1, K.otherAdults + Math.max(0, adults));
+                let total = 0;
+                K.rows.forEach(r => {
+                    let t = r.total;
+                    if ((r.type === 'per_night' || r.type === 'per_person_per_night') && r.price > 0.01) {
+                        const units = r.type === 'per_night' ? n : persons * n;
+                        const nt = Math.round(r.price * units * 100) / 100;
+                        if (Math.abs(nt - r.total) > 0.01) t = nt;
+                    }
+                    total += t;
+                });
+                total = Math.round(total * 100) / 100;
+                if (Math.abs(total - K.oldTotal) <= 0.01) return out;
+                const oldG = Math.round(K.oldTotal * K.grossFactor * 100) / 100;
+                const newG = Math.round(total * K.grossFactor * 100) / 100;
+                out.changed = true;
+                if (K.self) out.gross = newG;
+                out.note = (K.self ? 'Package' : 'The party package on ' + K.leadRef) + ' will be recalculated: ' + money(oldG) + ' → ' + money(newG)
+                    + (K.self ? '' : ' (on that room\'s bill)') + '.';
+                return out;
+            }
+
+            function rateLine(nights, total, night, occ, children, addBack, pkgNow) {
                 const el = $('ebRateNew');
                 const R = P.rate;
                 if (!el || !R) return;
                 const sameRate = occ === P.occupancy && children === P.children;
-                if (sameRate && nights === R.nights && !addBack) {
+                const pkg = pkgNow === undefined ? R.package : pkgNow;
+                if (sameRate && nights === R.nights && !addBack && Math.abs(pkg - R.package) <= 0.01) {
                     el.hidden = true;
                     return;
                 }
                 const m = v => histMoney(v, R.cur);
                 const nightWord = nights === 1 ? '1 night' : nights + ' nights';
-                const pkg = R.package;
                 let text;
                 if (sameRate) {
                     const roomGross = Math.round((total - pkg) * 100) / 100;
@@ -1260,10 +1341,18 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                 unusedQuote(ci, co, occ, children);
                 const night = Math.max(0, P.bookedNight + rack(occ, children) - rack(P.occupancy, P.children) + addBack);
 
-                const total = Math.round((night * nights + P.packageGross) * 100) / 100;
+                const guests = $('number_of_guests') ? parseInt($('number_of_guests').value || '0', 10) : 0;
+                const adults = $('number_of_guests') && !$('number_of_guests').disabled ? Math.max(1, guests - children) : P.adults;
+                const pq = pkgQuote(nights, adults);
+                const pkgNote = $('ebPkgNote');
+                if (pkgNote) {
+                    pkgNote.textContent = pq.note;
+                    pkgNote.hidden = !pq.note;
+                }
+                const total = Math.round((night * nights + pq.gross) * 100) / 100;
                 const delta = total - P.currentTotal;
                 $('ebNewTotal').textContent = money(total);
-                rateLine(nights, total, night, occ, children, addBack);
+                rateLine(nights, total, night, occ, children, addBack, pq.gross);
                 const d = $('ebDelta');
                 d.textContent = Math.abs(delta) < 0.01 ? 'No change' : (delta > 0 ? '+' : '') + money(delta);
                 d.style.color = delta > 0.01 ? '#b42318' : (delta < -0.01 ? '#1b5e20' : '#222');

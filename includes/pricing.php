@@ -804,6 +804,224 @@ if (!function_exists('rh_stay_totals_with_package')) {
     }
 }
 
+/*
+ * Room packages on a booking (owner 2026-11-26). booking_packages rows keep the price the guest booked at
+ * (price_type, price_amount); when the stay changes, per-night and per-person-per-night packages are worked out
+ * again from that price, per-stay packages stay as they are. A package's units are what calculatePackageCost()
+ * multiplies by: per night = nights, per person per night = persons x nights, per stay = 1.
+ */
+if (!function_exists('rh_pkg_units')) {
+    /** PURE. Units a room package is charged for (the saved booking_packages.quantity). */
+    function rh_pkg_units(string $type, int $nights, int $persons): int
+    {
+        $n = max(1, $nights);
+        if ($type === 'per_night') {
+            return $n;
+        }
+        if ($type === 'per_person_per_night') {
+            return max(1, $persons) * $n;
+        }
+        return 1;
+    }
+}
+
+if (!function_exists('rh_pkg_row_units')) {
+    /**
+     * PURE. Units a saved booking_packages row was charged for: total_cost / price_amount when that is a whole number
+     * (rows saved before 2026-11-26 all say quantity 1), else the saved quantity.
+     */
+    function rh_pkg_row_units(array $row): int
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $price = (float)($row['price_amount'] ?? 0);
+        $total = (float)($row['total_cost'] ?? 0);
+        if ($price > $tol) {
+            $u = (int)round($total / $price);
+            if ($u >= 1 && abs($u * $price - $total) <= $tol) {
+                return $u;
+            }
+        }
+        return max(1, (int)($row['quantity'] ?? 1));
+    }
+}
+
+if (!function_exists('rh_pkg_label')) {
+    /**
+     * PURE. How a package line adds up, e.g. "MWK 50,000.00 per night × 2 nights = MWK 100,000.00",
+     * "MWK 20,000.00 per person per night × 3 guests × 3 nights = MWK 180,000.00", "MWK 30,000.00 per stay".
+     * $nights: the nights the row was charged for (the lead room's); 0 = unknown (a per-person row then reads "× 9").
+     * $money: formats an amount; default "<currency> 1,234.00".
+     */
+    function rh_pkg_label(array $row, int $nights = 0, ?callable $money = null, bool $withTotal = true, string $currency = 'MWK'): string
+    {
+        $m = $money ?? static function (float $v) use ($currency): string {
+            return $currency . ' ' . number_format($v, 2);
+        };
+        $type = (string)($row['price_type'] ?? '');
+        $price = (float)($row['price_amount'] ?? 0);
+        $total = round((float)($row['total_cost'] ?? 0), 2);
+        $units = rh_pkg_row_units($row);
+        $nw = static function (int $n): string {
+            return $n === 1 ? '1 night' : $n . ' nights';
+        };
+        if ($type === 'per_night') {
+            $s = $m($price) . ' per night × ' . $nw($units);
+        } elseif ($type === 'per_person_per_night') {
+            if ($nights > 0 && $units % $nights === 0) {
+                $p = intdiv($units, $nights);
+                $s = $m($price) . ' per person per night × ' . ($p === 1 ? '1 guest' : $p . ' guests') . ' × ' . $nw($nights);
+            } else {
+                $s = $m($price) . ' per person per night × ' . $units;
+            }
+        } else {
+            return $m($total > 0 ? $total : $price) . ' per stay';
+        }
+        return $withTotal ? $s . ' = ' . $m($total) : $s;
+    }
+}
+
+if (!function_exists('rh_pkg_requote')) {
+    /**
+     * PURE. Work a booking's package rows out again for $nights (the lead room's nights) and $persons (the party's
+     * adults), from each row's saved price_type / price_amount (calculatePackageCost() rounding). Per-stay rows are
+     * kept as saved. Amounts are on the price basis, like booking_packages.total_cost and bookings.package_total.
+     * $oldNights: the nights the rows were charged for (only for the wording of the "was" side).
+     *
+     * @return array{rows:array,old_total:float,new_total:float,changed:bool,lines:array<int,string>}
+     *   rows: [id, package_name, price_type, price_amount, old_quantity, old_total, new_quantity, new_total, changed]
+     *   lines: "Breakfast: MWK 50,000.00 per night × 5 nights = MWK 250,000.00 → MWK 50,000.00 per night × 2 nights = ..."
+     */
+    function rh_pkg_requote(array $rows, int $nights, int $persons, ?callable $money = null, string $currency = 'MWK', int $oldNights = 0): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $out = ['rows' => [], 'old_total' => 0.0, 'new_total' => 0.0, 'changed' => false, 'lines' => []];
+        foreach ($rows as $r) {
+            $type = (string)($r['price_type'] ?? '');
+            $price = round((float)($r['price_amount'] ?? 0), 2);
+            $oldTotal = round((float)($r['total_cost'] ?? 0), 2);
+            $oldQty = (int)($r['quantity'] ?? 1);
+            $newQty = $oldQty;
+            $newTotal = $oldTotal;
+            if (in_array($type, ['per_night', 'per_person_per_night'], true) && $price > $tol) {
+                $newQty = rh_pkg_units($type, $nights, $persons);
+                $newTotal = round($price * $newQty, 2);
+            }
+            $changed = abs($newTotal - $oldTotal) > $tol;
+            $row = [
+                'id' => (int)($r['id'] ?? 0), 'package_name' => (string)($r['package_name'] ?? ''), 'price_type' => $type,
+                'price_amount' => $price, 'old_quantity' => $oldQty, 'old_total' => $oldTotal,
+                'new_quantity' => $changed ? $newQty : $oldQty, 'new_total' => $changed ? $newTotal : $oldTotal, 'changed' => $changed,
+            ];
+            if ($changed) {
+                $was = rh_pkg_label($r, $oldNights, $money, true, $currency);
+                $now = rh_pkg_label(['price_type' => $type, 'price_amount' => $price, 'total_cost' => $newTotal, 'quantity' => $newQty], $nights, $money, true, $currency);
+                $out['lines'][] = ($row['package_name'] !== '' ? $row['package_name'] : 'Package') . ': ' . $was . ' → ' . $now;
+                $out['changed'] = true;
+            }
+            $out['rows'][] = $row;
+            $out['old_total'] += $oldTotal;
+            $out['new_total'] += $row['new_total'];
+        }
+        $out['old_total'] = round($out['old_total'], 2);
+        $out['new_total'] = round($out['new_total'], 2);
+        return $out;
+    }
+}
+
+if (!function_exists('rh_package_allowed_for_type')) {
+    /**
+     * PURE. Whether a room_packages row (applies_to, room_type_ids) is offered for a room type. is_active is ignored
+     * (a package switched off is not a room-type question); a package no longer in the catalogue (deleted) = allowed.
+     */
+    function rh_package_allowed_for_type(?array $catalogue, int $roomTypeId): bool
+    {
+        if ($catalogue === null || (string)($catalogue['applies_to'] ?? 'all') !== 'room_types') {
+            return true;
+        }
+        $ids = json_decode((string)($catalogue['room_type_ids'] ?? ''), true);
+        return is_array($ids) && in_array($roomTypeId, array_map('intval', $ids), true);
+    }
+}
+
+if (!function_exists('rh_packages_for_booking')) {
+    /**
+     * The packages a guest ticked, checked again at submit (fault C, owner 2026-11-26): each id must still be active
+     * and offered for $roomTypeId. Returns the rows to save (quantity = units), their total (price basis) and the
+     * names of any that are no longer available ("a selected package" for one deleted meanwhile).
+     *
+     * @return array{rows:array,total:float,missing:array<int,string>}
+     */
+    function rh_packages_for_booking(PDO $pdo, int $roomTypeId, array $ids, int $nights, int $adults): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static function ($v) {
+            return $v > 0;
+        })));
+        $out = ['rows' => [], 'total' => 0.0, 'missing' => []];
+        if (!$ids) {
+            return $out;
+        }
+        $byId = [];
+        foreach (getActivePackages($pdo, $roomTypeId) as $p) {
+            $byId[(int)$p['id']] = $p;
+        }
+        $missingIds = [];
+        foreach ($ids as $id) {
+            if (!isset($byId[$id])) {
+                $missingIds[] = $id;
+                continue;
+            }
+            $p = $byId[$id];
+            $cost = calculatePackageCost($p, $nights, $adults);
+            $out['rows'][] = [
+                'package_id' => $id,
+                'package_name' => (string)$p['name'],
+                'price_type' => (string)$p['price_type'],
+                'price_amount' => (float)$p['price_amount'],
+                'quantity' => rh_pkg_units((string)$p['price_type'], $nights, $adults),
+                'total_cost' => $cost,
+            ];
+            $out['total'] += $cost;
+        }
+        $out['total'] = round($out['total'], 2);
+        if ($missingIds) {
+            $names = [];
+            try {
+                $st = $pdo->prepare('SELECT id, name FROM room_packages WHERE id IN (' . implode(',', array_fill(0, count($missingIds), '?')) . ')');
+                $st->execute($missingIds);
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $names[(int)$r['id']] = (string)$r['name'];
+                }
+            } catch (PDOException $e) {
+                error_log('[pricing] package name lookup failed: ' . $e->getMessage());
+            }
+            foreach ($missingIds as $id) {
+                $out['missing'][] = $names[$id] ?? 'a selected package';
+            }
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_package_unavailable_message')) {
+    /** PURE. The guest message when ticked packages are no longer available (nothing is booked). */
+    function rh_package_unavailable_message(array $names): string
+    {
+        $names = array_values(array_unique(array_map('strval', $names)));
+        $named = array_values(array_filter($names, static function ($n) {
+            return $n !== 'a selected package';
+        }));
+        if (!$named) {
+            $what = count($names) > 1 ? 'Some of the packages you selected are' : 'A package you selected is';
+        } else {
+            $list = count($named) > 1
+                ? implode(', ', array_slice($named, 0, -1)) . ' and ' . end($named)
+                : $named[0];
+            $what = 'The ' . $list . (count($named) > 1 ? ' packages are' : ' package is');
+        }
+        return $what . ' no longer available for this room. Please untick it, check your extras and submit again. Nothing has been booked.';
+    }
+}
+
 if (!function_exists('rh_rate_plan_dropped')) {
     /**
      * PURE. Owner 2026-11-10 (RP-3 b): when STAFF change a booking's dates or nights, a length-of-stay, weekend or

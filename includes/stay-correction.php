@@ -219,13 +219,18 @@ if (!function_exists('rh_stay_correction_quote')) {
         $rate = $extraRate === null ? $perNight : round($extraRate, 2);
         $rateChanged = $extraNights > 0 && abs($rate - $perNight) > $tol;
 
+        // Packages follow the new nights (owner 2026-11-26): the same requote in both branches.
+        $rp = rh_reprice_at_booked_rate($b, $newNights, $addBack);
+        $pkgGross = (float)($rp['package_gross'] ?? $split['package_gross']);
         if (!$rateChanged) {
-            $rp = rh_reprice_at_booked_rate($b, $newNights, $addBack);
             $tt = $rp['totals'];
             $newChild = (float)$rp['new_child_supplement'];
         } else {
-            $newGross = round(((float)$split['per_night'] + $addBack) * $keptNights + $rate * $extraNights + (float)$split['package_gross'], 2);
-            $tt = rh_stay_totals_with_package($newGross, (float)$split['package_gross'], rh_booking_has_levy($b));
+            $newGross = round(((float)$split['per_night'] + $addBack) * $keptNights + $rate * $extraNights + $pkgGross, 2);
+            $tt = rh_stay_totals_with_package($newGross, $pkgGross, rh_booking_has_levy($b));
+            if (isset($rp['totals']['packages'])) {
+                $tt['packages'] = $rp['totals']['packages'];
+            }
             $oldChild = (float)($b['child_supplement_total'] ?? 0);
             $newChild = $oldChild > 0 ? round($oldChild * ($newNights / max(1, $oldNights)), 2) : 0.0;
         }
@@ -259,10 +264,14 @@ if (!function_exists('rh_stay_correction_quote')) {
         if ($extraNights > 0) {
             $newLine .= ' + ' . rh_stay_correction_money($rate, $cur) . ' x ' . $rateWord($extraNights) . ($rateChanged ? ' (rate changed)' : '');
         }
-        if ((float)$split['package_gross'] > $tol) {
-            $newLine .= ' + package ' . rh_stay_correction_money((float)$split['package_gross'], $cur);
+        if ($pkgGross > $tol) {
+            $newLine .= ' + package ' . rh_stay_correction_money($pkgGross, $cur);
         }
         $newLine .= ' = ' . rh_stay_correction_money($newRoom, $cur);
+        $pkgNote = is_array($rp['packages'] ?? null) ? trim((string)($rp['packages']['note'] ?? '')) : '';
+        if ($pkgNote !== '') {
+            $newLine .= '. ' . $pkgNote;
+        }
 
         return [
             'ok' => true, 'error' => '',

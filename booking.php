@@ -229,13 +229,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $mxPackageRows = [];
             $mxPkgIds = (!empty($_POST['package_ids']) && is_array($_POST['package_ids'])) ? array_values(array_unique(array_map('intval', $_POST['package_ids']))) : [];
             if ($mxPkgIds) {
-                foreach (getActivePackages($pdo, (int)$sanitized_data['room_id']) as $pkg) {
-                    if (in_array((int)$pkg['id'], $mxPkgIds, true)) {
-                        $cost = calculatePackageCost($pkg, $mxNights, $mxAdults);
-                        $mxPackageTotal += $cost;
-                        $mxPackageRows[] = ['package_id' => (int)$pkg['id'], 'package_name' => $pkg['name'], 'price_type' => $pkg['price_type'], 'price_amount' => (float)$pkg['price_amount'], 'total_cost' => $cost];
-                    }
+                // A package switched off or no longer offered for this room since the guest ticked it is refused,
+                // never silently dropped (owner 2026-11-26).
+                $mxPk = rh_packages_for_booking($pdo, (int)$sanitized_data['room_id'], $mxPkgIds, $mxNights, $mxAdults);
+                if ($mxPk['missing']) {
+                    throw new Exception(rh_package_unavailable_message($mxPk['missing']));
                 }
+                $mxPackageTotal = $mxPk['total'];
+                $mxPackageRows = $mxPk['rows'];
             }
 
             $mxDup = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE guest_email = ? AND room_id = ? AND status IN ('pending', 'tentative', 'confirmed', 'checked-in') AND check_in_date = ? AND check_out_date = ?");
@@ -467,20 +468,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $selectedPackageIds = array_values(array_unique(array_map('intval', $rawPkgIds)));
         }
         if (!empty($selectedPackageIds)) {
-            $availablePkgs = getActivePackages($pdo, $room_id);
-            foreach ($availablePkgs as $pkg) {
-                if (in_array((int)$pkg['id'], $selectedPackageIds, true)) {
-                    $cost = calculatePackageCost($pkg, $number_of_nights, $adult_guests);
-                    $packageTotal += $cost;
-                    $packageRowsToInsert[] = [
-                        'package_id'   => (int)$pkg['id'],
-                        'package_name' => $pkg['name'],
-                        'price_type'   => $pkg['price_type'],
-                        'price_amount' => (float)$pkg['price_amount'],
-                        'total_cost'   => $cost,
-                    ];
-                }
+            // A package switched off or no longer offered for this room since the guest ticked it is refused,
+            // never silently dropped (owner 2026-11-26). quantity = the units charged (nights, or persons x nights).
+            $pkPick = rh_packages_for_booking($pdo, (int)$room_id, $selectedPackageIds, (int)$number_of_nights, (int)$adult_guests);
+            if ($pkPick['missing']) {
+                throw new Exception(rh_package_unavailable_message($pkPick['missing']));
             }
+            $packageTotal = $pkPick['total'];
+            $packageRowsToInsert = $pkPick['rows'];
         }
         $total_amount += $packageTotal;
 
@@ -737,7 +732,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($packageRowsToInsert) && !empty($createdBookingIds)) {
                 $pkgStmt = $pdo->prepare("INSERT INTO booking_packages
                     (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost)
-                    VALUES (?, ?, ?, ?, ?, 1, ?)");
+                    VALUES (?, ?, ?, ?, ?, ?, ?)");
                 foreach ($packageRowsToInsert as $pkgRow) {
                     $pkgStmt->execute([
                         $createdBookingIds[0],
@@ -745,6 +740,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $pkgRow['package_name'],
                         $pkgRow['price_type'],
                         $pkgRow['price_amount'],
+                        max(1, (int)($pkgRow['quantity'] ?? 1)),
                         $pkgRow['total_cost'],
                     ]);
                 }

@@ -12019,9 +12019,193 @@ function rh_write_booking_stay_totals(PDO $pdo, int $bookingId, array $tt, ?int 
         $sets[] = 'child_supplement_total = ?';
         $vals[] = round($childSupplement, 2);
     }
+    // Room packages worked out again for the new stay (rh_booking_package_requote(), owner 2026-11-26): when the
+    // packages sit on THIS row, package_total is written in the same UPDATE as total_with_vat, so the booked nightly
+    // rate (rh_booked_stay_split) never sees a total and a package total that disagree.
+    $pq = (isset($tt['packages']) && is_array($tt['packages']) && !empty($tt['packages']['changed'])) ? $tt['packages'] : null;
+    if ($pq !== null && (int)$pq['target_id'] === $bookingId) {
+        $sets[] = 'package_total = ?';
+        $vals[] = round((float)$pq['new_total'], 2);
+    }
     $sets[] = 'updated_at = NOW()';
     $vals[] = $bookingId;
     $pdo->prepare('UPDATE bookings SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($vals);
+    if ($pq !== null) {
+        rh_booking_package_requote_write($pdo, $bookingId, $pq);
+    }
+}
+
+/**
+ * Room packages of a booking's party worked out again for a stay change (owner 2026-11-26). Packages are saved on the
+ * group's LEAD row (bookings.primary_booking_id NULL) and were charged at booking on the party's total adults x the lead
+ * room's nights; they are recalculated on the same inputs from each row's saved price_type / price_amount:
+ *   - $b is the lead (or a single booking): nights = $newNights;
+ *   - $b is another room of the group: nights = the lead room's own nights (unchanged), so only an adults change moves it;
+ *   - persons = adult_guests summed over the group's rooms that are not deleted / cancelled / no-show / expired, with
+ *     $newAdults in place of $b's own when given.
+ * Per-stay packages are kept. A lead whose package_total does not equal its booking_packages rows (older data) is NOT
+ * recalculated: 'unverified' is set and 'note' tells staff. Read-only; null = nothing to work out (no packages, closed
+ * lead, no id, $b without package_total).
+ *
+ * Amounts: old_total / new_total on the price basis (bookings.package_total, booking_packages.total_cost);
+ * old_gross / new_gross are those grossed up the way rh_booked_stay_split() does (rh_stay_totals(...,'price',false)).
+ *
+ * @return array{target_id:int,self:bool,lead_ref:string,nights:int,old_nights:int,persons:int,old_total:float,
+ *               new_total:float,old_gross:float,new_gross:float,changed:bool,unverified:bool,rows:array,lines:array,note:string}|null
+ */
+function rh_booking_package_requote(PDO $pdo, array $b, int $newNights, ?int $newAdults = null): ?array
+{
+    $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    $selfId = (int)($b['id'] ?? 0);
+    if ($selfId <= 0) {
+        return null;
+    }
+    if (!function_exists('rh_pkg_requote')) {
+        require_once __DIR__ . '/../includes/pricing.php';
+    }
+    try {
+        if (!array_key_exists('primary_booking_id', $b)) {
+            $st = $pdo->prepare('SELECT primary_booking_id FROM bookings WHERE id = ?');
+            $st->execute([$selfId]);
+            $b['primary_booking_id'] = $st->fetchColumn() ?: null;
+        }
+        $leadId = !empty($b['primary_booking_id']) ? (int)$b['primary_booking_id'] : $selfId;
+        $self = $leadId === $selfId;
+        if ($self) {
+            // A row passed without package_total is priced as today (rh_booked_stay_split sees no package either).
+            if (!array_key_exists('package_total', $b) || (float)$b['package_total'] <= $tol) {
+                return null;
+            }
+            $lead = $b;
+        } else {
+            $st = $pdo->prepare('SELECT id, booking_reference, number_of_nights, package_total, status, deleted_at FROM bookings WHERE id = ?');
+            $st->execute([$leadId]);
+            $lead = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$lead || (float)$lead['package_total'] <= $tol) {
+                return null;
+            }
+        }
+        if (!empty($lead['deleted_at']) || in_array(strtolower((string)($lead['status'] ?? '')), ['cancelled', 'no-show', 'expired'], true)) {
+            return null;
+        }
+        $rs = $pdo->prepare('SELECT bp.id, bp.package_id, bp.package_name, bp.price_type, bp.price_amount, bp.quantity, bp.total_cost
+            FROM booking_packages bp WHERE bp.booking_id = ? ORDER BY bp.id ASC');
+        $rs->execute([$leadId]);
+        $rows = $rs->fetchAll(PDO::FETCH_ASSOC);
+
+        $cur = (string)getSetting('currency_symbol', 'MWK');
+        $pkgTotal = round((float)$lead['package_total'], 2);
+        $oldNights = max(1, (int)($lead['number_of_nights'] ?? 1));
+        $nights = $self ? max(1, $newNights) : $oldNights;
+        $gross = static function (float $v): float {
+            return $v > 0 ? (float)rh_stay_totals($v, 'price', false)['total_with_vat'] : 0.0;
+        };
+        $out = [
+            'target_id' => $leadId, 'self' => $self, 'lead_ref' => (string)($lead['booking_reference'] ?? ''),
+            'nights' => $nights, 'old_nights' => $oldNights, 'persons' => 0,
+            'old_total' => $pkgTotal, 'new_total' => $pkgTotal, 'old_gross' => $gross($pkgTotal), 'new_gross' => $gross($pkgTotal),
+            'changed' => false, 'unverified' => false, 'rows' => [], 'lines' => [], 'note' => '',
+        ];
+        $rowSum = round(array_sum(array_map(static function ($r) {
+            return (float)$r['total_cost'];
+        }, $rows)), 2);
+        if (!$rows || abs($rowSum - $pkgTotal) > $tol) {
+            $out['unverified'] = true;
+            $out['note'] = 'The package figures saved on this booking do not match (package total ' . $cur . ' ' . number_format($pkgTotal, 2)
+                . ', package lines ' . $cur . ' ' . number_format($rowSum, 2) . '), so the package was not recalculated. Tell a manager.';
+            return $out;
+        }
+
+        $ps = $pdo->prepare("SELECT id, adult_guests FROM bookings
+            WHERE (id = ? OR primary_booking_id = ?) AND deleted_at IS NULL AND status NOT IN ('cancelled', 'no-show', 'expired')");
+        $ps->execute([$leadId, $leadId]);
+        $persons = 0;
+        foreach ($ps->fetchAll(PDO::FETCH_ASSOC) as $m) {
+            $a = (int)$m['adult_guests'];
+            if ((int)$m['id'] === $selfId && $newAdults !== null) {
+                $a = $newAdults;
+            }
+            $persons += max(0, $a);
+        }
+        $out['persons'] = max(1, $persons);
+
+        $rq = rh_pkg_requote($rows, $nights, $out['persons'], null, $cur, $oldNights);
+        $out['rows'] = $rq['rows'];
+        $out['lines'] = $rq['lines'];
+        $out['new_total'] = $rq['new_total'];
+        $out['new_gross'] = $gross($rq['new_total']);
+        $out['changed'] = $rq['changed'];
+        if ($rq['changed']) {
+            $out['note'] = ($self ? 'Package' : 'The party package on ' . $out['lead_ref']) . ' recalculated: '
+                . $cur . ' ' . number_format($out['old_gross'], 2) . ' → ' . $cur . ' ' . number_format($out['new_gross'], 2)
+                . ' (' . implode('; ', $rq['lines']) . ').';
+        }
+        return $out;
+    } catch (Throwable $e) {
+        error_log('rh_booking_package_requote failed for booking ' . $selfId . ': ' . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * Save a changed rh_booking_package_requote() inside the caller's transaction: the booking_packages rows (quantity,
+ * total_cost) and one History line on the package row's booking. When $bookingId is the lead, bookings.package_total
+ * was already written with the stay totals (rh_write_booking_stay_totals). When $bookingId is another room of the
+ * group, the lead row is locked and checked (its package_total must still be the quoted one, else the save stops so
+ * nothing is half-written), its package_total and stay totals are moved by the package difference only (the room part
+ * and its levy stay as they are), its balance is recalculated, and both rooms get a History line.
+ */
+function rh_booking_package_requote_write(PDO $pdo, int $bookingId, array $pq): void
+{
+    $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    $leadId = (int)$pq['target_id'];
+    if (!function_exists('logBookingEvent')) {
+        require_once __DIR__ . '/../includes/booking-timeline.php';
+    }
+    if ($leadId !== $bookingId) {
+        $ls = $pdo->prepare('SELECT * FROM bookings WHERE id = ? FOR UPDATE');
+        $ls->execute([$leadId]);
+        $lead = $ls->fetch(PDO::FETCH_ASSOC);
+        if (!$lead || abs(round((float)$lead['package_total'], 2) - round((float)$pq['old_total'], 2)) > $tol) {
+            throw new RuntimeException('The party package on ' . ($pq['lead_ref'] ?: 'the lead room') . ' changed while this was being saved. Reload and try again.');
+        }
+        $split = rh_booked_stay_split($lead);
+        $newGross = round($split['total_with_vat'] - $split['package_gross'] + (float)$pq['new_gross'], 2);
+        $ltt = rh_stay_totals_with_package($newGross, (float)$pq['new_gross'], rh_booking_has_levy($lead));
+        $pdo->prepare('UPDATE bookings SET total_amount = ?, vat_amount = ?, tourism_levy_amount = ?, total_with_vat = ?, package_total = ?, updated_at = NOW() WHERE id = ?')
+            ->execute([round($ltt['net'] + $ltt['levy'], 2), $ltt['vat'], $ltt['levy'], $ltt['total_with_vat'], round((float)$pq['new_total'], 2), $leadId]);
+    }
+    $up = $pdo->prepare('UPDATE booking_packages SET quantity = ?, total_cost = ? WHERE id = ? AND booking_id = ?');
+    foreach ($pq['rows'] as $r) {
+        if (!empty($r['changed'])) {
+            $up->execute([min(65535, max(1, (int)$r['new_quantity'])), round((float)$r['new_total'], 2), (int)$r['id'], $leadId]);
+        }
+    }
+    if ($leadId !== $bookingId && function_exists('recalculateBookingFinancials')) {
+        recalculateBookingFinancials($leadId);
+    }
+
+    $uid = isset($_SESSION['admin_user_id']) ? (int)$_SESSION['admin_user_id'] : 0;
+    $who = trim((string)($_SESSION['admin_full_name'] ?? ($_SESSION['admin_username'] ?? '')));
+    $byType = $uid > 0 ? 'admin' : 'system';
+    $cur = (string)getSetting('currency_symbol', 'MWK');
+    $old = $cur . ' ' . number_format((float)$pq['old_gross'], 2);
+    $new = $cur . ' ' . number_format((float)$pq['new_gross'], 2);
+    $desc = implode('; ', (array)$pq['lines']);
+    $meta = ['old_package_total' => (float)$pq['old_total'], 'new_package_total' => (float)$pq['new_total'],
+        'nights' => (int)$pq['nights'], 'persons' => (int)$pq['persons'], 'changed_from_booking_id' => $bookingId];
+    $ref = static function (PDO $pdo, int $id): string {
+        $s = $pdo->prepare('SELECT booking_reference FROM bookings WHERE id = ?');
+        $s->execute([$id]);
+        return (string)$s->fetchColumn();
+    };
+    logBookingEvent($leadId, $pq['lead_ref'] !== '' ? (string)$pq['lead_ref'] : $ref($pdo, $leadId), 'Package recalculated', 'financial',
+        $desc, $old, $new, $byType, $uid ?: null, $who !== '' ? $who : null, $meta);
+    if ($leadId !== $bookingId) {
+        logBookingEvent($bookingId, $ref($pdo, $bookingId), 'Party package recalculated', 'financial',
+            'The party package on ' . $pq['lead_ref'] . ' was recalculated after this room changed: ' . $desc, $old, $new,
+            $byType, $uid ?: null, $who !== '' ? $who : null, $meta);
+    }
 }
 
 /**
@@ -12031,18 +12215,38 @@ function rh_write_booking_stay_totals(PDO $pdo, int $bookingId, array $tt, ?int 
  * only; early / late check-out pass nothing and keep the booked rate). The tourism levy is taken from the room part
  * only, never from packages (rh_stay_totals_with_package()).
  *
- * @return array{old_gross:float,new_gross:float,delta:float,totals:array,per_night:float,new_child_supplement:float}
+ * Room packages (owner 2026-11-26): per-night and per-person-per-night packages are worked out again for the new stay
+ * (rh_booking_package_requote(): the party's adults x the lead room's nights). On the lead row the new package is part
+ * of new_gross / totals; for another room of a group the lead's package can only move on an adults change, which is
+ * written to the lead row. Either way the requote travels in totals['packages'] (and 'packages'), and
+ * rh_write_booking_stay_totals() saves it. $pkgOpts: 'adults' => the booking's new adult count (edit booking only);
+ * 'skip' => true keeps the package exactly as saved.
+ *
+ * @return array{old_gross:float,new_gross:float,delta:float,totals:array,per_night:float,new_child_supplement:float,
+ *               package_gross:float,package_gross_old:float,packages:?array}
  */
-function rh_reprice_at_booked_rate(array $b, int $newNights, float $addBackNight = 0.0): array
+function rh_reprice_at_booked_rate(array $b, int $newNights, float $addBackNight = 0.0, array $pkgOpts = []): array
 {
+    global $pdo;
     if (!function_exists('rh_stay_totals_with_package')) {
         require_once __DIR__ . '/../includes/pricing.php';
     }
     $split = rh_booked_stay_split($b);
     $newNights = max(1, $newNights);
     $addBackNight = max(0.0, $addBackNight);
-    $newGross = round(($split['per_night'] + $addBackNight) * $newNights + $split['package_gross'], 2);
-    $tt = rh_stay_totals_with_package($newGross, $split['package_gross'], rh_booking_has_levy($b));
+    $pq = null;
+    if (empty($pkgOpts['skip']) && $pdo instanceof PDO) {
+        $pq = rh_booking_package_requote($pdo, $b, $newNights, isset($pkgOpts['adults']) ? (int)$pkgOpts['adults'] : null);
+    }
+    $pkgGross = $split['package_gross'];
+    if ($pq !== null && $pq['self'] && $pq['changed']) {
+        $pkgGross = (float)$pq['new_gross'];
+    }
+    $newGross = round(($split['per_night'] + $addBackNight) * $newNights + $pkgGross, 2);
+    $tt = rh_stay_totals_with_package($newGross, $pkgGross, rh_booking_has_levy($b));
+    if ($pq !== null && $pq['changed']) {
+        $tt['packages'] = $pq;
+    }
     $oldChild = (float)($b['child_supplement_total'] ?? 0);
     $newChild = $oldChild > 0 ? round($oldChild * ($newNights / $split['nights']), 2) : 0.0;
     return [
@@ -12052,6 +12256,9 @@ function rh_reprice_at_booked_rate(array $b, int $newNights, float $addBackNight
         'totals' => $tt,
         'per_night' => $split['per_night'] + $addBackNight,
         'new_child_supplement' => $newChild,
+        'package_gross' => $pkgGross,
+        'package_gross_old' => $split['package_gross'],
+        'packages' => $pq,
     ];
 }
 

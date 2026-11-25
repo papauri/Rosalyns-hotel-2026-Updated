@@ -32,6 +32,17 @@ when prompted."
   + faq (they quote "included in the room rate above"; add the new line). Assistant: "what is the room rate without
   VAT / levy" -> that popup line. Manager Guide: Money and End of Day (one line, optional). (Arrived mid-sync 2026-11-26.)
 
+- 2026-11-26 Liwonde (uncommitted, ROOM_PACKAGES_FIX_PLAN.md, owner PATCH): room packages now follow stay changes.
+  Shorter/longer stays and adult changes work per-night and per-person-per-night packages out again (per-stay kept);
+  in a group the lead room's party package is recalculated from the party's adults x the lead's nights, History
+  "Package recalculated" (lead) / "Party package recalculated" (the changed room). Edit Booking and the date-change
+  preview show old -> new. Changing the room type to one a package is not offered for needs the tick "I have told
+  the guest" (package kept at its booked price; History "Package check"). Emails / invoices word packages as
+  "per night × N nights" with the real units. A package switched off or not offered is refused at booking by name.
+  Switching a package on/off is in System Logs. Assistant: the room-type change action (includes/ai/ai-actions.php)
+  must send `package_ack` after the guest-told confirm, else it is refused when a package is flagged; reprice
+  previews already include the package. Guides: bookings / edit booking / room change pages. Manager Guide: Bookings (optional).
+
 - LATER (Assistant lead 2026-11-25): admin/bookings.php `modify_booking` has no "changed by someone else" version check
   (Edit Booking has one). A PATCH for the owner to decide.
 - Manager Guides left out 2026-11-25 (pages full): Stock: the import crates/bottles and "Which price is right?" questions;

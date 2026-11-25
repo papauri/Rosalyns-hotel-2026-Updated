@@ -592,9 +592,11 @@ if (!function_exists('rh_mixed_load_room')) {
             if (!empty($in['package_rows'])) {
                 $pkgStmt = $pdo->prepare("INSERT INTO booking_packages
                     (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost)
-                    VALUES (?, ?, ?, ?, ?, 1, ?)");
+                    VALUES (?, ?, ?, ?, ?, ?, ?)");
                 foreach ($in['package_rows'] as $pk) {
-                    $pkgStmt->execute([$ids[0], $pk['package_id'], $pk['package_name'], $pk['price_type'], $pk['price_amount'], $pk['total_cost']]);
+                    // quantity = the units charged (nights, or persons x nights), so the line adds up on documents.
+                    $pkQty = isset($pk['quantity']) ? (int)$pk['quantity'] : (function_exists('rh_pkg_row_units') ? rh_pkg_row_units($pk) : 1);
+                    $pkgStmt->execute([$ids[0], $pk['package_id'], $pk['package_name'], $pk['price_type'], $pk['price_amount'], max(1, $pkQty), $pk['total_cost']]);
                 }
             }
             $pdo->commit();

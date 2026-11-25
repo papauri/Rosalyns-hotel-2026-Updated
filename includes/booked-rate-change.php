@@ -8,8 +8,8 @@
  *   rh_booked_rate_change_for_booking(array $b, array $rp, int $newNights, array $opts = []): array      bookings row
  *   rh_booking_money_card(array $b, array $rate, array $opts = []): array   PURE: "How the total is made up" card
  *
- * $rp: rh_reprice_at_booked_rate() result (new_gross, new_child_supplement). $packageGross: rh_booked_stay_split()
- * package_gross (packages are kept as they are, never multiplied by nights). $opts: as rh_booked_rate_text()
+ * $rp: rh_reprice_at_booked_rate() result (new_gross, new_child_supplement, package_gross). $packageGross: the
+ * package inside new_gross (per-night / per-person packages follow the new stay, owner 2026-11-26). $opts: as rh_booked_rate_text()
  * (currency, status); 'child' = the repriced children charge on the all-in basis (rh_booked_rate_child_gross());
  * without it $rp['new_child_supplement'] is used as it is.
  *
@@ -46,7 +46,17 @@ if (!function_exists('rh_booked_rate_change_for_booking')) {
             return rh_booked_rate_text(['room_gross' => 0, 'nights' => 1]);
         }
         $opts['child'] = rh_booked_rate_child_gross((float)($rp['new_child_supplement'] ?? 0), rh_booking_has_levy($b));
-        return rh_booked_rate_change_line($rp, (float)rh_booked_stay_split($b)['package_gross'], $newNights, $opts);
+        // The package as rh_reprice_at_booked_rate() worked it out for the new stay (owner 2026-11-26); older results
+        // without it carry the saved package.
+        $pkg = array_key_exists('package_gross', $rp) ? (float)$rp['package_gross'] : (float)rh_booked_stay_split($b)['package_gross'];
+        $line = rh_booked_rate_change_line($rp, $pkg, $newNights, $opts);
+        // Staff see the package's old -> new price (or why it was not recalculated) next to the new total.
+        $note = is_array($rp['packages'] ?? null) ? trim((string)($rp['packages']['note'] ?? '')) : '';
+        $line['package_note'] = $note;
+        if ($note !== '' && !empty($line['ok'])) {
+            $line['text'] .= '. ' . $note;
+        }
+        return $line;
     }
 }
 

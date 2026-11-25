@@ -190,7 +190,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $id  = (int)($_POST['pkg_id'] ?? 0);
             $val = empty($_POST['is_active']) ? 0 : 1;
             if ($id > 0) {
+                $tgSt = $pdo->prepare("SELECT name, is_active FROM room_packages WHERE id=?");
+                $tgSt->execute([$id]);
+                $tgOld = $tgSt->fetch(PDO::FETCH_ASSOC);
                 $pdo->prepare("UPDATE room_packages SET is_active=? WHERE id=?")->execute([$val, $id]);
+                if ($tgOld) {
+                    rh_log_event('room_packages', 'info', ($val ? 'Package activated: ' : 'Package deactivated: ') . $tgOld['name'],
+                        ['id' => $id, 'old' => (int)$tgOld['is_active'] ? 'active' : 'inactive', 'new' => $val ? 'active' : 'inactive', 'user' => $user['username']]);
+                }
                 $message = $val ? 'Package activated.' : 'Package deactivated.';
                 $messageType = 'success';
             }

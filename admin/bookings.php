@@ -2979,7 +2979,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 (string)($_POST['reason_code'] ?? ''),
                 (string)($_POST['note'] ?? ''),
                 $user,
-                (bool)$_perm_edit_financials || $_is_admin_user
+                (bool)$_perm_edit_financials || $_is_admin_user,
+                ($_POST['package_ack'] ?? '') === '1'
             );
             if ($res['success'] && ($_POST['send_email'] ?? '') === '1') {
                 require_once '../config/email.php';
@@ -8472,6 +8473,14 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     </div>
                     <p id="rc_accounting_note" class="rc-hint"></p>
 
+                    <div id="rc_pkg_wrap" hidden>
+                        <p id="rc_pkg_text" class="rc-hint" style="color:#b42318;" role="status"></p>
+                        <label class="rc-option rc-option--inline">
+                            <input type="checkbox" id="rc_pkg_ack" value="1">
+                            <span>I have told the guest. Keep the package on the bill at the booked price.</span>
+                        </label>
+                    </div>
+
                     <label class="rc-option rc-option--inline">
                         <input type="checkbox" id="upgrade_send_email" value="1" checked>
                         <span><i class="fas fa-envelope"></i> Email the guest about the change</span>
@@ -10721,6 +10730,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             document.getElementById('rc_detail').hidden = true;
             document.getElementById('rc_submit').disabled = true;
             document.getElementById('rc_note').value = '';
+            document.getElementById('rc_pkg_ack').checked = false;
             const select = document.getElementById('upgrade_new_room');
             select.innerHTML = '<option value="">Loading room types…</option>';
             setBookingPageModalOpen(modal, true);
@@ -10857,13 +10867,22 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             else if (keep && q.direction === 'upgrade') acc = 'No money moves. The comp value is written to the audit log and timeline.';
             document.getElementById('rc_accounting_note').textContent = acc;
 
+            // A room package the new type does not offer (owner 2026-11-26): staff confirm they told the guest.
+            const pkgText = q.package_flag_text || '';
+            const pkgWrap = document.getElementById('rc_pkg_wrap');
+            const pkgAck = document.getElementById('rc_pkg_ack');
+            pkgWrap.hidden = !pkgText;
+            document.getElementById('rc_pkg_text').textContent = pkgText ? pkgText + ' Tell the guest before you continue.' : '';
+            if (!pkgText) pkgAck.checked = false;
+
             const note = document.getElementById('rc_note').value.trim();
-            document.getElementById('rc_submit').disabled = !reason || (noteRequired && note.length < 5);
+            document.getElementById('rc_submit').disabled = !reason || (noteRequired && note.length < 5) || (!!pkgText && !pkgAck.checked);
         }
 
         document.getElementById('upgrade_new_room').addEventListener('change', rcRender);
         document.getElementById('rc_reason').addEventListener('change', rcUpdateTotals);
         document.getElementById('rc_note').addEventListener('input', rcUpdateTotals);
+        document.getElementById('rc_pkg_ack').addEventListener('change', rcUpdateTotals);
         document.querySelectorAll('input[name="rc_pricing"]').forEach(r => r.addEventListener('change', rcUpdateTotals));
 
         function submitUpgradeRoom() {
@@ -10882,6 +10901,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             fd.append('reason_code', document.getElementById('rc_reason').value);
             fd.append('note', document.getElementById('rc_note').value.trim());
             fd.append('send_email', document.getElementById('upgrade_send_email').checked ? '1' : '0');
+            fd.append('package_ack', document.getElementById('rc_pkg_ack').checked ? '1' : '0');
             postBookingAction(fd, 'Could not change the room type.')
                 .then(data => {
                     window.bkDeepLeaving = true; // closing the modal below is not a cancel
