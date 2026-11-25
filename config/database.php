@@ -4488,6 +4488,34 @@ function rh_booking_full_total(array $row): float
 }
 
 /**
+ * The room alone, without VAT or levy, for one bookings row (owner 2026-11-26: "the room rate total on its own"), from
+ * the SAME stored figures as rh_doc_stay_lines(): (gross - VAT - levy) less the child charge's and packages' own nets.
+ * A child charge is priced all-in like the room (VAT + levy inside), a package all-in with VAT only; both are split with
+ * the booking's own stored rates. Display only, no queries.
+ *
+ * @return array{room:float,child:float,nights:int}
+ */
+function rh_booking_room_net(array $r): array
+{
+    if (!function_exists('rh_doc_stay_lines')) {
+        require_once __DIR__ . '/../includes/pricing.php';
+    }
+    $dl = rh_doc_stay_lines($r, max(0.0, (float)($r['package_total'] ?? 0)));
+    // VAT switched off: a leftover vat_amount on an old row is not inside the total, so nothing to take out.
+    $vatIn = $dl['mode'] !== 'off' ? $dl['vat'] : 0.0;
+    $vatPct = max(0.0, (float)($r['vat_rate'] ?? 0));
+    if ($vatPct <= 0 && $vatIn > BALANCE_TOLERANCE && function_exists('getSetting')) {
+        $vatPct = max(0.0, (float)getSetting('vat_rate', 0));
+    }
+    $levyPct = $dl['levy'] > BALANCE_TOLERANCE ? max(0.0, (float)($r['tourism_levy_percent'] ?? 0)) : 0.0;
+    $v = $vatIn > BALANCE_TOLERANCE ? $vatPct / 100 : 0.0;
+    $childNet = $dl['child'] > BALANCE_TOLERANCE ? round($dl['child'] / (1 + $v + $levyPct / 100), 2) : 0.0;
+    $pkgNet = $dl['pkg'] > BALANCE_TOLERANCE ? round($dl['pkg'] / (1 + $v), 2) : 0.0;
+    $room = round($dl['gross'] - $vatIn - $dl['levy'] - $childNet - $pkgNet, 2);
+    return ['room' => max(0.0, $room), 'child' => $childNet, 'nights' => (int)($r['number_of_nights'] ?? 0)];
+}
+
+/**
  * The "How this total is worked out" figures for one booking row or a list of rows (a group booking), built from the
  * SAME stored numbers that make the total (rh_doc_stay_lines(): total_with_vat, vat_amount, tourism_levy_amount,
  * child_supplement_total, package_total) so the lines always add up to the shown total; any leftover is a "Rounding"
@@ -4514,7 +4542,7 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
     };
     $out = ['ok' => false, 'title' => 'How this total is worked out', 'note' => 'Breakdown not available for this older booking.', 'lines' => []];
 
-    $room = $child = $pkg = $levy = $vat = $gross = $disc = $surch = 0.0;
+    $room = $child = $pkg = $levy = $vat = $gross = $disc = $surch = $roomNet = 0.0;
     $surchLabels = [];
     $mode = 'off';
     $rebuilt = false;
@@ -4534,6 +4562,7 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
         $levy += $dl['levy'];
         $vat += $dl['vat'];
         $gross += $dl['gross'];
+        $roomNet += rh_booking_room_net($r)['room'];
         if ((float)($r['total_with_vat'] ?? 0) <= BALANCE_TOLERANCE) {
             $rebuilt = true;
         }
@@ -4590,11 +4619,20 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
     if ($pkg > BALANCE_TOLERANCE) {
         $lines[] = ['label' => 'Packages / add-ons', 'hint' => '', 'value' => $fmt($pkg), 'kind' => 'add'];
     }
+    // Owner 2026-11-26: the room on its own without VAT or levy, right above the levy line. A note: never added.
+    $roomNet = round($roomNet, 2);
+    if (!$exclusive && (($vat > BALANCE_TOLERANCE && $mode !== 'off') || $levyInside) && $roomNet > BALANCE_TOLERANCE) {
+        $netHint = '';
+        if ($nights > 0) {
+            $netHint = $nights . ' night' . ($nights === 1 ? '' : 's') . ($rooms > 1 ? ' x ' . $rooms . ' rooms' : '') . ' at ' . $fmt($roomNet / ($nights * $rooms)) . ($rooms > 1 ? ' average' : '');
+        }
+        $lines[] = ['label' => 'Room rate x nights (excl. VAT & levy)', 'hint' => $netHint, 'value' => $fmt($roomNet), 'kind' => 'note'];
+    }
     if ($levy > BALANCE_TOLERANCE) {
-        $lines[] = ['label' => 'Tourism levy' . ($levyPct > 0 ? ' (' . $trim($levyPct) . '%)' : ''), 'hint' => $levyInside ? 'included in the room rate above' : '', 'value' => $fmt($levy), 'kind' => $levyInside ? 'note' : 'add'];
+        $lines[] = ['label' => 'Tourism levy' . ($levyPct > 0 ? ' (' . $trim($levyPct) . '%)' : ''), 'hint' => $levyInside ? 'included in the all-in room rate (first line)' : '', 'value' => $fmt($levy), 'kind' => $levyInside ? 'note' : 'add'];
     }
     if ($vat > BALANCE_TOLERANCE && $mode !== 'off') {
-        $lines[] = ['label' => 'VAT' . ($vatPct > 0 ? ' (' . $trim($vatPct) . '%)' : ''), 'hint' => $exclusive ? 'added' : 'included in the room rate above', 'value' => $fmt($vat), 'kind' => $exclusive ? 'add' : 'note'];
+        $lines[] = ['label' => 'VAT' . ($vatPct > 0 ? ' (' . $trim($vatPct) . '%)' : ''), 'hint' => $exclusive ? 'added' : 'included in the all-in room rate (first line)', 'value' => $fmt($vat), 'kind' => $exclusive ? 'add' : 'note'];
     }
     $sum = round($room + $child + $pkg + ($levyInside ? 0.0 : $levy) + ($exclusive ? $vat : 0.0), 2);
     $diff = round($gross - $sum, 2);

@@ -74,6 +74,17 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     ok("[$mode] plain: levy and VAT lines present, no child line", btb_has($bd, 'Tourism levy (1%)') && btb_has($bd, 'VAT (17.5%)') && !btb_has($bd, 'Child'));
     $vatLine = array_values(array_filter($bd['lines'], fn($l) => strpos($l['label'], 'VAT') === 0))[0] ?? [];
     ok("[$mode] plain: VAT is " . ($mode === 'inclusive' ? 'included (not added)' : 'added'), ($vatLine['kind'] ?? '') === ($mode === 'inclusive' ? 'note' : 'add') && strpos((string)($vatLine['hint'] ?? ''), $mode === 'inclusive' ? 'included' : 'added') !== false);
+    // Owner 2026-11-26: room on its own excl. VAT & levy, a note right above the levy line (inclusive only; exclusive's room line already is)
+    $labels = array_column($bd['lines'], 'label');
+    $netIdx = array_search('Room rate x nights (excl. VAT & levy)', $labels, true);
+    $levyIdx = array_search('Tourism levy (1%)', $labels, true);
+    if ($mode === 'inclusive') {
+        $nl = $bd['lines'][$netIdx] ?? [];
+        $want = round($plain['total_with_vat'] - $plain['vat_amount'] - $plain['tourism_levy_amount'], 2);
+        ok("[$mode] plain: room excl. VAT & levy note above the levy line, value = total - VAT - levy, '3 nights at' hint", $netIdx !== false && $levyIdx === $netIdx + 1 && ($nl['kind'] ?? '') === 'note' && abs(btb_num($nl['value'] ?? '') - $want) <= BALANCE_TOLERANCE && strpos($nl['hint'] ?? '', '3 nights at K ') === 0 && abs($sum - $tot) <= BALANCE_TOLERANCE, json_encode($bd));
+    } else {
+        ok("[$mode] plain: no separate excl. VAT & levy line (the room line is already net)", $netIdx === false, json_encode($labels));
+    }
 
     // child charge: 3 children, first 2 free -> 1 pays 50% of the rate for each night
     $childSup = rh_child_supplement($rule, 3, $nights, $night);
@@ -83,6 +94,8 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     $childLine = array_values(array_filter($bd['lines'], fn($l) => $l['label'] === 'Child charge'))[0] ?? [];
     ok("[$mode] child: line present with the rule label", !empty($childLine) && strpos($childLine['hint'], '3 children, first 2 free') !== false, json_encode($childLine));
     ok("[$mode] child: lines add up to the total", abs($sum - $tot) <= BALANCE_TOLERANCE && abs($tot - rh_booking_full_total($kid)) <= BALANCE_TOLERANCE, "$sum vs $tot");
+    $kn = rh_booking_room_net($kid);
+    ok("[$mode] child: room net excl. VAT & levy is the room alone (child net split out, both add to the net)", abs($kn['room'] - $night * $nights / 1.185) <= 0.02 && abs($kn['room'] + $kn['child'] - ($kid['total_with_vat'] - $kid['vat_amount'] - $kid['tourism_levy_amount'])) <= BALANCE_TOLERANCE, json_encode($kn));
 
     // manager override = final gross, nothing separate
     $ovr = $mk(250000.0, 'final', 0.0);
@@ -133,6 +146,8 @@ $offRow = ['number_of_nights' => 2, 'total_amount' => 202000.0, 'vat_amount' => 
 $bd = rh_booking_total_breakdown($offRow);
 [$sum, $tot] = btb_sum($bd);
 ok('[off] no VAT line from a leftover vat_amount, lines add up to the total', !btb_has($bd, 'VAT (') && strpos(json_encode($bd), 'VAT included') === false && abs($sum - $tot) <= BALANCE_TOLERANCE && abs($tot - 202000.0) <= BALANCE_TOLERANCE, json_encode($bd));
+$offNet = array_values(array_filter($bd['lines'], fn($l) => $l['label'] === 'Room rate x nights (excl. VAT & levy)'))[0] ?? [];
+ok('[off] room excl. levy ignores the leftover vat_amount: K 200,000.00 (202,000 - 2,000 levy)', ($offNet['value'] ?? '') === 'K 200,000.00' && ($offNet['kind'] ?? '') === 'note', json_encode($offNet));
 $_SITE_SETTINGS['vat_enabled'] = '1';
 
 // old row: total_with_vat 0, only total_amount + vat_amount (rh_booking_full_total fallback); no levy/child data

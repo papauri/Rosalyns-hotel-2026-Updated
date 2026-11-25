@@ -2602,6 +2602,19 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         // A cancelled / no-show / expired booking: the rate is shown for reference only, never as money owed.
         $bd_rate_closed = in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true);
         $bd_rate_label = $bd_rate_closed ? 'Was booked at' : 'Room booked at';
+        // Room base line (owner 2026-11-26): nights x the room's own rate a night, without VAT or levy, from the same
+        // stored figures. Shown only when they give the room base this panel shows (to the cent per night), so the
+        // words never disagree with the amount.
+        $bd_base_nights_text = '';
+        if (!$bd_is_cancelled) {
+            $bd_net = rh_booking_room_net($bd_row_fresh);
+            $bd_net_n = $bd_net['nights'];
+            if ($bd_net_n > 0 && $bd_net['room'] > BALANCE_TOLERANCE
+                && abs(($bd_net['room'] + $bd_net['child']) - $bd_room_base) <= BALANCE_TOLERANCE * max(1, $bd_net_n)) {
+                $bd_base_nights_text = $bd_net_n . ' night' . ($bd_net_n === 1 ? '' : 's') . ' × ' . $currency_symbol . number_format($bd_net['room'] / $bd_net_n, 2)
+                    . ($bd_net['child'] > BALANCE_TOLERANCE ? ' + child charge ' . $currency_symbol . number_format($bd_net['child'], 2) : '');
+            }
+        }
         ?>
         <!-- Group booking notice -->
         <?php if (!empty($group_bookings)): ?>
@@ -3289,7 +3302,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <?php if ($bd_is_cancelled): ?>
                                 <span>Room (amount kept on cancellation, excl. VAT and levy)<br><small class="bd-muted">only this part of the stay is billed; taxed like a room night</small></span>
                                 <?php else: ?>
-                                <span>Room base (excl. VAT and levy)<br><small class="bd-muted">the stay (and any child charge) without VAT or levy<?php echo $bd_pkg_rows ? '; packages listed below' : ''; ?></small></span>
+                                <span>Room base (excl. VAT and levy)<br><?php if ($bd_base_nights_text !== ''): ?><small class="bd-muted bd-base-nights"><?php echo htmlspecialchars($bd_base_nights_text); ?></small><br><?php endif; ?><small class="bd-muted">the stay (and any child charge) without VAT or levy<?php echo $bd_pkg_rows ? '; packages listed below' : ''; ?></small></span>
                                 <?php endif; ?>
                                 <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_room_base, 2); ?></strong>
                             </div>
