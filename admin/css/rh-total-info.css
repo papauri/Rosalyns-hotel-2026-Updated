@@ -30,6 +30,38 @@
     outline-offset: 2px;
 }
 
+/* A Status / Payment pill that opens the same popup on hover or tap (Bookings list; markup from
+   admin/includes/booking-status-info.php). Keeps the .badge look; only the button defaults are reset. */
+button.rh-pill-info {
+    margin: 0;
+    font-family: inherit;
+    cursor: help;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+button.rh-pill-info:focus-visible {
+    outline: 2px solid var(--rh-brand, #766550);
+    outline-offset: 2px;
+}
+
+@media (pointer: coarse), (max-width: 1024px) {
+    /* Same pill look, 44px-tall hit area (invisible, out of the layout flow so the row does not grow). */
+    button.rh-pill-info {
+        position: relative;
+    }
+
+    button.rh-pill-info::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        height: 44px;
+        transform: translateY(-50%);
+    }
+}
+
 @media (pointer: coarse), (max-width: 1024px) {
     /* Same 20px look, 44x44 hit area (invisible, out of the layout flow so the Total text is not pushed). */
     .rh-info-btn {
@@ -114,6 +146,19 @@
     flex: none;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+}
+
+/* Words (a reason, who, a date) rather than an amount: they wrap inside the popup instead of widening it. */
+.rh-info-pop__row--text .rh-info-pop__label {
+    flex: none;
+}
+
+.rh-info-pop__row--text .rh-info-pop__value {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: right;
 }
 
 .rh-info-pop__row--note {

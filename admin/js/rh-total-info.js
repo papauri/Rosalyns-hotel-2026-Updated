@@ -53,7 +53,7 @@
             var ul = document.createElement('ul');
             ul.className = 'rh-info-pop__list';
             lines.forEach(function (ln) {
-                var kind = ['add', 'note', 'total', 'minus'].indexOf(ln.kind) >= 0 ? ln.kind : 'add';
+                var kind = ['add', 'note', 'total', 'minus', 'text'].indexOf(ln.kind) >= 0 ? ln.kind : 'add'; // text: words that wrap
                 var li = document.createElement('li');
                 li.className = 'rh-info-pop__row rh-info-pop__row--' + kind;
                 var lab = document.createElement('span');
@@ -130,7 +130,8 @@
     }
 
     function btnOf(target) {
-        return target && target.closest ? target.closest('.rh-info-btn[data-rh-breakdown]') : null;
+        // .rh-pill-info: a Status / Payment pill on the Bookings list (admin/includes/booking-status-info.php).
+        return target && target.closest ? target.closest('.rh-info-btn[data-rh-breakdown], .rh-pill-info[data-rh-breakdown]') : null;
     }
 
     document.addEventListener('click', function (e) {

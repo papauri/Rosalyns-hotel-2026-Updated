@@ -4173,8 +4173,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                     <?php rh_server_sort_th('Nights' . $bk_tip('Nights: nights booked, check-in day to check-out day (the check-out day is not a night).'), 'nights', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-nights'); ?>
                                     <?php rh_server_sort_th('Guests', 'guests', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-guests'); ?>
                                     <?php rh_server_sort_th('Total' . $bk_tip('Total: the whole bill for the booking, room nights plus extras and charges, VAT and levy included. The small line is the booked rate a night times the nights.'), 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
-                                    <?php rh_server_sort_th('Status' . $bk_tip('Status: where the booking is now: Pending, Tentative, Confirmed, Checked in, Checked out, Cancelled, No-show or Expired.'), 'status', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-status'); ?>
-                                    <?php rh_server_sort_th('Payment' . $bk_tip('Payment: from the money on the booking (paid so far against the total): Paid, Part paid, Unpaid or Refunded. The small line is the latest payment reference.'), 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
+                                    <?php rh_server_sort_th('Status' . $bk_tip('Status: where the booking is now: Pending, Tentative, Confirmed, Checked in, Checked out, Cancelled, No-show or Expired. Hover over or tap the pill to see why and when (who, the reason, hold or pay-by time).'), 'status', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-status'); ?>
+                                    <?php rh_server_sort_th('Payment' . $bk_tip('Payment: from the money on the booking (paid so far against the total): Paid, Part paid, Unpaid or Refunded. The small line is the latest payment reference. Hover over or tap the pill to see the total, paid so far, balance due and the latest payment.'), 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
                                     <?php rh_server_sort_th('Balance due' . $bk_tip('Balance due: what the guest still has to pay on this booking now (cancelled and no-show bookings: a fee or extras still owed). Blank = nothing to pay. Deleted bookings are blank. Same figure as the CSV export.' . ($bk_chase_bal ? ' Arrivals to chase filter: a group shows the whole group\'s balance (all its confirmed rooms, an overpaid room offsetting the others), the same figure as the Dashboard and the daily email.' : '')), 'balance', $bk_sort_key, $bk_sort_dir, 'col-optional-md bk-col-balance'); ?>
                                     <?php rh_server_sort_th('Created' . $bk_tip('Created: when the booking was made, and who made it (from the booking history).'), 'created', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-created'); ?>
                                     <th>Actions</th>
@@ -4208,6 +4208,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                 $bk_status_word = static function (string $st): string {
                                     return ['checked-in' => 'Checked in', 'checked-out' => 'Checked out', 'no-show' => 'No-show'][$st] ?? ucfirst(str_replace('-', ' ', $st));
                                 };
+                                // Hover / tap on the Status and Payment pills: the why and when (owner 2026-11-25). One read-only
+                                // query per log table for the page's closed / in-house rows (admin/includes/booking-status-info.php).
+                                require_once __DIR__ . '/includes/booking-status-info.php';
+                                $bk_status_ev = rh_bk_status_events($pdo, $bookings);
+                                $bk_pending_hours_raw = trim((string)getSetting('pending_expiry_hours', ''));
+                                $bk_pending_hours = $bk_pending_hours_raw === '' ? 48 : max(0, min(720, (int)$bk_pending_hours_raw)); // the same rule as _expireStalePendingBookings
                                 ?>
                                 <?php foreach ($bookings as $booking): ?>
                                     <?php
@@ -4333,13 +4339,32 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             $bk_left_shown = $bk_grp !== null ? ((float)$bk_grp['balance'] > BALANCE_TOLERANCE ? (float)$bk_grp['balance'] : 0.0) : $bk_left_to_pay;
                                             $bk_grp_note = ($bk_grp !== null && (int)$bk_grp['rooms'] > 1) ? 'Group balance, ' . (int)$bk_grp['rooms'] . ' rooms' : '';
                                             $bk_left_text = $bk_left_shown > 0 ? $currency_symbol . ' ' . number_format($bk_left_shown, 2) . ' left to pay' . ($bk_grp_note !== '' ? ' (group, ' . (int)$bk_grp['rooms'] . ' rooms)' : '') : '';
+                                            // Company pays later (migration 084): the list says who owes the balance instead of a plain "Unpaid".
+                                            $bkBillLabel = '';
+                                            if (isset($bk_bill_splits[(int)$booking['id']])) {
+                                                $bkBillLabel = rh_booking_pay_label($bk_bill_splits[(int)$booking['id']]);
+                                            }
+                                            $bk_pay_later = $bkBillLabel === '' && !empty($booking['checkin_without_payment']) && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed', 'checked-in'], true);
+                                            // Pill popups (hover / tap): the same figures this row prints, so they never disagree with it.
+                                            $bk_pay_pill = $is_deleted_row ? '' : rh_bk_pill_info_attrs(rh_bk_pay_info($booking, [
+                                                'currency' => $currency_symbol, 'total' => rh_booking_full_total($booking), 'left' => $bk_left_shown,
+                                                'group_note' => $bk_grp_note, 'pay' => $bk_pay_state,
+                                                'arrangement' => $bkBillLabel !== '' ? $bkBillLabel . ' (company pays later)'
+                                                    : ($bk_pay_later ? 'May check in before paying' . (trim((string)($booking['checkin_arrangement_note'] ?? '')) !== '' ? ': ' . trim((string)$booking['checkin_arrangement_note']) : '') : ''),
+                                            ]), 'Payment ' . ($status_labels[$status] ?? ucfirst($status)) . ': show the figures');
+                                            $bk_status_pill = $is_deleted_row ? '' : rh_bk_pill_info_attrs(rh_bk_status_info($booking, $bk_status_ev[(int)$booking['id']] ?? null, [
+                                                'currency' => $currency_symbol, 'today' => $today_str, 'pending_hours' => $bk_pending_hours, 'left' => $bk_left_shown,
+                                            ]), 'Status ' . $bk_status_word((string)$booking['status']) . ': show why and when');
+                                            $bk_pill_tag = static fn (string $attrs): array => $attrs !== '' ? ['button type="button"', 'button', ' rh-pill-info'] : ['span', 'span', ''];
+                                            [$bk_pt_open, $bk_pt_close, $bk_pt_cls] = $bk_pill_tag($bk_pay_pill);
+                                            [$bk_st_open, $bk_st_close, $bk_st_cls] = $bk_pill_tag($bk_status_pill);
                                             ?>
-                                            <span class="bk-total-main"><strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?><span class="bk-ph-pay badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>"><?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?></span><?php if ($bk_left_text !== ''): ?><span class="bk-ph-left bk-left-to-pay"><?php echo htmlspecialchars($bk_left_text); ?></span><?php endif; ?></span>
+                                            <span class="bk-total-main"><strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?><<?php echo $bk_pt_open; ?> class="bk-ph-pay badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?><?php echo $bk_pt_cls; ?>"<?php echo $bk_pay_pill; ?>><?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?></<?php echo $bk_pt_close; ?>><?php if ($bk_left_text !== ''): ?><span class="bk-ph-left bk-left-to-pay"><?php echo htmlspecialchars($bk_left_text); ?></span><?php endif; ?></span>
                                             <?php $bk_rate = rh_booked_rate_line($booking, null, ['currency' => $currency_symbol]); // the row's own columns, no query ?>
                                             <?php if ($bk_rate['ok']): ?>
                                                 <br><small class="bk-booked-rate" style="color:#666;white-space:nowrap;" title="<?php echo htmlspecialchars('Booked at ' . $bk_rate['text'] . '. Room rate a night × nights, at the price the booking was made at; today\'s room price does not change it.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bk_rate['compact'], ENT_QUOTES); ?></small>
                                             <?php endif; ?>
-                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><span class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?>"><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?></span></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?>
+                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><<?php echo $bk_st_open; ?> class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?><?php echo $bk_st_cls; ?>"<?php echo $bk_status_pill; ?>><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?></<?php echo $bk_st_close; ?>></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
                                                     <br><span class="expires-soon"><i class="fas fa-exclamation-triangle"></i> Expires soon!</span>
@@ -4355,9 +4380,9 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                                     <em><?php echo htmlspecialchars((string)($booking['deleted_reason'] ?? '')); ?></em>
                                                 </small>
                                             <?php else: ?>
-                                            <span class="badge badge-<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?>">
+                                            <<?php echo $bk_st_open; ?> class="badge badge-<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?><?php echo $bk_st_cls; ?>"<?php echo $bk_status_pill; ?>>
                                                 <?php echo htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?>
-                                            </span>
+                                            </<?php echo $bk_st_close; ?>>
                                             <?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <br><small style="color: #666; font-size: 10px;">
@@ -4370,19 +4395,13 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                         </td>
                                         <td class="col-optional-md" data-label="Payment">
                                             <?php /* $status / $status_labels: worked out in the Total cell above. */ ?>
-                                            <span class="badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>">
+                                            <<?php echo $bk_pt_open; ?> class="badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?><?php echo $bk_pt_cls; ?>"<?php echo $bk_pay_pill; ?>>
                                                 <?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?>
-                                            </span>
-                                            <?php
-                                            // Company pays later (migration 084): the list says who owes the balance instead of a plain "Unpaid".
-                                            $bkBillLabel = '';
-                                            if (isset($bk_bill_splits[(int)$booking['id']])) {
-                                                $bkBillLabel = rh_booking_pay_label($bk_bill_splits[(int)$booking['id']]);
-                                            }
-                                            ?>
+                                            </<?php echo $bk_pt_close; ?>>
+                                            <?php /* $bkBillLabel / $bk_pay_later: worked out in the Total cell above. */ ?>
                                             <?php if ($bkBillLabel !== ''): ?>
                                                 <br><small class="bk-arrangement-tag" title="<?php echo htmlspecialchars('Company pays later: the room stay is billed to the company, not chased from the guest and it does not block checkout.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bkBillLabel); ?></small>
-                                            <?php elseif (!empty($booking['checkin_without_payment']) && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed', 'checked-in'], true)): ?>
+                                            <?php elseif ($bk_pay_later): ?>
                                                 <br><small class="bk-arrangement-tag" title="<?php echo htmlspecialchars('May check in before paying' . (trim((string)($booking['checkin_arrangement_note'] ?? '')) !== '' ? ': ' . trim((string)$booking['checkin_arrangement_note']) : '') . '. The balance stays owed.', ENT_QUOTES); ?>">Pay-later arrangement</small>
                                             <?php endif; ?>
                                             <?php if ($booking['payment_reference']): ?>
