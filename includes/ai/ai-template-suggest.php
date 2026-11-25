@@ -23,6 +23,13 @@
  *  - Cost: Fast model (Primary when there is no Fast), one try, short timeout, usage recorded like every call,
  *    about ai_tpl_suggest_limit requests per person per 10 minutes, the same input answered from the session for
  *    a short time.
+ *  - Tone (owner 2026-11-25: "a few options on what sort of email you want, maybe firm, concise, friendly, etc to pick
+ *    from. Make sure tags are accurate."): a fixed list (rh_ai_ts_tones()); anything else is Mixed. One tone = 3
+ *    versions in that tone; Mixed = 3 different tones, each card labelled with its (whitelisted) tone. The tone goes
+ *    in the message, never in the system prompt. No tone may add threats, deadlines or consequences the original
+ *    does not state (checked in code: rh_ai_ts_threats()).
+ *  - Tags: a version may only use the tags this template's sender really fills (includes/email-template-tags.php).
+ *    Tags that print HTML or mislead in a sentence are not offered; they may stay only in the block they were in.
  */
 
 require_once __DIR__ . '/ai-core.php';
@@ -76,11 +83,95 @@ function rh_ai_ts_purposes(): array
         'event_quotation' => 'Sent with a quotation for an event.',
         'credit_note' => 'Sent when a credit note is issued.',
         'refund_notification' => 'Sent when a refund is made.',
-        'payment_reminder_1' => 'First reminder about an unpaid balance, in friendly wording.',
-        'payment_reminder_2' => 'Second reminder about an unpaid balance, in firmer wording.',
+        'payment_reminder_1' => 'First reminder about an unpaid balance.',
+        'payment_reminder_2' => 'Second reminder about an unpaid balance.',
         'payment_reminder_3' => 'Final reminder about an unpaid balance.',
         'quotation_expiry_reminder' => 'Sent to remind a client that their quotation is about to expire.',
+        'prearrival_payment_reminder' => 'Sent before arrival to a guest whose confirmed booking still has a balance to pay.',
     ];
+}
+
+/** How a template usually sounds: added to the purpose only for Mixed (a picked tone replaces it). */
+function rh_ai_ts_purpose_styles(): array
+{
+    return [
+        'payment_reminder_1' => 'Usually friendly wording.',
+        'payment_reminder_2' => 'Usually firmer wording than the first reminder.',
+    ];
+}
+
+/** The purpose line the model gets: with the usual style for Mixed, without it when a tone is picked. */
+function rh_ai_ts_purpose(string $key, string $tone): string
+{
+    $p = rh_ai_ts_purposes()[$key] ?? '';
+    $style = rh_ai_ts_purpose_styles()[$key] ?? '';
+    return ($tone === 'mixed' && $style !== '') ? $p . ' ' . $style : $p;
+}
+
+// ── Tone ─────────────────────────────────────────────────────────────────────
+
+/** Tone key => label (the picker's options, in order). Mixed = today's behaviour: 3 different tones. */
+function rh_ai_ts_tones(): array
+{
+    return [
+        'mixed'      => 'Mixed',
+        'friendly'   => 'Friendly',
+        'concise'    => 'Concise',
+        'firm'       => 'Firm',
+        'formal'     => 'Formal',
+        'apologetic' => 'Apologetic',
+    ];
+}
+
+/** Tone key => what it means (sent to the model with the tone; fixed text, never the person's input). */
+function rh_ai_ts_tone_notes(): array
+{
+    return [
+        'friendly'   => 'Warm and personal, still professional.',
+        'concise'    => 'Shorter and to the point. Every fact and every tag kept.',
+        'firm'       => 'Clear and direct, still polite. No threats, deadlines, consequences or legal wording the original does not state.',
+        'formal'     => 'Courteous and formal, no casual phrases.',
+        'apologetic' => 'Sorry for any trouble where it fits, without admitting fault or offering anything the original does not.',
+    ];
+}
+
+/** The posted tone, whitelisted: a known key, anything else (missing, unknown, odd case) is 'mixed'. */
+function rh_ai_ts_tone($raw): string
+{
+    $t = is_string($raw) ? strtolower(trim($raw)) : '';
+    return isset(rh_ai_ts_tones()[$t]) ? $t : 'mixed';
+}
+
+/** The card label of a version's tone: a named tone's label, '' for anything else (Mixed itself included). */
+function rh_ai_ts_tone_label($raw): string
+{
+    $t = is_string($raw) ? strtolower(trim($raw)) : '';
+    return ($t !== 'mixed' && isset(rh_ai_ts_tones()[$t])) ? rh_ai_ts_tones()[$t] : '';
+}
+
+/**
+ * Threat and consequence words found in a text (stems). A version that brings in one the original email does not
+ * already use is dropped, whatever the tone (Firm stays polite).
+ */
+function rh_ai_ts_threats(string $t): array
+{
+    $t = strtolower(strip_tags((string)preg_replace('/\{\{[^{}]*\}\}|\[\[[a-z]\d+\]\]/', ' ', $t)));
+    $stems = [
+        'cancel'   => '/\bcancel/',
+        'legal'    => '/\blegal|\blawyer|\bsolicitor|\battorney|\bcourt\b|\bsue\b|\bprosecut|\blitigat/',
+        'collect'  => '/\bdebt collect|\bcollection agenc/',
+        'penalty'  => '/\bpenalt|\bsurcharge|\blate (payment )?(fee|charge)|\binterest (charge|will|at)\b/',
+        'suspend'  => '/\bsuspen|\bterminat|\bblacklist|\bwithdraw|\brevok|\bforfeit/',
+        'action'   => '/\bfurther action|\baction will be taken|\btake action|\bconsequence/',
+        'deadline' => '/\bdeadline|\bwithin (the next )?\w+ (hours?|days?|weeks?)|\bby (tomorrow|today|tonight|the end of)|\bimmediately\b|\bfinal (notice|warning)/',
+    ];
+    $hit = [];
+    foreach ($stems as $k => $re) {
+        if (preg_match($re, $t)) {
+            $hit[] = $k;
+        }
+    }
+    return $hit;
 }
 
 /** May this template get suggestions: a known email template (never a PDF document, never the receipt email). */
@@ -93,8 +184,34 @@ function rh_ai_ts_template_ok(string $key): bool
 }
 
 /**
- * The tags the model may use for this template: tag => meaning. Tags that print a block of HTML, a link or a
- * button (…_html, …_block, …_link) are left out: they cannot sit inside a sentence.
+ * Tags that print HTML (a paragraph, a list, a box) without the _html / _block / _link ending: they cannot sit
+ * inside a sentence. urgency_notice: a <p> (config/email.php sendBookingReminderEmail); payment_policy, pay_instructions,
+ * cancellation_policy_text: paragraphs; quotation_notes: the staff note with line breaks.
+ */
+function rh_ai_ts_unsafe_tags(): array
+{
+    return ['urgency_notice', 'payment_policy', 'pay_instructions', 'cancellation_policy_text', 'quotation_notes'];
+}
+
+/**
+ * Tags a template fills but that would mislead in new wording, so they are not offered (kept only where they were):
+ * booking_reminder days_overdue = days past check-in / check-out (0 for an upcoming stay), not a late payment;
+ * tentative_quotation vat_rate is rounded to a whole number (17.5 prints as 18); payment_invoice total_amount = the
+ * invoice's balance (0.00 when paid), not its total (invoice_total_amount and balance_due_amount say it plainly).
+ */
+function rh_ai_ts_held_tags(): array
+{
+    return [
+        'booking_reminder'    => ['days_overdue'],
+        'tentative_quotation' => ['vat_rate'],
+        'payment_invoice'     => ['total_amount'],
+    ];
+}
+
+/**
+ * The tags the model may use for this template: tag => meaning. Only the tags its sender really fills; tags that
+ * print a block of HTML, a link or a button (…_html, …_block, …_link and rh_ai_ts_unsafe_tags()) and the held ones
+ * are left out.
  */
 function rh_ai_ts_allowed_tags(string $key): array
 {
@@ -103,14 +220,27 @@ function rh_ai_ts_allowed_tags(string $key): array
         return [];
     }
     $defs = rh_email_tag_definitions();
+    $skip = array_merge(rh_ai_ts_unsafe_tags(), rh_ai_ts_held_tags()[$key] ?? []);
     $out = [];
     foreach (array_values(array_unique($map[$key])) as $tag) {
-        if (preg_match('/(_html|_block|_link)$/', $tag)) {
+        if (preg_match('/(_html|_block|_link)$/', $tag) || in_array($tag, $skip, true)) {
             continue;
         }
         $out[$tag] = (string)($defs[$tag][1] ?? '');
     }
     return $out;
+}
+
+/**
+ * The tags one piece of new text may hold: the offered ones, plus any tag this template's sender fills that the same
+ * piece already held in the original (an HTML or held tag may stay where it was). A tag the sender does not fill is
+ * never allowed, even when the original holds it.
+ */
+function rh_ai_ts_piece_tags(string $key, string $orig): array
+{
+    $filled = array_values(array_unique(rh_email_template_tag_map()[$key] ?? []));
+    $kept = array_values(array_intersect(rh_ai_ts_tags_in($orig), $filled));
+    return array_values(array_unique(array_merge(array_keys(rh_ai_ts_allowed_tags($key)), $kept)));
 }
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
@@ -180,7 +310,17 @@ function rh_ai_ts_button(string $key, bool $on): string
         return '';
     }
     $k = htmlspecialchars($key, ENT_QUOTES, 'UTF-8');
-    return '<button type="button" class="tpl-assist__btn" data-tpl-suggest="' . $k . '" aria-controls="tpl-assist-out-' . $k . '">'
+    $opts = '';
+    foreach (rh_ai_ts_tones() as $tk => $label) {
+        $opts .= '<option value="' . htmlspecialchars($tk, ENT_QUOTES, 'UTF-8') . '"' . ($tk === 'mixed' ? ' selected' : '') . '>'
+            . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</option>';
+    }
+    return '<span class="tpl-assist__tone">'
+        . '<label class="tpl-assist__tone-label" for="tpl-assist-tone-' . $k . '">Tone</label>'
+        . '<select class="tpl-assist__tone-select" id="tpl-assist-tone-' . $k . '" data-tpl-tone="' . $k . '">' . $opts . '</select>'
+        . '<i class="help" data-tip="Pick how the email should sound; Mixed gives three different styles">?</i>'
+        . '</span>'
+        . '<button type="button" class="tpl-assist__btn" data-tpl-suggest="' . $k . '" aria-controls="tpl-assist-out-' . $k . '">'
         . '<i class="fas fa-pen-to-square" aria-hidden="true"></i> Suggest wording</button>'
         . '<i class="help" data-tip="Ideas from the Assistant: up to 3 new wordings for this email, same layout and tags. '
         . 'Only the wording, the subject and the tag names are sent; never a guest, a booking or a link. Nothing is saved until you press Save.">?</i>';
@@ -461,9 +601,13 @@ function rh_ai_ts_subject(string $subject): array
 
 // ── What is sent ─────────────────────────────────────────────────────────────
 
-/** The one message the model gets (JSON): purpose, hotel name, subject, numbered blocks, allowed tags. */
-function rh_ai_ts_payload(string $key, string $hotel, array $subject, array $blocks): string
+/**
+ * The one message the model gets (JSON): purpose, hotel name, subject, numbered blocks, allowed tags, tone.
+ * $tone is a whitelisted key (rh_ai_ts_tone()); its meaning is fixed text from rh_ai_ts_tone_notes().
+ */
+function rh_ai_ts_payload(string $key, string $hotel, array $subject, array $blocks, string $tone = 'mixed'): string
 {
+    $tone = rh_ai_ts_tone($tone);
     $b = [];
     foreach ($blocks as $blk) {
         $b[(string)$blk['n']] = $blk['text'];
@@ -472,32 +616,54 @@ function rh_ai_ts_payload(string $key, string $hotel, array $subject, array $blo
     foreach (rh_ai_ts_allowed_tags($key) as $tag => $meaning) {
         $tags['{{' . $tag . '}}'] = $meaning;
     }
-    return (string)json_encode([
+    if ($tone === 'mixed') {
+        $notes = rh_ai_ts_tone_notes();
+    } else {
+        $notes = [$tone => rh_ai_ts_tone_notes()[$tone]];
+    }
+    // Tags in the current wording that this template's sender does not fill (they reach the guest as "{{tag}}")
+    $all = $subject['text'];
+    foreach ($blocks as $blk) {
+        $all .= ' ' . $blk['text'];
+    }
+    $remove = array_values(array_diff(rh_ai_ts_tags_in($all), rh_email_template_tag_map()[$key] ?? []));
+    $msg = [
         'template'     => $key,
-        'purpose'      => rh_ai_ts_purposes()[$key] ?? '',
+        'purpose'      => rh_ai_ts_purpose($key, $tone),
         'hotel_name'   => mb_substr(trim($hotel), 0, 80),
         'subject'      => $subject['text'],
         'blocks'       => (object)$b,
         'allowed_tags' => (object)$tags,
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        'tone'         => $tone,
+        'tone_notes'   => (object)$notes,
+    ];
+    if ($remove) {
+        $msg['remove_tags'] = array_map(static fn(string $t): string => '{{' . $t . '}}', $remove);
+    }
+    return (string)json_encode($msg, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 function rh_ai_ts_prompt(): string
 {
     return "You suggest new wording for one email that a hotel sends to its guests or clients. You get JSON: the template "
-        . "name and what it is for, the hotel name, the subject and the email's text blocks, numbered in page order, plus the "
-        . "{{tags}} this email may use and what each one prints.\n"
-        . "Write exactly 3 versions that differ from each other in tone (for example warm, brief, formal). Reply with JSON only, "
-        . "no other text: {\"versions\":[{\"subject\":\"...\",\"blocks\":{\"1\":\"...\",\"2\":\"...\"}}]}\n"
+        . "name and what it is for, the hotel name, the subject and the email's text blocks, numbered in page order, the "
+        . "{{tags}} this email may use and what each one prints, and the tone wanted with what each tone means.\n"
+        . "Write exactly 3 versions. If \"tone\" is \"mixed\", each version uses a different tone from tone_notes and says which "
+        . "in \"tone\". Otherwise all 3 versions use that one tone and differ only in phrasing. The tone wanted decides how "
+        . "the email sounds, whatever the purpose or the current wording suggests.\n"
+        . "Reply with JSON only, no other text: {\"versions\":[{\"tone\":\"...\",\"subject\":\"...\",\"blocks\":{\"1\":\"...\",\"2\":\"...\"}}]}\n"
         . "Rules for every version:\n"
         . "- Every block number from the input, each one once, no new numbers. One block stays one block: a greeting stays a "
         . "greeting, a short label (like \"Check-in\") stays a short label, a sign-off stays a sign-off.\n"
-        . "- Keep the meaning and the facts. Use only the tags listed, written exactly like {{tag}}. Keep the tags a block "
-        . "uses where you can.\n"
+        . "- Keep the meaning and the facts. Use the tags listed in allowed_tags, written exactly like {{tag}}. A block may "
+        . "also keep a tag it already has, in that block only, unless the tag is listed in remove_tags (those print nothing "
+        . "for this email: leave them out). Keep the tags a block uses where you can.\n"
         . "- Keep every marker like [[k3]] or [[s1]] exactly once, in the same block (or the subject) it came from.\n"
         . "- Plain text. You may use <strong>...</strong> and <br>, nothing else.\n"
         . "- No links, no new figures, prices, dates or times, no promises the original does not make.\n"
-        . "- Clear, friendly British English, short sentences. Do not say how the text was written.";
+        . "- Never add a threat, a deadline, a consequence (such as cancelling or further action) or legal wording that the "
+        . "original does not already state. A firm tone stays polite.\n"
+        . "- Clear British English, short sentences. Do not say how the text was written.";
 }
 
 // ── Reading the answer ───────────────────────────────────────────────────────
@@ -615,18 +781,21 @@ function rh_ai_ts_render(string $text, array $markers): string
 
 /**
  * Check every version and build its HTML from the original string. Unchanged blocks keep their exact bytes.
- * @return list<array{subject:string, html:string, preview_text:string, missing_tags:list<string>}>
+ * $tone: the whitelisted tone asked for. Its label goes on every card; for Mixed the model's own "tone" is used when
+ * it is one of the named tones, otherwise the card has no label.
+ * @return list<array{subject:string, html:string, preview_text:string, missing_tags:list<string>, tone:string}>
  */
-function rh_ai_ts_validate(array $versions, string $key, string $html, array $subject, array $blocks): array
+function rh_ai_ts_validate(array $versions, string $key, string $html, array $subject, array $blocks, string $tone = 'mixed'): array
 {
-    $allowedTags = array_keys(rh_ai_ts_allowed_tags($key));
+    $tone = rh_ai_ts_tone($tone);
     $origAll = $subject['text'];
     foreach ($blocks as $b) {
         $origAll .= ' ' . $b['text'];
     }
-    $allowedTags = array_values(array_unique(array_merge($allowedTags, rh_ai_ts_tags_in($origAll))));
     $digits = rh_ai_ts_digits($origAll);
-    $origTags = rh_ai_ts_tags_in($origAll);
+    $filled = rh_email_template_tag_map()[$key] ?? [];
+    $origTags = array_values(array_intersect(rh_ai_ts_tags_in($origAll), $filled)); // an unfilled tag left out is not "missing"
+    $origThreats = rh_ai_ts_threats($origAll);
     $out = [];
     $seen = [];
     foreach ($versions as $v) {
@@ -650,7 +819,7 @@ function rh_ai_ts_validate(array $versions, string $key, string $html, array $su
         if ($subject['text'] === '' && $subj === '') {
             $subj = ''; // no subject before, none now
         } else {
-            $subj = rh_ai_ts_check_text($subj, $subject['text'], array_keys($subject['markers']), $allowedTags, $digits, RH_AI_TS_SUBJECT_MAX);
+            $subj = rh_ai_ts_check_text($subj, $subject['text'], array_keys($subject['markers']), rh_ai_ts_piece_tags($key, $subject['text']), $digits, RH_AI_TS_SUBJECT_MAX);
         }
         if ($subj === null) {
             continue;
@@ -664,7 +833,7 @@ function rh_ai_ts_validate(array $versions, string $key, string $html, array $su
                 break;
             }
             $cap = min(RH_AI_TS_BLOCK_MAX, max((int)ceil(mb_strlen($b['text']) * 2.5), mb_strlen($b['text']) + 200));
-            $c = rh_ai_ts_check_text($t, $b['text'], array_keys($b['markers']), $allowedTags, $digits, $cap);
+            $c = rh_ai_ts_check_text($t, $b['text'], array_keys($b['markers']), rh_ai_ts_piece_tags($key, $b['text']), $digits, $cap);
             if ($c === null) {
                 $okAll = false;
                 break;
@@ -697,6 +866,9 @@ function rh_ai_ts_validate(array $versions, string $key, string $html, array $su
         foreach ($new as $t) {
             $allNew .= ' ' . $t;
         }
+        if (array_diff(rh_ai_ts_threats($allNew), $origThreats)) {
+            continue; // a threat, deadline or consequence the original does not state
+        }
         $missing = array_values(array_diff($origTags, rh_ai_ts_tags_in($allNew)));
         $prev = array_reverse($changed);
         $preview = trim((string)preg_replace('/\s+/', ' ', strip_tags(str_replace('<br>', ' ', (string)preg_replace('/\[\[[a-z]\d+\]\]/', '…', implode(' ', $prev))))));
@@ -705,6 +877,7 @@ function rh_ai_ts_validate(array $versions, string $key, string $html, array $su
             'html'         => $rebuilt,
             'preview_text' => mb_strlen($preview) > 180 ? mb_substr($preview, 0, 177) . '…' : $preview,
             'missing_tags' => array_map(static fn(string $t): string => '{{' . $t . '}}', $missing),
+            'tone'         => $tone === 'mixed' ? rh_ai_ts_tone_label($v['tone'] ?? '') : rh_ai_ts_tone_label($tone),
         ];
     }
     return $out;
@@ -734,9 +907,9 @@ function rh_ai_ts_limit(): int
     return $n < 1 ? 10 : min(30, $n);
 }
 
-function rh_ai_ts_cache_key(int $uid, string $key, string $subject, string $html): string
+function rh_ai_ts_cache_key(int $uid, string $key, string $subject, string $html, string $tone = 'mixed'): string
 {
-    return hash('sha256', $uid . '|' . $key . '|' . $subject . '|' . $html);
+    return hash('sha256', $uid . '|' . $key . '|' . rh_ai_ts_tone($tone) . '|' . $subject . '|' . $html);
 }
 
 /** A cached answer from the session store, or null. */
@@ -765,10 +938,11 @@ function rh_ai_ts_cache_put(array $store, string $ck, array $versions, int $now)
  * @return array{versions:list<array>, reason:string, called:bool}
  * reason: ok | template | nothing | model | budget | error | dropped
  */
-function rh_ai_ts_suggest(PDO $db, int $uid, string $key, string $subject, string $html, string $hotel): array
+function rh_ai_ts_suggest(PDO $db, int $uid, string $key, string $subject, string $html, string $hotel, string $tone = 'mixed'): array
 {
     $out = static fn(array $v, string $r, bool $c): array => ['versions' => $v, 'reason' => $r, 'called' => $c];
     try {
+        $tone = rh_ai_ts_tone($tone);
         if (!rh_ai_ts_template_ok($key)) {
             return $out([], 'template', false);
         }
@@ -791,7 +965,7 @@ function rh_ai_ts_suggest(PDO $db, int $uid, string $key, string $subject, strin
         $tokens = max(800, min(8000, (int)rh_ai_setting('ai_tpl_suggest_tokens', '4000')));
         $r = rh_ai_chat(['provider' => $sel['provider'], 'model' => $model, 'max_tokens' => $tokens,
             'effort' => 'minimal', 'timeout' => 30, 'system_frozen' => rh_ai_ts_prompt(),
-            'messages' => [['role' => 'user', 'content' => rh_ai_ts_payload($key, $hotel, $subj, $ex['blocks'])]], 'tools' => []]);
+            'messages' => [['role' => 'user', 'content' => rh_ai_ts_payload($key, $hotel, $subj, $ex['blocks'], $tone)]], 'tools' => []]);
         $usage = (array)($r['usage'] ?? []);
         if ((int)($usage['in'] ?? 0) + (int)($usage['out'] ?? 0) > 0) {
             $used = (string)($r['model'] ?? $model);
@@ -801,7 +975,7 @@ function rh_ai_ts_suggest(PDO $db, int $uid, string $key, string $subject, strin
         if (($r['error'] ?? '') !== '') {
             return $out([], 'error', true);
         }
-        $v = rh_ai_ts_validate(rh_ai_ts_parse((string)($r['text'] ?? '')), $key, $html, $subj, $ex['blocks']);
+        $v = rh_ai_ts_validate(rh_ai_ts_parse((string)($r['text'] ?? '')), $key, $html, $subj, $ex['blocks'], $tone);
         return $out($v, $v ? 'ok' : 'dropped', true);
     } catch (Throwable $e) {
         error_log('Template wording suggestions: ' . $e->getMessage());

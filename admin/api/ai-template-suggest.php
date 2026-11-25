@@ -1,7 +1,8 @@
 <?php
 /**
  * Email Templates "Suggest wording" (POST action=get_suggestions + csrf_token + X-Requested-With, template, subject,
- * html_body) -> {success: true, versions: [{subject, html, preview_text, missing_tags}], message}.
+ * html_body, tone) -> {success: true, versions: [{subject, html, preview_text, missing_tags, tone}], message}.
+ * tone is whitelisted (rh_ai_ts_tone(): mixed, friendly, concise, firm, formal, apologetic; anything else = mixed).
  * includes/ai/ai-template-suggest.php has the rules.
  *
  * Order of checks: signed in (api-init: 401) -> the Assistant is connected (kill switch, chat tables, cloud on, key,
@@ -48,6 +49,7 @@ if (!rh_ai_ts_person_ok($uid, rh_ai_ts_can_for($uid))) {
 $key = (string)($_POST['template'] ?? '');
 $subject = (string)($_POST['subject'] ?? '');
 $html = (string)($_POST['html_body'] ?? '');
+$tone = rh_ai_ts_tone($_POST['tone'] ?? ''); // whitelisted: unknown or missing = mixed; the raw text never reaches the prompt
 if (!rh_ai_ts_template_ok($key)) {
     rh_ai_ts_api_out(200, ['success' => true, 'versions' => [], 'message' => 'Suggestions are not available for this template.']);
 }
@@ -56,7 +58,7 @@ if (trim($html) === '') {
 }
 
 $now = time();
-$ck = rh_ai_ts_cache_key($uid, $key, $subject, $html);
+$ck = rh_ai_ts_cache_key($uid, $key, $subject, $html, $tone);
 $hit = rh_ai_ts_cache_get((array)($_SESSION[RH_AI_TS_SESSION]['cache'] ?? []), $ck, $now);
 if ($hit !== null) {
     session_write_close();
@@ -74,7 +76,7 @@ session_write_close(); // the model call never holds this person's session
 
 @set_time_limit(60);
 $hotel = (string)getSetting('site_name', 'Hotel');
-$r = rh_ai_ts_suggest($pdo, $uid, $key, $subject, $html, $hotel);
+$r = rh_ai_ts_suggest($pdo, $uid, $key, $subject, $html, $hotel, $tone);
 
 if ($r['versions']) {
     try {

@@ -769,7 +769,8 @@
         versions.slice(0, 3).forEach(function (v, i) {
             if (!v || typeof v.html !== 'string' || typeof v.subject !== 'string') { return; }
             var card = assistEl('div', 'tpl-assist-card');
-            card.appendChild(assistEl('div', 'tpl-assist-card__label', 'Suggestion ' + (i + 1)));
+            var toneLabel = (typeof v.tone === 'string' && v.tone) ? ' · ' + v.tone : '';
+            card.appendChild(assistEl('div', 'tpl-assist-card__label', 'Suggestion ' + (i + 1) + toneLabel));
             card.appendChild(assistEl('div', 'tpl-assist-card__subject', v.subject));
             card.appendChild(assistEl('p', 'tpl-assist-card__text', v.preview_text || ''));
             if (Array.isArray(v.missing_tags) && v.missing_tags.length) {
@@ -809,6 +810,8 @@
                 fd.set('template', key);
                 fd.set('subject', subj ? subj.value : '');
                 fd.set('html_body', html.value);
+                var toneSel = document.getElementById('tpl-assist-tone-' + key);
+                fd.set('tone', toneSel ? toneSel.value : 'mixed');
                 btn.disabled = true;
                 btn.setAttribute('aria-busy', 'true');
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Getting ideas…';
