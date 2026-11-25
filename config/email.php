@@ -2101,7 +2101,7 @@ function ensureBookingEmailTemplateDefaults()
                         ['Reference',         '{{payment_reference}}'],
                         ['Type',              '{{booking_type}}'],
                         ['Payment Date',      '{{payment_date}}'],
-                        ['VAT Incl.',         '{{vat_amount}}'],
+                        ['VAT',               '{{vat_amount}}'],
                         ['Amount Received',   '{{total_amount}}', true],
                     ])
                     . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
@@ -2906,11 +2906,45 @@ function renderBookingEmailTemplate(string $templateKey, array $vars)
 }
 
 /**
+ * PURE. With no phone number set, a template sentence like "contact us at a@b.c or {{phone_main}}." would read
+ * "a@b.c or ." once filled. Drops the joiner and the empty tag (both phone tags) before filling; a phone set = unchanged.
+ */
+function rh_email_drop_empty_phone(string $s, string $phone): string
+{
+    if (trim(html_entity_decode($phone, ENT_QUOTES | ENT_HTML5, 'UTF-8')) !== '') {
+        return $s;
+    }
+    return strtr($s, [
+        '</a> or {{phone_main}}'         => '</a>',
+        '</a> &middot; {{phone_main}}'   => '</a>',
+        ' or {{phone_main}}'             => '',
+        ' &middot; {{phone_main}}'       => '',
+        '</a> or {{contact_phone}}'      => '</a>',
+        ' or {{contact_phone}}'          => '',
+        '{{contact_phone}}&nbsp;|&nbsp;' => '',
+        '{{contact_phone}}  |  '         => '',
+    ]);
+}
+
+/** " or call <phone>" for the hard-coded email sentences, '' when no phone is set (so no "or call ." is left). */
+function rh_email_or_call(): string
+{
+    $phone = trim((string)getSetting('phone_main', ''));
+    return $phone !== '' ? ' or call ' . htmlspecialchars($phone, ENT_QUOTES, 'UTF-8') : '';
+}
+
+/**
  * PURE. Fill one booking email template row (subject, html_body, text_body) with $vars and add the blocks a stored
  * template does not place itself (booked rate, cancellation policy). renderBookingEmailTemplate() reads the row.
  */
 function rh_render_booking_email_template_row(string $templateKey, array $template, array $vars): array
 {
+    $phoneSet = trim((string)($vars['phone_main'] ?? '')) !== '' ? (string)$vars['phone_main'] : (string)($vars['contact_phone'] ?? '');
+    foreach (['subject', 'html_body', 'text_body'] as $part) {
+        if (isset($template[$part]) && is_string($template[$part])) {
+            $template[$part] = rh_email_drop_empty_phone($template[$part], $phoneSet);
+        }
+    }
     $replace = [];
     foreach ($vars as $k => $v) {
         $replace['{{' . $k . '}}'] = (string)$v;
@@ -3175,7 +3209,7 @@ function sendBookingReceivedEmail(array $booking)
         $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
         <p>Thank you for choosing ' . htmlspecialchars($email_site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -3293,7 +3327,7 @@ function sendBookingConfirmedEmail(array $booking)
         $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
         <p>We look forward to welcoming you to ' . htmlspecialchars($email_site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -3404,7 +3438,7 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
                 <strong>Contact us:</strong> If you have questions about these changes, please reach out.
             </p>
         </div>
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
         <p>Thank you for choosing ' . htmlspecialchars($email_site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
@@ -3533,7 +3567,7 @@ function sendAdminNotificationEmail(array $booking)
                 . htmlspecialchars($email_site_name, ENT_QUOTES, 'UTF-8')
                 . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
             : '';
-        $htmlBody = strtr($htmlBody, [
+        $htmlBody = strtr(rh_email_drop_empty_phone($htmlBody, (string)getSetting('phone_main', '')), [
             '{{logo_html}}'     => $logoHtml,
             '{{site_name}}'     => htmlspecialchars($email_site_name, ENT_QUOTES, 'UTF-8'),
             '{{address}}'       => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
@@ -3710,7 +3744,7 @@ function sendConferenceEnquiryEmail(array $data)
             }
 
             $htmlBody .= '
-            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
             <p>Thank you for considering ' . htmlspecialchars($email_site_name) . ' for your event!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -3960,7 +3994,7 @@ function sendConferencePaymentEmail(array $data)
             </p>
         </div>
 
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
         <p>Thank you for your payment! We look forward to hosting your event at ' . htmlspecialchars($email_site_name) . '.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -4069,7 +4103,7 @@ function sendConferenceConfirmedEmail(array $enquiry)
                 </p>
             </div>
 
-            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
             <p>We look forward to hosting your event at ' . htmlspecialchars($email_site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -4134,7 +4168,7 @@ function sendConferenceCancelledEmail(array $enquiry)
                 </p>
             </div>
 
-            <p>If you have any questions or would like to reschedule, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+            <p>If you have any questions or would like to reschedule, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
             <p>We hope to have the opportunity to serve you in the future.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -4194,7 +4228,7 @@ function sendGymConfirmedEmail(array $inquiry)
                 </p>
             </div>
 
-            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>';
@@ -4244,7 +4278,7 @@ function sendGymCancelledEmail(array $inquiry)
                 </p>
             </div>
 
-            <p>If you have any questions or would like to rebook, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+            <p>If you have any questions or would like to rebook, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
             <p>We hope to have the opportunity to serve you in the future.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -4317,8 +4351,8 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
             $htmlBody .= '<p><strong>Notes:</strong><br>' . nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')) . '</p>';
         }
 
-        $htmlBody .= '<p>To confirm this quotation, reply to this email or contact us at '
-            . htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8') . '.</p>';
+        $htmlBody .= '<p>To confirm this quotation, reply to this email'
+            . str_replace(' or call ', ' or contact us at ', rh_email_or_call()) . '.</p>';
 
         $result = ['success' => false, 'message' => 'Unable to send quotation email.'];
         if ($attachPdf) {
@@ -4408,7 +4442,7 @@ function sendEventBookingConfirmedEmail(array $inquiry): array
                 </p>
             </div>
 
-            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>';
@@ -4458,7 +4492,7 @@ function sendEventCancelledEmail(array $inquiry): array
                 </p>
             </div>
 
-            <p>If you have any questions or would like to rebook, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+            <p>If you have any questions or would like to rebook, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
             <p>We hope to have the opportunity to serve you in the future.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -4536,8 +4570,8 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
             $htmlBody .= '<p><strong>Notes:</strong><br>' . nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')) . '</p>';
         }
 
-        $htmlBody .= '<p>To confirm this quotation, reply to this email or contact us at '
-            . htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8') . '.</p>';
+        $htmlBody .= '<p>To confirm this quotation, reply to this email'
+            . str_replace(' or call ', ' or contact us at ', rh_email_or_call()) . '.</p>';
 
         $result = ['success' => false, 'message' => 'Unable to send quotation email.'];
         if ($attachPdf) {
@@ -4680,7 +4714,7 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
             </p>
         </div>
 
-        <p>If you have any questions or would like to make a new booking, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions or would like to make a new booking, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
         <p>We hope to have the opportunity to serve you in the future.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -5230,7 +5264,7 @@ function sendTentativeBookingConfirmedEmail(array $booking)
         $htmlBody .= (string)($templateVars['booked_rate_block'] ?? ''); // booked rate x nights, rate plan, room references ('' when none)
 
         $htmlBody .= '
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
         <p>Thank you for considering ' . htmlspecialchars($email_site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -5320,7 +5354,7 @@ function sendTentativeBookingReminderEmail(array $booking)
             </a>
         </div>
 
-        <p style="margin-top: 20px;">If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p style="margin-top: 20px;">If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>';
@@ -5405,7 +5439,7 @@ function sendTentativeBookingExpiredEmail(array $booking)
             </a>
         </div>
 
-        <p style="margin-top: 20px;">If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p style="margin-top: 20px;">If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>';
@@ -5535,7 +5569,7 @@ function sendTentativeBookingConvertedEmail(array $booking)
         $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
         <p>We look forward to welcoming you to ' . htmlspecialchars($email_site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -5612,7 +5646,7 @@ function sendPendingBookingExpiredEmail(array $booking, ?array $room = null)
             </a>
         </div>
 
-        <p style="margin-top: 20px;">If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p style="margin-top: 20px;">If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>';
@@ -5678,7 +5712,7 @@ function sendUnpaidConfirmedReminderEmail(array $booking, string $deadline)
         To keep your room, please pay by <strong>' . htmlspecialchars($deadline) . '</strong>. After that the room is released to other guests.</p>'
         . rh_unpaid_confirmed_details_html($booking, $room, 'Pay by', $deadline)
         . (function_exists('rh_auto_pay_instructions') ? rh_auto_pay_instructions((string)$booking['booking_reference'], 'room') : '')
-        . '<p style="margin-top: 20px;">Already paid? Please reply with your proof of payment, or contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . htmlspecialchars((string)getSetting('phone_main')) . '.</p>
+        . '<p style="margin-top: 20px;">Already paid? Please reply with your proof of payment, or contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Warm regards &mdash; we look forward to hosting you.</p>';
 
         return sendEmail($booking['guest_email'], $booking['guest_name'], 'Payment reminder - keep your room - ' . $booking['booking_reference'], $htmlBody);
@@ -5739,6 +5773,10 @@ function rh_prearrival_payment_email_build(array $booking, array $info): ?array
     if (!array_key_exists('payment_policy', $vars)) {
         $vars['payment_policy'] = rh_email_payment_policy_html();
     }
+    // No payment policy set: the default's "as set out in our payment policy below" would point at nothing.
+    if (trim(strip_tags((string)$vars['payment_policy'])) === '') {
+        $row['html_body'] = str_replace(', as set out in our payment policy below', '', (string)$row['html_body']);
+    }
     return rh_render_booking_email_template_row($key, $row, $vars);
 }
 
@@ -5785,7 +5823,7 @@ function sendUnpaidConfirmedReleasedEmail(array $booking)
         <div style="text-align: center; margin-top: 30px;">
             <a href="' . htmlspecialchars($email_site_url) . '/booking.php" style="display: inline-block; background: #8B7355; color: #1A1A1A; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Make a New Booking</a>
         </div>
-        <p style="margin-top: 20px;">Contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . htmlspecialchars((string)getSetting('phone_main')) . '.</p>';
+        <p style="margin-top: 20px;">Contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>';
 
         return sendEmail($booking['guest_email'], $booking['guest_name'], 'Booking released - payment not received - ' . $booking['booking_reference'], $htmlBody);
     } catch (Exception $e) {
@@ -5965,7 +6003,7 @@ function sendGymBookingEmail(array $data)
             </p>
         </div>
 
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
         <p>Thank you for choosing ' . htmlspecialchars($site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -7516,8 +7554,8 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
             $htmlBody .= '<p><strong>Notes:</strong><br>' . nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')) . '</p>';
         }
 
-        $htmlBody .= '<p>To confirm this quotation, reply to this email or contact us at '
-            . htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8') . '.</p>';
+        $htmlBody .= '<p>To confirm this quotation, reply to this email'
+            . str_replace(' or call ', ' or contact us at ', rh_email_or_call()) . '.</p>';
 
         if (function_exists('getBookingEmailTemplateConfig')) {
             $tplConfig = getBookingEmailTemplateConfig('conference_quotation', []);
@@ -7548,7 +7586,7 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
                     '{{payment_policy}}' => rh_email_payment_policy_html(),
                 ];
                 $subject = strtr((string)$tplConfig['subject'], $tagMap);
-                $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
+                $htmlBody = strtr(rh_email_drop_empty_phone((string)$tplConfig['html_body'], (string)$tagMap['{{contact_phone}}']), $tagMap);
             }
         }
 
@@ -7670,8 +7708,8 @@ function sendEventQuotationEmail(array $event, array $options = []): array
             $htmlBody .= '<p><strong>Notes:</strong><br>' . nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')) . '</p>';
         }
 
-        $htmlBody .= '<p>To confirm this quotation, reply to this email or contact us at '
-            . htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8') . '.</p>';
+        $htmlBody .= '<p>To confirm this quotation, reply to this email'
+            . str_replace(' or call ', ' or contact us at ', rh_email_or_call()) . '.</p>';
 
         if (function_exists('getBookingEmailTemplateConfig')) {
             $tplConfig = getBookingEmailTemplateConfig('event_quotation', []);
@@ -7699,7 +7737,7 @@ function sendEventQuotationEmail(array $event, array $options = []): array
                     '{{payment_policy}}' => rh_email_payment_policy_html(),
                 ];
                 $subject = strtr((string)$tplConfig['subject'], $tagMap);
-                $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
+                $htmlBody = strtr(rh_email_drop_empty_phone((string)$tplConfig['html_body'], (string)$tagMap['{{contact_phone}}']), $tagMap);
             }
         }
 

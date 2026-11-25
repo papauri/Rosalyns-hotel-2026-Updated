@@ -193,6 +193,25 @@ function rh_template_preview_document_html(string $key, string $html, array $doc
 }
 }
 
+/**
+ * Sample references for the template previews in THIS hotel's own formats: the booking reference prefix
+ * (Booking Settings -> Booking references), the quotation reference built from it as the real send does
+ * ('QT-' + booking reference) and the credit note number from the credit note prefix. Never another hotel's prefix.
+ */
+if (!function_exists('rh_template_preview_refs')) {
+function rh_template_preview_refs(): array
+{
+    $year = date('Y');
+    $booking = (function_exists('rh_booking_reference_prefix') ? rh_booking_reference_prefix() : 'BK') . $year . '423468';
+    if (!function_exists('finance_format_document_number')) {
+        require_once __DIR__ . '/../includes/finance-sequences.php';
+    }
+    $cnPrefix = trim((string)finance_sequence_setting('credit_note_prefix', 'CN'));
+    $creditNote = finance_format_document_number('credit_note', $cnPrefix !== '' ? $cnPrefix : 'CN', $year, 1);
+    return ['booking' => $booking, 'quote' => 'QT-' . $booking, 'credit_note' => $creditNote];
+}
+}
+
 // Handle enable/disable via GET parameter
 if (isset($_GET['enable'])) {
     // A state change must never fire from a bare link (cross-site image/link): require the CSRF token.
@@ -702,13 +721,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
         }
 
         // Sample VAT at the hotel's own rate (Hotel Settings), never a fixed 15%: 4,500 + VAT = invoice total; 1,000 paid.
+        $pvRefs = rh_template_preview_refs();
         $pvVatRate = max(0.0, (float)getSetting('vat_rate', 0));
         $pvVat = round(4500 * $pvVatRate / 100, 2);
         $pvTotal = 4500 + $pvVat;
         $ajaxVars = [
             '{{site_name}}'                => (string)getSetting('site_name', 'Hotel'),
             '{{site_url}}'                 => (string)getSetting('site_url', ''),
-            '{{booking_reference}}'        => 'RBH2026423468',
+            '{{booking_reference}}'        => $pvRefs['booking'],
             '{{inquiry_reference}}'        => 'CONF-2026-PREVIEW-001',
             '{{guest_name}}'               => 'Jane Doe',
             '{{guest_email}}'              => 'jane.doe@example.com',
@@ -749,8 +769,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{cancellation_reason}}'      => 'Requested by guest.',
             '{{special_requests}}'         => 'Late check-in preferred.',
             '{{tentative_expires_at_formatted}}' => date('F j, Y g:i A', strtotime('+2 days')),
-            '{{quotation_reference}}'      => 'QT-RBH-2026-PREVIEW-001',
-            '{{quote_reference}}'          => 'QT-RBH-2026-PREVIEW-001',
+            '{{quotation_reference}}'      => $pvRefs['quote'],
+            '{{quote_reference}}'          => $pvRefs['quote'],
             '{{valid_until}}'              => date('F j, Y', strtotime('+7 days')),
             '{{quotation_notes}}'          => 'Please reply by the validity date to secure your booking.',
             '{{rate_per_night}}'           => (string)getSetting('currency_symbol', 'MWK') . number_format(2250, 2),
@@ -765,7 +785,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{amount_due}}'               => number_format($pvTotal - 1000, 2),
             '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
             '{{days_overdue}}'             => '3',
-            '{{days_until_arrival}}'       => '15 days',
+            '{{days_until_arrival}}'       => '14 days', // check-in sample is +14 days
             '{{urgency_notice}}'           => '<p style="margin:0 0 16px;">Your upcoming stay at <strong>' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '</strong> is approaching. We wanted to remind you of your reservation details.</p>', // sample: the reminder's upcoming-stay line
             '{{occupancy_type}}'           => 'Double occupancy', // samples for tags the booking emails fill
             '{{rate_plan_label}}'          => 'Standard Rate',
@@ -793,7 +813,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{description}}'              => 'Restaurant order preview for table service payment.',
             '{{bank_details_html}}'        => '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><p style="margin:0;font-size:6px;color:#1E2430;">Bank: Preview Bank<br>Account No.: 00123456789</p></div>',
             '{{receipt_terms}}'            => '<p style="margin:0;font-size:6px;line-height:1.5;color:#5F655F;">Thank you for your payment. Please retain this receipt for your records.</p>',
-            '{{credit_note_number}}'       => 'CN-RBH-2026-001',
+            '{{credit_note_number}}'       => $pvRefs['credit_note'],
             '{{amount}}'                   => (string)getSetting('currency_symbol', 'MWK') . number_format(1200, 2),
             '{{balance}}'                  => (string)getSetting('currency_symbol', 'MWK') . number_format(850, 2),
             '{{amount_used}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(350, 2),
@@ -1307,10 +1327,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $htmlBodyRaw = rh_template_preview_document_html($templateKey, $htmlBodyRaw, $booking_document_template_keys);
 
             $currencySymbol = (string)getSetting('currency_symbol', 'MWK');
+            $pvRefs = rh_template_preview_refs();
+            // Same sample money as the AJAX preview: 4,500 + VAT at the hotel's rate = total; 1,000 paid.
+            $pvTotal = 4500 + round(4500 * max(0.0, (float)getSetting('vat_rate', 0)) / 100, 2);
             $previewVars = [
                 '{{site_name}}'                => (string)getSetting('site_name', 'Hotel'),
                 '{{site_url}}'                 => (string)getSetting('site_url', ''),
-                '{{booking_reference}}'        => 'RBH-2026-PREVIEW-001',
+                '{{booking_reference}}'        => $pvRefs['booking'],
                 '{{inquiry_reference}}'        => 'CONF-2026-PREVIEW-001',
                 '{{guest_name}}'               => 'Jane Doe',
                 '{{guest_email}}'              => 'jane.doe@example.com',
@@ -1350,8 +1373,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{special_requests}}'         => 'Late check-in preferred.',
                 '{{tentative_expires_at_formatted}}' => date('F j, Y g:i A', strtotime('+2 days')),
                 // Quotation-specific
-                '{{quotation_reference}}'      => 'QT-RBH-2026-PREVIEW-001',
-                '{{quote_reference}}'          => 'QT-RBH-2026-PREVIEW-001',
+                '{{quotation_reference}}'      => $pvRefs['quote'],
+                '{{quote_reference}}'          => $pvRefs['quote'],
                 '{{valid_until}}'              => date('F j, Y', strtotime('+7 days')),
                 '{{quotation_notes}}'          => 'Please reply by the valid-until date to secure your reservation.',
                 '{{rate_per_night}}'           => $currencySymbol . number_format(2250, 2),
@@ -1360,11 +1383,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{vat_rate}}'                 => rh_rate_label(max(0.0, (float)getSetting('vat_rate', 0))), // the hotel's rate, never a fixed 15
                 '{{child_supplement}}'         => $currencySymbol . '0',
                 '{{deposit_amount}}'           => $currencySymbol . number_format(1000, 2),
-                '{{balance_due}}'              => $currencySymbol . number_format(3500, 2),
-                '{{amount_due}}'               => number_format(4500 + round(4500 * max(0.0, (float)getSetting('vat_rate', 0)) / 100, 2) - 1000, 2), // as the AJAX preview: total at the hotel's VAT less 1,000 paid
+                '{{balance_due}}'              => $currencySymbol . number_format($pvTotal - 1000, 2),
+                '{{amount_due}}'               => number_format($pvTotal - 1000, 2), // as the AJAX preview: total at the hotel's VAT less 1,000 paid
                 '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
                 '{{days_overdue}}'             => '3',
-                '{{days_until_arrival}}'       => '15 days',
+                '{{days_until_arrival}}'       => '14 days', // check-in sample is +14 days
                 '{{urgency_notice}}'           => '<p style="margin:0 0 16px;">Your upcoming stay at <strong>' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '</strong> is approaching. We wanted to remind you of your reservation details.</p>', // sample: the reminder's upcoming-stay line
                 '{{occupancy_type}}'           => 'Double occupancy', // samples for tags the booking emails fill
                 '{{rate_plan_label}}'          => 'Standard Rate',
@@ -1393,7 +1416,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{description}}'              => 'Restaurant order preview for table service payment.',
                 '{{bank_details_html}}'        => '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><p style="margin:0;font-size:6px;color:#1E2430;">Bank: Preview Bank<br>Account No.: 00123456789</p></div>',
                 '{{receipt_terms}}'            => '<p style="margin:0;font-size:6px;line-height:1.5;color:#5F655F;">Thank you for your payment. Please retain this receipt for your records.</p>',
-                '{{credit_note_number}}'       => 'CN-RBH-2026-001',
+                '{{credit_note_number}}'       => $pvRefs['credit_note'],
                 '{{amount}}'                   => $currencySymbol . number_format(1200, 2),
                 '{{balance}}'                  => $currencySymbol . number_format(850, 2),
                 '{{amount_used}}'              => $currencySymbol . number_format(350, 2),

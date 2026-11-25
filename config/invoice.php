@@ -2407,7 +2407,8 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
         $stmt->execute([$booking['room_id']]);
         $room = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        $checkOut = !empty($booking['check_out_date']) ? date('F j, Y', strtotime((string)$booking['check_out_date'])) : '';
+        // Same look as {{check_out}} on the attached invoice PDF ("28 November 2026"), so the email and its PDF agree.
+        $checkOut = !empty($booking['check_out_date']) ? date('j F Y', strtotime((string)$booking['check_out_date'])) : '';
         $siteUrl  = rtrim((string)($email_site_url ?? ''), '/');
         $invoiceLink = $siteUrl . '/booking-lookup.php?ref=' . urlencode((string)($booking['booking_reference'] ?? ''));
         $templateVars = function_exists('buildBookingEmailVariables')
