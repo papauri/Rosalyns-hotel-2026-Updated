@@ -274,3 +274,114 @@ body.dashboard-insight-open {
     align-items: center;
 }
 
+/* Movements card (owner 2026-11-25): ‹ period › switcher beside the title rotates Today / Tomorrow /
+   Next 7 days / Next 30 days. The list area keeps one height on wider screens so the card never resizes
+   while flicking through; on phones the list follows its rows (10 per page) with a steady minimum. */
+.ck-mv-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+}
+
+.ck-period {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--ck-soft);
+}
+
+.ck-period__btn {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ck-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+}
+
+.ck-period__btn:hover {
+    background: var(--ck-surface);
+    color: var(--ck-ink);
+}
+
+.ck-period__btn:focus-visible {
+    outline: 3px solid var(--ck-gold-on-dark);
+    outline-offset: 1px;
+}
+
+.ck-period__label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 8.5em; /* "Next 30 days" fits: the arrows stay put while the words change */
+    line-height: 1.2;
+    text-align: center;
+}
+
+.ck-period__label strong {
+    font: 600 13px/1.2 'Jost', system-ui, sans-serif;
+    color: var(--ck-ink);
+}
+
+.ck-period__label small {
+    font-size: 11px;
+    color: var(--ck-muted);
+    white-space: nowrap;
+}
+
+.ck-today .ck-tab[hidden],
+.ck-today .ck-mv-block[hidden],
+.ck-today ul.ck-rows[hidden] {
+    display: none;
+}
+
+@media (min-width: 681px) {
+    .ck-today .ck-pane {
+        height: 460px;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+    }
+}
+
+@media (max-width: 680px) {
+    .ck-mv-head {
+        width: 100%;
+    }
+
+    .ck-period {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .ck-today .ck-pane {
+        min-height: 240px;
+    }
+}
+
+@media (pointer: coarse), (max-width: 1024px) {
+    .ck-period__btn {
+        width: 44px;
+        height: 44px;
+    }
+}
+
+@media print {
+    .ck-period {
+        display: none;
+    }
+
+    .ck-today .ck-pane {
+        height: auto;
+        overflow: visible;
+    }
+}
+

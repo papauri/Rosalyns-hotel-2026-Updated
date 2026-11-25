@@ -2232,12 +2232,78 @@ $currency_symbol = getSetting('currency_symbol');
             } catch (Throwable $e) { $checkin_bookings = []; }
         }
 
+        // Movements ahead (owner 2026-11-25): the Today's movements card flips between Today, Tomorrow, the next
+        // 7 days and the next 30 days. Today's own lists above stay exactly as they are; the days after today
+        // (tomorrow to +30) load here, display only. Each row carries its dates and the switcher shows the rows
+        // in the chosen range. Arrivals = confirmed/pending due in; departures = due out (in house or still to
+        // arrive); events = any day of the event inside the range.
+        $mvAheadFrom = date('Y-m-d', strtotime($today . ' +1 day'));
+        $mvWeekTo    = date('Y-m-d', strtotime($today . ' +7 day'));
+        $mvAheadTo   = date('Y-m-d', strtotime($today . ' +30 day'));
+        $mvAheadCap  = 500; // rows per list; the note under a list says when there are more
+        $mvArrAhead = $mvDepAhead = $mvEvtAhead = [];
+        if ($mod_bookings) {
+            try {
+                $st = $pdo->prepare("
+                    SELECT b.*, r.name AS room_name,
+                           ir.room_number AS individual_room_number, ir.room_name AS individual_room_name
+                    FROM bookings b
+                    LEFT JOIN rooms r ON b.room_id = r.id
+                    LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
+                    WHERE b.deleted_at IS NULL AND b.check_in_date BETWEEN ? AND ?
+                      AND " . rh_fd_status_in_sql('b.status', rh_fd_still_to_arrive_statuses()) . "
+                    ORDER BY b.check_in_date ASC, FIELD(b.status, 'pending', 'confirmed'), b.created_at ASC
+                    LIMIT " . ($mvAheadCap + 1));
+                $st->execute([$mvAheadFrom, $mvAheadTo]);
+                $mvArrAhead = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) { $mvArrAhead = []; }
+            try {
+                $st = $pdo->prepare("
+                    SELECT b.id, b.booking_reference, b.guest_name, b.room_guest_name, b.check_in_date, b.check_out_date,
+                           b.number_of_nights, b.amount_due, b.payment_status, b.status, r.name AS room_name,
+                           ir.room_number AS individual_room_number, ir.room_name AS individual_room_name
+                    FROM bookings b
+                    LEFT JOIN rooms r ON b.room_id = r.id
+                    LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
+                    WHERE b.deleted_at IS NULL AND b.check_out_date BETWEEN ? AND ?
+                      AND " . rh_fd_status_in_sql('b.status', array_merge(['checked-in'], rh_fd_still_to_arrive_statuses())) . "
+                    ORDER BY b.check_out_date ASC, b.guest_name ASC
+                    LIMIT " . ($mvAheadCap + 1));
+                $st->execute([$mvAheadFrom, $mvAheadTo]);
+                $mvDepAhead = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) { $mvDepAhead = []; }
+        }
+        if ($mod_conference) {
+            try {
+                $mvHasEnd = rh_conf_has_end_date($pdo);
+                $st = $pdo->prepare("
+                    SELECT ci.id, ci.company_name, ci.contact_person, ci.event_date, " . ($mvHasEnd ? 'ci.end_date' : 'NULL AS end_date') . ",
+                           ci.start_time, ci.end_time, ci.number_of_attendees, ci.status, cr.name AS room_name
+                    FROM conference_inquiries ci
+                    LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
+                    WHERE " . ($mvHasEnd ? "ci.event_date <= ? AND COALESCE(ci.end_date, ci.event_date) >= ?" : "ci.event_date BETWEEN ? AND ?") . "
+                      AND ci.status IN ('confirmed', 'pending')
+                    ORDER BY ci.event_date ASC, ci.start_time ASC
+                    LIMIT " . ($mvAheadCap + 1));
+                $st->execute($mvHasEnd ? [$mvAheadTo, $mvAheadFrom] : [$mvAheadFrom, $mvAheadTo]);
+                $mvEvtAhead = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) { $mvEvtAhead = []; }
+        }
+        $mvMore = [
+            'arrivals' => count($mvArrAhead) > $mvAheadCap,
+            'departures' => count($mvDepAhead) > $mvAheadCap,
+            'events' => count($mvEvtAhead) > $mvAheadCap,
+        ];
+        $mvArrAhead = array_slice($mvArrAhead, 0, $mvAheadCap);
+        $mvDepAhead = array_slice($mvDepAhead, 0, $mvAheadCap);
+        $mvEvtAhead = array_slice($mvEvtAhead, 0, $mvAheadCap);
+
         // Rooms held by the bookings in Today's movements and Week ahead, in one read: every unit a
         // booking holds (both rooms of a joined room). A checked-out stay has released its rooms, so
         // those few use getBookingRooms(), which returns the set the stay last held. Display only.
         if ($mod_bookings) {
             $unitIds = [];
-            foreach ([$checkin_bookings, $departureList, $upcoming_checkins] as $unitList) {
+            foreach ([$checkin_bookings, $departureList, $upcoming_checkins, $mvArrAhead, $mvDepAhead] as $unitList) {
                 foreach ($unitList as $ub) { $unitIds[(int)($ub['id'] ?? 0)] = (string)($ub['status'] ?? ''); }
             }
             unset($unitIds[0]);
@@ -2275,9 +2341,12 @@ $currency_symbol = getSetting('currency_symbol');
         // (one batch query, the guest-history rule), special request, deposit unpaid (pending/confirmed only; never a
         // group child room or a company-billed booking). Shown only when true. Display only.
         $guestFlags = [];
-        if ($mod_bookings && ($checkin_bookings || $upcoming_checkins)) {
+        if ($mod_bookings && ($checkin_bookings || $upcoming_checkins || $mvArrAhead)) {
             require_once __DIR__ . '/../includes/guest-history.php';
-            $flagRows = array_merge($checkin_bookings, $upcoming_checkins);
+            $flagRows = [];
+            foreach (array_merge($checkin_bookings, $upcoming_checkins, $mvArrAhead) as $fr) { $flagRows[(int)($fr['id'] ?? 0)] = $fr; }
+            unset($flagRows[0]);
+            $flagRows = array_values($flagRows);
             $flagStays = rh_guest_history_stays_for($pdo, $flagRows);
             $flagAccounts = null;
             foreach ($flagRows as $fb) {
@@ -2688,19 +2757,65 @@ $currency_symbol = getSetting('currency_symbol');
             }
             if ($mod_conference) { $todayTabs['events'] = ['Events', count($today_conference_events)]; }
             if ($mod_roomsvc) { $todayTabs['roomservice'] = ['Room service', max($roomServiceOpenCount, count($roomServiceQueue))]; }
+
+            // Period switcher (owner 2026-11-25): Today -> Tomorrow -> Next 7 days -> Next 30 days, round and round.
+            // The later periods start tomorrow (Next 7 days = the same days as the Week ahead panel).
+            $mvDay = static function (string $d): string { return date('D j M', strtotime($d)); };
+            $mvSpan = static function (string $a, string $b): string { return date('j M', strtotime($a)) . ' – ' . date('j M', strtotime($b)); };
+            $mvPeriods = [
+                ['key' => 'today', 'name' => 'Today', 'title' => "Today's movements", 'dates' => $mvDay($today), 'from' => $today, 'to' => $today, 'phrase' => 'today'],
+                ['key' => 'tomorrow', 'name' => 'Tomorrow', 'title' => "Tomorrow's movements", 'dates' => $mvDay($mvAheadFrom), 'from' => $mvAheadFrom, 'to' => $mvAheadFrom, 'phrase' => 'tomorrow'],
+                ['key' => 'week', 'name' => 'Next 7 days', 'title' => 'Movements: next 7 days', 'dates' => $mvSpan($mvAheadFrom, $mvWeekTo), 'from' => $mvAheadFrom, 'to' => $mvWeekTo, 'phrase' => 'in the next 7 days'],
+                ['key' => 'month', 'name' => 'Next 30 days', 'title' => 'Movements: next 30 days', 'dates' => $mvSpan($mvAheadFrom, $mvAheadTo), 'from' => $mvAheadFrom, 'to' => $mvAheadTo, 'phrase' => 'in the next 30 days'],
+            ];
+            // The dates a row covers: arrivals their arrival day, departures their departure day, events every day
+            // of the event from tomorrow on (today's part is in Today's own list, so no row shows twice).
+            $mvRowSpan = static function (array $r, string $kind) use ($mvAheadFrom): array {
+                if ($kind === 'arrivals') { return [(string)$r['check_in_date'], (string)$r['check_in_date']]; }
+                if ($kind === 'departures') { return [(string)$r['check_out_date'], (string)$r['check_out_date']]; }
+                $from = max((string)$r['event_date'], $mvAheadFrom);
+                $to = (string)($r['end_date'] ?: $r['event_date']);
+                return [$from, max($from, $to)];
+            };
+            $mvAheadRows = ['arrivals' => $mvArrAhead, 'departures' => $mvDepAhead, 'events' => $mvEvtAhead];
+            $mvCounts = [];
+            foreach ($todayTabs as $key => [$label, $n]) {
+                $mvCounts[$key] = ['today' => (int)$n];
+                if (!isset($mvAheadRows[$key])) { continue; } // room service: open orders now, Today only
+                foreach (array_slice($mvPeriods, 1) as $p) {
+                    $c = 0;
+                    foreach ($mvAheadRows[$key] as $r) {
+                        [$rf, $rt] = $mvRowSpan($r, $key);
+                        if ($rf <= $p['to'] && $rt >= $p['from']) { $c++; }
+                    }
+                    $mvCounts[$key][$p['key']] = $c;
+                }
+            }
+            $mvJson = static function ($v): string {
+                return htmlspecialchars(json_encode($v, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8');
+            };
             ?>
             <?php if ($todayTabs): ?>
-            <!-- Today: the front-desk worklist -->
-            <section class="ck-panel ck-span-2 ck-today" data-ck-tabs>
+            <!-- Today: the front-desk worklist, with a period switcher (Today / Tomorrow / Next 7 days / Next 30 days) -->
+            <section class="ck-panel ck-span-2 ck-today" data-ck-tabs data-ck-movements="<?php echo $mvJson($mvPeriods); ?>" data-ck-period="today">
                 <header class="ck-panel__head">
                     <div>
-                        <h2 class="ck-panel__title">Today's movements</h2>
+                        <div class="ck-mv-head">
+                            <h2 class="ck-panel__title"><span data-ck-mv-title>Today's movements</span><?php echo $ckHelp('Movements', 'Arrivals, departures, events and room service for the period picked with the arrows. Today: arrivals still to come (the count) with guests already in, everyone due out today plus overdue stays, today\'s events and open room-service orders. Tomorrow, Next 7 days and Next 30 days start tomorrow: confirmed or pending bookings arriving, bookings due to leave (in house or still to arrive), and confirmed or pending events on any day of the period. Room service is live orders, so it shows under Today only.'); ?></h2>
+                            <?php if (array_intersect_key($todayTabs, $mvAheadRows)): // room service alone has no later periods ?>
+                            <div class="ck-period" role="group" aria-label="Period shown">
+                                <button type="button" class="ck-period__btn" data-ck-mv-step="-1" aria-label="Previous period"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                                <span class="ck-period__label" aria-live="polite" aria-atomic="true"><strong data-ck-mv-name>Today</strong><small data-ck-mv-dates><?php echo htmlspecialchars($mvDay($today)); ?></small></span>
+                                <button type="button" class="ck-period__btn" data-ck-mv-step="1" aria-label="Next period"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                            </div>
+                            <?php endif; ?>
+                        </div>
                         <p class="ck-panel__sub">Act straight from the list — tap a row for the full record.</p>
                     </div>
                     <div class="ck-tabs" role="tablist">
                         <?php $firstTab = true; foreach ($todayTabs as $key => [$label, $n]): ?>
-                            <button type="button" class="ck-tab<?php echo $firstTab ? ' is-active' : ''; ?>" role="tab" aria-selected="<?php echo $firstTab ? 'true' : 'false'; ?>" data-ck-tab="<?php echo $key; ?>">
-                                <?php echo $label; ?> <span class="ck-tab__count"><?php echo (int)$n; ?></span>
+                            <button type="button" class="ck-tab<?php echo $firstTab ? ' is-active' : ''; ?>" role="tab" aria-selected="<?php echo $firstTab ? 'true' : 'false'; ?>" data-ck-tab="<?php echo $key; ?>"<?php echo isset($mvAheadRows[$key]) ? '' : ' data-ck-today-only'; ?>>
+                                <?php echo $label; ?> <span class="ck-tab__count" data-ck-counts="<?php echo $mvJson($mvCounts[$key]); ?>"><?php echo (int)$n; ?></span>
                             </button>
                         <?php $firstTab = false; endforeach; ?>
                     </div>
@@ -2709,6 +2824,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php $firstPane = array_key_first($todayTabs); ?>
                 <?php if ($mod_bookings): ?>
                 <div class="ck-pane" role="tabpanel" data-ck-pane="arrivals"<?php echo $firstPane === 'arrivals' ? '' : ' hidden'; ?>>
+                    <div class="ck-mv-block" data-ck-block="today">
                     <?php if ($checkin_bookings): ?>
                     <ul class="ck-rows">
                         <?php foreach ($checkin_bookings as $booking):
@@ -2757,9 +2873,39 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php else: ?>
                         <div class="ck-empty"><i class="fas fa-mug-saucer"></i><p><?php echo $dayProgress['arrived'] ? 'All ' . $dayProgress['arrived'] . ' of today\'s arrivals have arrived.' : 'No arrivals scheduled for today.'; ?></p></div>
                     <?php endif; ?>
+                    </div>
+                    <div class="ck-mv-block" data-ck-block="ahead" data-ck-empty="No arrivals" hidden>
+                        <?php if ($mvArrAhead): ?>
+                        <ul class="ck-rows">
+                            <?php foreach ($mvArrAhead as $booking): [$rf, $rt] = $mvRowSpan($booking, 'arrivals'); $inTs = strtotime($rf); ?>
+                            <li class="ck-row" data-ck-from="<?php echo htmlspecialchars($rf); ?>" data-ck-to="<?php echo htmlspecialchars($rt); ?>" data-filter-hidden="1" hidden>
+                                <span class="ck-date" title="Arrives <?php echo htmlspecialchars(date('D j M', $inTs)); ?>"><b><?php echo date('j', $inTs); ?></b><?php echo date('M', $inTs); ?></span>
+                                <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
+                                    <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
+                                    <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo htmlspecialchars($stayText($booking)); ?></span>
+                                    <?php echo $flagChips($booking); ?>
+                                </a>
+                                <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
+                                <span class="ck-row__meta">
+                                    <span class="badge badge-<?php echo htmlspecialchars($booking['status']); ?>"><?php echo ucfirst(htmlspecialchars($booking['status'])); ?></span>
+                                    <?php if ((float)$booking['amount_due'] > BALANCE_TOLERANCE): ?>
+                                        <small class="ck-due">Due <?php echo $money($booking['amount_due']); ?></small>
+                                    <?php else: ?>
+                                        <small class="ck-paid"><i class="fas fa-check"></i> Paid</small>
+                                    <?php endif; ?>
+                                </span>
+                                <span class="ck-row__act"><a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>"><i class="fas fa-eye"></i> View</a></span>
+                            </li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <?php if ($mvMore['arrivals']): ?><p class="ck-panel__sub">Showing the first <?php echo (int)$mvAheadCap; ?> arrivals. <a href="bookings.php">See all in Bookings</a></p><?php endif; ?>
+                        <?php endif; ?>
+                        <div class="ck-empty" data-ck-ahead-empty<?php echo $mvArrAhead ? ' hidden' : ''; ?>><i class="fas fa-mug-saucer"></i><p>No arrivals tomorrow.</p></div>
+                    </div>
                 </div>
 
                 <div class="ck-pane" role="tabpanel" data-ck-pane="departures" hidden>
+                    <div class="ck-mv-block" data-ck-block="today">
                     <?php if ($departureList): ?>
                     <ul class="ck-rows">
                         <?php foreach ($departureList as $d): $dState = $d['departure_state']; $owes = rh_fd_departure_owes($d); $hasBalance = rh_fd_departure_has_balance($d); ?>
@@ -2799,11 +2945,40 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php else: ?>
                         <div class="ck-empty"><i class="fas fa-suitcase-rolling"></i><p><?php echo $dayProgress['departed'] ? 'All ' . $dayProgress['departed'] . ' departures are checked out.' : 'No departures due today.'; ?></p></div>
                     <?php endif; ?>
+                    </div>
+                    <div class="ck-mv-block" data-ck-block="ahead" data-ck-empty="No departures" hidden>
+                        <?php if ($mvDepAhead): ?>
+                        <ul class="ck-rows">
+                            <?php foreach ($mvDepAhead as $d): [$rf, $rt] = $mvRowSpan($d, 'departures'); $outTs = strtotime($rf); ?>
+                            <li class="ck-row" data-ck-from="<?php echo htmlspecialchars($rf); ?>" data-ck-to="<?php echo htmlspecialchars($rt); ?>" data-filter-hidden="1" hidden>
+                                <span class="ck-date" title="Leaves <?php echo htmlspecialchars(date('D j M', $outTs)); ?>"><b><?php echo date('j', $outTs); ?></b><?php echo date('M', $outTs); ?></span>
+                                <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
+                                    <strong><?php echo htmlspecialchars($d['guest_name']); ?></strong><?php if (trim((string)($d['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$d['room_guest_name']); ?></small><?php endif; ?>
+                                    <span><?php echo htmlspecialchars($d['booking_reference']); ?> · <?php echo htmlspecialchars((string)($d['room_name'] ?? '—')); ?> · <?php echo htmlspecialchars($stayText($d)); ?></span>
+                                </a>
+                                <span class="ck-chip<?php echo $roomLabel($d) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($d)); ?></span>
+                                <span class="ck-row__meta">
+                                    <span class="badge badge-<?php echo htmlspecialchars($d['status']); ?>"><?php echo $d['status'] === 'checked-in' ? 'In house' : ucfirst(htmlspecialchars($d['status'])); ?></span>
+                                    <?php if ((float)$d['amount_due'] > BALANCE_TOLERANCE): ?>
+                                        <small class="ck-due">Balance <?php echo $money($d['amount_due']); ?></small>
+                                    <?php else: ?>
+                                        <small class="ck-paid"><i class="fas fa-check"></i> Settled</small>
+                                    <?php endif; ?>
+                                </span>
+                                <span class="ck-row__act"><a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$d['id']; ?>"><i class="fas fa-eye"></i> View</a></span>
+                            </li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <?php if ($mvMore['departures']): ?><p class="ck-panel__sub">Showing the first <?php echo (int)$mvAheadCap; ?> departures. <a href="bookings.php">See all in Bookings</a></p><?php endif; ?>
+                        <?php endif; ?>
+                        <div class="ck-empty" data-ck-ahead-empty<?php echo $mvDepAhead ? ' hidden' : ''; ?>><i class="fas fa-suitcase-rolling"></i><p>No departures tomorrow.</p></div>
+                    </div>
                 </div>
                 <?php endif; ?>
 
                 <?php if ($mod_conference): ?>
                 <div class="ck-pane" role="tabpanel" data-ck-pane="events"<?php echo $firstPane === 'events' ? '' : ' hidden'; ?>>
+                    <div class="ck-mv-block" data-ck-block="today">
                     <?php if ($today_conference_events): ?>
                     <ol class="ck-timeline">
                         <?php foreach ($today_conference_events as $conf): ?>
@@ -2820,6 +2995,27 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php else: ?>
                         <div class="ck-empty"><i class="fas fa-calendar-xmark"></i><p>No conference events today.</p></div>
                     <?php endif; ?>
+                    </div>
+                    <div class="ck-mv-block" data-ck-block="ahead" data-ck-empty="No conference events" hidden>
+                        <?php if ($mvEvtAhead): ?>
+                        <ul class="ck-rows">
+                            <?php foreach ($mvEvtAhead as $conf): [$rf, $rt] = $mvRowSpan($conf, 'events'); $evTs = strtotime((string)$conf['event_date']); $evEnd = (string)($conf['end_date'] ?: ''); ?>
+                            <li class="ck-row" data-ck-from="<?php echo htmlspecialchars($rf); ?>" data-ck-to="<?php echo htmlspecialchars($rt); ?>" data-filter-hidden="1" hidden>
+                                <span class="ck-date ck-date--event" title="Starts <?php echo htmlspecialchars(date('D j M', $evTs)); ?>"><b><?php echo date('j', $evTs); ?></b><?php echo date('M', $evTs); ?></span>
+                                <a class="ck-row__main" href="conference-management.php">
+                                    <strong><?php echo htmlspecialchars((string)$conf['company_name']); ?></strong>
+                                    <span><?php echo htmlspecialchars(date('D j M', $evTs) . ($evEnd !== '' && $evEnd !== (string)$conf['event_date'] ? ' – ' . date('D j M', strtotime($evEnd)) : '')); ?> · <?php echo date('H:i', strtotime((string)$conf['start_time'])); ?>–<?php echo date('H:i', strtotime((string)$conf['end_time'])); ?> · <?php echo (int)$conf['number_of_attendees']; ?> guests · <?php echo htmlspecialchars((string)$conf['contact_person']); ?></span>
+                                </a>
+                                <span class="ck-chip ck-chip--event"><i class="fas fa-users"></i> <?php echo htmlspecialchars((string)($conf['room_name'] ?? 'Room TBC')); ?></span>
+                                <span class="ck-row__meta"><span class="badge badge-<?php echo htmlspecialchars((string)$conf['status']); ?>"><?php echo ucfirst(htmlspecialchars((string)$conf['status'])); ?></span></span>
+                                <span class="ck-row__act"><a class="ck-btn ck-btn--sm" href="conference-management.php"><i class="fas fa-eye"></i> View</a></span>
+                            </li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <?php if ($mvMore['events']): ?><p class="ck-panel__sub">Showing the first <?php echo (int)$mvAheadCap; ?> events. <a href="conference-management.php">See all events</a></p><?php endif; ?>
+                        <?php endif; ?>
+                        <div class="ck-empty" data-ck-ahead-empty<?php echo $mvEvtAhead ? ' hidden' : ''; ?>><i class="fas fa-calendar-xmark"></i><p>No conference events tomorrow.</p></div>
+                    </div>
                 </div>
                 <?php endif; ?>
 
@@ -3736,11 +3932,91 @@ $currency_symbol = getSetting('currency_symbol');
                         });
                         panel.querySelectorAll('[data-ck-pane]').forEach(function (pane) {
                             pane.hidden = pane.dataset.ckPane !== tab.dataset.ckTab;
-                            // A pane that started hidden could not be measured: refresh its pager now it shows.
-                            const list = pane.hidden ? null : pane.querySelector('ul.ck-rows');
-                            if (list && typeof list.rhPagerRefresh === 'function') list.rhPagerRefresh(false);
+                            // A pane that started hidden could not be measured: refresh its pager(s) now it shows
+                            // (only the lists on screen: the movements card keeps one list per period block).
+                            if (pane.hidden) return;
+                            pane.querySelectorAll('ul.ck-rows').forEach(function (list) {
+                                if (typeof list.rhPagerRefresh === 'function' && list.getClientRects().length) list.rhPagerRefresh(false);
+                            });
                         });
                     });
+                });
+            });
+
+            // Movements card period switcher (owner 2026-11-25): the arrows rotate Today -> Tomorrow -> Next 7 days ->
+            // Next 30 days and round again. Today shows the page's own worklists; the later periods show the rows
+            // loaded for tomorrow to +30 days whose dates fall in the range. Counts come from the server per period.
+            document.querySelectorAll('[data-ck-movements]').forEach(function (panel) {
+                let periods = [];
+                try { periods = JSON.parse(panel.dataset.ckMovements || '[]'); } catch (e) { periods = []; }
+                if (!Array.isArray(periods) || periods.length < 2) return;
+                const title = panel.querySelector('[data-ck-mv-title]');
+                const name = panel.querySelector('[data-ck-mv-name]');
+                const dates = panel.querySelector('[data-ck-mv-dates]');
+                let at = 0;
+
+                function filterBlock(block, p) {
+                    const list = block.querySelector('ul.ck-rows');
+                    const empty = block.querySelector('[data-ck-ahead-empty]');
+                    const paged = !!(list && typeof list.rhPagerRefresh === 'function');
+                    let shown = 0;
+                    if (list) {
+                        Array.prototype.forEach.call(list.children, function (row) {
+                            const on = (row.dataset.ckFrom || '') <= p.to && (row.dataset.ckTo || '') >= p.from;
+                            if (on) { row.removeAttribute('data-filter-hidden'); shown++; } else { row.setAttribute('data-filter-hidden', '1'); }
+                            if (!paged) row.hidden = !on;
+                        });
+                        list.hidden = shown === 0; // before the pager re-measures, so it measures the list on screen
+                        if (paged) {
+                            list.rhPagerRefresh(true);
+                            const nav = list.nextElementSibling;
+                            if (nav && nav.matches('[data-admin-auto-pagination-nav]')) nav.style.display = shown === 0 ? 'none' : '';
+                        }
+                    }
+                    if (empty) {
+                        empty.hidden = shown > 0;
+                        const text = empty.querySelector('p');
+                        if (text) text.textContent = (block.dataset.ckEmpty || 'Nothing') + ' ' + p.phrase + '.';
+                    }
+                }
+
+                function show(i) {
+                    at = (i % periods.length + periods.length) % periods.length;
+                    const p = periods[at];
+                    const isToday = at === 0;
+                    panel.dataset.ckPeriod = p.key;
+                    if (title) title.textContent = p.title;
+                    if (name) name.textContent = p.name;
+                    if (dates) dates.textContent = p.dates;
+                    panel.querySelectorAll('[data-ck-counts]').forEach(function (c) {
+                        let n = {};
+                        try { n = JSON.parse(c.dataset.ckCounts || '{}'); } catch (e) { n = {}; }
+                        c.textContent = String(typeof n[p.key] === 'number' ? n[p.key] : 0);
+                    });
+                    // Room service is live orders: its tab shows under Today only.
+                    let lost = false;
+                    panel.querySelectorAll('[data-ck-tab][data-ck-today-only]').forEach(function (t) {
+                        t.hidden = !isToday;
+                        if (!isToday && t.classList.contains('is-active')) lost = true;
+                    });
+                    // Show the period's block first so the lists can be measured, then filter them.
+                    panel.querySelectorAll('[data-ck-block]').forEach(function (block) {
+                        block.hidden = (block.dataset.ckBlock === 'today') !== isToday;
+                    });
+                    if (!isToday) panel.querySelectorAll('[data-ck-block="ahead"]').forEach(function (block) { filterBlock(block, p); });
+                    if (lost) {
+                        const first = panel.querySelector('[data-ck-tab]:not([hidden])');
+                        if (first) first.click();
+                    } else if (isToday) {
+                        const pane = panel.querySelector('[data-ck-pane]:not([hidden])');
+                        if (pane) pane.querySelectorAll('ul.ck-rows').forEach(function (list) {
+                            if (typeof list.rhPagerRefresh === 'function' && list.getClientRects().length) list.rhPagerRefresh(false);
+                        });
+                    }
+                }
+
+                panel.querySelectorAll('[data-ck-mv-step]').forEach(function (btn) {
+                    btn.addEventListener('click', function () { show(at + (parseInt(btn.dataset.ckMvStep, 10) || 1)); });
                 });
             });
 
