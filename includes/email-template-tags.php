@@ -163,6 +163,7 @@ if (!function_exists('rh_email_tag_groups')) {
             'refund_reference'     => ['doc', 'Refund reference'],
             'refund_reason_display' => ['doc', 'Reason for the refund'],
             'receipt_number'       => ['doc', 'Receipt number'],
+            'receipt_details_html' => ['doc', 'The receipt itself: details, VAT, levy, tip and total (email body only)'],
             'payment_reference'    => ['doc', 'Payment reference'],
             'payment_method'       => ['doc', 'How the guest paid, e.g. Cash'],
             'payment_type'         => ['doc', 'Kind of payment, e.g. Deposit'],
@@ -229,7 +230,8 @@ if (!function_exists('rh_email_tag_groups')) {
             'payment_receipt'             => ['site_name', 'logo_html', 'address', 'hotel_address', 'contact_email', 'contact_phone',
                 'guest_name', 'guest_email', 'guest_phone', 'receipt_number', 'booking_type', 'payment_reference',
                 'booking_reference', 'payment_date', 'payment_method', 'payment_type', 'payment_status', 'payment_amount',
-                'vat_amount', 'total_amount', 'description', 'vat_number', 'vat_rate', 'vat_number_html', 'payment_policy'],
+                'vat_amount', 'total_amount', 'description', 'vat_number', 'vat_rate', 'vat_number_html', 'payment_policy',
+                'receipt_details_html'],
             // PDF documents
             'tentative_quotation_document' => ['logo_html', 'site_name', 'address', 'contact_phone', 'contact_email',
                 'quotation_reference', 'valid_until', 'guest_name', 'booking_reference', 'room_name', 'check_in_date',
@@ -265,7 +267,7 @@ if (!function_exists('rh_email_tag_groups')) {
     function rh_email_template_tag_note(string $templateKey): string
     {
         $notes = [
-            'payment_receipt' => 'The receipt email body is laid out automatically. These tags work in the subject and the plain text version.',
+            'payment_receipt' => 'Put {{receipt_details_html}} where the receipt (details, VAT, total) should show; if it is left out, the receipt is added at the end. It shows in the email body only, not the subject or plain text.',
             'payment_receipt_document' => 'The receipt PDF is laid out automatically; this template is not used for it.',
         ];
         return $notes[$templateKey] ?? '';

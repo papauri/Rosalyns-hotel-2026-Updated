@@ -2089,22 +2089,16 @@ function ensureBookingEmailTemplateDefaults()
         'payment_receipt' => [
             'name'    => 'Payment Receipt Email',
             'subject' => 'Payment Receipt {{receipt_number}} — {{site_name}}',
+            // The receipt_details_html tag = the receipt itself (details, VAT / levy / tip, REFUND / CORRECTED banner,
+            // whole-group block, footer), built per payment by receipt_email_details_html() (owner 2026-11-26).
             'html'    => hotel_premium_email_html(
-                'Your payment receipt {{receipt_number}} from {{site_name}}',
+                'Your receipt {{receipt_number}} from {{site_name}}',
                 hotel_premium_email_body(
                     '{{guest_name}}',
-                    '<p style="margin:0 0 16px;">Thank you for your payment. Your receipt PDF is attached for your records.</p>'
+                    '<p style="margin:0 0 16px;">Here is your receipt {{receipt_number}} from <strong>{{site_name}}</strong>. A PDF copy is attached for your records.</p>'
                         . '<p style="margin:0;">Questions? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</p>'
                 )
-                    . hotel_premium_email_summary_rows('Payment Summary', [
-                        ['Receipt No.',       '{{receipt_number}}'],
-                        ['Reference',         '{{payment_reference}}'],
-                        ['Type',              '{{booking_type}}'],
-                        ['Payment Date',      '{{payment_date}}'],
-                        ['VAT',               '{{vat_amount}}'],
-                        ['Amount Received',   '{{total_amount}}', true],
-                    ])
-                    . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
+                    . '{{receipt_details_html}}'
             ),
         ],
         'payment_receipt_document' => [

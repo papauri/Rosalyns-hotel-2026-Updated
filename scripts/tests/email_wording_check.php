@@ -8,7 +8,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  *  3. tentative_quotation: the VAT rate is never number_format(x, 0) ("18" for 17.5).
  *  4. payment_invoice: {{total_amount}} stays the balance (owner rule 2026-11-15), the default is unchanged.
  *  5. No phone number set: no "a@b.c or ." left (template joiners dropped, hard-coded sentences via rh_email_or_call()).
- *  6. Invoice email {{check_out}} = the attached PDF's format; the receipt email's VAT row is not "VAT Incl." in every mode.
+ *  6. Invoice email {{check_out}} = the attached PDF's format; the receipt email never says "VAT Incl." in every mode.
  *  7. Template previews: this hotel's own reference prefixes, one sample balance; pre-arrival reminder wording.
  *
  * Usage (repo root): php scripts/tests/email_wording_check.php
@@ -93,7 +93,8 @@ check(strpos(cut($email, 'function rh_render_booking_email_template_row(', '$rep
 check(strpos($invoice, "\$checkOut = !empty(\$booking['check_out_date']) ? date('j F Y'") !== false
     && strpos($invoice, "\$check_out = date('j F Y'") !== false, 'invoice: email {{check_out}} = the PDF format (j F Y)');
 $rcpt = cut($email, "'payment_receipt' => [", "'payment_receipt_document' => [");
-check(strpos($rcpt, 'VAT Incl.') === false && preg_match("/\\['VAT',\\s*'\\{\\{vat_amount\\}\\}'\\]/", $rcpt) === 1, 'receipt: VAT row label is plain "VAT" (the value already says "Included at x%" or the amount)');
+check(strpos($rcpt, 'VAT Incl.') === false && strpos($rcpt, '{{receipt_details_html}}') !== false,
+    'receipt: no "VAT Incl." label; the VAT line comes from the receipt block in the hotel\'s VAT mode (receipt_email_template_check.php)');
 
 /* ---- 7. Previews and the pre-arrival reminder ---- */
 check(strpos($settingsPage, 'LSH') === false, 'preview: no Liwonde prefix hard-coded (it showed at the sister hotel too)');

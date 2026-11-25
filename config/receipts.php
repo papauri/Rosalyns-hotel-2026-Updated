@@ -554,13 +554,13 @@ if (!function_exists('receipt_log_event')) {
     }
 }
 
-if (!function_exists('receipt_build_pos_style_html_raw')) {
+if (!function_exists('receipt_email_parts')) {
     /**
-     * Build a clean POS-receipt-style HTML document for a payment record.
-     * Visual design mirrors buildReceiptHtml() in stock-receipt.php.
-     * Used for both the PDF attachment and injecting into the email body.
+     * The pieces of the payment receipt email, worked out once: hotel header bits, the REFUND / CORRECTED banner,
+     * detail rows, totals rows (VAT at the payment's own rate, levy split, tip), whole-group block and footer.
+     * Shared by the POS-style body (template switched off) and {{receipt_details_html}} in the payment_receipt template.
      */
-    function receipt_build_pos_style_html_raw(array $payment, array $context, PDO $pdo): string
+    function receipt_email_parts(array $payment, array $context): array
     {
         $currency    = getSetting('currency_symbol', 'MWK');
         $siteName    = getSetting('site_name', 'Hotel');
@@ -689,6 +689,28 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
             }
             $groupHtml .= '</div></td></tr>';
         }
+
+        return [
+            'siteName' => $siteName, 'address' => $address, 'phone' => $phone, 'email' => $email, 'logoHtml' => $logoHtml,
+            'voidBanner' => $voidBanner, 'details' => $details, 'totalsHtml' => $totalsHtml, 'groupHtml' => $groupHtml,
+            'footerHtml' => $footerHtml, 'receiptNumber' => $receiptNumber,
+        ];
+    }
+}
+
+if (!function_exists('receipt_build_pos_style_html_raw')) {
+    /**
+     * Build a clean POS-receipt-style HTML document for a payment record.
+     * Visual design mirrors buildReceiptHtml() in stock-receipt.php.
+     * The receipt email body when the payment_receipt template is switched off.
+     */
+    function receipt_build_pos_style_html_raw(array $payment, array $context, PDO $pdo): string
+    {
+        $p = receipt_email_parts($payment, $context);
+        $siteName = $p['siteName']; $address = $p['address']; $phone = $p['phone']; $email = $p['email'];
+        $logoHtml = $p['logoHtml']; $voidBanner = $p['voidBanner']; $details = $p['details'];
+        $totalsHtml = $p['totalsHtml']; $groupHtml = $p['groupHtml']; $footerHtml = $p['footerHtml'];
+        $receiptNumber = $p['receiptNumber'];
 
         return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . $receiptNumber . '</title></head>'
             . '<body style="margin:0;padding:0;background:#f7f3ee;font-family:Arial,Helvetica,sans-serif;color:#1f1c18;">'
@@ -1490,6 +1512,63 @@ if (!function_exists('receipt_payment_pdf_bytes')) {
     }
 }
 
+if (!function_exists('receipt_email_details_html')) {
+    /**
+     * {{receipt_details_html}} in the payment_receipt email template: the receipt itself (banner, details, totals with
+     * VAT / levy / tip, whole-group block, footer) as ONE row of the template's email table. Same figures and escaping
+     * as the POS-style body; the hotel header is left to the template.
+     */
+    function receipt_email_details_html(array $payment, array $context): string
+    {
+        $p = receipt_email_parts($payment, $context);
+        return receipt_apply_theme(
+            '<tr><td style="padding:0 48px 24px;">'
+            . $p['voidBanner']
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;">'
+            . $p['details']
+            . '</table>'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px;font-size:13px;color:#3f3933;border-collapse:collapse;border:1px solid #d9cec1;">'
+            . $p['totalsHtml']
+            . '</table>'
+            . ($p['groupHtml'] !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0">'
+                . str_replace('padding:14px 24px 0;', 'padding:14px 0 0;', $p['groupHtml']) . '</table>' : '')
+            . ($p['footerHtml'] !== '' ? '<div style="margin-top:14px;border-top:1px dashed #d9cec1;padding-top:10px;text-align:center;font-size:12px;color:#6a645d;line-height:1.5;">' . $p['footerHtml'] . '</div>' : '')
+            . '</td></tr>'
+        );
+    }
+}
+
+/**
+ * The receipt email body from the payment_receipt template (owner 2026-11-26: the template IS the email). PURE.
+ * {{receipt_details_html}} prints the receipt; a stored copy without it gets the block added at the end (stored
+ * templates are never edited). With no phone set, "or {{contact_phone}}" joiners are dropped first. One strtr() pass:
+ * a guest name or note that reads like a {{tag}} is never filled again.
+ */
+if (!function_exists('receipt_email_body_from_template')) {
+    function receipt_email_body_from_template(string $templateHtml, array $placeholders, string $detailsHtml): string
+    {
+        if (function_exists('rh_email_drop_empty_phone')) {
+            $templateHtml = rh_email_drop_empty_phone($templateHtml, (string)($placeholders['{{contact_phone}}'] ?? ''));
+        }
+        $templateHtml = receipt_email_template_ensure_block($templateHtml);
+        return strtr($templateHtml, ['{{receipt_details_html}}' => $detailsHtml] + $placeholders);
+    }
+}
+
+/** PURE. A payment_receipt template without {{receipt_details_html}} gets it at the end (before </body> when there is one). */
+if (!function_exists('receipt_email_template_ensure_block')) {
+    function receipt_email_template_ensure_block(string $templateHtml): string
+    {
+        if (strpos($templateHtml, '{{receipt_details_html}}') !== false) {
+            return $templateHtml;
+        }
+        $block = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;margin:0 auto;">'
+            . '{{receipt_details_html}}</table>';
+        $at = stripos($templateHtml, '</body>');
+        return $at !== false ? substr($templateHtml, 0, $at) . $block . substr($templateHtml, $at) : $templateHtml . $block;
+    }
+}
+
 if (!function_exists('receipt_build_pos_style_html')) {
     /** Payment receipt email body (POS-style layout, shared brand palette). */
     function receipt_build_pos_style_html(array $payment, array $context, PDO $pdo): string
@@ -1633,8 +1712,15 @@ if (!function_exists('receipt_send_email')) {
                 $ccList[] = $extraCc;
             }
         }
-        // Payment receipt email body: POS-style layout in the shared brand palette
-        $emailBody = receipt_build_pos_style_html($payment, $context, $pdo);
+        // Payment receipt email body (owner 2026-11-26): the payment_receipt template, switched on, IS the email; its
+        // {{receipt_details_html}} prints the receipt (added at the end when a stored copy lacks the tag). Switched off
+        // or empty: the POS-style layout in the shared brand palette, as before. The plain text never gets the block.
+        if (!empty($receiptTemplate['subject']) && !empty($receiptTemplate['html_body']) && (int)($receiptTemplate['is_active'] ?? 1) === 1) {
+            $emailBody = receipt_email_body_from_template((string)$receiptTemplate['html_body'], $placeholders, receipt_email_details_html($payment, $context));
+            $textBody = str_replace('{{receipt_details_html}}', '', $textBody);
+        } else {
+            $emailBody = receipt_build_pos_style_html($payment, $context, $pdo);
+        }
         $attachments = [];
         if ((string)($pdf['bytes'] ?? '') !== '') {
             $attachments[] = ['content' => $pdf['bytes'], 'name' => $pdf['receipt_number'] . '.pdf', 'mime' => 'application/pdf'];

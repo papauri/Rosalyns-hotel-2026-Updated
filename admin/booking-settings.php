@@ -212,6 +212,37 @@ function rh_template_preview_refs(): array
 }
 }
 
+/**
+ * payment_receipt preview (owner 2026-11-26: the template IS the receipt email): as the real send, a copy without
+ * {{receipt_details_html}} gets the receipt at the end, and the tag shows the real receipt block for a sample payment
+ * of 4,500 at this hotel's VAT mode, rate, currency and receipt footer. Nothing is read from or written to payments.
+ * Other templates: unchanged, no sample built.
+ */
+if (!function_exists('rh_template_preview_receipt')) {
+function rh_template_preview_receipt(string $key, string $html): array
+{
+    if ($key !== 'payment_receipt' && strpos($html, '{{receipt_details_html}}') === false) {
+        return [$html, ''];
+    }
+    require_once __DIR__ . '/../config/receipts.php';
+    if ($key === 'payment_receipt') {
+        $html = receipt_email_template_ensure_block($html);
+    }
+    $rate = max(0.0, (float)getSetting('vat_rate', 0));
+    $mode = function_exists('vat_mode') ? vat_mode() : 'off';
+    $vat = $mode === 'exclusive' ? round(4500 * $rate / 100, 2) : ($mode === 'inclusive' ? round(4500 * $rate / (100 + $rate), 2) : 0.0);
+    $refs = rh_template_preview_refs();
+    $block = receipt_email_details_html([
+        'receipt_number' => 'RCP-2026-000042', 'payment_reference' => 'PAY-2026-PREVIEW-001', 'booking_reference' => $refs['booking'],
+        'payment_date' => date('Y-m-d'), 'payment_method' => 'bank_transfer', 'payment_type' => 'full_payment', 'booking_type' => 'room',
+        'payment_amount' => $mode === 'exclusive' ? 4500.0 : 4500.0 - $vat, 'vat_amount' => $vat,
+        'total_amount' => $mode === 'exclusive' ? 4500.0 + $vat : 4500.0, 'vat_rate' => $rate, 'tip_amount' => 0,
+    ], ['guest_name' => 'Jane Doe', 'guest_email' => 'jane.doe@example.com', 'guest_phone' => '+27 82 555 0000',
+        'description' => 'Room booking ' . $refs['booking']]);
+    return [$html, $block];
+}
+}
+
 // Handle enable/disable via GET parameter
 if (isset($_GET['enable'])) {
     // A state change must never fire from a bare link (cross-site image/link): require the CSRF token.
@@ -708,6 +739,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
         }
         // PDF templates: show the layout the real send prints (after the unsaved-changes compare above).
         $ajaxHtmlBody = rh_template_preview_document_html($ajaxKey, $ajaxHtmlBody, $booking_document_template_keys);
+        [$ajaxHtmlBody, $pvReceiptBlock] = rh_template_preview_receipt((string)$ajaxKey, $ajaxHtmlBody);
 
         $ajaxAddressParts = [
             trim((string)getSetting('address_line1', '')),
@@ -809,6 +841,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{payment_status}}'           => 'Completed',
             '{{payment_amount}}'           => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
             '{{receipt_number}}'           => 'RCP-2026-000042',
+            '{{receipt_details_html}}'     => $pvReceiptBlock,
             '{{booking_type}}'             => 'Restaurant',
             '{{description}}'              => 'Restaurant order preview for table service payment.',
             '{{bank_details_html}}'        => '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><p style="margin:0;font-size:6px;color:#1E2430;">Bank: Preview Bank<br>Account No.: 00123456789</p></div>',
@@ -1325,6 +1358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('This template has no content yet — save it first, or type content into the HTML body field.');
             }
             $htmlBodyRaw = rh_template_preview_document_html($templateKey, $htmlBodyRaw, $booking_document_template_keys);
+            [$htmlBodyRaw, $pvReceiptBlock] = rh_template_preview_receipt((string)$templateKey, $htmlBodyRaw);
 
             $currencySymbol = (string)getSetting('currency_symbol', 'MWK');
             $pvRefs = rh_template_preview_refs();
@@ -1412,6 +1446,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{payment_status}}'           => 'Completed',
                 '{{payment_amount}}'           => $currencySymbol . number_format(4500, 2),
                 '{{receipt_number}}'           => 'RCP-2026-000042',
+                '{{receipt_details_html}}'     => $pvReceiptBlock,
                 '{{booking_type}}'             => 'Restaurant',
                 '{{description}}'              => 'Restaurant order preview for table service payment.',
                 '{{bank_details_html}}'        => '<div style="background:#FCFAF7;padding:7px 10px;border-top:2px solid #D5B37C;"><p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Bank Details</p><p style="margin:0;font-size:6px;color:#1E2430;">Bank: Preview Bank<br>Account No.: 00123456789</p></div>',
