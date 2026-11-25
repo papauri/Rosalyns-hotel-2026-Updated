@@ -63,6 +63,10 @@ when prompted."
   page and screen size, also on a short last page, after a filter or with nothing found ("Showing 0 of 0"). The
   dashboard movements card keeps one height: its list scrolls inside the card with the page buttons at the bottom.
   Guides: 99-admin-dashboard (one line, if it describes the card's paging). Assistant: none. Manager Guides: none.
+- 2026-11-26 Liwonde f33403c / Rosalyn's 177e4b0 (owner PATCH, amends the line above): on phones and tablets (up to
+  1024px wide) the page buttons sit right under the last row again, no gap; the dashboard movements card follows its
+  rows there and keeps one height only on larger screens. Guides: 99-admin-dashboard (same line, say "on a computer
+  screen"). Assistant: none. Manager Guides: none.
 - 2026-11-26 Liwonde bb3a41c / Rosalyn's 2908d62 (owner FEATURE): Calendar, Housekeeping and Maintenance timelines:
   with a night selected by keyboard, Left / Right past the last or first day shown moves the grid to the next /
   previous dates (same step as the Next / Previous buttons) and the cursor lands on the next night in the same room,
