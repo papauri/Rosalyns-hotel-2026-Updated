@@ -525,7 +525,7 @@ if (!function_exists('receipt_placeholders')) {
             '{{address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
             '{{hotel_address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
             '{{vat_number}}'      => htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8'),
-            '{{vat_rate}}'        => $vatRateNum > 0.0 ? number_format($vatRateNum, 1) : '0',
+            '{{vat_rate}}'        => $vatRateNum > 0.0 ? rh_rate_label($vatRateNum) : '0',
             '{{vat_number_html}}' => $vatNumHtml,
             '{{logo_html}}'       => $logoHtml,
         ];
@@ -651,7 +651,7 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
             $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($netAmount, 2) . '</td></tr>';
         }
         if ($vatDocMode === 'exclusive' && $vatAmount > 0) {
-            $vatLabel = 'VAT' . ($vatRate > 0 ? ' (' . number_format($vatRate, 1) . '%)' : '');
+            $vatLabel = 'VAT' . ($vatRate > 0 ? ' (' . rh_rate_label((float)$vatRate) . '%)' : '');
             $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">' . htmlspecialchars($vatLabel, ENT_QUOTES, 'UTF-8') . '</td>';
             $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($vatAmount, 2) . '</td></tr>';
         }

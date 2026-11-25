@@ -2435,7 +2435,7 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         ? (float)($booking['total_amount'] ?? 0) + $levyAmtVal
         : (float)($booking['total_amount'] ?? 0) + $vatAmtVal + $levyAmtVal));
     $vars['vat_number']      = $vatNumVal;
-    $vars['vat_rate']        = $vatRateVal > 0.0 ? number_format($vatRateVal, 1) : '0';
+    $vars['vat_rate']        = $vatRateVal > 0.0 ? rh_rate_label($vatRateVal) : '0';
     $vars['vat_amount']      = $vatAmtVal > 0.0 ? vat_document_value($currency . ' ' . number_format($vatAmtVal, 2)) : '—';
     $vars['levy_rate']       = $levyPctVal > 0.0 ? number_format($levyPctVal, 1) : '0';
     $vars['levy_amount']     = $levyAmtVal > 0.0 ? ($currency . ' ' . number_format($levyAmtVal, 2)) : '—';
@@ -5032,7 +5032,7 @@ function generateWhatsAppLink(array $booking, array $room)
 function sendBookingReminderEmail(array $booking): array
 {
     $emailCtx = rh_email_context(['kind' => 'booking_reminder'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
-    global $pdo;
+    global $pdo, $email_site_name;
 
     try {
         $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
@@ -5085,7 +5085,9 @@ function sendBookingReminderEmail(array $booking): array
             } elseif ($checkInObj && $checkInObj == $today) {
                 $urgencyLine = '<p style="margin:0 0 16px;color:#7a5c2e;font-weight:600;">Your check-in is today. We are expecting you and your room is ready.</p>';
             } else {
-                $urgencyLine = '<p style="margin:0 0 16px;">Your upcoming stay at <strong>{{site_name}}</strong> is approaching. We wanted to remind you of your reservation details.</p>';
+                $urgencyLine = '<p style="margin:0 0 16px;">Your upcoming stay at <strong>'
+                    . htmlspecialchars((string)$email_site_name, ENT_QUOTES, 'UTF-8') // a tag value is never filled again: the hotel name itself, not the site_name tag
+                    . '</strong> is approaching. We wanted to remind you of your reservation details.</p>';
             }
             $referenceLabel = 'Check-in';
             $referenceDate  = $checkInDate;
@@ -5112,7 +5114,7 @@ function sendBookingReminderEmail(array $booking): array
             . $urgencyLine
             . '<p>Booking Reference: <strong>' . htmlspecialchars($booking['booking_reference']) . '</strong></p>'
             . '<p>Room: ' . htmlspecialchars($room['name']) . '</p>'
-            . '<p>' . htmlspecialchars($referenceLabel) . ': ' . htmlspecialchars($referenceDate) . '</p>'
+            . '<p>' . htmlspecialchars($referenceLabel) . ': ' . htmlspecialchars($referenceDate !== '' ? date('F j, Y', strtotime($referenceDate)) : '') . '</p>'
             . '<p>Please contact us if you have any questions.</p>';
         return sendEmail($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody);
     } catch (Exception $e) {
@@ -6947,6 +6949,8 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         $levy_amount = $docLines['levy'];
         $pkg_amount  = $docLines['pkg'];
         $vat_rate    = (float)($booking['vat_rate'] ?? 0);
+        // The rate as the attached quotation PDF prints it (rh_pdf_vat_rows: the booking's rate, else Hotel Settings): 17.5, never "18".
+        $vat_rate_label = rh_rate_label($vat_rate > 0 ? $vat_rate : (float)getSetting('vat_rate', 0));
         $child_supp  = $docLines['child'];
         $deposit_req = !empty($booking['deposit_required']);
         $deposit_amt = (float)($booking['deposit_amount'] ?? 0);
@@ -7081,7 +7085,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             $htmlBody .= $trow('Tourism levy', $fmt($levy_amount));
         }
         if ($vat_enabled && $vat_amount > 0) {
-            $htmlBody .= $trow('VAT (' . number_format($vat_rate, 0) . '%)', vat_document_value($fmt($vat_amount)));
+            $htmlBody .= $trow('VAT (' . $vat_rate_label . '%)', vat_document_value($fmt($vat_amount)));
         }
         $htmlBody .= $trow('Total Amount', $fmt($total), true)
             . '</table></div>';
@@ -7164,7 +7168,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
                 'rate_per_night' => $fmt($rate_per_night),
                 'room_subtotal' => $fmt($room_subtotal),
                 'vat_amount' => vat_document_value($fmt($vat_amount)),
-                'vat_rate' => number_format($vat_rate, 0),
+                'vat_rate' => $vat_rate_label,
                 'child_supplement' => $fmt($child_supp),
                 'deposit_amount' => $fmt($deposit_amt),
                 'balance_due' => $deposit_amt > 0 ? $fmt($total - $deposit_amt) : $fmt($total),

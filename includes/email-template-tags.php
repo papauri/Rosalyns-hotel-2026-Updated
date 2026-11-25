@@ -95,7 +95,7 @@ if (!function_exists('rh_email_tag_groups')) {
             'expires_at'           => ['dates', 'Date the credit note runs out, or No expiry'],
             // Money
             'currency_symbol'      => ['money', 'Currency, e.g. MWK'],
-            'total_amount'         => ['money', 'Total including VAT, e.g. MWK 300,000.00'],
+            'total_amount'         => ['money', 'Total including VAT, e.g. MWK 300,000.00 (in the room invoice email: the balance still to pay; the invoice total there is invoice_total_amount)'],
             'total_amount_formatted' => ['money', 'Amount owed as a number, e.g. 300,000'],
             'subtotal_amount'      => ['money', 'Amount before VAT and levy'],
             'vat_rate'             => ['money', 'VAT rate, e.g. 17.5'],

@@ -1883,7 +1883,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
     $cSub = number_format($subtotalShown, 2);
     $totalsRows  = '<tr><td colspan="3" style="padding:6px 8px 3px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-top:2px solid #D8CDBE; border-left:1px solid #C8BEB0;">Subtotal</td><td width="25%" style="padding:6px 8px 3px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-top:2px solid #D8CDBE; border-right:1px solid #C8BEB0; white-space:nowrap;">' . $currency_symbol . ' ' . $cSub . '</td></tr>';
     if ($vatEnabled && $vatAmount > 0) {
-        $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-left:1px solid #C8BEB0;">VAT (' . number_format($vatRate, 1) . '%)</td><td width="25%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</td></tr>';
+        $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-left:1px solid #C8BEB0;">VAT (' . rh_rate_label((float)$vatRate) . '%)</td><td width="25%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</td></tr>';
     }
     if ($tourismLevyAmt > 0) {
         $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-left:1px solid #C8BEB0;">Tourism levy</td><td width="25%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . $currency_symbol . ' ' . number_format($tourismLevyAmt, 2) . '</td></tr>';
@@ -3696,7 +3696,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             'event_time' => htmlspecialchars(date('H:i', strtotime((string)$enquiry['start_time'])) . ' - ' . date('H:i', strtotime((string)$enquiry['end_time'])), ENT_QUOTES, 'UTF-8'),
             'attendees' => (string)((int)($enquiry['number_of_attendees'] ?? 0)),
             'subtotal_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($ciSubtotal, 2), ENT_QUOTES, 'UTF-8'),
-            'vat_rate' => $ciVatRate > 0.0 ? number_format($ciVatRate, 1) : '0',
+            'vat_rate' => $ciVatRate > 0.0 ? rh_rate_label($ciVatRate) : '0',
             'vat_amount' => $ciVatAmt > 0.0 ? htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($ciVatAmt, 2)), ENT_QUOTES, 'UTF-8') : '—',
             'total_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($ciTotalWithVat, 2), ENT_QUOTES, 'UTF-8'),
             'vat_number' => htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8'),

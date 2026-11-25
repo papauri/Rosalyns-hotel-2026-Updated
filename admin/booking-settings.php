@@ -701,6 +701,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             $ajaxAddress = (string)getSetting('hotel_address', getSetting('address', ''));
         }
 
+        // Sample VAT at the hotel's own rate (Hotel Settings), never a fixed 15%: 4,500 + VAT = invoice total; 1,000 paid.
+        $pvVatRate = max(0.0, (float)getSetting('vat_rate', 0));
+        $pvVat = round(4500 * $pvVatRate / 100, 2);
+        $pvTotal = 4500 + $pvVat;
         $ajaxVars = [
             '{{site_name}}'                => (string)getSetting('site_name', 'Hotel'),
             '{{site_url}}'                 => (string)getSetting('site_url', ''),
@@ -751,17 +755,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{quotation_notes}}'          => 'Please reply by the validity date to secure your booking.',
             '{{rate_per_night}}'           => (string)getSetting('currency_symbol', 'MWK') . number_format(2250, 2),
             '{{room_subtotal}}'            => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
-            '{{vat_amount}}'               => (string)getSetting('currency_symbol', 'MWK') . number_format(675, 2),
-            '{{vat_rate}}'                 => '15',
+            '{{vat_amount}}'               => (string)getSetting('currency_symbol', 'MWK') . number_format($pvVat, 2),
+            '{{vat_rate}}'                 => rh_rate_label($pvVatRate),
             '{{child_supplement}}'         => (string)getSetting('currency_symbol', 'MWK') . '0',
             '{{deposit_amount}}'           => (string)getSetting('currency_symbol', 'MWK') . number_format(1000, 2),
-            '{{total_due}}'                => (string)getSetting('currency_symbol', 'MWK') . number_format(5175, 2),
+            '{{total_due}}'                => (string)getSetting('currency_symbol', 'MWK') . number_format($pvTotal, 2),
             '{{amount_paid}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(1000, 2),
-            '{{balance_due}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(4175, 2),
-            '{{amount_due}}'               => number_format(4175, 2),
+            '{{balance_due}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format($pvTotal - 1000, 2),
+            '{{amount_due}}'               => number_format($pvTotal - 1000, 2),
             '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
             '{{days_overdue}}'             => '3',
             '{{days_until_arrival}}'       => '15 days',
+            '{{urgency_notice}}'           => '<p style="margin:0 0 16px;">Your upcoming stay at <strong>' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '</strong> is approaching. We wanted to remind you of your reservation details.</p>', // sample: the reminder's upcoming-stay line
+            '{{occupancy_type}}'           => 'Double occupancy', // samples for tags the booking emails fill
+            '{{rate_plan_label}}'          => 'Standard Rate',
+            '{{packages_html}}'            => '',
+            '{{group_rooms_block}}'        => '', // a single-room booking prints no group list
             '{{account_reference}}'        => 'BK-PREVIEW-001',
             '{{days_left}}'                => '2 days from now',
             '{{quote_total}}'              => number_format(4500, 2),
@@ -849,13 +858,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
                 . '</tr>';
             $invoiceTotalsRows = ''
                 . $invTotalRow('Subtotal', $invCur . ' 4,500.00', $invTok['muted_dark'])
-                . $invTotalRow('VAT (15%)', $invCur . ' 675.00', $invTok['muted_dark'])
+                . $invTotalRow('VAT (' . rh_rate_label($pvVatRate) . '%)', $invCur . ' ' . number_format($pvVat, 2), $invTok['muted_dark'])
                 . '<tr>'
                 . '<td colspan="3" align="right" bgcolor="' . $invTok['accent'] . '" style="color:' . $invTok['accent_text'] . ';font-size:9pt;font-weight:bold;">Invoice Total</td>'
-                . '<td width="25%" align="right" bgcolor="' . $invTok['accent'] . '" style="color:' . $invTok['accent_text'] . ';font-size:9pt;font-weight:bold;">' . $invCur . ' 5,175.00</td>'
+                . '<td width="25%" align="right" bgcolor="' . $invTok['accent'] . '" style="color:' . $invTok['accent_text'] . ';font-size:9pt;font-weight:bold;">' . $invCur . ' ' . number_format($pvTotal, 2) . '</td>'
                 . '</tr>'
                 . $invTotalRow('Amount Paid', $invCur . ' 1,000.00', $invTok['muted_dark'])
-                . $invTotalRow('Balance Due', $invCur . ' 4,175.00', $invTok['danger'], true);
+                . $invTotalRow('Balance Due', $invCur . ' ' . number_format($pvTotal - 1000, 2), $invTok['danger'], true);
             $invoicePaymentHistorySection = '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #D5B37C;">'
                 . '<p style="margin:0 0 4px;font-size:6px;letter-spacing:1px;text-transform:uppercase;color:#20303E;font-weight:700;">Payment History</p>'
                 . '<table style="width:100%;border-collapse:collapse;" cellpadding="0" cellspacing="0">'
@@ -1347,15 +1356,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{quotation_notes}}'          => 'Please reply by the valid-until date to secure your reservation.',
                 '{{rate_per_night}}'           => $currencySymbol . number_format(2250, 2),
                 '{{room_subtotal}}'            => $currencySymbol . number_format(4500, 2),
-                '{{vat_amount}}'               => $currencySymbol . number_format(675, 2),
-                '{{vat_rate}}'                 => '15',
+                '{{vat_amount}}'               => $currencySymbol . number_format(round(4500 * max(0.0, (float)getSetting('vat_rate', 0)) / 100, 2), 2),
+                '{{vat_rate}}'                 => rh_rate_label(max(0.0, (float)getSetting('vat_rate', 0))), // the hotel's rate, never a fixed 15
                 '{{child_supplement}}'         => $currencySymbol . '0',
                 '{{deposit_amount}}'           => $currencySymbol . number_format(1000, 2),
                 '{{balance_due}}'              => $currencySymbol . number_format(3500, 2),
-                '{{amount_due}}'               => number_format(4175, 2),
+                '{{amount_due}}'               => number_format(4500 + round(4500 * max(0.0, (float)getSetting('vat_rate', 0)) / 100, 2) - 1000, 2), // as the AJAX preview: total at the hotel's VAT less 1,000 paid
                 '{{due_date}}'                 => date('F j, Y', strtotime('-3 days')),
                 '{{days_overdue}}'             => '3',
                 '{{days_until_arrival}}'       => '15 days',
+                '{{urgency_notice}}'           => '<p style="margin:0 0 16px;">Your upcoming stay at <strong>' . htmlspecialchars((string)getSetting('site_name', 'Hotel'), ENT_QUOTES, 'UTF-8') . '</strong> is approaching. We wanted to remind you of your reservation details.</p>', // sample: the reminder's upcoming-stay line
+                '{{occupancy_type}}'           => 'Double occupancy', // samples for tags the booking emails fill
+                '{{rate_plan_label}}'          => 'Standard Rate',
+                '{{packages_html}}'            => '',
+                '{{group_rooms_block}}'        => '', // a single-room booking prints no group list
                 '{{amount_paid}}'              => $currencySymbol . number_format(1000, 2),
                 '{{account_reference}}'        => 'BK-PREVIEW-001',
                 '{{days_left}}'                => '2 days from now',

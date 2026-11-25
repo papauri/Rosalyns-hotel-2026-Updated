@@ -413,6 +413,17 @@ if (!function_exists('rh_pdf_document_shell')) {
     }
 }
 
+if (!function_exists('rh_rate_label')) {
+    /**
+     * PURE. A tax rate as printed on documents and emails: up to 2 decimals, no trailing zeros
+     * (17.5 -> "17.5", 16.5 -> "16.5", 17 -> "17"). Never rounded to a whole number.
+     */
+    function rh_rate_label(float $pct): string
+    {
+        return rtrim(rtrim(number_format($pct, 2), '0'), '.');
+    }
+}
+
 if (!function_exists('rh_pdf_vat_rows')) {
     /**
      * VAT presentation for customer documents, honouring vat_mode():
@@ -432,7 +443,7 @@ if (!function_exists('rh_pdf_vat_rows')) {
         }
         $mode = vat_mode();
         $rate = $ratePct > 0 ? $ratePct : (float)getSetting('vat_rate', 0);
-        $rateLabel = rtrim(rtrim(number_format($rate, 2), '0'), '.');
+        $rateLabel = rh_rate_label($rate);
         if ($mode === 'exclusive' && $vatAmount > 0) {
             return [['label' => 'VAT (' . $rateLabel . '%)', 'value' => $money($vatAmount), 'type' => 'vat']];
         }
