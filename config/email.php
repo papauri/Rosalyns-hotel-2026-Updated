@@ -5688,7 +5688,8 @@ function sendUnpaidConfirmedReminderEmail(array $booking, string $deadline)
 /**
  * The payment reminder before arrival (owner 2026-11-25), ready to send: the saved template (Email Templates page),
  * the built-in default when none is saved. null = the template is switched off in the editor (the job then sends
- * nothing). $info: days_until (int), total, paid, balance (floats, hotel currency). $booking is the booking row the
+ * nothing). $info: days_until (int), arrival (Y-m-d, optional: the date shown, else the row's check-in), total, paid,
+ * balance (floats, hotel currency). $booking is the booking row the
  * email is about (a group's primary room with the group's money in $info).
  *
  * @return array{subject:string,html_body:string,text_body:string}|null
@@ -5720,7 +5721,11 @@ function rh_prearrival_payment_email_build(array $booking, array $info): ?array
     };
     $days = max(0, (int)($info['days_until'] ?? 0));
     $ref = (string)($booking['booking_reference'] ?? '');
-    $vars = buildBookingEmailVariables($booking, $room, [
+    // A group's arrival = the earliest confirmed room ($info['arrival']), the date the days are counted to; the lead
+    // row may arrive later, so its own date would disagree with "in N days".
+    $arrivalTs = !empty($info['arrival']) ? strtotime((string)$info['arrival']) : false;
+    $arrivalVars = $arrivalTs !== false ? ['check_in_date_formatted' => date('F j, Y', $arrivalTs)] : [];
+    $vars = buildBookingEmailVariables($booking, $room, $arrivalVars + [
         'days_until_arrival' => $days === 1 ? '1 day' : $days . ' days',
         'total_amount'       => $money($info['total'] ?? 0),
         'amount_paid'        => $money($info['paid'] ?? 0),

@@ -8,7 +8,8 @@
  *  - a group (lead booking + its rooms) with a CONFIRMED room arriving after today and within the window, where the
  *    window = the LARGEST value of the "Payment reminders before arrival" days setting (prearrival_payment_reminder_days);
  *  - left out: any live room on a pay-later arrangement or a company account, any room already checked in;
- *  - money = the confirmed rooms' amount_paid / amount_due summed (the reminder's own rule); owing = above BALANCE_TOLERANCE;
+ *  - money = rh_prearrival_group_money (the reminder's own rule): the confirmed rooms netted (an overpaid room's credit
+ *    offsets the others), floored at 0 for the group; owing = above BALANCE_TOLERANCE; the row shown = rh_prearrival_group_lead;
  *  - the arrival = the earliest confirmed arrival; a group whose earliest confirmed room is due today or earlier is left
  *    out (it is on the arrivals / overdue arrivals lists already);
  *  - urgent = arriving within the SMALLEST value of that setting.
@@ -70,6 +71,71 @@ if (!function_exists('rh_arrivals_to_chase')) {
     }
 
     /**
+     * PURE. A group's money for the reminder and the chase list (one rule for both): $confirmed = the group's live
+     * confirmed rooms (amount_paid, amount_due, credit_balance, check_in_date). The group is netted: an overpaid room
+     * (credit_balance, what recalculateBookingFinancials keeps when paid > bill) offsets what the other rooms owe, and the
+     * group balance is floored at 0 (BALANCE_TOLERANCE and under = 0). Once a credit note is issued its credit_balance is
+     * 0 again, so money handed back as a credit note never offsets the group twice. paid = what was paid on those rooms;
+     * total = their bills (paid + owed - credit). first = the earliest arrival (midnight timestamp) or null.
+     * @return array{first:?int, paid:float, balance:float, total:float}
+     */
+    function rh_prearrival_group_money(array $confirmed): array
+    {
+        $first = null;
+        $paid = 0.0;
+        $net = 0.0;
+        foreach ($confirmed as $r) {
+            $ci = strtotime((string)($r['check_in_date'] ?? ''));
+            if ($ci !== false && ($first === null || $ci < $first)) {
+                $first = $ci;
+            }
+            $paid += max(0.0, (float)($r['amount_paid'] ?? 0));
+            $net += max(0.0, (float)($r['amount_due'] ?? 0)) - max(0.0, (float)($r['credit_balance'] ?? 0));
+        }
+        $balance = $net > (float)BALANCE_TOLERANCE ? $net : 0.0;
+        return ['first' => $first, 'paid' => round($paid, 2), 'balance' => round($balance, 2), 'total' => round(max(0.0, $paid + $net), 2)];
+    }
+
+    /**
+     * The row a group's reminder goes to and the chase list shows / links to: the lead (root) while it is live, else the
+     * group's effective lead (rh_booking_group_effective_lead: the room that took over a CANCELLED lead, the same one the
+     * group's documents, payments and search use) when it is one of $liveRows, else the first confirmed room (id order).
+     * $liveRows: the group's live rows (id order); $confirmed: the confirmed ones among them (not empty). The dedupe key
+     * stays the root, whoever is shown. The extra query runs only when the root itself is no longer live.
+     */
+    function rh_prearrival_group_lead(PDO $pdo, int $root, array $liveRows, array $confirmed): array
+    {
+        $byId = [];
+        foreach ($liveRows as $r) {
+            $byId[(int)$r['id']] = $r;
+        }
+        if (isset($byId[$root])) {
+            return $byId[$root];
+        }
+        if (function_exists('rh_booking_group_effective_lead')) {
+            $eff = rh_booking_group_effective_lead($pdo, $root);
+            if (isset($byId[$eff])) {
+                return $byId[$eff];
+            }
+        }
+        return $confirmed[0];
+    }
+
+    /**
+     * PURE. The chase list's group figures by the booking it lists (lead_id => balance, rooms), for the Bookings
+     * ?chase=arrivals Balance due cell: the same whole-group balance the Dashboard count and the daily email use.
+     * @return array<int, array{balance:float, rooms:int}>
+     */
+    function rh_arrivals_chase_balances(array $chase): array
+    {
+        $out = [];
+        foreach ((array)($chase['rows'] ?? []) as $r) {
+            $out[(int)$r['lead_id']] = ['balance' => (float)$r['balance'], 'rooms' => (int)$r['rooms']];
+        }
+        return $out;
+    }
+
+    /**
      * PURE. Window and urgent threshold from the "Payment reminders before arrival" days: window = the largest value,
      * urgent = the smallest. $days null = the saved setting.
      * @return array{days:int[], window:int, urgent:int}
@@ -105,7 +171,7 @@ if (!function_exists('rh_arrivals_to_chase')) {
         // Every live room of those groups (the reminder's own set: not deleted, not cancelled / no-show / expired /
         // checked out), with whether it passes the pay-later / company rule.
         $st = $pdo->prepare("SELECT b.id, b.primary_booking_id, b.status, b.booking_reference, b.guest_name, b.guest_phone, b.guest_email,
-                b.check_in_date, b.amount_paid, b.amount_due, (CASE WHEN 1 = 1{$noArr} THEN 1 ELSE 0 END) AS arr_ok
+                b.check_in_date, b.amount_paid, b.amount_due, b.credit_balance, (CASE WHEN 1 = 1{$noArr} THEN 1 ELSE 0 END) AS arr_ok
             FROM bookings b
             WHERE (b.id IN ({$in}) OR b.primary_booking_id IN ({$in})) AND b.deleted_at IS NULL
               AND b.status NOT IN ('cancelled', 'no-show', 'expired', 'checked-out')
@@ -138,17 +204,10 @@ if (!function_exists('rh_arrivals_to_chase')) {
             if ($skip || !$confirmed) {
                 continue;
             }
-            $first = null;
-            $paid = 0.0;
-            $balance = 0.0;
-            foreach ($confirmed as $r) {
-                $ci = strtotime((string)$r['check_in_date']);
-                if ($ci !== false && ($first === null || $ci < $first)) {
-                    $first = $ci;
-                }
-                $paid += max(0.0, (float)($r['amount_paid'] ?? 0));
-                $balance += max(0.0, (float)($r['amount_due'] ?? 0));
-            }
+            $money = rh_prearrival_group_money($confirmed); // the reminder's own rule: the group netted, floored at 0
+            $first = $money['first'];
+            $paid = $money['paid'];
+            $balance = $money['balance'];
             if ($balance <= $tol || $first === null) {
                 continue;
             }
@@ -156,19 +215,9 @@ if (!function_exists('rh_arrivals_to_chase')) {
             if ($daysUntil <= 0 || $daysUntil > $lim['window']) {
                 continue; // due today or overdue: on the arrivals lists already
             }
-            // The row the list shows and the email links to: the lead booking while it is live, else the earliest
-            // confirmed room (lowest id on a tie).
-            $lead = null;
-            foreach ($rows as $r) {
-                if ((int)$r['id'] === (int)$root) {
-                    $lead = $r;
-                }
-            }
-            if ($lead === null) {
-                $byArrival = $confirmed;
-                usort($byArrival, static fn($a, $b) => [(string)$a['check_in_date'], (int)$a['id']] <=> [(string)$b['check_in_date'], (int)$b['id']]);
-                $lead = $byArrival[0];
-            }
+            // The row the list shows and the email links to: the reminder's own pick (the lead while live, else the
+            // group's effective lead, the room that took over a cancelled lead).
+            $lead = rh_prearrival_group_lead($pdo, (int)$root, $rows, $confirmed);
             $pick = static function (string $col) use ($lead, $confirmed): string {
                 $v = trim((string)($lead[$col] ?? ''));
                 if ($v !== '') {
@@ -193,7 +242,7 @@ if (!function_exists('rh_arrivals_to_chase')) {
                 'arrival' => date('Y-m-d', $first),
                 'days_until' => $daysUntil,
                 'rooms' => count($confirmed),
-                'total' => round($paid + $balance, 2),
+                'total' => $money['total'],
                 'paid' => round($paid, 2),
                 'balance' => round($balance, 2),
                 'last_reminder' => $last[(int)$root] ?? null,

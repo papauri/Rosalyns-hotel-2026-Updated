@@ -1169,12 +1169,80 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
     /**
      * Groups (by lead id: primary_booking_id, else the booking itself) with a confirmed room arriving within the largest
      * stage that still owes money. Leaves out pay-later arrangements and company-billed bookings (own or lead's).
+     * With $days: only the groups whose stage due now (earliest confirmed arrival, as rh_auto_prearrival_plan works it
+     * out) is not done yet under $prefix ('' live / 'test:'), nearest arrival first, at most $limit. "Done" = sent or
+     * skipped, or failed 3 times, under any room of the group (so a group whose root moved by "Make primary" is not
+     * reminded twice). Groups already reminded at their stage never take the $limit slots, so every due group is reached
+     * (QA 2026-11-25). Small hotels: two extra light queries per run. $today (midnight timestamp) for tests.
      *
      * @return int[]
      */
-    function rh_auto_prearrival_candidates(PDO $pdo, int $maxDays): array
+    function rh_auto_prearrival_candidates(PDO $pdo, int $maxDays, array $days = [], string $prefix = '', ?int $today = null, int $limit = 200): array
     {
-        return rh_prearrival_owing_roots($pdo, $maxDays, 200); // includes/arrivals-chase.php: the WHERE the chase list shares
+        $limit = max(1, $limit);
+        $roots = rh_prearrival_owing_roots($pdo, $maxDays, 5000); // includes/arrivals-chase.php: the WHERE the chase list shares
+        if (!$roots || !$days) {
+            return array_slice($roots, 0, $limit);
+        }
+        $rootSet = array_flip($roots);
+        $in = implode(',', array_fill(0, count($roots), '?'));
+        $st = $pdo->prepare("SELECT id, COALESCE(NULLIF(primary_booking_id, 0), id) AS root, status, check_in_date, deleted_at
+            FROM bookings WHERE id IN ({$in}) OR primary_booking_id IN ({$in})");
+        $st->execute(array_merge($roots, $roots));
+        $first = [];
+        $rootOf = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $root = (int)$r['root'];
+            if (!isset($rootSet[$root])) {
+                continue;
+            }
+            $rootOf[(int)$r['id']] = $root;
+            if (strtolower((string)$r['status']) === 'confirmed' && $r['deleted_at'] === null) {
+                $ci = (string)$r['check_in_date'];
+                if (!isset($first[$root]) || $ci < $first[$root]) {
+                    $first[$root] = $ci;
+                }
+            }
+        }
+        $done = [];
+        if ($rootOf && rh_auto_log_table_ready($pdo)) {
+            $stages = array_map(static fn($d) => $prefix . 'pre:' . (int)$d, array_values($days));
+            $ids = array_keys($rootOf);
+            $lg = $pdo->prepare("SELECT account_id, stage FROM automated_email_log
+                WHERE job = 'prearrival_payment_reminders' AND account_type = 'room'
+                  AND account_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")
+                  AND stage IN (" . implode(',', array_fill(0, count($stages), '?')) . ")
+                  AND (status IN ('sent', 'skipped') OR (status = 'failed' AND attempts >= 3))");
+            $lg->execute(array_merge($ids, $stages));
+            $cut = strlen($prefix . 'pre:');
+            foreach ($lg->fetchAll(PDO::FETCH_ASSOC) as $l) {
+                $done[$rootOf[(int)$l['account_id']]][(int)substr((string)$l['stage'], $cut)] = true;
+            }
+        }
+        return rh_auto_prearrival_due_roots($first, $done, $days, $today ?? strtotime(date('Y-m-d')), $limit);
+    }
+
+    /**
+     * PURE. Which groups still have their stage due now: $firstByRoot = root => earliest confirmed arrival (Y-m-d),
+     * $doneByRoot = root => [stage => true] already done. Nearest arrival first (then root), at most $limit.
+     * @return int[]
+     */
+    function rh_auto_prearrival_due_roots(array $firstByRoot, array $doneByRoot, array $days, int $today, int $limit): array
+    {
+        $due = [];
+        foreach ($firstByRoot as $root => $date) {
+            $ci = strtotime((string)$date);
+            if ($ci === false) {
+                continue;
+            }
+            $stage = rh_auto_prearrival_stage((int)round(($ci - $today) / 86400), $days);
+            if ($stage === 0 || isset($doneByRoot[$root][$stage])) {
+                continue;
+            }
+            $due[] = [$ci, (int)$root];
+        }
+        sort($due);
+        return array_slice(array_column($due, 1), 0, max(1, $limit));
     }
 
     /**
@@ -1183,7 +1251,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
      * 'paid', 'balance', 'lead' => booking row (with room_name), 'email', 'name', 'rooms' => confirmed room count].
      * Rules: confirmed rooms only; the whole group is left out when any live room is checked in, has a pay-later
      * arrangement or is on a company account, or when a room was created / confirmed less than 24 hours ago;
-     * money is the confirmed rooms' amount_paid / amount_due; the stage follows the earliest confirmed arrival.
+     * money = rh_prearrival_group_money (the confirmed rooms netted, floored at 0 for the group); the stage and 'arrival'
+     * follow the earliest confirmed arrival; 'lead' = rh_prearrival_group_lead (the chase list's pick).
      */
     function rh_auto_prearrival_plan(PDO $pdo, int $root, array $days, ?int $today = null): array
     {
@@ -1235,17 +1304,11 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         if (!$confirmed) {
             return ['send' => false, 'why' => 'not_confirmed'];
         }
-        $first = null;
-        $paid = 0.0;
-        $balance = 0.0;
-        foreach ($confirmed as $r) {
-            $ci = strtotime((string)$r['check_in_date']);
-            if ($ci !== false && ($first === null || $ci < $first)) {
-                $first = $ci;
-            }
-            $paid += max(0.0, (float)($r['amount_paid'] ?? 0));
-            $balance += max(0.0, (float)($r['amount_due'] ?? 0));
-        }
+        // The group netted (an overpaid room offsets the others), floored at 0: the chase list's own rule.
+        $money = rh_prearrival_group_money($confirmed);
+        $first = $money['first'];
+        $paid = $money['paid'];
+        $balance = $money['balance'];
         if ($balance <= BALANCE_TOLERANCE) {
             return ['send' => false, 'why' => 'paid'];
         }
@@ -1254,15 +1317,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         if ($stage === 0) {
             return ['send' => false, 'why' => 'no_stage', 'days_until' => $daysUntil];
         }
-        // Sent to the group's lead (the lead room, or the room that stands in for a cancelled lead).
-        $leadId = count($rows) > 1 && function_exists('rh_booking_group_effective_lead') ? rh_booking_group_effective_lead($pdo, $root) : $root;
-        $lead = null;
-        foreach ($rows as $r) {
-            if ((int)$r['id'] === $leadId) {
-                $lead = $r;
-            }
-        }
-        $lead = $lead ?? $confirmed[0];
+        // Sent to the group's lead (the lead room, or the room that stands in for a cancelled lead): the chase list's pick.
+        $lead = rh_prearrival_group_lead($pdo, $root, $rows, $confirmed);
         $email = trim((string)($lead['guest_email'] ?? ''));
         $name = (string)($lead['guest_name'] ?? '');
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -1279,7 +1335,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         }
         unset($lead['is_recent']);
         return ['send' => true, 'stage' => $stage, 'days_until' => $daysUntil, 'paid' => round($paid, 2),
-            'balance' => round($balance, 2), 'arrival' => date('Y-m-d', (int)$first), 'total' => round($paid + $balance, 2), 'lead' => $lead, 'email' => $email,
+            'balance' => round($balance, 2), 'arrival' => date('Y-m-d', (int)$first), 'total' => $money['total'], 'lead' => $lead, 'email' => $email,
             'name' => $name, 'rooms' => count($confirmed)];
     }
 
@@ -1301,7 +1357,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         $prefix = !empty($o['test_mode']) ? 'test:' : '';
         $days = rh_auto_prearrival_days();
 
-        foreach (rh_auto_prearrival_candidates($pdo, max($days)) as $root) {
+        foreach (rh_auto_prearrival_candidates($pdo, max($days), $days, $prefix) as $root) {
             if (!rh_scheduler_budget_ok()) {
                 $res['deferred'] = true;
                 break;
@@ -1314,7 +1370,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             }
             $lead = $plan['lead'];
             $ref = (string)$lead['booking_reference'];
-            $info = ['days_until' => $plan['days_until'], 'total' => $plan['total'], 'paid' => $plan['paid'], 'balance' => $plan['balance']];
+            // arrival = the earliest confirmed arrival the days count from (a group's lead may arrive later).
+            $info = ['days_until' => $plan['days_until'], 'arrival' => $plan['arrival'], 'total' => $plan['total'], 'paid' => $plan['paid'], 'balance' => $plan['balance']];
             $tpl = rh_prearrival_payment_email_build($lead, $info);
             if ($tpl === null) {
                 $res['skipped']++; // template switched off in the editor = job sends nothing

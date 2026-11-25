@@ -1008,7 +1008,7 @@ if (!function_exists('rh_bk_filters_from_get')) {
             'source'        => (string)($f['source'] ?? ''),
             'created_by'    => $id($f['created_by'] ?? 0),
             'chase'         => (string)($f['chase'] ?? ''),
-            'size'         => ($f['size'] ?? '10') !== '10' ? (string)$f['size'] : '',
+            'size'          => ($f['size'] ?? '10') !== '10' ? (string)$f['size'] : '',
             'page'          => (int)($f['page'] ?? 1) > 1 ? (string)(int)$f['page'] : '',
         ];
         $out = [];
@@ -1074,7 +1074,7 @@ if (!function_exists('rh_bk_filters_from_get')) {
             $defs[] = ['created_by', 'Made by: ' . $name('staff', (int)$f['created_by']), ['created_by']];
         }
         if (($f['chase'] ?? '') !== '') {
-            $defs[] = ['chase', 'Arrivals with a balance to chase', ['chase']];
+            $defs[] = ['chase', 'Arrivals with a balance to chase (balance = whole group)', ['chase']];
         }
         $out = [];
         foreach ($defs as [$key, $label, $drop]) {

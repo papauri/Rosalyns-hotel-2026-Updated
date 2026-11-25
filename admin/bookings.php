@@ -3099,12 +3099,15 @@ $bk_f = rh_bk_filters_from_get($_GET, [
     'groups'     => $bk_group_ids,
     'staff'      => array_keys($bk_staff_names),
 ]);
+$bk_chase_bal = []; // ?chase=arrivals: lead id => the shared list's whole-group balance + rooms (the Balance due cell shows it)
 if ($bk_f['chase'] === 'arrivals') {
     // Dashboard "Arrivals with a balance to chase": exactly the lead bookings of the shared list (no list = no rows).
     $bk_f['chase_ids'] = [];
     try {
         require_once __DIR__ . '/../includes/arrivals-chase.php';
-        $bk_f['chase_ids'] = rh_arrivals_chase_ids(rh_arrivals_to_chase($pdo));
+        $bk_chase_list = rh_arrivals_to_chase($pdo);
+        $bk_f['chase_ids'] = rh_arrivals_chase_ids($bk_chase_list);
+        $bk_chase_bal = rh_arrivals_chase_balances($bk_chase_list);
     } catch (Throwable $e) {
         error_log('Bookings arrivals to chase filter: ' . $e->getMessage());
     }
@@ -4172,7 +4175,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                     <?php rh_server_sort_th('Total' . $bk_tip('Total: the whole bill for the booking, room nights plus extras and charges, VAT and levy included. The small line is the booked rate a night times the nights.'), 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
                                     <?php rh_server_sort_th('Status' . $bk_tip('Status: where the booking is now: Pending, Tentative, Confirmed, Checked in, Checked out, Cancelled, No-show or Expired.'), 'status', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-status'); ?>
                                     <?php rh_server_sort_th('Payment' . $bk_tip('Payment: from the money on the booking (paid so far against the total): Paid, Part paid, Unpaid or Refunded. The small line is the latest payment reference.'), 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
-                                    <?php rh_server_sort_th('Balance due' . $bk_tip('Balance due: what the guest still has to pay on this booking now (cancelled and no-show bookings: a fee or extras still owed). Blank = nothing to pay. Deleted bookings are blank. Same figure as the CSV export.'), 'balance', $bk_sort_key, $bk_sort_dir, 'col-optional-md bk-col-balance'); ?>
+                                    <?php rh_server_sort_th('Balance due' . $bk_tip('Balance due: what the guest still has to pay on this booking now (cancelled and no-show bookings: a fee or extras still owed). Blank = nothing to pay. Deleted bookings are blank. Same figure as the CSV export.' . ($bk_chase_bal ? ' Arrivals to chase filter: a group shows the whole group\'s balance (all its confirmed rooms, an overpaid room offsetting the others), the same figure as the Dashboard and the daily email.' : '')), 'balance', $bk_sort_key, $bk_sort_dir, 'col-optional-md bk-col-balance'); ?>
                                     <?php rh_server_sort_th('Created' . $bk_tip('Created: when the booking was made, and who made it (from the booking history).'), 'created', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-created'); ?>
                                     <th>Actions</th>
                                 </tr>
@@ -4324,7 +4327,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             // admin/css/bookings.css; 900px and under; phone row line 3).
                                             $bk_balance_due = rh_bk_balance_due($booking, isset($bk_tagged_expired[(int)$booking['id']]));
                                             $bk_left_to_pay = ($bk_balance_due !== null && $bk_balance_due > BALANCE_TOLERANCE) ? (float)$bk_balance_due : 0.0;
-                                            $bk_left_text = $bk_left_to_pay > 0 ? $currency_symbol . ' ' . number_format($bk_left_to_pay, 2) . ' left to pay' : '';
+                                            // ?chase=arrivals: the shown figure is the shared list's (the whole group's balance, the same as
+                                            // the Dashboard and the daily email); data-balance keeps the booking's own (sorting, scripts).
+                                            $bk_grp = $bk_chase_bal[(int)$booking['id']] ?? null;
+                                            $bk_left_shown = $bk_grp !== null ? ((float)$bk_grp['balance'] > BALANCE_TOLERANCE ? (float)$bk_grp['balance'] : 0.0) : $bk_left_to_pay;
+                                            $bk_grp_note = ($bk_grp !== null && (int)$bk_grp['rooms'] > 1) ? 'Group balance, ' . (int)$bk_grp['rooms'] . ' rooms' : '';
+                                            $bk_left_text = $bk_left_shown > 0 ? $currency_symbol . ' ' . number_format($bk_left_shown, 2) . ' left to pay' . ($bk_grp_note !== '' ? ' (group, ' . (int)$bk_grp['rooms'] . ' rooms)' : '') : '';
                                             ?>
                                             <span class="bk-total-main"><strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?><span class="bk-ph-pay badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>"><?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?></span><?php if ($bk_left_text !== ''): ?><span class="bk-ph-left bk-left-to-pay"><?php echo htmlspecialchars($bk_left_text); ?></span><?php endif; ?></span>
                                             <?php $bk_rate = rh_booked_rate_line($booking, null, ['currency' => $currency_symbol]); // the row's own columns, no query ?>
@@ -4388,7 +4396,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             <?php endif; ?>
                                         </td>
                                         <td class="col-optional-md bk-col-balance" data-label="Balance due" data-balance="<?php echo $bk_balance_due === null ? '' : number_format($bk_balance_due, 2, '.', ''); ?>">
-                                            <?php if ($bk_left_to_pay > 0): ?><strong class="bk-balance-due"><?php echo htmlspecialchars($currency_symbol . ' ' . number_format($bk_left_to_pay, 2)); ?></strong><?php endif; ?>
+                                            <?php if ($bk_left_shown > 0): ?><strong class="bk-balance-due"><?php echo htmlspecialchars($currency_symbol . ' ' . number_format($bk_left_shown, 2)); ?></strong><?php if ($bk_grp_note !== ''): ?><br><small class="bk-chase-group-note"><?php echo htmlspecialchars($bk_grp_note); ?></small><?php endif; ?><?php endif; ?>
                                         </td>
                                         <td class="col-optional-lg bk-col-created" data-label="Created">
                                             <small style="color: #666; font-size: 11px;">

@@ -265,8 +265,41 @@ try {
     ok('group: arrival = the earliest room (12 days)', ($L[$g]['days_until'] ?? 0) === 12);
     $cRow = null;
     foreach ($chase['rows'] as $r) { if ((int)$r['root_id'] === $c) { $cRow = $r; } }
-    ok('group with a cancelled lead: one row on the earliest confirmed room, its money only', $cRow !== null && (int)$cRow['lead_id'] === $cm2 && $cRow['rooms'] === 2
-        && $cRow['days_until'] === 8 && $near($cRow['balance'], (float)ac_row($pdo, $cm1)['amount_due'] + (float)ac_row($pdo, $cm2)['amount_due']), json_encode($cRow));
+    $cEff = rh_booking_group_effective_lead($pdo, $c);
+    $cPlan = rh_auto_prearrival_plan($pdo, $c, [30, 15, 4]);
+    ok('group with a cancelled lead: one row on the group\'s effective lead (the room that took over), the live rooms\' money, arrival = earliest',
+        $cRow !== null && in_array($cEff, [$cm1, $cm2], true) && (int)$cRow['lead_id'] === $cEff && $cRow['rooms'] === 2
+        && $cRow['days_until'] === 8 && $near($cRow['balance'], (float)ac_row($pdo, $cm1)['amount_due'] + (float)ac_row($pdo, $cm2)['amount_due']), json_encode([$cRow, $cEff]));
+    ok('cancelled lead: the guest reminder goes to the same room the list shows, keyed on the root', (int)($cPlan['lead']['id'] ?? 0) === $cEff
+        && in_array($c, rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000), true) && !in_array($cEff, rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000), true),
+        json_encode([(int)($cPlan['lead']['id'] ?? 0), $cEff]));
+    if ($logReady) {
+        // The reminder log stays keyed on the root: the list's "last reminder" for the group follows it.
+        $pdo->prepare("INSERT INTO automated_email_log (job, account_type, account_id, stage, recipient, subject, status) VALUES ('prearrival_payment_reminders','room',?, 'pre:15', 'x@example.invalid', 'x', 'sent')")->execute([$c]);
+        $cRow2 = null;
+        foreach (rh_arrivals_to_chase($pdo, [30, 15, 4])['rows'] as $r) { if ((int)$r['root_id'] === $c) { $cRow2 = $r; } }
+        ok('cancelled lead: last reminder found under the root while the row shows the effective lead', ($cRow2['last_reminder']['stage'] ?? 0) === 15 && (int)($cRow2['lead_id'] ?? 0) === $cEff);
+    }
+
+    // Overpaid room in a group: its credit offsets the others; the group balance is netted, never the overpaid room as 0.
+    $ov = ac_booking($pdo, 'ovlead@example.invalid', 13);
+    $ovm = ac_booking($pdo, 'ovm@example.invalid', 13, $ov);
+    ac_pay($pdo, $ovm, (float)ac_row($pdo, $ovm)['amount_due'] + 300);
+    $ovWant = max(0.0, (float)ac_row($pdo, $ov)['amount_due'] - (float)ac_row($pdo, $ovm)['credit_balance']);
+    $ovRow = $byLead(rh_arrivals_to_chase($pdo, [30, 15, 4]))[$ov] ?? null;
+    $ovPlan = rh_auto_prearrival_plan($pdo, $ov, [30, 15, 4]);
+    ok('overpaid room in a group: credit 300 offsets the lead\'s balance (list = reminder)', $near(ac_row($pdo, $ovm)['credit_balance'], 300) && $ovRow !== null
+        && $near($ovRow['balance'], $ovWant) && $near($ovRow['balance'], (float)ac_row($pdo, $ov)['amount_due'] - 300) && $near($ovPlan['balance'] ?? -1, $ovWant)
+        && $near($ovRow['total'], $ovRow['paid'] + $ovRow['balance']), json_encode([$ovRow, $ovWant]));
+    // Overpaid by more than the rest owes: the group owes nothing, it is not listed (floored at 0 for the group).
+    ac_pay($pdo, $ovm, (float)ac_row($pdo, $ov)['amount_due']);
+    ok('group whose overpaid room covers the rest: left out, reminder says paid', !isset($byLead(rh_arrivals_to_chase($pdo, [30, 15, 4]))[$ov])
+        && (rh_auto_prearrival_plan($pdo, $ov, [30, 15, 4])['why'] ?? '') === 'paid');
+    ok('money helper: netted, floored at 0, tolerance', rh_prearrival_group_money([
+            ['check_in_date' => '2031-01-05', 'amount_paid' => 0, 'amount_due' => 100, 'credit_balance' => 0],
+            ['check_in_date' => '2031-01-03', 'amount_paid' => 260, 'amount_due' => 0, 'credit_balance' => 60]]) === ['first' => strtotime('2031-01-03'), 'paid' => 260.0, 'balance' => 40.0, 'total' => 300.0]
+        && rh_prearrival_group_money([['check_in_date' => '2031-01-05', 'amount_paid' => 100, 'amount_due' => 0.005, 'credit_balance' => 0]])['balance'] === 0.0
+        && rh_prearrival_group_money([['check_in_date' => '2031-01-05', 'amount_paid' => 500, 'amount_due' => 50, 'credit_balance' => 0], ['check_in_date' => '2031-01-05', 'amount_paid' => 0, 'amount_due' => 0, 'credit_balance' => 80]])['balance'] === 0.0);
     $flags = array_map(static fn($r) => $r['urgent'] ? 0 : 1, $chase['rows']);
     $sorted = $flags;
     sort($sorted);
@@ -305,7 +338,20 @@ try {
     $want = rh_arrivals_chase_ids($dash);
     sort($want);
     ok('filter: ?chase=arrivals is a filter (the list re-counts), with its chip', $f['chase'] === 'arrivals' && rh_bk_filters_active($f)
-        && in_array('Arrivals with a balance to chase', array_column(rh_bk_chips($f, []), 'label'), true));
+        && in_array('Arrivals with a balance to chase (balance = whole group)', array_column(rh_bk_chips($f, []), 'label'), true));
+    // The chase view's Balance due = the list's (and the email's) whole-group figure for each listed booking.
+    $balMap = rh_arrivals_chase_balances($dash);
+    $Ld = $byLead($dash);
+    $balOk = count($balMap) === count($dash['rows']);
+    foreach ($Ld as $lid => $r) {
+        if (!isset($balMap[$lid]) || !$near($balMap[$lid]['balance'], $r['balance']) || $balMap[$lid]['rooms'] !== $r['rooms']) { $balOk = false; }
+    }
+    ok('chase view: each listed booking shows the list\'s group balance and room count (group of 3 = the 3 rooms)', $balOk && isset($balMap[$g])
+        && $balMap[$g]['rooms'] === 3 && $near($balMap[$g]['balance'], $Ld[$g]['balance']), json_encode($balMap[$g] ?? null));
+    $bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
+    ok('bookings.php: the chase view prints the shared figure (not the booking\'s own), labelled "Group balance"', strpos($bkSrc, '$bk_chase_bal = rh_arrivals_chase_balances($bk_chase_list);') !== false
+        && strpos($bkSrc, 'number_format($bk_left_shown, 2)') !== false && strpos($bkSrc, "'Group balance, '") !== false
+        && strpos($bkSrc, 'data-balance="<?php echo $bk_balance_due === null') !== false);
     ok('Dashboard count = Bookings ?chase=arrivals rows (same bookings)', (int)$cnt->fetchColumn() === count($dash['rows']) && $listIds === $want && count($want) > 0,
         json_encode([count($dash['rows']), $listIds === $want]));
     $f0 = rh_bk_filters_from_get(['chase' => 'arrivals']);

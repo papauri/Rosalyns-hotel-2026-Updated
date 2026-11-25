@@ -58,6 +58,26 @@ ok('stage: arrival day or past = none', $got[0] === 0 && $got[-3] === 0);
 ok('stage: late booking 10 days out never gets the 30-day one', rh_auto_prearrival_stage(10, $d) === 15);
 ok('stage: unsorted list works the same', rh_auto_prearrival_stage(10, [4, 30, 15]) === 15);
 
+/* ── every due group reached (pure): groups done at their stage never take the slots ── */
+$t0 = strtotime('2031-06-01');
+$firsts = [];
+$doneMap = [];
+for ($i = 1; $i <= 250; $i++) {
+    $firsts[$i] = date('Y-m-d', strtotime('+10 day', $t0)); // stage 15 for all
+    if ($i <= 200) {
+        $doneMap[$i] = [15 => true]; // the first 200 already reminded at 15
+    }
+}
+$dueR = rh_auto_prearrival_due_roots($firsts, $doneMap, [30, 15, 4], $t0, 200);
+ok('250 groups, 200 done at their stage, limit 200: the other 50 are all reached', count($dueR) === 50 && min($dueR) === 201 && max($dueR) === 250, count($dueR) . ' returned');
+$doneMap[201] = [30 => true]; // done at an earlier stage only: the 15-day one is still due
+ok('done at an earlier stage only: still due', in_array(201, rh_auto_prearrival_due_roots($firsts, $doneMap, [30, 15, 4], $t0, 200), true));
+$firsts[300] = date('Y-m-d', strtotime('+3 day', $t0));
+$firsts[301] = date('Y-m-d', strtotime('+31 day', $t0)); // too far: no stage
+$firsts[302] = date('Y-m-d', $t0);                        // today: no stage
+$dueR = rh_auto_prearrival_due_roots($firsts, $doneMap, [30, 15, 4], $t0, 5);
+ok('nearest arrival first; no stage = left out; limit kept', $dueR === [300, 201, 202, 203, 204], json_encode($dueR));
+
 /* ── CC list ── */
 ok('cc: valid kept, invalid dropped, case duplicates once', rh_auto_reminder_cc_list('gerald@example.invalid, not-an-email; PM@example.invalid pm@example.invalid')
     === ['gerald@example.invalid', 'PM@example.invalid'], json_encode(rh_auto_reminder_cc_list('gerald@example.invalid, not-an-email; PM@example.invalid pm@example.invalid')));
@@ -294,6 +314,71 @@ try {
         }
     } else {
         echo "[SKIP] company booking: migration 084 not run\n";
+    }
+
+    // Date and days agree: a group whose member arrives (9 days) before the lead (14 days).
+    $dl = pp_booking($pdo, 'datelead@example.invalid', 14);
+    $dm = pp_booking($pdo, 'datemember@example.invalid', 9, $dl);
+    $p = $plan($pdo, $dl);
+    $early = date('Y-m-d', strtotime('+9 day'));
+    ok('group date: arrival = the earliest room, days counted to it', !empty($p['send']) && ($p['arrival'] ?? '') === $early && ($p['days_until'] ?? 0) === 9
+        && (int)($p['lead']['id'] ?? 0) === $dl, json_encode(array_diff_key($p, ['lead' => 1])));
+    $dt = rh_prearrival_payment_email_build($p['lead'], ['days_until' => $p['days_until'], 'arrival' => $p['arrival'], 'total' => $p['total'], 'paid' => $p['paid'], 'balance' => $p['balance']]);
+    $leadDate = date('F j, Y', strtotime((string)pp_row($pdo, $dl)['check_in_date']));
+    ok('group email: the date shown is the one the days count to (9 days, ' . date('F j, Y', strtotime($early)) . '), never the lead\'s later date',
+        is_array($dt) && strpos($dt['subject'] . $dt['html_body'], date('F j, Y', strtotime($early))) !== false && strpos($dt['html_body'], '9 days') !== false
+        && strpos($dt['subject'] . $dt['html_body'], $leadDate) === false);
+    ok('job passes the arrival to the email', strpos((string)file_get_contents($root . '/includes/auto-email-jobs.php'), "'arrival' => \$plan['arrival'], 'total' => \$plan['total']") !== false);
+
+    // Overpaid room in a group: its credit offsets the group (netted, floored at 0 for the group).
+    $ol = pp_booking($pdo, 'ovlead@example.invalid', 12);
+    $om = pp_booking($pdo, 'ovmember@example.invalid', 12, $ol);
+    pp_pay($pdo, $om, (float)pp_row($pdo, $om)['amount_due'] + 250);
+    $p = $plan($pdo, $ol);
+    $owe = (float)pp_row($pdo, $ol)['amount_due'];
+    ok('group with an overpaid room: balance = lead owes - 250 credit, total foots', !empty($p['send']) && $near(pp_row($pdo, $om)['credit_balance'], 250)
+        && $near($p['balance'] ?? -1, $owe - 250) && $near($p['total'] ?? -1, ($p['paid'] ?? 0) + ($p['balance'] ?? 0)), json_encode(array_diff_key($p, ['lead' => 1])) . ' owe ' . $owe);
+    $ovt = rh_prearrival_payment_email_build($p['lead'], ['days_until' => $p['days_until'], 'arrival' => $p['arrival'], 'total' => $p['total'], 'paid' => $p['paid'], 'balance' => $p['balance']]);
+    ok('group email with an overpaid room: shows the netted balance', is_array($ovt) && strpos($ovt['html_body'], number_format($owe - 250, 2)) !== false);
+    pp_pay($pdo, $om, $owe);
+    ok('overpaid room covers the rest: nothing to remind', ($plan($pdo, $ol)['why'] ?? '') === 'paid');
+
+    // Cancelled lead: the reminder goes to the group's effective lead; the dedupe key stays the root.
+    $cl = pp_booking($pdo, 'clead@example.invalid', 11);
+    $cm1 = pp_booking($pdo, 'cm1@example.invalid', 11, $cl);
+    $cm2 = pp_booking($pdo, 'cm2@example.invalid', 10, $cl);
+    $pdo->prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?")->execute([$cl]);
+    $eff = rh_booking_group_effective_lead($pdo, $cl);
+    $p = $plan($pdo, $cl);
+    ok('cancelled lead: reminder to the effective lead (the room that took over), whole live group', !empty($p['send']) && in_array($eff, [$cm1, $cm2], true)
+        && (int)($p['lead']['id'] ?? 0) === $eff && ($p['rooms'] ?? 0) === 2 && ($p['days_until'] ?? 0) === 10, json_encode([array_diff_key($p, ['lead' => 1]), $eff]));
+    $cc5 = rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000);
+    ok('cancelled lead: the candidate (dedupe key) is still the root, never the stand-in', in_array($cl, $cc5, true) && !in_array($cm1, $cc5, true) && !in_array($cm2, $cc5, true));
+
+    // Every due group is reached: a group already done at its stage never takes a slot.
+    if ($logReady) {
+        $dueA = pp_booking($pdo, 'duea@example.invalid', 10);
+        $dueB = pp_booking($pdo, 'dueb@example.invalid', 11);
+        $dueBm = pp_booking($pdo, 'duebm@example.invalid', 11, $dueB);
+        $all = rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000);
+        ok('candidates (stage-aware): both new groups due', in_array($dueA, $all, true) && in_array($dueB, $all, true));
+        rh_auto_log_claim($pdo, 'prearrival_payment_reminders', 'room', $dueA, 'test:pre:15', 'duea@example.invalid', 'x');
+        rh_auto_log_finish($pdo, 'prearrival_payment_reminders', 'room', $dueA, 'test:pre:15', 'sent');
+        $after = rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000);
+        ok('a group sent at its current stage is left out of the candidates', !in_array($dueA, $after, true) && in_array($dueB, $after, true));
+        ok('test sends never hide a group from the live run', in_array($dueA, rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], '', null, 5000), true));
+        // Done under a member's id (the root moved by "Make primary"): the group is still done, never reminded twice.
+        $pdo->prepare("INSERT INTO automated_email_log (job, account_type, account_id, stage, recipient, subject, status) VALUES ('prearrival_payment_reminders','room',?, 'test:pre:15', 'x', 'x', 'sent')")->execute([$dueBm]);
+        ok('done under another room of the group (root moved): left out', !in_array($dueB, rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000), true));
+        // A failed send still to retry keeps its slot; after 3 failures it gives it up.
+        $soonA = pp_booking($pdo, 'soona@example.invalid', 3);
+        rh_auto_log_claim($pdo, 'prearrival_payment_reminders', 'room', $soonA, 'test:pre:4', 'x', 'x');
+        rh_auto_log_finish($pdo, 'prearrival_payment_reminders', 'room', $soonA, 'test:pre:4', 'failed', 'x');
+        ok('failed once: still a candidate (retried)', in_array($soonA, rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000), true));
+        $pdo->prepare("UPDATE automated_email_log SET attempts = 3 WHERE job = 'prearrival_payment_reminders' AND account_id = ? AND stage = 'test:pre:4'")->execute([$soonA]);
+        ok('failed 3 times: left out', !in_array($soonA, rh_auto_prearrival_candidates($pdo, 30, [30, 15, 4], 'test:', null, 5000), true));
+    } else {
+        echo "[SKIP] stage-aware candidates: automated_email_log missing\n";
     }
 
     $in = pp_booking($pdo, 'inhouse@example.invalid', 10);
