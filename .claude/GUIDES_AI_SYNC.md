@@ -67,6 +67,8 @@ when prompted."
   1024px wide) the page buttons sit right under the last row again, no gap; the dashboard movements card follows its
   rows there and keeps one height only on larger screens. Guides: 99-admin-dashboard (same line, say "on a computer
   screen"). Assistant: none. Manager Guides: none.
+  DONE 2026-11-26 (owner "fix the line"), this entry and the one above: 99-admin-dashboard "Today's movements" has the
+  page-buttons line, commit "Guide: movements card page buttons" in both repos. Nothing else left for either.
 - 2026-11-26 Liwonde bb3a41c / Rosalyn's 2908d62 (owner FEATURE): Calendar, Housekeeping and Maintenance timelines:
   with a night selected by keyboard, Left / Right past the last or first day shown moves the grid to the next /
   previous dates (same step as the Next / Previous buttons) and the cursor lands on the next night in the same room,
