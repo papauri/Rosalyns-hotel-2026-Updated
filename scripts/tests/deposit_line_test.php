@@ -180,6 +180,13 @@ foreach (['sendConferenceInvoiceEmailToClient' => 'conference', 'sendGymInvoiceE
         $totPos = strpos($body, 'rh_flat_invoice_email_total_row($fig,');
         ok("$fnName prints the total line from the helper", $totPos !== false);
         ok("$fnName total line sits above paid / due", $totPos !== false && $totPos < (int)strpos($body, 'Paid so far') && $totPos < (int)strpos($body, 'Balance due: '));
+    } else {
+        // Conference (fault 2026-11-26): the total line came from rh_conf_gross() at 0 decimals, not the PDF's figure.
+        $totPos = strpos($body, 'rh_flat_invoice_email_total_row($ciFig,');
+        $duePos = strpos($body, 'Balance due: ');
+        ok("$fnName prints the total line from the helper", $totPos !== false);
+        ok("$fnName total line sits above the balance due", $totPos !== false && $duePos !== false && $totPos < $duePos);
+        ok("$fnName has no rh_conf_gross / 0-decimal total of its own", strpos($body, 'rh_conf_gross(') === false && strpos($body, 'Invoice total:') === false);
     }
 }
 
@@ -191,7 +198,7 @@ foreach (['sendConferenceInvoiceEmailToClient' => 'conference', 'sendGymInvoiceE
 $vatOn = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
 $totLabel = $vatOn ? 'Total (incl. VAT)' : 'Total';
 echo "  (VAT at this hotel: " . ($vatOn ? 'on' : 'off') . ", mode " . (function_exists('vat_mode') ? vat_mode() : (string)getSetting('vat_mode', '')) . ")\n";
-foreach (['gym' => 'buildGymInvoiceHTML', 'event' => 'buildEventInvoiceHTML'] as $type => $fn) {
+foreach (['gym' => 'buildGymInvoiceHTML', 'event' => 'buildEventInvoiceHTML', 'conference' => 'buildConferenceInvoiceHTML'] as $type => $fn) {
     $row = array_merge($base, ['deposit_required' => 0, 'deposit_amount' => 0, 'deposit_paid' => 0,
         'total_amount' => 20000, 'vat_rate' => 15, 'vat_amount' => 3000, 'total_with_vat' => 23000, 'amount_paid' => 5000, 'amount_due' => 18000]);
     $fig = rh_flat_invoice_figures($pdo, $type, $row);
@@ -205,6 +212,14 @@ foreach (['gym' => 'buildGymInvoiceHTML', 'event' => 'buildEventInvoiceHTML'] as
     ok("$type email total line: styled like the conference total", strpos($line, 'color: #8B7355; font-size: 18px;') !== false);
 }
 ok('email total line: currency escaped', strpos(rh_flat_invoice_email_total_row(['total' => 1], '<b>'), '<b>') === false);
+// Conference: a locked total with cents shows the cents, as on the PDF (the old line printed rh_conf_gross at 0 dp: 1,235).
+$cRow = array_merge($base, ['deposit_required' => 0, 'deposit_amount' => 0, 'deposit_paid' => 0,
+    'total_amount' => 1059.71, 'vat_rate' => 16.5, 'vat_amount' => 174.85, 'total_with_vat' => 1234.56, 'amount_paid' => 0, 'amount_due' => 1234.56]);
+$cFig = rh_flat_invoice_figures($pdo, 'conference', $cRow);
+$cPdf = strip_tags(buildConferenceInvoiceHTML($cRow, 'TEST-INV-1', 'Test Hotel', 'hotel@example.invalid', '000', 'Somewhere', 'MWK'));
+$cLine = strip_tags(rh_flat_invoice_email_total_row($cFig, 'MWK'));
+ok('conference email total line keeps the cents: 1,234.56 (was 1,235)', strpos($cLine, 'MWK 1,234.56') !== false, $cLine);
+ok('conference email total line = PDF total with cents', preg_match('/' . preg_quote($totLabel, '/') . '(?:\s|&nbsp;)*MWK\s*1,234\.56/', $cPdf) === 1);
 
 echo "\ndeposit_line_test: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

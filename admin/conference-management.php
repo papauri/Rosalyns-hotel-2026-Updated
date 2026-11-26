@@ -784,6 +784,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 }
                 $postedAttendees = (int)$attRaw; // the 500 cap is checked under the lock: it applies to a NEW count only
             }
+            // Optional manual venue price (owner 2026-11-26): the room hire before packages. Empty = worked out from the
+            // room's rate as before. Same permission and limit as the venue price action (update_amount), but above 0.
+            // Checked before anything is locked or written.
+            $manualVenue = null;
+            $manualRaw = trim((string)($_POST['manual_venue_price'] ?? ''));
+            if ($manualRaw !== '') {
+                if (!$canPrice) {
+                    throw new Exception('Setting a manual venue price needs conference pricing permission.');
+                }
+                if (!is_numeric($manualRaw) || round((float)$manualRaw, 2) <= 0) {
+                    throw new Exception('The manual venue price must be a number above 0.');
+                }
+                $manualVenue = round((float)$manualRaw, 2);
+                if ($manualVenue > RH_CONF_MAX_TOTAL) {
+                    throw new Exception(rh_conf_too_big_message());
+                }
+            }
             $confPkgs = rh_conf_has_packages($pdo);
             $tol = (float)BALANCE_TOLERANCE;
 
@@ -847,13 +864,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 $priceRoom = $roomChanged ? $newRoom : rh_conf_booked_room($locked, $oldRoom);
                 $newSuggest = rh_conf_price($priceRoom, $newStart, $newEnd, $newFrom, $newTo);
                 // Owner 2026-11-26: a move to a room with no rate for this booking (daily / half-day rate empty or 0, as the
-                // pricing reads it) is refused; the old room's price is never kept silently. Nothing is written (rollback).
-                if ($roomChanged && $newSuggest['amount'] <= $tol) {
+                // pricing reads it) is refused unless staff enter a manual venue price; the old room's price is never kept
+                // silently. Nothing is written (rollback).
+                if ($roomChanged && $newSuggest['amount'] <= $tol && $manualVenue === null) {
                     throw new Exception(((string)($newRoom['name'] ?? '') !== '' ? (string)$newRoom['name'] : 'The chosen room')
-                        . ' has no rate set. Set its rate in Conference Rooms first, then move the event.');
+                        . ' has no rate set. Set its rate in Conference Rooms, or enter a manual venue price.');
                 }
-                $replaceAmount = $canPrice && (!$wasManual || !empty($_POST['recalculate_amount']))
+                $replaceAmount = $manualVenue === null && $canPrice && (!$wasManual || !empty($_POST['recalculate_amount']))
                     && abs($newSuggest['amount'] - $oldVenue) > $tol && $newSuggest['amount'] > 0;
+                // The venue price to write: the manual one, else the refreshed suggestion, else none (kept). A manual price
+                // needs no flag of its own: it differs from rate x days at the booked rates saved below (0 for a room with
+                // no rate), so the $wasManual check above keeps it on every later change.
+                $newVenue = $manualVenue ?? ($replaceAmount ? round($newSuggest['amount'], 2) : null);
 
                 if ((string)($locked['status'] ?? '') === 'confirmed' && $newRoomId > 0) {
                     if ($clash = conferenceFindClash($pdo, $newRoomId, $enquiry_id, $newStart, $newEnd, $newFrom, $newTo)) {
@@ -873,9 +895,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
 
                 $schedRes = null;
                 if ($confPkgs) {
-                    $schedRes = rh_conf_apply_totals($pdo, $enquiry_id, $replaceAmount ? round($newSuggest['amount'], 2) : null, ['room_changed' => $roomChanged]);
-                } elseif ($replaceAmount) {
-                    $schedAmount = round($newSuggest['amount'], 2);
+                    $schedRes = rh_conf_apply_totals($pdo, $enquiry_id, $newVenue, ['room_changed' => $roomChanged]);
+                } elseif ($newVenue !== null) {
+                    $schedAmount = $newVenue;
                     if (!rh_conf_total_fits($schedAmount)) {
                         throw new Exception(rh_conf_too_big_message());
                     }
@@ -893,15 +915,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 throw $schedEx;
             }
             $schedRef = (string)($locked['inquiry_reference'] ?? ('#' . $enquiry_id));
-            if ($schedRes && (abs($schedRes['new_total'] - $schedRes['old_total']) > $tol || !empty($schedRes['changes']))) {
-                $what = 'event changed (' . $newSuggest['label'] . ', ' . $newAttendees . ' delegates' . ($roomChanged ? ', room ' . (string)($newRoom['name'] ?? '') : '') . ')';
+            if ($schedRes && (abs($schedRes['new_total'] - $schedRes['old_total']) > $tol || abs((float)$schedRes['new_venue'] - (float)$schedRes['old_venue']) > $tol || !empty($schedRes['changes']))) {
+                $what = 'event changed (' . $newSuggest['label'] . ', ' . $newAttendees . ' delegates' . ($roomChanged ? ', room ' . (string)($newRoom['name'] ?? '') : '')
+                    . ($manualVenue !== null ? ', manual venue price' : '') . ')';
                 logActivity((int)($user['id'] ?? 0), 'conference_price_change', rh_conf_change_log_text($schedRef, $what, $schedRes));
             }
             $message = 'Event updated (' . $newSuggest['label'] . ($newAttendees !== $oldAttendees ? ', ' . $newAttendees . ' delegates' : '') . ($roomChanged ? ', moved to ' . (string)($newRoom['name'] ?? 'the new room') : '') . ').';
-            if ($replaceAmount) {
+            if ($manualVenue !== null) {
+                $message .= ' Venue price set manually to ' . getSetting('currency_symbol') . number_format($manualVenue, 2) . '.';
+            } elseif ($replaceAmount) {
                 $message .= ' Venue price recalculated to ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . '.';
             } elseif ($wasManual && abs($newSuggest['amount'] - $oldVenue) > $tol) {
-                $message .= ' The manually set venue price was kept (suggested price: ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . ').';
+                $message .= ' The manually set venue price was kept' . ($newSuggest['amount'] > $tol
+                    ? ' (suggested price: ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . ')' : '') . '.';
             }
             if ($schedRes && !empty($schedRes['changes'])) {
                 $message .= ' Packages repriced; total now ' . getSetting('currency_symbol') . number_format((float)$schedRes['new_total'], 2) . '.';
@@ -2464,6 +2490,12 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                             <div class="form-group">
                                 <label>Conference room:</label>
                                 <select name="conference_room_id">${confRoomOptions(enquiry.conference_room_id)}</select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Venue price (manual)<?php echo vat_mode() === 'exclusive' ? ' (before VAT)' : ''; ?>: <i class="help" data-tip="Room hire before packages; leave empty to use the room's rate.">?</i></label>
+                                <input type="number" name="manual_venue_price" step="0.01" min="0.01" max="<?php echo RH_CONF_MAX_TOTAL; ?>" value="" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                             </div>
                         </div>` : ''}
                         <div class="form-group checkbox-group">

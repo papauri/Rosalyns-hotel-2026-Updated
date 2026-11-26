@@ -173,6 +173,18 @@ ok('rh_email_plain: Rosalyn&#039;s reads as text', rh_email_plain('Rosalyn&#039;
 ok('rh_email_plain: no line break can reach the header', !preg_match('/[\x00-\x1F\x7F]/', rh_email_plain("A&#13;&#10;Bcc: x@example.invalid\r\nB&#x0A;C"))
     && rh_email_plain("A\r\nBcc: x@example.invalid") === 'A Bcc: x@example.invalid');
 ok('rh_email_plain: plain value unchanged', rh_email_plain('Conference Enquiry Received - Hotel [CONF-1]') === 'Conference Enquiry Received - Hotel [CONF-1]');
+// Invalid UTF-8 (a Latin-1 byte from an old row or a pasted value): the /u pattern fails, the subject must not go empty.
+$badSubj = rh_email_plain("Caf\xE9 Booking [CONF-9]");
+ok('rh_email_plain: invalid UTF-8 never empties the subject', $badSubj !== '' && strpos($badSubj, 'Booking [CONF-9]') !== false && strpos($badSubj, 'Caf') === 0, var_export($badSubj, true));
+ok('rh_email_plain: invalid UTF-8 comes back as valid UTF-8', mb_check_encoding($badSubj, 'UTF-8'));
+$badCtl = rh_email_plain("A\xFF\r\nBcc: x@example.invalid&#10;\x07B");
+ok('rh_email_plain: invalid UTF-8 still has no line break or control character', $badCtl !== '' && !preg_match('/[\x00-\x1F\x7F]/', $badCtl)
+    && strpos($badCtl, 'Bcc: x@example.invalid') !== false && mb_check_encoding($badCtl, 'UTF-8'), var_export($badCtl, true));
+ok('rh_email_plain: entities decoded next to an invalid byte', strpos(rh_email_plain("O&apos;Brien \xFF Ltd"), "O'Brien ") === 0, var_export(rh_email_plain("O&apos;Brien \xFF Ltd"), true));
+ok('rh_email_plain: valid accented text kept as is', rh_email_plain('Seán Müller – Café') === 'Seán Müller – Café');
+ok('rh_email_plain: only control characters gives an empty value', rh_email_plain("\r\n\t") === '' && rh_email_plain("\xFF") === '?');
+$badFill = rh_email_subject_fill('Booking - {{name}} [{{ref}}]', ['{{name}}' => "Ren\xE9e", '{{ref}}' => 'CONF-7']);
+ok('rh_email_subject_fill: an invalid UTF-8 value keeps the template text', strpos($badFill, 'Booking - Ren') === 0 && strpos($badFill, '[CONF-7]') !== false && mb_check_encoding($badFill, 'UTF-8'), var_export($badFill, true));
 
 $srcOf = static function (string $fn): string {
     $r = new ReflectionFunction($fn);

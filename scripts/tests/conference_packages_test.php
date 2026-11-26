@@ -306,7 +306,7 @@ ok('7F Remove deletes the line and lowers the total by 50,000 (3,390,000)', !iss
 // PATCH 2026-11-26 fault 5 (owner decision): a move to a room with no rate is refused, nothing written.
 $noRateB = ['UPDATE conference_rooms SET daily_rate = 0, half_day_rate = NULL WHERE id = @rb'];
 $r = $admin('no-rate move', array_merge($S, $enq('inclusive', 'NR', 750000, $B_LINES), $noRateB), $sched(3, 40, '{rb}'), $enqVerify('NR'));
-ok('fault 5: move to a room with no rate refused with "<Room> has no rate set"', strpos($r['flash'], $tag . ' Room B has no rate set. Set its rate in Conference Rooms first') !== false, $r['flash']);
+ok('fault 5: move to a room with no rate refused with "<Room> has no rate set ... or enter a manual venue price"', strpos($r['flash'], $tag . ' Room B has no rate set. Set its rate in Conference Rooms, or enter a manual venue price.') !== false, $r['flash']);
 ok('fault 5: refused move writes nothing (room, totals, lines, history unchanged)', empty($row($r)['in_b']) && $totalsOk($r, 'inclusive', 3290000, 2540000)
     && (int)($linesOf($r)['Banner']['needs_review'] ?? 1) === 0 && $logs($r) === '', json_encode([$row($r), $logs($r)]));
 $r = $admin('no-rate move manual', array_merge($S, $enq('inclusive', 'NRM', 600000, $B_LINES), $noRateB), $sched(2, 35, '{rb}'), $enqVerify('NRM'));
@@ -314,6 +314,43 @@ ok('fault 5: a manual venue price is not kept silently either: refused, dates/de
     && $totalsOk($r, 'inclusive', 3140000, 2540000) && (int)($row($r)['number_of_attendees'] ?? 0) === 40, json_encode([$row($r), $r['flash']]));
 $r = $admin('half-day-only move', array_merge($S, $enq('inclusive', 'HD', 750000, $B_LINES), ['UPDATE conference_rooms SET daily_rate = 0, half_day_rate = 120000 WHERE id = @rb']), $sched(3, 40, '{rb}'), $enqVerify('HD'));
 ok('fault 5: a full-day move to a room with only a half-day rate is refused (no rate for this booking)', strpos($r['flash'], 'has no rate set') !== false && empty($row($r)['in_b']), $r['flash']);
+
+// Manual venue price on the event change (owner 2026-11-26): a no-rate move is allowed only with one; it replaces the
+// room hire, packages still reprice, VAT on the whole total, History says "manual venue price" with venue old → new.
+foreach (['inclusive', 'exclusive'] as $mode) {
+    $SM = $seed($mode);
+    $ref = 'MV' . strtoupper($mode[0]);
+    $r = $admin("manual move $mode", array_merge($SM, $enq($mode, $ref, 750000, $B_LINES), $noRateB), $sched(3, 40, '{rb}', ['manual_venue_price' => '800000']), $enqVerify($ref));
+    ok("manual venue [$mode]: no-rate move with a manual price saved: venue 800,000 + packages 2,540,000 = 3,340,000, VAT on the whole total",
+        !empty($row($r)['in_b']) && $totalsOk($r, $mode, 3340000, 2540000), json_encode([$row($r), $r['flash'], $r['raw']]));
+    ok("manual venue [$mode]: the new room's rate (none) is saved as the booked rate, Banner flagged for the new room",
+        $near($row($r)['booked_daily_rate'] ?? -1, 0) && (int)($linesOf($r)['Banner']['needs_review'] ?? 0) === 1, json_encode([$row($r), $linesOf($r)['Banner'] ?? null]));
+    ok("manual venue [$mode]: History logs the manual venue price old → new and the total",
+        strpos($logs($r), 'manual venue price') !== false && strpos($logs($r), 'venue 750,000 → 800,000') !== false && strpos($logs($r), 'total 3,290,000 → 3,340,000') !== false, $logs($r));
+    ok("manual venue [$mode]: staff told the venue price was set manually", strpos($r['flash'], 'Venue price set manually to') !== false && strpos($r['flash'], '800,000.00') !== false, $r['flash']);
+}
+// A later change keeps the manual price (booked rate 0 in the no-rate room = "manual" by the existing check), ticked or not.
+$mvKeep = array_merge($S, $enq('inclusive', 'MVK', 800000, $B_LINES, ['room' => '@rb', 'booked' => ['0', null]]), $noRateB);
+$r = $admin('manual kept', $mvKeep, $sched(2, 35, '{rb}'), $enqVerify('MVK'));
+ok('manual venue: a later reschedule keeps the manual 800,000, packages follow (total 2,310,000)', $totalsOk($r, 'inclusive', 2310000, 1510000)
+    && strpos($r['flash'], 'manually set venue price was kept') !== false && strpos($r['flash'], 'suggested price') === false, json_encode([$row($r), $r['flash']]));
+ok('manual venue: the later reschedule is logged with the venue unchanged', strpos($logs($r), 'total 3,340,000 → 2,310,000') !== false && strpos($logs($r), 'venue ') === false, $logs($r));
+$r = $admin('manual kept ticked', $mvKeep, $sched(2, 35, '{rb}', ['recalculate_amount' => '1']), $enqVerify('MVK'));
+ok('manual venue: "replace with the suggested price" ticked never wipes it to 0 (no rate): total 2,310,000', $totalsOk($r, 'inclusive', 2310000, 1510000), json_encode([$row($r), $r['flash']]));
+// Refusals: 0, above the max, and a total that would overflow; nothing is written.
+$r = $admin('manual zero', array_merge($S, $enq('inclusive', 'MV0', 750000, $B_LINES), $noRateB), $sched(3, 40, '{rb}', ['manual_venue_price' => '0']), $enqVerify('MV0'));
+ok('manual venue: 0 is refused, nothing changes', strpos($r['flash'], 'must be a number above 0') !== false && empty($row($r)['in_b']) && $totalsOk($r, 'inclusive', 3290000, 2540000) && $logs($r) === '', json_encode([$row($r), $r['flash']]));
+$r = $admin('manual text', array_merge($S, $enq('inclusive', 'MVX', 750000, $B_LINES)), $sched(2, 40, '{ra}', ['manual_venue_price' => 'abc']), $enqVerify('MVX'));
+ok('manual venue: a non-number is refused, nothing changes', strpos($r['flash'], 'must be a number above 0') !== false && $totalsOk($r, 'inclusive', 3290000, 2540000), json_encode([$row($r), $r['flash']]));
+$r = $admin('manual max', array_merge($S, $enq('inclusive', 'MVM', 750000, $B_LINES), $noRateB), $sched(3, 40, '{rb}', ['manual_venue_price' => '100000000']), $enqVerify('MVM'));
+ok('manual venue: above 99,999,999.99 is refused, nothing changes', strpos($r['flash'], 'too large to save') !== false && empty($row($r)['in_b']) && $totalsOk($r, 'inclusive', 3290000, 2540000), json_encode([$row($r), $r['flash']]));
+$r = $admin('manual overflow', array_merge($S, $enq('inclusive', 'MVO', 750000, $B_LINES), $noRateB), $sched(3, 40, '{rb}', ['manual_venue_price' => '99999999']), $enqVerify('MVO'));
+ok('manual venue: venue + packages above the max is refused (overflow guard), nothing changes', strpos($r['flash'], 'too large to save') !== false && empty($row($r)['in_b'])
+    && $totalsOk($r, 'inclusive', 3290000, 2540000) && $logs($r) === '', json_encode([$row($r), $r['flash']]));
+// Same room, rated: a manual price replaces the computed room hire there too.
+$r = $admin('manual same room', array_merge($S, $enq('inclusive', 'MVS', 750000, $B_LINES)), $sched(2, 35, '{ra}', ['manual_venue_price' => '650000']), $enqVerify('MVS'));
+ok('manual venue: same room, 2 days / 35 delegates with a manual 650,000: total 2,160,000, booked rate unchanged', $totalsOk($r, 'inclusive', 2160000, 1510000)
+    && $near($row($r)['booked_daily_rate'] ?? -1, 250000) && strpos($logs($r), 'venue 750,000 → 650,000') !== false, json_encode([$row($r), $r['flash'], $logs($r)]));
 
 // PATCH 2026-11-26 fault 4: the 500 cap applies to a NEW delegate count only.
 $r = $admin('600 unchanged', array_merge($S, $enq('inclusive', 'D6', 750000, [], ['delegates' => 600])), $sched(2, 600), $enqVerify('D6'));
@@ -363,6 +400,9 @@ if ($hasStaff) {
         && (int)($row($r)['number_of_attendees'] ?? 0) === 40, $r['flash']);
     $r = $admin('perm dates', array_merge($S, $enq('inclusive', 'PDT', 750000, $B_LINES), $perm), $sched(2, 40), $enqVerify('PDT'), ['as_username' => 'test.staff']);
     ok('9 a date-only change without pricing permission: venue kept at 750,000, packages follow the 2 days (total 2,460,000)', $totalsOk($r, 'inclusive', 2460000, 1710000), json_encode([$row($r), $r['flash']]));
+    $r = $admin('perm manual venue', array_merge($S, $enq('inclusive', 'PMV', 750000, $B_LINES), $perm), $sched(2, 40, '{ra}', ['manual_venue_price' => '100000']), $enqVerify('PMV'), ['as_username' => 'test.staff']);
+    ok('9 a manual venue price without pricing permission is refused, nothing changes', strpos($r['flash'], 'manual venue price needs conference pricing permission') !== false
+        && $totalsOk($r, 'inclusive', 3290000, 2540000) && $logs($r) === '', json_encode([$row($r), $r['flash']]));
     $r = cpk_run('perm catalog', 'admin/conference-packages.php', ['ajax' => true, 'as_username' => 'test.staff', 'setup' => array_merge($S, $perm),
         'post' => ['action' => 'save', 'name' => $tag . ' Sneaky', 'price_type' => 'per_event', 'price_amount' => '1', 'applies_to' => 'all', 'is_active' => '1'],
         'verify' => ["SELECT COUNT(*) AS n FROM conference_packages WHERE name = '{$tag} Sneaky'"]]);

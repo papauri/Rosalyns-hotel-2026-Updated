@@ -6408,7 +6408,15 @@ function rh_email_plain($value): string
         return '';
     }
     $t = html_entity_decode((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    return trim((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $t));
+    $out = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $t);
+    if ($out === null) {
+        // Invalid UTF-8 (the /u pattern fails and returns null, which would leave an empty subject): make the text
+        // valid UTF-8 (bad bytes become "?"), then strip the control characters byte-wise. Bytes 00-1F / 7F never
+        // occur inside a UTF-8 multibyte sequence, so the pattern without /u is safe and cannot fail.
+        $t = function_exists('mb_scrub') ? mb_scrub($t, 'UTF-8') : mb_convert_encoding($t, 'UTF-8', 'UTF-8');
+        $out = preg_replace('/[\x00-\x1F\x7F]+/', ' ', (string)$t);
+    }
+    return trim((string)$out);
 }
 
 /**
@@ -7629,8 +7637,13 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
             $quoteRef = 'CQ-' . strtoupper((string)($enquiry['inquiry_reference'] ?? ('CONF-' . (int)($enquiry['id'] ?? 0))));
         }
 
+        // The attached quotation PDF's total, worked out the same way (generateConferenceQuotationPDF): the locked
+        // total_with_vat, else total_amount plus VAT (derived when only the rate is stored); shown, like the PDF, to 0 dp.
         $baseAmount = (float)($enquiry['total_amount'] ?? 0);
         $vatAmount = (float)($enquiry['vat_amount'] ?? 0);
+        if ($vatAmount <= 0 && (float)($enquiry['vat_rate'] ?? 0) > 0) {
+            $vatAmount = vat_components($baseAmount)['vat'];
+        }
         $totalAmount = (float)($enquiry['total_with_vat'] ?? 0);
         if ($totalAmount <= 0) {
             // Inclusive mode: the priced amount already contains VAT.

@@ -3504,9 +3504,9 @@ function rh_flat_invoice_figures(PDO $pdo, string $type, array $row): array
 }
 
 /**
- * PURE (reads the vat_enabled setting). The total line of the gym / event invoice EMAIL: the same figure and label as
- * the attached PDF's total row (rh_inv_flat_invoice: "Total (incl. VAT)" with VAT on, "Total" with it off), styled like
- * the conference invoice email's total line. $fig = rh_flat_invoice_figures().
+ * PURE (reads the vat_enabled setting). The total line of the conference / gym / event invoice EMAIL: the same figure,
+ * 2 decimals and label as the attached PDF's total row (rh_inv_flat_invoice: "Total (incl. VAT)" with VAT on, "Total"
+ * with it off). $fig = rh_flat_invoice_figures().
  */
 function rh_flat_invoice_email_total_row(array $fig, string $currencySymbol): string
 {
@@ -3889,11 +3889,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
                         <span style="font-weight: bold; color: #333;">Event Time:</span>
                         <span style="color: #666;">' . date('H:i', strtotime($enquiry['start_time'])) . ' - ' . date('H:i', strtotime($enquiry['end_time'])) . '</span>
                     </div>
-
-                    <div style="display: flex; justify-content: space-between; padding: 15px 0;">
-                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Invoice total:</span>
-                        <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . $currency_symbol . ' ' . number_format(rh_conf_gross($enquiry), 0) . '</span>
-                    </div>
+' . rh_flat_invoice_email_total_row($ciFig, (string)$currency_symbol) . '
                 </div>
 
                 <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
