@@ -4409,7 +4409,7 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
             . '<p><strong>Inquiry Ref:</strong> ' . htmlspecialchars((string)($inquiry['reference_number'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
             . '<strong>Quotation Ref:</strong> ' . htmlspecialchars($quoteRef, ENT_QUOTES, 'UTF-8') . '<br>'
             . '<strong>Package:</strong> ' . htmlspecialchars((string)($inquiry['membership_type'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
-            . '<strong>Total:</strong> ' . htmlspecialchars($currency, ENT_QUOTES, 'UTF-8') . number_format($totalAmount, 0) . '<br>'
+            . '<strong>Total:</strong> ' . htmlspecialchars(rh_pdf_money($totalAmount), ENT_QUOTES, 'UTF-8') . '<br>' // exactly as the PDF prints it (rh_pdf_money, hotel currency, "MWK 1,234.56")
             . '<strong>Valid Until:</strong> ' . $validUntil->format('F j, Y') . '</p>';
 
         if ($notes !== '') {
@@ -4622,7 +4622,7 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
             . '<p><strong>Inquiry Ref:</strong> ' . htmlspecialchars((string)($inquiry['reference_number'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
             . '<strong>Quotation Ref:</strong> ' . htmlspecialchars($quoteRef, ENT_QUOTES, 'UTF-8') . '<br>'
             . '<strong>Event:</strong> ' . htmlspecialchars((string)($inquiry['event_title'] ?? ''), ENT_QUOTES, 'UTF-8') . '<br>'
-            . '<strong>Total:</strong> ' . htmlspecialchars($currency, ENT_QUOTES, 'UTF-8') . number_format($totalAmount, 0) . '<br>'
+            . '<strong>Total:</strong> ' . htmlspecialchars(rh_pdf_money($totalAmount), ENT_QUOTES, 'UTF-8') . '<br>' // exactly as the PDF prints it (rh_pdf_money, hotel currency, "MWK 1,234.56")
             . '<strong>Valid Until:</strong> ' . $validUntil->format('F j, Y') . '</p>';
 
         if ($notes !== '') {

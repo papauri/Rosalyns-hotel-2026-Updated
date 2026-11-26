@@ -1035,9 +1035,14 @@ function sendGymQuotationWhatsApp(array $inquiry, array $options = []): array
 
     $baseAmount = (float)($inquiry['total_amount'] ?? 0);
     $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
-    $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
-    if ($totalAmount <= 0) {
-        $totalAmount = $baseAmount + $vatAmount;
+    // Same total as the quotation email and PDF (VAT from the rate when not stored, inclusive mode = base).
+    if (function_exists('rh_quote_email_total')) {
+        $totalAmount = rh_quote_email_total($inquiry);
+    } else {
+        $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
+        if ($totalAmount <= 0) {
+            $totalAmount = $baseAmount + $vatAmount;
+        }
     }
 
     $vars = [
@@ -1047,7 +1052,7 @@ function sendGymQuotationWhatsApp(array $inquiry, array $options = []): array
         'quote_reference' => $quoteRef,
         'quotation_reference' => $quoteRef,
         'membership_type' => (string)($inquiry['membership_type'] ?? ''),
-        'total_amount' => $currency . ' ' . number_format($totalAmount, 0),
+        'total_amount' => function_exists('rh_pdf_money') ? rh_pdf_money($totalAmount) : ($currency . ' ' . number_format($totalAmount, 2)), // as the PDF prints it
         'valid_until' => $validUntil,
         'quotation_notes' => $notes !== '' ? $notes : 'Please confirm before the validity date to secure this quotation.',
         'hotel_phone' => getSetting('phone_main', ''),
@@ -1081,9 +1086,14 @@ function sendEventInquiryQuotationWhatsApp(array $inquiry, array $options = []):
 
     $baseAmount = (float)($inquiry['total_amount'] ?? 0);
     $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
-    $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
-    if ($totalAmount <= 0) {
-        $totalAmount = $baseAmount + $vatAmount;
+    // Same total as the quotation email and PDF (VAT from the rate when not stored, inclusive mode = base).
+    if (function_exists('rh_quote_email_total')) {
+        $totalAmount = rh_quote_email_total($inquiry);
+    } else {
+        $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
+        if ($totalAmount <= 0) {
+            $totalAmount = $baseAmount + $vatAmount;
+        }
     }
 
     $vars = [
@@ -1094,7 +1104,7 @@ function sendEventInquiryQuotationWhatsApp(array $inquiry, array $options = []):
         'quotation_reference' => $quoteRef,
         'event_title' => (string)($inquiry['event_title'] ?? 'Event'),
         'guests' => (string)max(1, (int)($inquiry['guests'] ?? 1)),
-        'total_amount' => $currency . ' ' . number_format($totalAmount, 0),
+        'total_amount' => function_exists('rh_pdf_money') ? rh_pdf_money($totalAmount) : ($currency . ' ' . number_format($totalAmount, 2)), // as the PDF prints it
         'valid_until' => $validUntil,
         'quotation_notes' => $notes !== '' ? $notes : 'Please confirm before the validity date to secure your event booking.',
         'hotel_phone' => getSetting('phone_main', ''),

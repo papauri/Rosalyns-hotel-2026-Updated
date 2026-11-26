@@ -265,5 +265,40 @@ foreach (['sendGymQuotationEmail', 'sendEventInquiryQuotationEmail'] as $fnName)
         && strpos($body, "\$vatAmount = (float)(\$inquiry['vat_amount']") === false);
 }
 
+// Quotation email Total shows the same decimals as its attached PDF (PATCH 2026-11-26). Gym / event-inquiry PDFs
+// print via rh_pdf_money (2 dp, "MWK 1,234.56"); the conference and event quotation PDFs (includes/quotation-pdf.php)
+// print $currency . number_format(x, 0), so those two emails stay at 0 dp to match.
+$fnBody = static function (string $src, string $fnName): string {
+    $start = strpos($src, 'function ' . $fnName . '(');
+    if ($start === false) { return ''; }
+    $end = strpos($src, "\nfunction ", $start + 10);
+    return substr($src, $start, ($end === false ? strlen($src) : $end) - $start);
+};
+foreach (['sendGymQuotationEmail', 'sendEventInquiryQuotationEmail'] as $fnName) {
+    $body = $fnBody($eSrc, $fnName);
+    ok("$fnName no longer prints number_format(\$totalAmount, 0)", $body !== '' && strpos($body, 'number_format($totalAmount, 0)') === false);
+    ok("$fnName prints the total with rh_pdf_money (hotel currency), exactly as the PDF", strpos($body, "htmlspecialchars(rh_pdf_money(\$totalAmount), ENT_QUOTES, 'UTF-8')") !== false);
+}
+// The PDF (rh_inv_quotation_html) prints rh_pdf_money($v, hotel_brand_tokens()['hotel']['currency']); the email passes
+// no currency, so rh_pdf_money uses that same brand currency (empty setting -> MWK, negatives "-MWK 5.00" in both).
+$brandCur = hotel_brand_tokens()['hotel']['currency'];
+ok('quotation email total = quotation PDF figure for 1234.56', rh_pdf_money(1234.56) === rh_pdf_money(1234.56, $brandCur), rh_pdf_money(1234.56));
+ok('quotation email total = quotation PDF figure for -5', rh_pdf_money(-5.0) === rh_pdf_money(-5.0, $brandCur), rh_pdf_money(-5.0));
+ok('quotation email total 1234.56 has 2 decimals', (bool)preg_match('/ 1,234\.56$/', rh_pdf_money(1234.56)), rh_pdf_money(1234.56));
+// WhatsApp gym / event-inquiry quotations: same total and format as the email and PDF.
+$wSrc = (string)file_get_contents($root . '/includes/whatsapp-functions.php');
+foreach (['sendGymQuotationWhatsApp', 'sendEventInquiryQuotationWhatsApp'] as $fnName) {
+    $body = $fnBody($wSrc, $fnName);
+    ok("$fnName uses rh_quote_email_total (same total as email + PDF)", strpos($body, '$totalAmount = rh_quote_email_total($inquiry);') !== false);
+    ok("$fnName prints the total with rh_pdf_money", strpos($body, "'total_amount' => function_exists('rh_pdf_money') ? rh_pdf_money(\$totalAmount)") !== false);
+}
+ok('sendEventQuotationWhatsApp keeps 0 dp (its PDF prints 0 dp)', strpos($fnBody($wSrc, 'sendEventQuotationWhatsApp'), "'total_amount' => \$currency . ' ' . number_format(\$totalAmount, 0),") !== false);
+$qSrc = (string)file_get_contents($root . '/includes/quotation-pdf.php');
+foreach (['sendConferenceQuotationEmail' => 'generateConferenceQuotationPDF', 'sendEventQuotationEmail' => 'generateEventQuotationPDF'] as $mailFn => $pdfFn) {
+    $pdfAt0 = strpos($fnBody($qSrc, $pdfFn), 'return $currency . number_format($value, 0);') !== false;
+    $mailAt0 = strpos($fnBody($eSrc, $mailFn), 'number_format($totalAmount, 0)') !== false;
+    ok("$mailFn total decimals match $pdfFn", $pdfAt0 === $mailAt0, 'pdf 0dp ' . var_export($pdfAt0, true) . ', email 0dp ' . var_export($mailAt0, true));
+}
+
 echo "\ndeposit_line_test: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

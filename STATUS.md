@@ -46,8 +46,9 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   - Manual venue price + conference email total = PDF + subject never blank DONE: Liwonde e4bf933 / Rosalyn's 60d5cc7.
   - email_send_log_test brought up to date (test only): Liwonde 88a0728 / Rosalyn's 49d22ae.
   - Icon preview (Conference Packages, Gym, Page Management) + booked rates on any room move + gym/event quotation email total = PDF DONE: Liwonde 4aa3d3b / Rosalyn's ffc4f2c.
-  - LATER: gym/event quotation emails print the total with 0 decimals (email.php ~4412, ~4625; the PDF shows cents);
-  - LATER: conference-packages.php ~516 loads admin-components.js twice (listener registered twice, harmless).
+  - Gym/event quotation email + WhatsApp total = PDF (rh_pdf_money; WhatsApp uses rh_quote_email_total) + Conference
+    Packages loads admin-components.js once DONE 2026-11-27: Liwonde 1404789 / Rosalyn's (this port). Files identical.
+  - LATER: in the two WhatsApp quotation functions $currency/$baseAmount/$vatAmount now only feed the fallback (tidy-up).
 
 ## Shipped 2026-11-25: Guides + Assistant sync (owner prompted; port of Liwonde e48fc69)
 - Staff guides (Rosalyn's branding kept), Assistant answers (why cancelled, unapproved counts, arrivals to chase) and the

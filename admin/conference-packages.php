@@ -513,7 +513,6 @@ $cpVatNote = vat_mode() === 'exclusive' ? 'before VAT (VAT is added on top, as f
         </script>
     <?php endif; ?>
 
-    <script src="js/admin-components.js" defer></script>
 <?php require_once 'includes/admin-footer.php'; ?>
 </body>
 
