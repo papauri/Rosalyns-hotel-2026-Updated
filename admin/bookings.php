@@ -455,7 +455,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'convert_tentative') {
             $booking_id = (int)($_POST['id'] ?? 0);
             // Shared with the bulk Confirm: admin/includes/booking-row-actions.php (same checks, email, History).
-            $convertRes = bookings_convert_tentative_booking($pdo, $booking_id, $user);
+            // Edited email wording (owner 2026-11-27, More > Confirm and edit email): checked before anything changes.
+            require_once __DIR__ . '/../includes/email-wording.php';
+            $convertWording = rh_email_wording_from_post('tentative_booking_converted', $_POST);
+            if ($convertWording !== null && empty($convertWording['ok'])) {
+                throw new Exception('Nothing was confirmed. ' . $convertWording['error']);
+            }
+            $convertRes = bookings_convert_tentative_booking($pdo, $booking_id, $user, $convertWording);
             $message = $convertRes['message'];
         } elseif ($action === 'convert_to_tentative') {
             $booking_id = (int)($_POST['id'] ?? 0);
@@ -736,7 +742,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (in_array($current_status, ['pending', 'tentative'], true) && $new_status === 'confirmed') {
                     // Confirming a hold (locked availability re-check, status, room counter, History, confirmation
                     // email, automatic room when paid): shared with the bulk Confirm, admin/includes/booking-row-actions.php.
-                    $confirmRes = bookings_confirm_hold($pdo, (int)$booking_id, $user, $current_booking);
+                    // Edited email wording (owner 2026-11-27, More > Confirm and edit email): checked before anything changes.
+                    require_once __DIR__ . '/../includes/email-wording.php';
+                    $confirmWording = rh_email_wording_from_post('booking_confirmed', $_POST);
+                    if ($confirmWording !== null && empty($confirmWording['ok'])) {
+                        throw new Exception('Nothing was confirmed. ' . $confirmWording['error']);
+                    }
+                    $confirmRes = bookings_confirm_hold($pdo, (int)$booking_id, $user, $current_booking, $confirmWording);
                     $message = $confirmRes['message'];
                 } else {
                     // Update booking status; if leaving tentative, clear tentative fields so badge counts stay accurate
@@ -770,6 +782,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cur->execute([$booking_id]);
             $current = $cur->fetch(PDO::FETCH_ASSOC);
             if (!$current) throw new Exception('Booking not found');
+
+            // Edited "Booking updated" email wording (owner 2026-11-27): checked before anything changes.
+            require_once __DIR__ . '/../includes/email-wording.php';
+            $modWording = rh_email_wording_from_post('booking_modified', $_POST);
+            if ($modWording !== null && empty($modWording['ok'])) {
+                throw new Exception('Nothing was changed. ' . $modWording['error']);
+            }
 
             // Only fields the modal allows. Whitelist + sanitize.
             $allowed = [
@@ -955,7 +974,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Send guest modification email when meaningful fields changed
             $notifyFields = ['check_in_date', 'check_out_date', 'number_of_guests', 'adult_guests', 'child_guests',
                              'room_id', 'total_amount', 'status', 'special_requests', 'guest_email', 'guest_name', 'guest_phone'];
-            $meaningfulChanges = array_intersect_key($newValues, array_flip($notifyFields));
+            // Only the fields that really changed, as old -> new pairs (the email lists them; the modal posts every field).
+            $meaningfulChanges = [];
+            foreach (array_intersect_key($newValues, array_flip($notifyFields)) as $mf => $mv) {
+                $mOld = (string)($current[$mf] ?? '');
+                if ($mOld !== (string)$mv) {
+                    $meaningfulChanges[$mf] = ['old' => $mOld, 'new' => (string)$mv];
+                }
+            }
             if (!empty($meaningfulChanges)) {
                 try {
                     require_once '../config/email.php';
@@ -963,16 +989,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $modStmt->execute([$booking_id]);
                     $modBooking = $modStmt->fetch(PDO::FETCH_ASSOC);
                     if ($modBooking) {
-                        $modEmailResult = sendBookingModifiedEmail($modBooking, $meaningfulChanges);
+                        $modEmailResult = rh_email_wording_send($modWording, static function () use ($modBooking, $meaningfulChanges) {
+                            return sendBookingModifiedEmail($modBooking, $meaningfulChanges);
+                        }, $booking_id, (string)($modBooking['booking_reference'] ?? ''), $user);
                         if ($modEmailResult['success']) {
                             $message .= ' Guest notified by email.';
                         } else {
                             error_log('Quick-modify guest email failed for booking ' . $booking_id . ': ' . $modEmailResult['message']);
+                            if ($modWording !== null) {
+                                $message .= ' Email NOT sent: ' . htmlspecialchars((string)$modEmailResult['message']);
+                            }
                         }
                     }
                 } catch (Throwable $modEmailEx) {
                     error_log('Quick-modify guest email exception for booking ' . $booking_id . ': ' . $modEmailEx->getMessage());
+                    if ($modWording !== null) {
+                        $message .= ' Email NOT sent: ' . htmlspecialchars($modEmailEx->getMessage());
+                    }
                 }
+            } elseif ($modWording !== null) {
+                $message .= ' No email sent: nothing the guest sees changed.';
             }
 
             if (isAjaxRequest()) {
@@ -2513,6 +2549,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bbPlan = rh_bk_bulk_plan($pdo, $bbOp, $bbIds, (int)($user['id'] ?? 0));
                 echo json_encode(empty($bbPlan['success']) ? ['success' => false, 'message' => $bbPlan['error']] : [
                     'success' => true, 'state' => $bbPlan['state'], 'rooms' => $bbPlan['rooms'], 'will' => $bbPlan['will'], 'skip' => $bbPlan['skip'],
+                    'email_keys' => $bbPlan['email_keys'] ?? [],
                     'once' => rh_bk_bulk_once_issue($_SESSION['rh_bk_bulk_once'], $bbScope),
                 ], JSON_INVALID_UTF8_SUBSTITUTE);
                 exit;
@@ -2533,7 +2570,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'cancellation_reason' => trim((string)($_POST['cancellation_reason'] ?? '')),
                 'email_guest' => (string)($_POST['email_guest'] ?? '0') === '1' ? '1' : '0',
                 'note' => trim((string)($_POST['note'] ?? '')),
+                // One edited email wording for the batch (owner 2026-11-27), checked once in rh_bk_bulk_apply().
+                'email_wording_key' => trim((string)($_POST['email_wording_key'] ?? '')),
+                'email_wording_html' => (string)($_POST['email_wording_html'] ?? ''),
             ];
+            // Checked before the one-time token is used too, so a refused wording can be fixed and the review confirmed.
+            $bbWordingCheck = rh_email_wording_bulk_check($bbOp, $bbIn);
+            if ($bbWordingCheck !== null && empty($bbWordingCheck['ok'])) {
+                echo json_encode(['success' => false, 'message' => $bbWordingCheck['error'] . ' Nothing was done.']);
+                exit;
+            }
             if ($bbOp === 'cancel' && !($bbReasonCheck = rh_cancel_reason_check($bbIn['cancellation_reason']))['ok']) {
                 // Checked before the one-time token is used, so the same review can still be confirmed.
                 echo json_encode(['success' => false, 'message' => $bbReasonCheck['error']]);
@@ -4623,6 +4669,10 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                                             <?php endif; ?>
 
                                                             <hr class="menu-divider">
+                                                            <?php if ($bkCanConfirm && ($is_tentative || $bk_status === 'pending')): ?>
+                                                                <?php /* Same action as the row's one-click Confirm, through a dialog that can edit the email first (owner 2026-11-27). */ ?>
+                                                                <button type="button" onclick="confirmWithEmailEdit(<?php echo $bk_id; ?>, <?php echo $is_tentative ? 'true' : 'false'; ?>)"><i class="fas fa-circle-check"></i> Confirm and edit email</button>
+                                                            <?php endif; ?>
                                                             <button type="button" onclick="openResendEmailModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_js($bk_status); ?>, <?php echo ($is_missed_checkin || $is_overdue_checkout) ? 'true' : 'false'; ?>)"><i class="fas fa-envelope"></i> Resend email</button>
                                                             <?php if ($bk_doc === 'receipt' && $can_receipt): ?>
                                                                 <button type="button" onclick="rhSendAccountReceipt('room', <?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-receipt"></i> Send receipt</button>
@@ -6465,6 +6515,38 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         setButtonLoading(activeBtn, false);
                     }
                     Alert.show(error.message || 'Error updating status', 'error');
+                });
+        }
+
+        // More > Confirm and edit email (owner 2026-11-27): the row's Confirm (tentative -> convert_tentative, pending ->
+        // update_status confirmed) behind a dialog whose "Edit email wording" changes the guest's email for this one send.
+        async function confirmWithEmailEdit(id, isTentative) {
+            const keyInput = document.createElement('input');
+            const htmlInput = document.createElement('input');
+            const confirmed = await confirmAdminAction({
+                title: 'Confirm booking',
+                message: isTentative ? 'Convert this tentative booking to a confirmed reservation?' : 'Move this pending booking to Confirmed?',
+                details: ['A confirmation email will be sent to the guest. Use "Edit email wording" to change its words first.'],
+                confirmText: 'Confirm Booking',
+                icon: 'fa-circle-check',
+                tone: 'success',
+                wording: { key: isTentative ? 'tentative_booking_converted' : 'booking_confirmed', bookingId: id, keyInput: keyInput, htmlInput: htmlInput }
+            });
+            if (!confirmed) return;
+            showLoadingOverlay(isTentative ? 'Converting booking to confirmed...' : 'Updating booking status...');
+            const formData = new FormData();
+            formData.append('action', isTentative ? 'convert_tentative' : 'update_status');
+            formData.append('id', id);
+            if (!isTentative) formData.append('status', 'confirmed');
+            if (keyInput.value && htmlInput.value) {
+                formData.append('email_wording_key', keyInput.value);
+                formData.append('email_wording_html', htmlInput.value);
+            }
+            postBookingAction(formData, 'Error confirming booking')
+                .then(data => reloadWithBookingActionMessage(data, 'Booking confirmed.'))
+                .catch(error => {
+                    hideLoadingOverlay();
+                    Alert.show(error.message || 'Error confirming booking', 'error');
                 });
         }
 
@@ -11502,7 +11584,11 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             const mbRateQ = mbDatesChanged()
                 ? await bkStayRateQuote(fd.get('id'), fd.get('check_in_date'), fd.get('check_out_date'))
                 : null;
+            // Optional edit of the "Booking updated" email the guest gets when dates, guests or details change (owner 2026-11-27).
+            const mbWording = window.RhEmailWording ? window.RhEmailWording.inputsFor(this) : null;
+            if (mbWording) { mbWording.keyInput.value = ''; mbWording.htmlInput.value = ''; }
             const confirmed = await confirmAdminAction({
+                wording: mbWording ? { key: 'booking_modified', bookingId: fd.get('id'), keyInput: mbWording.keyInput, htmlInput: mbWording.htmlInput } : null,
                 title: 'Confirm booking changes',
                 message: 'Review the main booking values before saving ' + ref + '.',
                 details: [
@@ -11514,6 +11600,10 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 icon: 'fa-pen-to-square'
             });
             if (!confirmed) return;
+            if (mbWording) {
+                fd.set('email_wording_key', mbWording.keyInput.value);
+                fd.set('email_wording_html', mbWording.htmlInput.value);
+            }
             const btn = this.querySelector('button[type=submit]');
             if (btn) setButtonLoading(btn, true);
             showLoadingOverlay('Saving changes…');
@@ -12258,6 +12348,15 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         <p class="bk-bulk-note">Each room's no-show fee is the automatic one. To change one room's fee, open that booking.</p>
                     </div>
                 </div>
+                <?php /* One edited email wording for the whole batch (owner 2026-11-27): shown when the bookings going ahead get an editable email. */ ?>
+                <div class="ew-open-row" id="bkBulkWording" hidden>
+                    <select id="bkBulkWordingKey" class="form-control" aria-label="Which email to edit" hidden></select>
+                    <button type="button" class="btn btn-secondary" id="bkBulkWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit email wording</button>
+                    <i class="help" data-tip="Change the words of this email once for every ticked booking that gets it. Each guest's own name, dates, room and amounts are still filled in from their booking. The saved template stays the default. Prices, totals and payment details cannot be changed. The invoice keeps its fixed wording.">?</i>
+                    <span class="ew-open-state" id="bkBulkWordingState"></span>
+                    <input type="hidden" id="bkBulkWKey" value="">
+                    <input type="hidden" id="bkBulkWHtml" value="">
+                </div>
                 <p id="bkBulkError" class="rh-form-error" role="alert" hidden></p>
             </div>
             <div class="admin-modal__footer">
@@ -12372,6 +12471,43 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         /* ---- Remove from group, Send a reminder, Resend confirmation, Email invoice ---- */
         var bulk = { op: '', ids: [], state: '', once: '', seq: 0, done: false, label: 'Confirm' };
         function bulkError(m) { var e = byId('bkBulkError'); if (!e) return; e.textContent = m || ''; e.hidden = !m; }
+        // One edited email wording for the batch (owner 2026-11-27): the review lists which editable emails the bookings
+        // going ahead get (res.email_keys); the edit is used for every booking that gets that email, the rest keep the
+        // default wording. Checked once on the server before anything is done.
+        var BULK_EMAIL_NAMES = {
+            booking_received: 'Booking received email', booking_confirmed: 'Booking confirmed email',
+            tentative_booking_created: 'Tentative booking email', tentative_booking_converted: 'Tentative-to-confirmed email',
+            booking_reminder: 'Reminder email', booking_cancelled: 'Cancellation email'
+        };
+        function bulkWordingClear() {
+            var k = byId('bkBulkWKey'), h = byId('bkBulkWHtml'), s = byId('bkBulkWordingState');
+            if (k) k.value = '';
+            if (h) h.value = '';
+            if (s) s.textContent = '';
+        }
+        function bulkWordingSetup(keys) {
+            var wrap = byId('bkBulkWording'), sel = byId('bkBulkWordingKey');
+            bulkWordingClear();
+            if (!wrap || !sel) return;
+            keys = (keys || []).filter(function (k) { return BULK_EMAIL_NAMES[k]; });
+            sel.innerHTML = keys.map(function (k) { return '<option value="' + esc(k) + '">' + esc(BULK_EMAIL_NAMES[k]) + '</option>'; }).join('');
+            sel.hidden = keys.length < 2;
+            sel.style.display = keys.length < 2 ? 'none' : ''; // .form-control sets display, which beats [hidden]
+            sel.disabled = false;
+            wrap.hidden = !keys.length || !window.RhEmailWording;
+        }
+        function editBulkWording() {
+            var sel = byId('bkBulkWordingKey');
+            if (!sel || !sel.value || !window.RhEmailWording) return;
+            var key = sel.value;
+            window.RhEmailWording.open({
+                key: key, bookingId: 0, keyInput: byId('bkBulkWKey'), htmlInput: byId('bkBulkWHtml'),
+                onDone: function () {
+                    var s = byId('bkBulkWordingState');
+                    if (s) s.textContent = 'Your edited wording will be used for every ' + (BULK_EMAIL_NAMES[key] || 'email').toLowerCase() + ' in this batch.';
+                }
+            });
+        }
         function openBulk(btn) {
             var m = byId('bkBulkModal');
             var p = picked();
@@ -12394,6 +12530,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             byId('bkBulkList').innerHTML = '';
             bulkError('');
             bulkExtra('');
+            bulkWordingSetup([]);
             open(m);
             post('preview_bookings_bulk', { op: bulk.op }, bulk.ids, 'bulk_ids').then(function (res) {
                 if (my !== bulk.seq) return;
@@ -12408,6 +12545,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     var e = byId('bkBulkEmail');
                     if (e) e.checked = (res.rooms || []).some(function (r) { return r.will && r.email_default; });
                 }
+                if (res.will) bulkWordingSetup(res.email_keys || []);
                 bulk.state = res.state || '';
                 bulk.once = res.once || '';
                 c.disabled = !res.will || !bulk.state;
@@ -12428,6 +12566,15 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 var nsWhy = noteEl ? noteEl.value.trim() : '';
                 if (nsWhy.length < 5) { bulkError('Say why these bookings are no-shows (at least 5 characters). It is written to every room\'s History.'); if (noteEl) noteEl.focus(); return; }
                 fields.note = nsWhy;
+            }
+            var wKey = byId('bkBulkWKey'), wHtml = byId('bkBulkWHtml');
+            if (wKey && wHtml && wKey.value && wHtml.value) {
+                if (bulk.op === 'cancel' && fields.email_guest !== '1') {
+                    bulkError('You edited the cancellation email but "Email the guest" is unticked. Tick it, or reopen the review to drop the edit.');
+                    return;
+                }
+                fields.email_wording_key = wKey.value;
+                fields.email_wording_html = wHtml.value;
             }
             var list = byId('bkBulkList');
             if (bulk.op === 'remove_group' && list) {
@@ -12456,6 +12603,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 bulk.done = (res.done || 0) > 0;
                 c.hidden = true;
                 bulkExtra('');
+                bulkWordingSetup([]);
                 byId('bkBulkCancel').textContent = 'Close';
                 byId('bkBulkIntro').textContent = res.message || '';
                 byId('bkBulkList').innerHTML = roomTable('Result', res.results || [], null, 'What was done to this booking, or why it was skipped and left as it is.');
@@ -12631,11 +12779,13 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             }
             if (t.closest('[data-bk-bulk-close]')) { closeBulk(); return; }
             if (t.closest('#bkBulkConfirm')) { confirmBulk(); return; }
+            if (t.closest('#bkBulkWordingBtn')) { editBulkWording(); return; }
             if (t.closest('[data-bk-group-close]')) { closeGroup(); return; }
             if (t.closest('#bkGroupConfirm')) { confirmGroup(); return; }
             if (t.closest('#bkGroupRefCheck')) { grpPreview(); return; }
         });
         document.addEventListener('change', function (ev) {
+            if (ev.target && ev.target.id === 'bkBulkWordingKey') { bulkWordingClear(); return; }
             if (ev.target && ev.target.matches && ev.target.matches('#bkGroupLeads input[name="bkGroupLead"]')) grpPreview();
         });
         document.addEventListener('keydown', function (ev) {

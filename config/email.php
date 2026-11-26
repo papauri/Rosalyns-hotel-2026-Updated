@@ -1962,6 +1962,31 @@ function ensureBookingEmailTemplateDefaults()
                     . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">{{payment_policy}}</td></tr>'
             ),
         ],
+        // Staff changed a booking (Edit booking / Modify, "Email the guest" ticked). {{changes_html}} is the list of
+        // what changed (old -> new), filled per send; before this template existed the email was fixed wording.
+        'booking_modified' => [
+            'name'    => 'Booking Updated',
+            'subject' => 'Booking Updated — {{site_name}} · {{booking_reference}}',
+            'html'    => hotel_premium_email_html(
+                'Your booking has been updated — Reference: {{booking_reference}}',
+                hotel_premium_email_body(
+                    '{{guest_name}}',
+                    '<p style="margin:0;">Your booking with <strong>{{site_name}}</strong> has been updated by our team. Please review the details below.</p>'
+                )
+                    . '<tr><td style="padding:0 48px 24px;">{{changes_html}}</td></tr>'
+                    . '<tr><td style="padding:0 48px 16px;">{{group_rooms_block}}</td></tr>'
+                    . hotel_premium_email_summary_rows('Updated Booking Details', [
+                        ['Reference',  '{{booking_reference}}'],
+                        ['Room',       '{{room_name}}'],
+                        ['Check-in',   '{{check_in_date_formatted}}'],
+                        ['Check-out',  '{{check_out_date_formatted}}'],
+                        ['Nights',     '{{number_of_nights}}'],
+                        ['Guests',     '{{number_of_guests}}'],
+                        ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
+                    ])
+                    . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">Check-in from {{check_in_time}} &middot; Check-out by {{check_out_time}}. Questions about these changes? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</td></tr>'
+            ),
+        ],
         /* ── Quotation emails ────────────────────────────────────── */
         'tentative_quotation' => [
             'name'    => 'Room Quotation Email',
@@ -3370,6 +3395,44 @@ function sendBookingConfirmedEmail(array $booking)
 /**
  * Send booking modified email (sent when admin edits a booking)
  */
+/**
+ * PURE. The "What changed" block of the Booking Updated email ({{changes_html}}): one row per field, old value struck
+ * through, new value after it. $changes = [field => ['old' => .., 'new' => ..]] (a plain value is shown as the new
+ * value). Every value is escaped; '' when nothing changed.
+ */
+function rh_booking_modified_changes_html(array $changes): string
+{
+    if ($changes === []) {
+        return '';
+    }
+    $labels = [
+        'room' => 'Room', 'check_in_date' => 'Check-in', 'check_out_date' => 'Check-out', 'number_of_nights' => 'Nights',
+        'number_of_guests' => 'Guests', 'occupancy_type' => 'Occupancy', 'total_amount' => 'Total',
+        'guest_name' => 'Guest name', 'guest_email' => 'Email', 'guest_phone' => 'Phone', 'guest_country' => 'Country',
+    ];
+    $e = static function ($v): string {
+        return htmlspecialchars(is_scalar($v) || $v === null ? (string)$v : '', ENT_QUOTES, 'UTF-8');
+    };
+    $rows = '';
+    $i = 0;
+    foreach ($changes as $field => $change) {
+        $label = $labels[$field] ?? ucfirst(str_replace('_', ' ', (string)$field));
+        $old = is_array($change) ? ($change['old'] ?? '') : '';
+        $newV = is_array($change) ? ($change['new'] ?? '') : $change;
+        $border = $i++ > 0 ? 'border-top:1px solid #e1dbce;' : '';
+        $rows .= '<tr>'
+            . '<td width="34%" style="color:#9b8f7e;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;font-size:9px;padding:8px 0;' . $border . '">' . $e($label) . '</td>'
+            . '<td width="33%" style="color:#9b8f7e;text-decoration:line-through;padding:8px 6px;' . $border . '">' . $e($old) . '</td>'
+            . '<td width="33%" style="color:#3e3930;font-weight:600;text-align:right;padding:8px 0;' . $border . '">' . $e($newV) . '</td>'
+            . '</tr>';
+    }
+    return '<table width="100%" border="0" cellspacing="0" cellpadding="0" style="border:1px solid #d3cbc0;">'
+        . '<tr><td style="padding:20px 24px;">'
+        . '<div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#9b8f7e;font-weight:600;margin-bottom:12px;text-align:center;">What changed</div>'
+        . '<table width="100%" border="0" cellspacing="0" cellpadding="0" style="font-size:12px;line-height:1.6;">' . $rows . '</table>'
+        . '</td></tr></table>';
+}
+
 function sendBookingModifiedEmail(array $booking, array $changes = [])
 {
     $emailCtx = rh_email_context(['kind' => 'booking_modified'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
@@ -3415,6 +3478,21 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
                     </tr>';
             }
             $changesHtml .= '</table></div>';
+        }
+
+        // Stored template first (Email & PDF templates > Booking Updated); the fixed wording below is the fallback
+        // when it is missing or switched off. With edited wording set, a missing template throws instead (no fallback).
+        $templateVars = buildBookingEmailVariables($booking, $room);
+        $templateVars['changes_html'] = rh_booking_modified_changes_html($changes);
+        $dbTemplate = renderBookingEmailTemplate('booking_modified', $templateVars);
+        if ($dbTemplate) {
+            return sendEmail(
+                $booking['guest_email'],
+                $booking['guest_name'],
+                $dbTemplate['subject'],
+                $dbTemplate['html_body'],
+                $dbTemplate['text_body']
+            );
         }
 
         $htmlBody = '

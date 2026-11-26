@@ -661,6 +661,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
     try {
         switch ($action) {
             case 'convert':
+                // Edited email wording (owner 2026-11-27): checked before anything changes; a refusal stops here.
+                $convertWording = rh_email_wording_from_post('tentative_booking_converted', $_POST);
+                if ($convertWording !== null && empty($convertWording['ok'])) {
+                    $_SESSION['error_message'] = 'Nothing was confirmed. ' . $convertWording['error'];
+                    break;
+                }
                 // Convert tentative booking to confirmed
                 $stmt = $pdo->prepare("
                     SELECT b.*, r.name as room_name, r.slug as room_slug
@@ -710,10 +716,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
 
                     // Send conversion email
                     require_once '../config/email.php';
-                    $email_result = sendTentativeBookingConvertedEmail($booking_data);
+                    $email_result = rh_email_wording_send($convertWording, static function () use ($booking_data) {
+                        return sendTentativeBookingConvertedEmail($booking_data);
+                    }, (int)$booking_id, (string)($booking_data['booking_reference'] ?? ''), $user);
 
                     $_SESSION['success_message'] = 'Tentative booking converted to confirmed!' . $auto_assign_msg .
-                        ($email_result['success'] ? ' Confirmation email sent.' : ' (Email failed: ' . $email_result['message'] . ')');
+                        ($email_result['success'] ? ' Confirmation email sent.'
+                            : ($convertWording !== null ? ' Email NOT sent: ' : ' (Email failed: ') . (string)($email_result['message'] ?? '') . ($convertWording !== null ? '' : ')'));
                 }
                 break;
 
@@ -2205,7 +2214,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php endif; ?>
                 <?php else: ?>
                 <?php if ($bdCanEditBooking && ($booking['status'] == 'tentative' || $booking['is_tentative'] == 1)): ?>
-                    <form method="POST" class="booking-action-form" data-admin-confirm="Convert this tentative booking to confirmed and send the conversion email?" data-admin-confirm-title="Convert tentative booking" data-admin-confirm-ok="Convert" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Converting...">
+                    <form method="POST" class="booking-action-form" data-admin-email-wording="tentative_booking_converted" data-booking-id="<?php echo (int)$booking_id; ?>" data-admin-confirm="Convert this tentative booking to confirmed and send the conversion email?" data-admin-confirm-title="Convert tentative booking" data-admin-confirm-ok="Convert" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Converting...">
                         <input type="hidden" name="booking_action" value="convert">
                         <button type="submit" class="action-btn convert" aria-label="Convert to confirmed"><i class="fas fa-circle-check"></i> Convert to Confirmed</button>
                     </form>

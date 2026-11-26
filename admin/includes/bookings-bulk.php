@@ -23,6 +23,7 @@
 require_once __DIR__ . '/bulk-actions.php';
 require_once __DIR__ . '/../../includes/booking-group-ops.php';
 require_once __DIR__ . '/booking-row-actions.php';
+require_once __DIR__ . '/../../includes/email-wording.php';
 
 if (!function_exists('rh_bk_bulk_ops')) {
 
@@ -587,13 +588,22 @@ if (!function_exists('rh_bk_bulk_ops')) {
                     }
                 }
             }
+            // The editable email this room gets (owner 2026-11-27: one edited wording per batch, for every room that
+            // gets that email). Not part of the state token: the plan text already says what will happen.
+            if ($b !== null && !$denied && !empty($p['will']) && rh_email_wording_bulk_allowed_keys($op) !== []) {
+                $extra['email_key'] = rh_email_wording_bulk_key($op, $b);
+            }
             $out['rooms'][] = ['id' => $id, 'label' => $label, 'will' => (bool)$p['will'], 'why' => (string)$p['why'], 'text' => (string)$p['text']] + $extra;
         }
         if ($op === 'cancel' && !$denied) {
             rh_bk_bulk_cancel_groups($pdo, $out['rooms']);
         }
+        $out['email_keys'] = [];
         foreach ($out['rooms'] as $r) {
             $out[$r['will'] ? 'will' : 'skip']++;
+            if ($r['will'] && !empty($r['email_key']) && !in_array($r['email_key'], $out['email_keys'], true)) {
+                $out['email_keys'][] = $r['email_key'];
+            }
         }
         // Assign rooms: the free-room count and the proposals may move between review and confirm; what counts is
         // which bookings will get a room (the room itself is re-checked under lock when it is assigned).
@@ -759,6 +769,12 @@ if (!function_exists('rh_bk_bulk_ops')) {
             }
             $noshowNote = $noteCheck['reason'];
         }
+        // Edited email wording: checked ONCE, before any room is touched; then set and cleared around each single send.
+        $wording = rh_email_wording_bulk_check($op, $in);
+        if ($wording !== null && empty($wording['ok'])) {
+            $out['error'] = (string)$wording['error'] . ' Nothing was done.';
+            return $out;
+        }
         $plan = rh_bk_bulk_plan($pdo, $op, $ids, (int)($user['id'] ?? 0), $today);
         if (empty($plan['success'])) {
             $out['error'] = $plan['error'];
@@ -766,6 +782,10 @@ if (!function_exists('rh_bk_bulk_ops')) {
         }
         if ($state === '' || !hash_equals($plan['state'], $state)) {
             $out['error'] = 'The bookings changed since you reviewed them. Nothing was done. Close this and review again.';
+            return $out;
+        }
+        if ($wording !== null && !in_array($wording['key'], (array)($plan['email_keys'] ?? []), true)) {
+            $out['error'] = 'None of the ticked bookings gets the email you edited. Nothing was done. Close this and review again.';
             return $out;
         }
         $opts = ['user_id' => (int)($user['id'] ?? 0), 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? ''))];
@@ -820,7 +840,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
             }
             try {
                 if ($op === 'cancel') {
-                    $one = rh_bk_bulk_cancel_one($pdo, $r, $user, $reason, (string)($in['email_guest'] ?? '0') === '1');
+                    $one = rh_bk_bulk_cancel_one($pdo, $r, $user, $reason, (string)($in['email_guest'] ?? '0') === '1', rh_email_wording_for_key($wording, 'booking_cancelled'));
                     foreach ($one['others'] as $gid => $gres) {
                         $groupDone[(int)$gid] = $gres;
                     }
@@ -837,7 +857,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
                         adminBulkSkip($skipped, $one['why']);
                     }
                 } elseif ($op === 'confirm' || $op === 'assign' || $op === 'checkin') {
-                    $one = rh_bk_bulk_apply_one($pdo, $op, $r, $user, $choices, $taken);
+                    $one = rh_bk_bulk_apply_one($pdo, $op, $r, $user, $choices, $taken, $op === 'confirm' ? $wording : null);
                     $res['ok'] = $one['ok'];
                     $res['text'] = $one['text'];
                     if (!$one['ok']) {
@@ -864,9 +884,11 @@ if (!function_exists('rh_bk_bulk_ops')) {
                     if ($b === null) {
                         throw new Exception('This booking no longer exists.');
                     }
+                    // The invoice keeps fixed wording; a reminder / confirmation gets the edit only when it is that email.
+                    $sendType = $op === 'reminder' ? 'booking_reminder' : rh_bk_bulk_confirmation_type((string)$b['status']);
                     $send = $op === 'invoice'
                         ? bookings_send_invoice_email((int)$r['id'], $user)
-                        : bookings_send_booking_email($pdo, $b, $op === 'reminder' ? 'booking_reminder' : rh_bk_bulk_confirmation_type((string)$b['status']), [], $user);
+                        : bookings_send_booking_email($pdo, $b, $sendType, [], $user, rh_email_wording_for_key($wording, rh_email_wording_key_for_resend_type($sendType)));
                     if (!empty($send['success'])) {
                         $res['ok'] = true;
                         $res['text'] = 'Sent to ' . (string)$b['guest_email'] . '.';
@@ -930,7 +952,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
      * $r: the plan row (id, quoted, group, group_quoted). $email: the review's "Email the guest" tick.
      * @return array{ok:bool,why:string,text:string,others:array} others: [bookingId => {ok,why,text}] for the rest of a group.
      */
-    function rh_bk_bulk_cancel_one(PDO $pdo, array $r, array $user, string $reason, bool $email): array
+    function rh_bk_bulk_cancel_one(PDO $pdo, array $r, array $user, string $reason, bool $email, ?array $wording = null): array
     {
         $id = (int)$r['id'];
         $st = $pdo->prepare('SELECT status, booking_reference FROM bookings WHERE id = ?');
@@ -959,7 +981,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
         if ($quoted !== '') {
             $in['fee_quoted'] = $quoted;
         }
-        $c = bookings_cancel_commit($pdo, $id, (string)$now['status'], $now['booking_reference'] ?? null, $user, $in);
+        $c = bookings_cancel_commit($pdo, $id, (string)$now['status'], $now['booking_reference'] ?? null, $user, $in, $email ? $wording : null);
         $per = [];
         foreach ($c['cancelled'] as $x) {
             $mail = $c['email'][(int)$x['id']] ?? '';
@@ -1033,16 +1055,18 @@ if (!function_exists('rh_bk_bulk_ops')) {
      * $taken: rooms given earlier in this batch ([roomId, ci, co]), updated here.
      * @return array{ok:bool,why:string,text:string}
      */
-    function rh_bk_bulk_apply_one(PDO $pdo, string $op, array $r, array $user, array $choices, array &$taken): array
+    function rh_bk_bulk_apply_one(PDO $pdo, string $op, array $r, array $user, array $choices, array &$taken, ?array $wording = null): array
     {
         $id = (int)$r['id'];
         if ($op === 'confirm') {
             $st = $pdo->prepare('SELECT status, is_tentative FROM bookings WHERE id = ?');
             $st->execute([$id]);
             $now = $st->fetch(PDO::FETCH_ASSOC) ?: [];
-            $res = ((string)($now['status'] ?? '') === 'tentative' && (int)($now['is_tentative'] ?? 0) === 1)
-                ? bookings_convert_tentative_booking($pdo, $id, $user)
-                : bookings_confirm_hold($pdo, $id, $user);
+            // The batch's edited wording goes only to the email this booking gets (convert a real hold, else confirm).
+            $key = rh_email_wording_bulk_key('confirm', $now);
+            $res = $key === 'tentative_booking_converted'
+                ? bookings_convert_tentative_booking($pdo, $id, $user, rh_email_wording_for_key($wording, $key))
+                : bookings_confirm_hold($pdo, $id, $user, null, rh_email_wording_for_key($wording, $key));
             $text = 'Confirmed. ' . ($res['email_ok'] ? 'Confirmation email sent.' : 'The confirmation email was not sent' . ($res['email_error'] !== '' ? ': ' . $res['email_error'] : '') . '.');
             if ($res['auto_note'] !== '') {
                 $text .= ' ' . $res['auto_note'];

@@ -3,6 +3,8 @@
  * GET JSON for the "Edit wording" editor (owner 2026-11-26): the default body of one booking email and, for each
  * {{field}} in it, a label, a short preview for this booking and whether it is a locked money field. Read-only:
  * nothing is saved here. ?key=<template key>&booking_id=<id>
+ * booking_id 0 (owner 2026-11-27): no single booking yet (New booking) or one wording for a whole bulk batch: every
+ * field previews as "filled in when sent".
  */
 require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/../includes/email-wording.php';
@@ -17,8 +19,12 @@ $ewOut = static function (array $data, int $code = 200): void {
 };
 
 // Not a mapped page: the same access as the screens that send these emails, checked here.
+// New booking access only covers booking_id 0 (no booking's details are read then).
 $ewUid = (int)$user['id'];
-if (!rhHasPagePermission($ewUid, 'bookings.php') && !rhHasPagePermission($ewUid, 'booking-details.php')) {
+$ewAskedId = (int)($_GET['booking_id'] ?? 0);
+if (!rhHasPagePermission($ewUid, 'bookings.php') && !rhHasPagePermission($ewUid, 'booking-details.php')
+    && !rhHasPagePermission($ewUid, 'edit-booking.php')
+    && !($ewAskedId <= 0 && rhHasPagePermission($ewUid, 'create-booking.php'))) {
     $ewOut(['ok' => false, 'error' => 'You do not have access to bookings.'], 403);
 }
 $ewModuleOn = ($user['role'] ?? '') === 'admin' ? rh_module_licence_allows('bookings') : rh_module_key_enabled('bookings');
@@ -38,30 +44,33 @@ if ($ewTpl === null) {
 }
 
 try {
-    $ewSt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
-    $ewSt->execute([$ewBookingId]);
-    $ewBooking = $ewSt->fetch(PDO::FETCH_ASSOC);
-    if (!$ewBooking) {
-        $ewOut(['ok' => false, 'error' => 'Booking not found.'], 404);
-    }
-
-    require_once __DIR__ . '/../config/email.php';
-    if (in_array($ewKey, ['booking_received', 'booking_confirmed', 'tentative_booking_created'], true) && function_exists('rh_email_party_booking')) {
-        $ewBooking = rh_email_party_booking($pdo, $ewBooking);
-    }
-    $ewRoomSt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
-    $ewRoomSt->execute([$ewBooking['room_id'] ?? 0]);
-    $ewRoom = $ewRoomSt->fetch(PDO::FETCH_ASSOC) ?: null;
-    $ewExtra = [];
-    if ($ewKey === 'booking_cancelled') {
-        require_once __DIR__ . '/../includes/cancel-reason.php';
-        if (function_exists('rh_cancel_guest_email_reason')) {
-            $ewExtra['cancellation_reason'] = rh_cancel_guest_email_reason();
+    $ewVars = [];
+    if ($ewBookingId > 0) {
+        $ewSt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
+        $ewSt->execute([$ewBookingId]);
+        $ewBooking = $ewSt->fetch(PDO::FETCH_ASSOC);
+        if (!$ewBooking) {
+            $ewOut(['ok' => false, 'error' => 'Booking not found.'], 404);
         }
-    }
-    $ewVars = buildBookingEmailVariables($ewBooking, $ewRoom, $ewExtra);
-    if (!array_key_exists('payment_policy', $ewVars) && function_exists('rh_email_payment_policy_html')) {
-        $ewVars['payment_policy'] = rh_email_payment_policy_html();
+
+        require_once __DIR__ . '/../config/email.php';
+        if (in_array($ewKey, ['booking_received', 'booking_confirmed', 'tentative_booking_created'], true) && function_exists('rh_email_party_booking')) {
+            $ewBooking = rh_email_party_booking($pdo, $ewBooking);
+        }
+        $ewRoomSt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
+        $ewRoomSt->execute([$ewBooking['room_id'] ?? 0]);
+        $ewRoom = $ewRoomSt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $ewExtra = [];
+        if ($ewKey === 'booking_cancelled') {
+            require_once __DIR__ . '/../includes/cancel-reason.php';
+            if (function_exists('rh_cancel_guest_email_reason')) {
+                $ewExtra['cancellation_reason'] = rh_cancel_guest_email_reason();
+            }
+        }
+        $ewVars = buildBookingEmailVariables($ewBooking, $ewRoom, $ewExtra);
+        if (!array_key_exists('payment_policy', $ewVars) && function_exists('rh_email_payment_policy_html')) {
+            $ewVars['payment_policy'] = rh_email_payment_policy_html();
+        }
     }
 
     [, $ewInner] = rh_email_wording_split((string)$ewTpl['html_body']);

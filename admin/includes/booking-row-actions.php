@@ -18,6 +18,17 @@ require_once __DIR__ . '/../../includes/late-stay.php';
 require_once __DIR__ . '/../../includes/system-logger.php';
 require_once __DIR__ . '/../../includes/cancel-reason.php';
 require_once __DIR__ . '/audit-functions.php';
+require_once __DIR__ . '/../../includes/email-wording.php';
+
+if (!function_exists('bookings_wording_guard')) {
+    /** Edited wording passed to an action must be for the email that action sends; else stop before anything changes. */
+    function bookings_wording_guard(?array $wording, string $key): void
+    {
+        if (!empty($wording['ok']) && (string)($wording['key'] ?? '') !== $key) {
+            throw new Exception('The edited wording belongs to a different email. Open "Edit wording" again.');
+        }
+    }
+}
 
 if (!function_exists('bookings_convert_tentative_booking')) {
 
@@ -26,11 +37,13 @@ if (!function_exists('bookings_convert_tentative_booking')) {
      * was converted a moment ago. Sends the conversion email; a paid booking with no room gets one automatically.
      * @return array{message:string,email_ok:bool,email_error:string,auto_note:string} message = the single action's (HTML).
      */
-    function bookings_convert_tentative_booking(PDO $pdo, int $booking_id, array $user): array
+    function bookings_convert_tentative_booking(PDO $pdo, int $booking_id, array $user, ?array $wording = null): array
     {
         if ($booking_id <= 0) {
             throw new Exception('Invalid booking id');
         }
+        // Edited wording (owner 2026-11-27) must be for the conversion email: refused before anything changes.
+        bookings_wording_guard($wording, 'tentative_booking_converted');
 
         // Get booking details WITH room information
         $stmt = $pdo->prepare("
@@ -104,7 +117,9 @@ if (!function_exists('bookings_convert_tentative_booking')) {
 
         // Send conversion email
         require_once __DIR__ . '/../../config/email.php';
-        $email_result = sendTentativeBookingConvertedEmail($booking);
+        $email_result = rh_email_wording_send($wording, static function () use ($booking) {
+            return sendTentativeBookingConvertedEmail($booking);
+        }, $booking_id, (string)($booking['booking_reference'] ?? ''), $user);
 
         // Log email result for debugging
         error_log("Email sending result for booking {$booking_id}: " . json_encode($email_result));
@@ -134,8 +149,10 @@ if (!function_exists('bookings_convert_tentative_booking')) {
      * booking_reference, check_in_date, check_out_date) or null to read it here.
      * @return array{message:string,email_ok:bool,email_error:string,auto_note:string}
      */
-    function bookings_confirm_hold(PDO $pdo, int $booking_id, array $user, ?array $current_booking = null): array
+    function bookings_confirm_hold(PDO $pdo, int $booking_id, array $user, ?array $current_booking = null, ?array $wording = null): array
     {
+        // Edited wording (owner 2026-11-27) must be for the confirmation email: refused before anything changes.
+        bookings_wording_guard($wording, 'booking_confirmed');
         if ($current_booking === null) {
             $check_stmt = $pdo->prepare("SELECT status, payment_status, room_id, individual_room_id, booking_reference, check_in_date, check_out_date FROM bookings WHERE id = ?");
             $check_stmt->execute([$booking_id]);
@@ -217,7 +234,9 @@ if (!function_exists('bookings_convert_tentative_booking')) {
             require_once __DIR__ . '/../../config/email.php';
 
             // Send booking confirmed email
-            $email_result = sendBookingConfirmedEmail($booking);
+            $email_result = rh_email_wording_send($wording, static function () use ($booking) {
+                return sendBookingConfirmedEmail($booking);
+            }, $booking_id, (string)($booking['booking_reference'] ?? ''), $user);
             $emailOk = !empty($email_result['success']);
             $emailError = (string)($email_result['message'] ?? '');
 

@@ -23,6 +23,7 @@ if (!function_exists('rh_email_wording_keys')) {
             'booking_reminder',
             'tentative_booking_created',
             'tentative_booking_converted',
+            'booking_modified',
         ];
     }
 }
@@ -50,11 +51,101 @@ if (!function_exists('rh_email_wording_key_for_resend_type')) {
     }
 }
 
+if (!function_exists('rh_email_wording_for_key')) {
+    /** PURE. The checked wording when it is for $key, else null (that email goes with its default wording). */
+    function rh_email_wording_for_key(?array $wording, string $key): ?array
+    {
+        if (empty($wording['ok']) || !isset($wording['html']) || $key === '' || (string)($wording['key'] ?? '') !== $key) {
+            return null;
+        }
+        return $wording;
+    }
+}
+
+if (!function_exists('rh_email_wording_bulk_allowed_keys')) {
+    /** PURE. The emails a bulk action sends whose wording may be edited once for the whole batch ([] = none). */
+    function rh_email_wording_bulk_allowed_keys(string $op): array
+    {
+        $map = [
+            'reminder' => ['booking_reminder'],
+            'confirmation' => ['booking_received', 'tentative_booking_created', 'booking_confirmed'],
+            'confirm' => ['booking_confirmed', 'tentative_booking_converted'],
+            'cancel' => ['booking_cancelled'],
+        ];
+        return $map[$op] ?? [];
+    }
+}
+
+if (!function_exists('rh_email_wording_bulk_key')) {
+    /**
+     * PURE. The template one booking ($b: status, is_tentative) gets from a bulk action; '' = no editable email.
+     * Same choices as the actions: Resend confirmation follows the status (rh_bk_bulk_confirmation_type), Confirm
+     * converts a real tentative hold (status tentative AND is_tentative 1), else confirms.
+     */
+    function rh_email_wording_bulk_key(string $op, array $b): string
+    {
+        $status = strtolower(trim((string)($b['status'] ?? '')));
+        switch ($op) {
+            case 'reminder':
+                return 'booking_reminder';
+            case 'confirmation':
+                $map = ['pending' => 'booking_received', 'tentative' => 'tentative_booking_created', 'confirmed' => 'booking_confirmed', 'checked-in' => 'booking_confirmed'];
+                return $map[$status] ?? '';
+            case 'confirm':
+                return ($status === 'tentative' && (int)($b['is_tentative'] ?? 0) === 1) ? 'tentative_booking_converted' : 'booking_confirmed';
+            case 'cancel':
+                return 'booking_cancelled';
+        }
+        return '';
+    }
+}
+
+if (!function_exists('rh_email_wording_bulk_check')) {
+    /**
+     * The one edited wording posted with a bulk action ($in: email_wording_key, email_wording_html, email_guest), checked
+     * ONCE before any booking is touched. null = none posted; ['ok'=>false,'error'] = stop, nothing done;
+     * ['ok'=>true,'key','html'] = used for every booking in the batch that gets that email.
+     */
+    function rh_email_wording_bulk_check(string $op, array $in): ?array
+    {
+        $key = trim((string)($in['email_wording_key'] ?? ''));
+        $post = ['email_wording_key' => $key, 'email_wording_html' => (string)($in['email_wording_html'] ?? '')];
+        if ($key === '' && trim($post['email_wording_html']) === '') {
+            return null;
+        }
+        if (!in_array($key, rh_email_wording_bulk_allowed_keys($op), true)) {
+            return ['ok' => false, 'error' => 'The edited wording belongs to a different email. Open "Edit wording" again.'];
+        }
+        if ($op === 'cancel' && (string)($in['email_guest'] ?? '0') !== '1') {
+            return ['ok' => false, 'error' => 'You edited the cancellation email but unticked "Email the guest". Tick it, or close the editor without changes.'];
+        }
+        return rh_email_wording_from_post($key, $post);
+    }
+}
+
+if (!function_exists('rh_email_wording_create_key')) {
+    /**
+     * PURE. The email New booking (admin/create-booking.php) sends for the chosen status: paid -> confirmed / received,
+     * tentative -> tentative created, else confirmed / received (a checked-in walk-in gets the received email).
+     */
+    function rh_email_wording_create_key(string $status, bool $paidNow): string
+    {
+        if (!$paidNow && $status === 'tentative') {
+            return 'tentative_booking_created';
+        }
+        return $status === 'confirmed' ? 'booking_confirmed' : 'booking_received';
+    }
+}
+
 if (!function_exists('rh_email_wording_is_financial_token')) {
     /** PURE. A token that carries money or payment terms: locked (same count and order as the default). */
     function rh_email_wording_is_financial_token(string $name): bool
     {
         $name = strtolower($name);
+        // Every *_html / *_block token is a ready-made block (a list, a table, a logo): locked as a whole.
+        if (preg_match('/_(html|block)$/', $name)) {
+            return true;
+        }
         $full = ['packages_html', 'pay_instructions', 'payment_policy', 'booked_rate_block', 'group_rooms_block',
             'cancellation_policy_text', 'cancellation_fee_charged', 'bank_details'];
         if (in_array($name, $full, true)) {
@@ -79,7 +170,7 @@ if (!function_exists('rh_email_wording_token_label')) {
     {
         $labels = ['total_amount_formatted' => 'Total', 'currency_symbol' => 'Currency', 'packages_html' => 'Extras and prices',
             'payment_policy' => 'Payment terms', 'logo_html' => 'Logo', 'site_name' => 'Hotel name', 'guest_name' => 'Guest name',
-            'booking_reference' => 'Reference', 'urgency_notice' => 'Reminder notice'];
+            'booking_reference' => 'Reference', 'urgency_notice' => 'Reminder notice', 'changes_html' => 'What changed'];
         if (isset($labels[$name])) {
             return $labels[$name];
         }

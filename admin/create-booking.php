@@ -772,6 +772,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $amount_collected   = 0.0;
         }
 
+        // ── Edited email wording (owner 2026-11-27) ──────────────────────────
+        // Checked against the email this booking will actually send (rh_email_wording_create_key: the same choice as
+        // the Email section below) BEFORE anything is created: a mismatch or a refused wording saves nothing.
+        require_once __DIR__ . '/../includes/email-wording.php';
+        $cbWordingKey = rh_email_wording_create_key((string)$booking_status, $payment_received && $amount_collected > 0);
+        $cbWording = $send_email ? rh_email_wording_from_post($cbWordingKey, $_POST) : null;
+        if ($cbWording !== null && empty($cbWording['ok'])) {
+            throw new Exception('The booking was not created. ' . $cbWording['error']);
+        }
+
         // ── Transaction: create bookings for all lines ───────────────────────
         // Every requested type AND the types that share rooms with it through joined rooms are locked
         // (ascending id, deadlock-free) so two receptionists can never both sell the last room. The set is
@@ -1330,9 +1340,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 // booking recorded (one per room when several were booked). No invoice: an invoice requests
                 // payment, and this guest has just paid.
                 // The booking confirmation (what the old payment-invoice email doubled as) is its own email.
-                $email_result = $booking_status === 'confirmed'
-                    ? sendBookingConfirmedEmail($booking_data)
-                    : sendBookingReceivedEmail($booking_data);
+                $email_result = rh_email_wording_send($cbWording, static function () use ($booking_status, $booking_data) {
+                    return $booking_status === 'confirmed'
+                        ? sendBookingConfirmedEmail($booking_data)
+                        : sendBookingReceivedEmail($booking_data);
+                }, (int)$primary_id, (string)$primary_ref, $user);
                 $email_msg = $email_result['success']
                     ? ' Confirmation email sent.'
                     : ' (Confirmation email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
@@ -1353,17 +1365,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 }
             } elseif ($is_tentative) {
                 // Tentative booking confirmation
-                $email_result = sendTentativeBookingConfirmedEmail($booking_data);
+                $email_result = rh_email_wording_send($cbWording, static function () use ($booking_data) {
+                    return sendTentativeBookingConfirmedEmail($booking_data);
+                }, (int)$primary_id, (string)$primary_ref, $user);
                 $email_msg = $email_result['success']
                     ? ' Confirmation email sent.'
                     : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
             } else {
                 // No payment yet — send booking confirmation + quotation (fixed price before the stay)
-                if ($booking_status === 'confirmed') {
-                    $email_result = sendBookingConfirmedEmail($booking_data);
-                } else {
-                    $email_result = sendBookingReceivedEmail($booking_data);
-                }
+                $email_result = rh_email_wording_send($cbWording, static function () use ($booking_status, $booking_data) {
+                    return $booking_status === 'confirmed'
+                        ? sendBookingConfirmedEmail($booking_data)
+                        : sendBookingReceivedEmail($booking_data);
+                }, (int)$primary_id, (string)$primary_ref, $user);
                 $email_msg = $email_result['success']
                     ? ' Confirmation email sent.'
                     : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
@@ -1549,6 +1563,8 @@ try {
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/email-wording.css?v=<?php echo @filemtime(__DIR__ . '/css/email-wording.css'); ?>">
+    <script src="js/email-wording.js?v=<?php echo @filemtime(__DIR__ . '/js/email-wording.js'); ?>" defer></script>
     <style>
         .create-booking-container {
             max-width: 860px;
@@ -2668,6 +2684,13 @@ try {
                     <div class="checkbox-group">
                         <input type="checkbox" name="send_email" id="sendEmail" checked>
                         <label for="sendEmail">Send confirmation email to guest</label>
+                    </div>
+                    <div class="ew-open-row" id="cbWordingRow">
+                        <button type="button" class="btn btn-secondary" id="cbWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit email wording</button>
+                        <i class="help" data-tip="Change the words of the email this booking sends, for this guest only. Which email it is follows the Status (and Payment received): changing either after editing clears your edit. The saved template stays the default. Prices, totals and payment details cannot be changed.">?</i>
+                        <span class="ew-open-state" id="cbWordingState" aria-live="polite"></span>
+                        <input type="hidden" name="email_wording_key" id="cbWKey" value="">
+                        <input type="hidden" name="email_wording_html" id="cbWHtml" value="">
                     </div>
 
                     <!-- Quotation options — visible only when Tentative status is selected -->
@@ -4196,7 +4219,56 @@ try {
             hid.value = chk.checked ? '1' : '0';
             sec.classList.toggle('open', chk.checked);
             if (chk.checked) calculateTotal();
+            cbWordingSync();
         }
+
+        // ── Edited email wording (owner 2026-11-27) ──────────────────────────────
+        // Which email the booking sends: the same choice as rh_email_wording_create_key() in PHP (the server checks
+        // the posted key again and refuses a mismatch). Changing Status or payment after editing clears the edit.
+        const CB_EMAIL_NAMES = {
+            booking_received: 'Booking received email',
+            booking_confirmed: 'Booking confirmed email',
+            tentative_booking_created: 'Tentative booking email'
+        };
+        function cbWordingKey() {
+            const status = el('bookingStatus') ? el('bookingStatus').value : 'confirmed';
+            const paid = el('paymentReceivedHidden') && el('paymentReceivedHidden').value === '1'
+                && (parseFloat(el('amountCollected') ? el('amountCollected').value : '0') || 0) > 0;
+            if (!paid && status === 'tentative') return 'tentative_booking_created';
+            return status === 'confirmed' ? 'booking_confirmed' : 'booking_received';
+        }
+        function cbWordingSync() {
+            const row = el('cbWordingRow');
+            const kIn = el('cbWKey');
+            const hIn = el('cbWHtml');
+            const state = el('cbWordingState');
+            if (!row || !kIn || !hIn) return;
+            const send = el('sendEmail') ? el('sendEmail').checked : false;
+            row.hidden = !send;
+            if (kIn.value && (!send || kIn.value !== cbWordingKey())) {
+                kIn.value = '';
+                hIn.value = '';
+                if (state) state.textContent = send
+                    ? 'The email changed to the ' + (CB_EMAIL_NAMES[cbWordingKey()] || 'email').toLowerCase() + ', so your edit was cleared. Edit it again if needed.'
+                    : '';
+                return;
+            }
+            if (!kIn.value && state && !send) state.textContent = '';
+        }
+        function cbWordingEdit() {
+            if (!window.RhEmailWording) return;
+            const key = cbWordingKey();
+            window.RhEmailWording.open({
+                key: key, bookingId: 0, keyInput: el('cbWKey'), htmlInput: el('cbWHtml'),
+                onDone: function () {
+                    const st = el('cbWordingState');
+                    if (st) st.textContent = 'Your edited wording will be used for the ' + (CB_EMAIL_NAMES[key] || 'email').toLowerCase() + '.';
+                }
+            });
+        }
+        if (el('cbWordingBtn')) el('cbWordingBtn').addEventListener('click', cbWordingEdit);
+        if (el('sendEmail')) el('sendEmail').addEventListener('change', cbWordingSync);
+        if (el('amountCollected')) el('amountCollected').addEventListener('input', cbWordingSync);
 
         function onBookingStatusChange() {
             const status = el('bookingStatus').value;
@@ -4223,6 +4295,7 @@ try {
                 notice.style.display = 'none';
                 qtGroup.style.display = 'none';
             }
+            cbWordingSync();
         }
 
         // ── Init ──────────────────────────────────────────────────────────────────

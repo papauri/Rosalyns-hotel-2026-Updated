@@ -25,6 +25,7 @@ require_once __DIR__ . '/../includes/alert.php';
 require_once __DIR__ . '/../includes/booking-room-change.php';
 require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights line (owner 2026-11-09)
 require_once __DIR__ . '/../includes/stale-edit.php';
+require_once __DIR__ . '/../includes/email-wording.php'; // edit the "Booking updated" email before it goes (owner 2026-11-27)
 
 /**
  * Stale-edit guard (CONCURRENCY_PLAN task 7): the booking columns this form shows and saves. A Save is refused when
@@ -489,6 +490,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
             }
         }
 
+        // Edited "Booking updated" wording: checked before anything is saved; a refused wording saves nothing.
+        $ebWording = null;
+        if (empty($error) && ($_POST['notify_guest'] ?? '1') === '1') {
+            $ebWording = rh_email_wording_from_post('booking_modified', $_POST);
+            if ($ebWording !== null && empty($ebWording['ok'])) {
+                $error = 'Nothing was changed. ' . $ebWording['error'];
+            }
+        }
+
         if (empty($error)) {
             $oldRoomIds = [];
             $ebStaleError = '';
@@ -709,9 +719,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $updated_booking = $refresh->fetch(PDO::FETCH_ASSOC);
                     if ($updated_booking) {
                         require_once __DIR__ . '/../config/email.php';
-                        $email_result = sendBookingModifiedEmail($updated_booking, $changes);
-                        $flash .= !empty($email_result['success']) ? ' Guest notified by email.' : ' (Guest email could not be sent.)';
+                        $email_result = rh_email_wording_send($ebWording, static function () use ($updated_booking, $changes) {
+                            return sendBookingModifiedEmail($updated_booking, $changes);
+                        }, (int)$booking_id, (string)($booking['booking_reference'] ?? ''), $user);
+                        if (!empty($email_result['success'])) {
+                            $flash .= ' Guest notified by email.';
+                        } elseif ($ebWording !== null) {
+                            $flash .= ' Email NOT sent: ' . (string)($email_result['message'] ?? 'the edited wording could not be used.');
+                        } else {
+                            $flash .= ' (Guest email could not be sent.)';
+                        }
                     }
+                } elseif ($ebWording !== null && empty($changes)) {
+                    $flash .= ' No email sent: nothing the guest sees changed.';
                 }
                 // Post/Redirect/Get: back on the booking, so Back / refresh never re-submit the edit.
                 $_SESSION['success_message'] = $flash;
@@ -816,6 +836,8 @@ $back_url ='booking-details.php?id=' . $booking_id;
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/email-wording.css?v=<?php echo @filemtime(__DIR__ . '/css/email-wording.css'); ?>">
+    <script src="js/email-wording.js?v=<?php echo @filemtime(__DIR__ . '/js/email-wording.js'); ?>" defer></script>
     <style>
         .eb-mode { display: flex; gap: 10px; align-items: flex-start; border-radius: 10px; padding: 12px 14px; margin-bottom: 18px; font-size: 13px; line-height: 1.5; }
         .eb-mode i { margin-top: 3px; }
@@ -1137,6 +1159,13 @@ $back_url ='booking-details.php?id=' . $booking_id;
                         <span>Email the guest if their dates, guests, room or price change</span>
                     </label>
                     <input type="hidden" name="notify_guest" value="0" disabled id="notifyGuestOff">
+                    <div class="ew-open-row" id="ebWordingRow">
+                        <button type="button" class="btn btn-secondary" id="ebWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit email wording</button>
+                        <i class="help" data-tip="Change the words of the Booking updated email for this guest only. The list of what changed and the prices are filled in from the booking and cannot be changed. The saved template stays the default.">?</i>
+                        <span class="ew-open-state" id="ebWordingState" aria-live="polite"></span>
+                        <input type="hidden" name="email_wording_key" id="ebWKey" value="">
+                        <input type="hidden" name="email_wording_html" id="ebWHtml" value="">
+                    </div>
                 </div>
 
                 <div class="btn-bar">
@@ -1415,6 +1444,26 @@ $back_url ='booking-details.php?id=' . $booking_id;
             if (notify) {
                 notify.addEventListener('change', function() {
                     $('notifyGuestOff').disabled = this.checked;
+                    // No email, no edited wording (owner 2026-11-27).
+                    const row = $('ebWordingRow');
+                    if (row) row.hidden = !this.checked;
+                    if (!this.checked) {
+                        if ($('ebWKey')) $('ebWKey').value = '';
+                        if ($('ebWHtml')) $('ebWHtml').value = '';
+                        if ($('ebWordingState')) $('ebWordingState').textContent = '';
+                    }
+                });
+            }
+            if ($('ebWordingBtn')) {
+                $('ebWordingBtn').addEventListener('click', function() {
+                    if (!window.RhEmailWording) return;
+                    window.RhEmailWording.open({
+                        key: 'booking_modified', bookingId: <?php echo (int)$booking_id; ?>,
+                        keyInput: $('ebWKey'), htmlInput: $('ebWHtml'),
+                        onDone: function() {
+                            if ($('ebWordingState')) $('ebWordingState').textContent = 'Your edited wording will be used if the guest is emailed.';
+                        }
+                    });
                 });
             }
 

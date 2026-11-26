@@ -173,6 +173,74 @@ check(rh_email_wording_from_post($K, []) === null, 'nothing posted: null (defaul
 $fp = rh_email_wording_from_post($K, ['email_wording_key' => 'booking_cancelled', 'email_wording_html' => '<p>x</p>']);
 check(is_array($fp) && empty($fp['ok']), 'posted for another email: refused (nothing sent)');
 
+/* ── LATER items (owner 2026-11-27): Booking updated email, locked blocks, bulk, New booking ── */
+check(rh_email_wording_is_editable_key('booking_modified'), 'booking_modified (Booking updated email) is editable');
+foreach (['changes_html', 'logo_html', 'group_rooms_block', 'packages_html', 'some_new_block', 'other_html'] as $t) {
+    check(rh_email_wording_is_financial_token($t), 'locked block/html field: ' . $t);
+}
+check(!rh_email_wording_is_financial_token('guest_name') && !rh_email_wording_is_financial_token('check_in_date'), 'plain guest fields stay unlocked');
+$modDefault = $head . '<div style="font-family:Arial;"><table width="100%"><tr><td><p>Dear {{guest_name}},</p><p>Your booking {{booking_reference}} was updated.</p></td></tr>'
+    . '<tr><td style="padding:0 48px 24px;">{{changes_html}}</td></tr><tr><td>Total</td><td>{{currency_symbol}} {{total_amount_formatted}}</td></tr></table></div></body></html>';
+$modBack = preg_replace('#<tr data-ew-block="1"><td>(\{\{[a-z0-9_]+\}\})</td></tr>#', '$1', rh_email_wording_editor_html($modDefault));
+$r = rh_email_wording_validate('booking_modified', str_replace('was updated.', 'was changed as you asked.', $modBack), $modDefault, 'MWK');
+check($r['ok'] && strpos($r['html'], 'as you asked') !== false && strpos($r['html'], '{{changes_html}}') !== false, 'booking_modified: wording change accepted, change list kept', implode(' ', $r['errors']));
+$r = rh_email_wording_validate('booking_modified', str_replace('{{changes_html}}', '', $modBack), $modDefault, 'MWK');
+check(!$r['ok'], 'booking_modified: removing the change list is refused');
+$r = rh_email_wording_validate('booking_modified', str_replace('{{changes_html}}', '{{changes_html}}{{changes_html}}', $modBack), $modDefault, 'MWK');
+check(!$r['ok'], 'booking_modified: repeating the change list is refused');
+
+// rh_email_wording_for_key: only the matching, accepted wording is handed to a send.
+$wOk = ['ok' => true, 'key' => 'booking_confirmed', 'html' => '<p>w</p>'];
+check(rh_email_wording_for_key($wOk, 'booking_confirmed') === $wOk, 'for_key: the matching email gets the wording');
+check(rh_email_wording_for_key($wOk, 'tentative_booking_converted') === null, 'for_key: another email gets the default');
+check(rh_email_wording_for_key(['ok' => false, 'error' => 'x'], 'booking_confirmed') === null && rh_email_wording_for_key(null, 'booking_confirmed') === null, 'for_key: refused or no wording gives nothing');
+
+// Bulk: which email each booking gets, and the one check made before the batch.
+check(rh_email_wording_bulk_allowed_keys('invoice') === [] && rh_email_wording_bulk_allowed_keys('noshow') === [], 'bulk invoice / no-show: fixed wording');
+check(rh_email_wording_bulk_key('reminder', ['status' => 'confirmed']) === 'booking_reminder', 'bulk key: reminder');
+check(rh_email_wording_bulk_key('confirmation', ['status' => 'pending']) === 'booking_received'
+    && rh_email_wording_bulk_key('confirmation', ['status' => 'tentative']) === 'tentative_booking_created'
+    && rh_email_wording_bulk_key('confirmation', ['status' => 'confirmed']) === 'booking_confirmed', 'bulk key: resend confirmation follows the status');
+check(rh_email_wording_bulk_key('confirm', ['status' => 'tentative', 'is_tentative' => 1]) === 'tentative_booking_converted', 'bulk key: confirm a tentative hold converts');
+check(rh_email_wording_bulk_key('confirm', ['status' => 'tentative', 'is_tentative' => 0]) === 'booking_confirmed'
+    && rh_email_wording_bulk_key('confirm', ['status' => 'pending']) === 'booking_confirmed', 'bulk key: confirm otherwise sends booking confirmed');
+check(rh_email_wording_bulk_key('cancel', ['status' => 'confirmed']) === 'booking_cancelled', 'bulk key: cancel');
+check(rh_email_wording_bulk_check('confirm', []) === null, 'bulk check: nothing posted gives the default wording');
+$bc = rh_email_wording_bulk_check('reminder', ['email_wording_key' => 'booking_cancelled', 'email_wording_html' => '<p>x</p>']);
+check(is_array($bc) && empty($bc['ok']), 'bulk check: wording for an email the action does not send is refused');
+$bc = rh_email_wording_bulk_check('invoice', ['email_wording_key' => 'payment_invoice', 'email_wording_html' => '<p>x</p>']);
+check(is_array($bc) && empty($bc['ok']), 'bulk check: the invoice keeps fixed wording');
+$bc = rh_email_wording_bulk_check('cancel', ['email_wording_key' => 'booking_cancelled', 'email_wording_html' => '<p>x</p>', 'email_guest' => '0']);
+check(is_array($bc) && empty($bc['ok']) && strpos($bc['error'], 'Email the guest') !== false, 'bulk check: edited cancellation with email unticked is refused');
+// Validated once, then set and cleared around every send of the batch (tokens filled per booking by the sender).
+$seen = [];
+$leak = false;
+foreach ([['id' => 1, 'status' => 'pending'], ['id' => 2, 'status' => 'tentative', 'is_tentative' => 1], ['id' => 3, 'status' => 'pending']] as $bb) {
+    $bkey = rh_email_wording_bulk_key('confirm', $bb);
+    rh_email_wording_send(rh_email_wording_for_key($wOk, $bkey), static function () use (&$seen, $bb, $bkey) {
+        $seen[$bb['id']] = $GLOBALS['rh_email_wording_override'][$bkey] ?? null;
+        return ['success' => true];
+    });
+    $leak = $leak || !empty($GLOBALS['rh_email_wording_override']);
+}
+check($seen === [1 => '<p>w</p>', 2 => null, 3 => '<p>w</p>'] && !$leak, 'bulk: edited wording only on the bookings that get that email, cleared after each send');
+try {
+    rh_email_wording_send($wOk, static function () { throw new RuntimeException('smtp down mid-batch'); });
+} catch (RuntimeException $e) { /* expected */ }
+check(empty($GLOBALS['rh_email_wording_override']), 'bulk: a send that throws mid-batch leaves no wording set');
+
+// New booking: the key follows the chosen status; wording for another email is refused before anything is created.
+check(rh_email_wording_create_key('confirmed', false) === 'booking_confirmed' && rh_email_wording_create_key('confirmed', true) === 'booking_confirmed', 'create key: confirmed');
+check(rh_email_wording_create_key('pending', false) === 'booking_received' && rh_email_wording_create_key('pending', true) === 'booking_received', 'create key: pending');
+check(rh_email_wording_create_key('tentative', false) === 'tentative_booking_created', 'create key: tentative');
+check(rh_email_wording_create_key('checked-in', false) === 'booking_received', 'create key: a checked-in walk-in gets the received email');
+$cm = rh_email_wording_from_post(rh_email_wording_create_key('tentative', false), ['email_wording_key' => 'booking_confirmed', 'email_wording_html' => '<p>x</p>']);
+check(is_array($cm) && empty($cm['ok']) && strpos($cm['error'], 'different email') !== false, 'create: status changed after editing (key mismatch) is refused');
+$cbSrc = (string)file_get_contents($root . '/admin/create-booking.php');
+$cbPosCheck = strpos($cbSrc, 'rh_email_wording_from_post($cbWordingKey');
+$cbPosTx = strpos($cbSrc, '// ── Transaction: create bookings for all lines');
+check($cbPosCheck !== false && $cbPosTx !== false && $cbPosCheck < $cbPosTx, 'create: the wording is checked before the booking transaction starts');
+
 /* ── seam (READ-ONLY database read of one template row) ── */
 $dbOk = false;
 try {
