@@ -1,7 +1,7 @@
 # STATUS: Rosalyn's Beach Hotel 2026 (hotel PMS / HMS)
 
 **Read this first.** Any agent (Claude, Cline, another provider) should be able to continue from this file alone. Keep it
-current during work. Last updated: **2026-11-11**.
+current during work. Last updated: **2026-11-26**.
 
 This is the original platform; `../Liwonde_Sun_Hotel_2026` is its fork. Most fixes go into both repos with the same
 commit message.
@@ -28,6 +28,23 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   (one copy; plain node, no AI calls) reads Claude Code's own session logs for ALL projects and writes
   `MSP/usage-reports/<date>.md` + a row in `MSP/usage-reports/HISTORY.md`. COST_LOG.md is retired.
   Baseline 10-16 Nov: 22,793 calls, 50 per hotel commit, 95% Opus, 53 agent runs past today's caps.
+
+## Shipped 2026-11-26: room + conference packages, deposit lines, email escaping (owner, profile Claude session 94b37144)
+- Room packages follow stay changes (PATCH): Liwonde d9a3bb8 / Rosalyn's 5559e09. Plan: Liwonde `.claude/ROOM_PACKAGES_FIX_PLAN.md`.
+- Conference packages (FEATURE): Liwonde 823e9bd / Rosalyn's c5753bf. Plan: Liwonde `.claude/CONF_PACKAGES_PLAN.md`.
+  **Rosalyn's needs migration 092 run on deploy** (owner); until then, no package screens appear and prices are unchanged
+  (guarded by `rh_conf_has_packages()`).
+- Deposit lines on gym/event/conference invoices + email template escaping (security PATCH): Liwonde 0ff45bf /
+  Rosalyn's 085706d. Tests: `scripts/tests/deposit_line_test.php`, `email_template_escape_test.php` (Liwonde only).
+- LATER (not built):
+  - conference confirm path locks room then enquiry; the new actions lock enquiry then room;
+  - more than 500 delegates can't be rescheduled;
+  - a new room with no rate keeps the old price;
+  - the Assistant's package_ack for room-type changes;
+  - the invoice email shows 0 paid when amount_paid is NULL (the attached PDF adds up the payments);
+  - gym/event email subjects htmlspecialchars the site name;
+  - station_reports_job has 1 failure (from d9475a0, not ours);
+  - UI_REQUEST for the conference package picker look (`.conf-pkg-pick*`).
 
 ## Shipped 2026-11-25: Guides + Assistant sync (owner prompted; port of Liwonde e48fc69)
 - Staff guides (Rosalyn's branding kept), Assistant answers (why cancelled, unapproved counts, arrivals to chase) and the
