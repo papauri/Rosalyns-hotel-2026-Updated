@@ -189,7 +189,10 @@ sr_check(rh_permission_resolve('manager', false, 'timed_report_emails', null, $m
     && rh_permission_resolve('manager', false, 'timed_report_emails', false, $mgr, [], [], 1) === false, 'manager has it by default; a saved off row removes it');
 
 $ae = sr_src('admin/automated-emails.php');
-sr_check(strpos($ae, "\$canTimedReports = hasPermission((int)\$user['id'], 'timed_report_emails');") !== false && strpos($ae, "\$timedReportJobs = ['daily_reports', 'station_reports'];") !== false, 'Automated Emails checks the permission server-side');
+// The list may grow (arrivals_chase joined it in b32252c); daily + station reports must stay in it.
+sr_check(strpos($ae, "\$canTimedReports = hasPermission((int)\$user['id'], 'timed_report_emails');") !== false
+    && preg_match("/\\\$timedReportJobs = \[([^\]]*)\];/", $ae, $trj) === 1
+    && strpos($trj[1], "'daily_reports'") !== false && strpos($trj[1], "'station_reports'") !== false, 'Automated Emails checks the permission server-side');
 $saveAt = strpos($ae, "if (\$action === 'save') {");
 $save = substr($ae, (int)$saveAt, strpos($ae, "} elseif (\$action === 'run_now') {") - (int)$saveAt);
 $gate = (string)strstr((string)strstr($save, 'if ($canTimedReports) {'), "            foreach (\$jobs as \$jobName => \$job) {", true);
