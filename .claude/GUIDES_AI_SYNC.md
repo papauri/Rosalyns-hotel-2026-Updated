@@ -140,6 +140,10 @@ when prompted."
   end. Switched off = the old automatic layout (and no automatic receipt emails). The template was reset to the new
   default at both hotels. Guides: 12-email-templates (receipt email note: the template now shapes the email, the new
   tag). Assistant: none. Manager Guides: none.
+- 2026-11-26 Liwonde af2a4a7 / Rosalyn's b00586f (owner PATCH): Dashboard figure cards (Owed to us, check-ins, takings
+  and the rest) open their details again after going to another page and back; before, none opened until a hard
+  refresh. Following a link inside the details window now closes it first. Guides: none. Assistant: none. Manager
+  Guides: none.
 
 ## Synced 2026-11-25 (owner prompted "sync guides, assistants and decisions"; guides + Assistant: commit "Guides + Assistant sync 2026-11-25" in both repos · Assistant: why-cancelled answer (reason from History, staff-only), Assistant cancel card uses rh_cancel_reason_check, counts_not_approved + count-measure hint, new arrivals_to_chase read · owner decisions 2026-11-24/25 written into guides + Assistant (cancel reason internal, guest emails unchanged; SMTP + copy lists unlocked) · Manager Guides: Stock, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed; POS and Kitchen Screens no change) - entries kept for reference
 
