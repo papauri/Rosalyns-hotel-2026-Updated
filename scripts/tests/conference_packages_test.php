@@ -352,6 +352,26 @@ $r = $admin('manual same room', array_merge($S, $enq('inclusive', 'MVS', 750000,
 ok('manual venue: same room, 2 days / 35 delegates with a manual 650,000: total 2,160,000, booked rate unchanged', $totalsOk($r, 'inclusive', 2160000, 1510000)
     && $near($row($r)['booked_daily_rate'] ?? -1, 250000) && strpos($logs($r), 'venue 750,000 → 650,000') !== false, json_encode([$row($r), $r['flash'], $logs($r)]));
 
+// PATCH 2026-11-26: an event WITHOUT packages moved to another room saves that room's rates as the booked rates (the
+// write is gated on the booked-rate columns, not on the package feature), so a later reschedule tells a room-rate
+// change from a manual price.
+$npVerify = static fn(string $ref): array => array_merge($enqVerify($ref), ["SELECT booked_half_day_rate FROM conference_inquiries WHERE id = @e"]);
+$r = $admin('no-pkg move', array_merge($S, $enq('inclusive', 'NPM', 750000, [])), $sched(3, 40, '{rb}'), $npVerify('NPM'));
+ok('no packages: move to room B saves room B\'s rates (daily 300,000, no half day); venue 900,000', !empty($row($r)['in_b']) && $totalsOk($r, 'inclusive', 900000, 0)
+    && $near($row($r)['booked_daily_rate'] ?? -1, 300000) && array_key_exists('booked_half_day_rate', $r['verify'][3][0] ?? []) && $r['verify'][3][0]['booked_half_day_rate'] === null,
+    json_encode([$row($r), $r['verify'][3] ?? null, $r['flash']]));
+$r = $admin('no-pkg later', array_merge($S, $enq('inclusive', 'NPL', 900000, [], ['room' => '@rb', 'booked' => ['300000', null]]), ['UPDATE conference_rooms SET daily_rate = 350000 WHERE id = @rb']),
+    $sched(2, 40, '{rb}'), $enqVerify('NPL'));
+ok('no packages: a later reschedule in room B reprices from the saved 300,000 (room now 350,000): venue 600,000, not "manual"', $totalsOk($r, 'inclusive', 600000, 0)
+    && strpos($r['flash'], 'manually set') === false && strpos($r['flash'], 'recalculated') !== false, json_encode([$row($r), $r['flash']]));
+$npSrc = (string)file_get_contents($root . '/admin/conference-management.php');
+$npA = strpos($npSrc, "} elseif (\$action === 'update_schedule') {");
+$npB = $npA !== false ? strpos($npSrc, "} elseif (\$action === 'update_amount') {", $npA) : false;
+$npBlock = ($npA !== false && $npB !== false) ? substr($npSrc, $npA, $npB - $npA) : '';
+ok('no packages: the event change saves the booked rates whenever the columns exist, not only with the package feature',
+    $npBlock !== '' && strpos($npBlock, "rh_conf_has_column(\$pdo, 'conference_inquiries', 'booked_daily_rate')") !== false
+    && preg_match('/if \(\$confPkgs && \(\$roomChanged \|\| \$replaceAmount\)\)/', $npBlock) === 0);
+
 // PATCH 2026-11-26 fault 4: the 500 cap applies to a NEW delegate count only.
 $r = $admin('600 unchanged', array_merge($S, $enq('inclusive', 'D6', 750000, [], ['delegates' => 600])), $sched(2, 600), $enqVerify('D6'));
 ok('fault 4: an enquiry with 600 delegates can be rescheduled (count unchanged): 2 days, venue 500,000', $totalsOk($r, 'inclusive', 500000, 0)

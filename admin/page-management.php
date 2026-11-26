@@ -625,8 +625,11 @@ try {
                     </div>
                     <div>
                         <label for="add_icon">Icon (Font Awesome)</label>
-                        <input type="text" id="add_icon" name="icon" placeholder="e.g. fa-spa" value="fa-file">
-                        <p style="font-size:12px;color:#888;margin:4px 0 0;">Shows on the Book Now button only. The menu itself is text-only.</p>
+                        <div class="icon-preview-wrap">
+                            <span class="icon-preview-badge"><i class="fas fa-file" id="addIconPreview"></i></span>
+                            <input type="text" id="add_icon" name="icon" placeholder="e.g. fa-spa" value="fa-file" data-icon-preview="addIconPreview" data-icon-prefix="fas" data-icon-fallback="fas fa-file">
+                        </div>
+                        <p style="font-size:12px;color:#888;margin:4px 0 0;">Shows on the Book Now button only. The menu itself is text-only. Browse free icons at fontawesome.com/icons</p>
                     </div>
                     <div>
                         <label for="add_page_heading">Page Heading</label>
@@ -673,8 +676,11 @@ try {
         </div>
         <div class="form-group">
             <label for="edit_icon">Icon (Font Awesome)</label>
-            <input type="text" id="edit_icon" name="icon">
-            <p style="font-size:12px;color:#888;margin:4px 0 0;">Shows on the Book Now button only. The menu itself is text-only.</p>
+            <div class="icon-preview-wrap">
+                <span class="icon-preview-badge"><i class="fas fa-file" id="editIconPreview"></i></span>
+                <input type="text" id="edit_icon" name="icon" data-icon-preview="editIconPreview" data-icon-prefix="fas" data-icon-fallback="fas fa-file">
+            </div>
+            <p style="font-size:12px;color:#888;margin:4px 0 0;">Shows on the Book Now button only. The menu itself is text-only. Browse free icons at fontawesome.com/icons</p>
         </div>
         <div class="form-group">
             <label for="edit_description">Description</label>
@@ -707,6 +713,7 @@ try {
             document.getElementById('edit_title').value = page.title;
             document.getElementById('edit_file_path').value = page.file_path;
             document.getElementById('edit_icon').value = page.icon || 'fa-file';
+            if (window.rhIconPreview) rhIconPreview(document.getElementById('edit_icon'));
             document.getElementById('edit_description').value = page.description || '';
             openAdminModal('editPageModal');
         }

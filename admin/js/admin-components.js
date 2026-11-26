@@ -1295,3 +1295,29 @@
         }).observe(document.body || document.documentElement, { childList: true, subtree: true });
     }
 })();
+
+/* Live Font Awesome icon preview. Input: data-icon-preview="<preview <i> id>", optional data-icon-fallback, data-icon-prefix ("fas" added when no style prefix).
+   Sets className only, value limited to letters, digits, spaces, hyphens. Call rhIconPreview(input) after filling an input from code. */
+(function () {
+    'use strict';
+    var STYLE = /(^|\s)(fas|far|fab|fal|fat|fad|fa-solid|fa-regular|fa-brands|fa-light|fa-thin|fa-duotone)(\s|$)/;
+    function update(input) {
+        if (!input || !input.getAttribute) return;
+        var prev = document.getElementById(input.getAttribute('data-icon-preview') || '');
+        if (!prev) return;
+        var fallback = input.getAttribute('data-icon-fallback') || 'fas fa-gift';
+        var prefix = input.getAttribute('data-icon-prefix') || '';
+        var v = String(input.value || '').trim().replace(/\s+/g, ' ');
+        if (!v || !/^[A-Za-z0-9 -]+$/.test(v) || !/(^|\s)fa-[a-z0-9-]+/.test(v)) { prev.className = fallback; return; }
+        if (prefix && !STYLE.test(v)) v = prefix + ' ' + v;
+        prev.className = v;
+    }
+    window.rhIconPreview = update;
+    document.addEventListener('input', function (e) {
+        if (e.target && e.target.getAttribute && e.target.getAttribute('data-icon-preview')) update(e.target);
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+        var all = document.querySelectorAll('input[data-icon-preview]');
+        for (var i = 0; i < all.length; i++) update(all[i]);
+    });
+})();

@@ -515,8 +515,11 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                         </div>
                         <div class="form-group">
                             <label class="form-label">Icon Class</label>
-                            <input type="text" name="icon_class" id="addGymIconClass" class="form-control" maxlength="100" value="fas fa-leaf" placeholder="fas fa-dumbbell">
-                            <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code></small>
+                            <div class="icon-preview-wrap">
+                                <span class="icon-preview-badge"><i class="fas fa-leaf" id="addGymIconPreview"></i></span>
+                                <input type="text" name="icon_class" id="addGymIconClass" class="form-control" maxlength="100" value="fas fa-leaf" placeholder="fas fa-dumbbell" data-icon-preview="addGymIconPreview" data-icon-fallback="fas fa-leaf">
+                            </div>
+                            <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code>. Browse free icons at fontawesome.com/icons</small>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
@@ -613,8 +616,11 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                         </div>
                         <div class="form-group">
                             <label class="form-label">Icon Class</label>
-                            <input type="text" name="icon_class" id="editGymIconClass" class="form-control" maxlength="100">
-                            <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code></small>
+                            <div class="icon-preview-wrap">
+                                <span class="icon-preview-badge"><i class="fas fa-leaf" id="editGymIconPreview"></i></span>
+                                <input type="text" name="icon_class" id="editGymIconClass" class="form-control" maxlength="100" data-icon-preview="editGymIconPreview" data-icon-fallback="fas fa-leaf">
+                            </div>
+                            <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code>. Browse free icons at fontawesome.com/icons</small>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
@@ -1147,6 +1153,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             document.getElementById('editGymId').value = pkg.id;
             document.getElementById('editGymName').value = pkg.name || '';
             document.getElementById('editGymIconClass').value = pkg.icon_class || 'fas fa-leaf';
+            if (window.rhIconPreview) rhIconPreview(document.getElementById('editGymIconClass'));
             document.getElementById('editGymPrice').value = Number(pkg.price || 0).toFixed(2);
             document.getElementById('editGymCurrency').value = pkg.currency_code || 'MWK';
             document.getElementById('editGymDurationDays').value = (pkg.duration_days === 0 || pkg.duration_days) ? pkg.duration_days : '';

@@ -6550,3 +6550,11 @@ body.rh-pwa-bar-on .admin-bulk-bar {
 @media (pointer: fine) { .rh-grip::before { width: 16px; right: -4px; } }
 .is-resizing { outline: 2px dashed #1f2a37; outline-offset: -2px; z-index: 4; }
 @media (pointer: coarse) { .rh-grip { width: min(44px, 60%); } } /* inside a clipped bar / block the target itself grows */
+
+/* Icon field with live preview (same look as Room Packages); used with rhIconPreview() in admin-components.js */
+.icon-preview-wrap { display: flex; align-items: stretch; border: 1px solid #ced4da; border-radius: 5px; overflow: hidden; transition: border-color .2s; background: #fff; }
+.icon-preview-wrap:focus-within { border-color: #7E684B; }
+.icon-preview-badge { display: flex; align-items: center; justify-content: center; min-width: 40px; width: 40px; background: rgba(139, 115, 85, .06); border-right: 1px solid #ced4da; color: #7E684B; font-size: 15px; flex-shrink: 0; transition: background .2s; }
+.icon-preview-wrap:focus-within .icon-preview-badge { background: rgba(139, 115, 85, .12); }
+.icon-preview-wrap input { flex: 1; min-width: 0; padding: 8px 10px; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; background: transparent; }
+.icon-preview-hint { font-size: 12px; color: #888; margin: 4px 0 0; }

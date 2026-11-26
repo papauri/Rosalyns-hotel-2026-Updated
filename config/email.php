@@ -4349,6 +4349,28 @@ function sendGymCancelledEmail(array $inquiry)
     }
 }
 
+if (!function_exists('rh_quote_email_total')) {
+    /**
+     * Gym / event quotation email total = the attached quotation PDF's total (generateGymQuotationPDF /
+     * generateEventInquiryQuotationPDF): the locked total_with_vat, else total_amount plus VAT, the VAT derived from the
+     * current mode when only the rate is stored (vat_amount missing, vat_rate above 0), as in the conference quotation.
+     */
+    function rh_quote_email_total(array $row): float
+    {
+        $base = (float)($row['total_amount'] ?? 0);
+        $vat = (float)($row['vat_amount'] ?? 0);
+        if ($vat <= 0 && (float)($row['vat_rate'] ?? 0) > 0) {
+            $vat = vat_components($base)['vat'];
+        }
+        $total = (float)($row['total_with_vat'] ?? 0);
+        if ($total <= 0) {
+            // Inclusive mode: the priced amount already contains VAT.
+            $total = vat_mode() === 'inclusive' ? $base : $base + $vat;
+        }
+        return $total;
+    }
+}
+
 /**
  * Send gym membership quotation email (mirrors sendConferenceQuotationEmail,
  * simplified: no PDF attachment / WhatsApp — gym has no per-room booking
@@ -4378,13 +4400,7 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
             $quoteRef = 'GQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('GYM-' . (int)($inquiry['id'] ?? 0))));
         }
 
-        $baseAmount = (float)($inquiry['total_amount'] ?? 0);
-        $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
-        $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
-        if ($totalAmount <= 0) {
-            // Inclusive mode: the priced amount already contains VAT.
-            $totalAmount = vat_mode() === 'inclusive' ? $baseAmount : $baseAmount + $vatAmount;
-        }
+        $totalAmount = rh_quote_email_total($inquiry); // same total as the attached PDF (VAT from the rate when not stored)
 
         $subject = 'Gym Membership Quotation - ' . $siteName . ' [' . $quoteRef . ']';
         $htmlBody = '<h1 style="color:#8B7355;text-align:center;">Gym Membership Quotation</h1>'
@@ -4597,13 +4613,7 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
             $quoteRef = 'EQ-' . strtoupper((string)($inquiry['reference_number'] ?? ('EVT-' . (int)($inquiry['id'] ?? 0))));
         }
 
-        $baseAmount = (float)($inquiry['total_amount'] ?? 0);
-        $vatAmount = (float)($inquiry['vat_amount'] ?? 0);
-        $totalAmount = (float)($inquiry['total_with_vat'] ?? 0);
-        if ($totalAmount <= 0) {
-            // Inclusive mode: the priced amount already contains VAT.
-            $totalAmount = vat_mode() === 'inclusive' ? $baseAmount : $baseAmount + $vatAmount;
-        }
+        $totalAmount = rh_quote_email_total($inquiry); // same total as the attached PDF (VAT from the rate when not stored)
 
         $subject = 'Event Booking Quotation - ' . $siteName . ' [' . $quoteRef . ']';
         $htmlBody = '<h1 style="color:#8B7355;text-align:center;">Event Booking Quotation</h1>'

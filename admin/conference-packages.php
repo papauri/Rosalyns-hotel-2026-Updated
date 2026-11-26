@@ -331,7 +331,11 @@ $cpVatNote = vat_mode() === 'exclusive' ? 'before VAT (VAT is added on top, as f
                             </div>
                             <div class="form-group">
                                 <label for="cpIcon">Icon (Font Awesome class)</label>
-                                <input type="text" id="cpIcon" name="icon" maxlength="60" placeholder="fas fa-utensils">
+                                <div class="icon-preview-wrap">
+                                    <span class="icon-preview-badge"><i class="fas fa-gift" id="cpIconPreview"></i></span>
+                                    <input type="text" id="cpIcon" name="icon" maxlength="60" placeholder="fas fa-utensils" data-icon-preview="cpIconPreview">
+                                </div>
+                                <p class="icon-preview-hint">Browse free icons at fontawesome.com/icons</p>
                             </div>
                         </div>
                         <div class="form-group">
@@ -428,6 +432,7 @@ $cpVatNote = vat_mode() === 'exclusive' ? 'before VAT (VAT is added on top, as f
                     document.getElementById('cpId').value = p ? p.id : '';
                     document.getElementById('cpName').value = p ? p.name : '';
                     document.getElementById('cpIcon').value = p ? p.icon : '';
+                    if (window.rhIconPreview) rhIconPreview(document.getElementById('cpIcon'));
                     document.getElementById('cpShort').value = p ? p.short_description : '';
                     document.getElementById('cpDesc').value = p ? p.description : '';
                     document.getElementById('cpIncl').value = p ? p.inclusions : '';

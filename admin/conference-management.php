@@ -884,7 +884,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 }
                 $sets = 'event_date = ?, end_date = ?, start_time = ?, end_time = ?, number_of_attendees = ?, conference_room_id = ?';
                 $args = [$newStart, $newEnd, $newFrom, $newTo, $newAttendees, $newRoomId];
-                if ($confPkgs && ($roomChanged || $replaceAmount)) {
+                // Saved on every room move (and refreshed price), with or without packages, whenever the booked-rate
+                // columns exist: a later change reads them to tell a room-rate change from a manual price.
+                if (rh_conf_has_column($pdo, 'conference_inquiries', 'booked_daily_rate') && rh_conf_has_column($pdo, 'conference_inquiries', 'booked_half_day_rate')
+                    && ($roomChanged || $replaceAmount)) {
                     // The rates this venue price now rests on (new room, or the rates of a refreshed price).
                     $sets .= ', booked_daily_rate = ?, booked_half_day_rate = ?';
                     $args[] = round((float)($priceRoom['daily_rate'] ?? 0), 2);

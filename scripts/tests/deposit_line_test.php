@@ -221,5 +221,49 @@ $cLine = strip_tags(rh_flat_invoice_email_total_row($cFig, 'MWK'));
 ok('conference email total line keeps the cents: 1,234.56 (was 1,235)', strpos($cLine, 'MWK 1,234.56') !== false, $cLine);
 ok('conference email total line = PDF total with cents', preg_match('/' . preg_quote($totLabel, '/') . '(?:\s|&nbsp;)*MWK\s*1,234\.56/', $cPdf) === 1);
 
+// ---------------------------------------------------------------------------------------------------------------
+// Gym / event QUOTATION email total = the attached quotation PDF's total when the stored VAT is missing (PATCH
+// 2026-11-26): VAT is derived from the current mode when vat_rate > 0, exactly as generateGymQuotationPDF /
+// generateEventInquiryQuotationPDF do. The VAT mode is forced in memory only ($_SITE_SETTINGS), never written, and
+// restored after. The emails themselves are not called (they send); the source check shows both use the helper.
+// ---------------------------------------------------------------------------------------------------------------
+require_once $root . '/config/email.php';
+$keep = [];
+foreach (['vat_enabled', 'vat_rate', 'vat_pricing_mode'] as $k) { $keep[$k] = array_key_exists($k, $GLOBALS['_SITE_SETTINGS'] ?? []) ? $GLOBALS['_SITE_SETTINGS'][$k] : '__unset__'; }
+$pdfTotal = static function (array $q): float { // generateGymQuotationPDF / generateEventInquiryQuotationPDF, lines for the total
+    $b = (float)($q['total_amount'] ?? 0); $r = (float)($q['vat_rate'] ?? 0); $v = (float)($q['vat_amount'] ?? 0);
+    if ($v <= 0 && $r > 0) { $v = vat_components($b)['vat']; }
+    $t = (float)($q['total_with_vat'] ?? 0);
+    return $t <= 0 ? (vat_mode() === 'inclusive' ? $b : $b + $v) : $t;
+};
+try {
+    $qRow = ['total_amount' => 20000, 'vat_rate' => 16.5, 'vat_amount' => 0, 'total_with_vat' => 0];
+    foreach (['exclusive' => 23300.0, 'inclusive' => 20000.0] as $mode => $want) {
+        $GLOBALS['_SITE_SETTINGS']['vat_enabled'] = '1';
+        $GLOBALS['_SITE_SETTINGS']['vat_rate'] = '16.5';
+        $GLOBALS['_SITE_SETTINGS']['vat_pricing_mode'] = $mode;
+        $got = rh_quote_email_total($qRow);
+        ok("quotation email [$mode], VAT not stored, rate 16.5: total " . number_format($want, 2), abs($got - $want) < 0.01, 'got ' . $got);
+        ok("quotation email [$mode], VAT not stored: total = quotation PDF total", abs($got - $pdfTotal($qRow)) < 0.01, $got . ' vs ' . $pdfTotal($qRow));
+    }
+    $GLOBALS['_SITE_SETTINGS']['vat_pricing_mode'] = 'exclusive';
+    $zeroRate = ['total_amount' => 20000, 'vat_rate' => 0, 'vat_amount' => 0, 'total_with_vat' => 0];
+    ok('quotation email [exclusive], stored rate 0 and no VAT: total 20,000.00, as on the PDF', abs(rh_quote_email_total($zeroRate) - 20000) < 0.01 && abs(rh_quote_email_total($zeroRate) - $pdfTotal($zeroRate)) < 0.01, (string)rh_quote_email_total($zeroRate));
+    $stored = ['total_amount' => 20000, 'vat_rate' => 15, 'vat_amount' => 3000, 'total_with_vat' => 0];
+    ok('quotation email [exclusive], stored VAT 3,000 is used as stored: total 23,000.00', abs(rh_quote_email_total($stored) - 23000) < 0.01);
+    $locked = ['total_amount' => 20000, 'vat_rate' => 16.5, 'vat_amount' => 0, 'total_with_vat' => 21000];
+    ok('quotation email: a locked total_with_vat wins: 21,000.00', abs(rh_quote_email_total($locked) - 21000) < 0.01);
+} finally {
+    foreach ($keep as $k => $v) { if ($v === '__unset__') { unset($GLOBALS['_SITE_SETTINGS'][$k]); } else { $GLOBALS['_SITE_SETTINGS'][$k] = $v; } }
+}
+$eSrc = (string)file_get_contents($root . '/config/email.php');
+foreach (['sendGymQuotationEmail', 'sendEventInquiryQuotationEmail'] as $fnName) {
+    $start = strpos($eSrc, 'function ' . $fnName . '(');
+    $end = $start === false ? false : strpos($eSrc, "\nfunction ", $start + 10);
+    $body = ($start === false) ? '' : substr($eSrc, $start, ($end === false ? strlen($eSrc) : $end) - $start);
+    ok("$fnName total comes from rh_quote_email_total (the PDF's rule)", $body !== '' && strpos($body, '$totalAmount = rh_quote_email_total($inquiry);') !== false
+        && strpos($body, "\$vatAmount = (float)(\$inquiry['vat_amount']") === false);
+}
+
 echo "\ndeposit_line_test: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);
