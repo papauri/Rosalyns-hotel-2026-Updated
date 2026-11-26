@@ -3640,7 +3640,7 @@ function sendAdminNotificationEmail(array $booking)
 if (!function_exists('rh_conf_email_packages_html')) {
     /**
      * The "Packages" block for conference emails: one row per stored package line (name, how it is charged, line
-     * total) plus room hire. Every value is escaped here (loadEmailTemplate inserts values raw). '' without packages.
+     * total) plus room hire. Every value is escaped here (loadEmailTemplate inserts this key as given). '' without packages.
      * Uses $row['package_lines'] when the caller has them (conference.php), else the stored lines by id.
      * Amounts are the stored figures: before VAT when the enquiry was priced with VAT on top.
      */
@@ -3720,17 +3720,17 @@ function sendConferenceEnquiryEmail(array $data)
             // Fallback to hardcoded HTML if template fails
             $htmlBody = '
             <h1 style="color: #8B7355; text-align: center;">Conference Enquiry Received</h1>
-            <p>Dear ' . htmlspecialchars($data['contact_person']) . ',</p>
-            <p>Thank you for your conference enquiry with <strong>' . htmlspecialchars($email_site_name) . '</strong>. We have received your request and it is currently being reviewed by our team.</p>
+            <p>Dear ' . rh_email_h($data['contact_person']) . ',</p>
+            <p>Thank you for your conference enquiry with <strong>' . rh_email_h($email_site_name) . '</strong>. We have received your request and it is currently being reviewed by our team.</p>
 
             <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
                 <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Enquiry Details</h2>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Enquiry Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['inquiry_reference']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Enquiry Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['inquiry_reference']) . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Company:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['company_name']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Company:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['company_name']) . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Conference Room:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($room['name']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Conference Room:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($room['name']) . '</td></tr></table>
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Event Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_conf_format_range($data['event_date'], $data['end_date'] ?? null, 'F j, Y') . '</td></tr></table>
 
@@ -3754,7 +3754,7 @@ function sendConferenceEnquiryEmail(array $data)
                 $htmlBody .= '
                 <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                     <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">Event Type</h3>
-                    <p style="color: #5C4A32; margin: 0;">' . htmlspecialchars($data['event_type']) . '</p>
+                    <p style="color: #5C4A32; margin: 0;">' . rh_email_h($data['event_type']) . '</p>
                 </div>';
             }
 
@@ -3770,7 +3770,7 @@ function sendConferenceEnquiryEmail(array $data)
                 $htmlBody .= '
                 <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                     <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">AV Equipment Requirements</h3>
-                    <p style="color: #5C4A32; margin: 0;">' . htmlspecialchars($data['av_equipment']) . '</p>
+                    <p style="color: #5C4A32; margin: 0;">' . rh_email_h($data['av_equipment']) . '</p>
                 </div>';
             }
 
@@ -3778,14 +3778,14 @@ function sendConferenceEnquiryEmail(array $data)
                 $htmlBody .= '
                 <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                     <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">Special Requirements</h3>
-                    <p style="color: #5C4A32; margin: 0;">' . htmlspecialchars($data['special_requirements']) . '</p>
+                    <p style="color: #5C4A32; margin: 0;">' . rh_email_h($data['special_requirements']) . '</p>
                 </div>';
             }
 
             $htmlBody .= '
-            <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
+            <p>If you have any questions, please contact us at <a href="mailto:' . rh_email_h($email_from_email) . '">' . rh_email_h($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
-            <p>Thank you for considering ' . htmlspecialchars($email_site_name) . ' for your event!</p>
+            <p>Thank you for considering ' . rh_email_h($email_site_name) . ' for your event!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>';
@@ -3794,8 +3794,8 @@ function sendConferenceEnquiryEmail(array $data)
         // Send email
         return sendEmail(
             $data['email'],
-            $data['contact_person'],
-            'Conference Enquiry Received - ' . htmlspecialchars($email_site_name) . ' [' . $data['inquiry_reference'] . ']',
+            rh_email_plain($data['contact_person']), // display name: plain text
+            rh_email_plain('Conference Enquiry Received - ' . $email_site_name . ' [' . $data['inquiry_reference'] . ']'), // plain text: no entities
             $htmlBody
         );
     } catch (\Throwable $e) {
@@ -3864,17 +3864,17 @@ function sendConferenceAdminNotificationEmail(array $data)
             <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
                 <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Enquiry Details</h2>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Enquiry Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['inquiry_reference']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Enquiry Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['inquiry_reference']) . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Company:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['company_name']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Company:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['company_name']) . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Contact Person:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['contact_person']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Contact Person:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['contact_person']) . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Email:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['email']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Email:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['email']) . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Phone:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['phone']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Phone:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['phone']) . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Conference Room:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($room['name']) . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Conference Room:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($room['name']) . '</td></tr></table>
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Event Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_conf_format_range($data['event_date'], $data['end_date'] ?? null, 'F j, Y') . '</td></tr></table>
 
@@ -3882,7 +3882,7 @@ function sendConferenceAdminNotificationEmail(array $data)
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Number of Attendees:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . (int) $data['number_of_attendees'] . '</td></tr></table>
 
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Event Type:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['event_type'] ?: 'Not specified') . '</td></tr></table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Event Type:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['event_type'] ?: 'Not specified') . '</td></tr></table>
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Estimated Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . $currency_symbol . ' ' . $total_amount . '</td></tr></table>
             </div>';
@@ -3903,7 +3903,7 @@ function sendConferenceAdminNotificationEmail(array $data)
                 $htmlBody .= '
                 <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                     <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">AV Equipment Requirements</h3>
-                    <p style="color: #5C4A32; margin: 0;">' . htmlspecialchars($data['av_equipment']) . '</p>
+                    <p style="color: #5C4A32; margin: 0;">' . rh_email_h($data['av_equipment']) . '</p>
                 </div>';
             }
 
@@ -3911,13 +3911,13 @@ function sendConferenceAdminNotificationEmail(array $data)
                 $htmlBody .= '
                 <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                     <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">Special Requirements</h3>
-                    <p style="color: #5C4A32; margin: 0;">' . htmlspecialchars($data['special_requirements']) . '</p>
+                    <p style="color: #5C4A32; margin: 0;">' . rh_email_h($data['special_requirements']) . '</p>
                 </div>';
             }
 
             $htmlBody .= '
             <div style="text-align: center; margin-top: 30px;">
-                <a href="' . htmlspecialchars($email_site_url) . '/admin/conference-management.php" style="display: inline-block; background: #8B7355; color: #1A1A1A; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">
+                <a href="' . rh_email_h($email_site_url) . '/admin/conference-management.php" style="display: inline-block; background: #8B7355; color: #1A1A1A; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">
                     View Enquiry in Admin Panel
                 </a>
             </div>';
@@ -3927,7 +3927,7 @@ function sendConferenceAdminNotificationEmail(array $data)
         return sendEmail(
             $conference_email,
             'Conference Team',
-            'New Conference Enquiry - ' . htmlspecialchars($email_site_name) . ' [' . $data['inquiry_reference'] . ']',
+            rh_email_plain('New Conference Enquiry - ' . $email_site_name . ' [' . $data['inquiry_reference'] . ']'), // plain text: no entities
             $htmlBody
         );
     } catch (\Throwable $e) {
@@ -6007,23 +6007,23 @@ function sendGymBookingEmail(array $data)
         if (empty($htmlBody)) {
             $htmlBody = '
         <h1 style="color: #8B7355; text-align: center;">Gym Booking Request Received</h1>
-        <p>Dear ' . htmlspecialchars($data['name']) . ',</p>
-        <p>Thank you for your gym booking request with <strong>' . htmlspecialchars($site_name) . '</strong>. We have received your submission and will confirm your booking shortly.</p>
+        <p>Dear ' . rh_email_h($data['name']) . ',</p>
+        <p>Thank you for your gym booking request with <strong>' . rh_email_h($site_name) . '</strong>. We have received your submission and will confirm your booking shortly.</p>
 
         <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
             <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Booking Details</h2>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Name:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['name']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Name:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['name']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Email:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['email']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Email:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['email']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Phone:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['phone']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Phone:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['phone']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['preferred_date']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['preferred_date']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Time:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['preferred_time']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Time:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['preferred_time']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Package:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['package_choice']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Package:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['package_choice']) . '</td></tr></table>
 
             ';
             $guestCount1 = (!empty($data['guests']) && $data['guests'] > 1) ? (int)$data['guests'] : 1;
@@ -6035,7 +6035,7 @@ function sendGymBookingEmail(array $data)
                 $htmlBody .= '
             <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                 <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">Fitness Goals / Notes</h3>
-                <p style="color: #5C4A32; margin: 0;">' . nl2br(htmlspecialchars($data['goals'])) . '</p>
+                <p style="color: #5C4A32; margin: 0;">' . nl2br(rh_email_h($data['goals'])) . '</p>
             </div>';
             }
 
@@ -6048,9 +6048,9 @@ function sendGymBookingEmail(array $data)
             </p>
         </div>
 
-        <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
+        <p>If you have any questions, please contact us at <a href="mailto:' . rh_email_h($email_from_email) . '">' . rh_email_h($email_from_email) . '</a>' . rh_email_or_call() . '.</p>
 
-        <p>Thank you for choosing ' . htmlspecialchars($site_name) . '!</p>
+        <p>Thank you for choosing ' . rh_email_h($site_name) . '!</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>'
@@ -6060,8 +6060,8 @@ function sendGymBookingEmail(array $data)
         // Send email
         return sendEmail(
             $data['email'],
-            $data['name'],
-            'Gym Booking Request Received - ' . htmlspecialchars($site_name),
+            rh_email_plain($data['name']), // display name: plain text
+            rh_email_plain('Gym Booking Request Received - ' . $site_name), // plain text: no entities
             $htmlBody
         );
     } catch (Exception $e) {
@@ -6095,12 +6095,15 @@ function sendGymAdminNotificationEmail(array $data)
             'name' => $data['name'] ?? '',
             'email' => $data['email'] ?? '',
             'phone' => $data['phone'] ?? '',
+            'phone_number' => $data['phone'] ?? '', // the staff template's tag for the phone
             'preferred_date' => $data['preferred_date'] ?? '',
             'preferred_time' => $data['preferred_time'] ?? '',
             'package_choice' => $data['package_choice'] ?? '',
             'guests' => (int)($data['guests'] ?? 1),
             'goals' => $data['goals'] ?? '',
-            'submission_date' => date('F j, Y g:i A')
+            'submission_date' => date('F j, Y g:i A'),
+            // The staff button opens the gym enquiries page (the shared default points at conference management).
+            'admin_url' => getSetting('site_url') . '/admin/gym-inquiries.php',
         ];
         $htmlBody = loadEmailTemplate('gym-booking-admin.html', $template_data);
 
@@ -6113,17 +6116,17 @@ function sendGymAdminNotificationEmail(array $data)
         <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
             <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Booking Details</h2>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Name:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['name']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Name:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['name']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Email:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['email']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Email:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['email']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Phone:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['phone']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Phone:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['phone']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['preferred_date']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['preferred_date']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Time:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['preferred_time']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Preferred Time:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['preferred_time']) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Package:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($data['package_choice']) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Package:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . rh_email_h($data['package_choice']) . '</td></tr></table>
 
             ';
             $guestCount2 = (!empty($data['guests']) && $data['guests'] > 1) ? (int)$data['guests'] : 1;
@@ -6135,13 +6138,13 @@ function sendGymAdminNotificationEmail(array $data)
                 $htmlBody .= '
             <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
                 <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">Fitness Goals / Notes</h3>
-                <p style="color: #5C4A32; margin: 0;">' . nl2br(htmlspecialchars($data['goals'])) . '</p>
+                <p style="color: #5C4A32; margin: 0;">' . nl2br(rh_email_h($data['goals'])) . '</p>
             </div>';
             }
 
             $htmlBody .= '
         <div style="text-align: center; margin-top: 30px;">
-            <a href="mailto:' . htmlspecialchars($data['email']) . '"
+            <a href="mailto:' . rh_email_h($data['email']) . '"
                style="display: inline-block; background: #8B7355; color: #1A1A1A; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">
                 Reply to Customer
             </a>
@@ -6152,7 +6155,7 @@ function sendGymAdminNotificationEmail(array $data)
         return sendEmail(
             $gym_email,
             'Gym Team',
-            'New Gym Booking Request - ' . htmlspecialchars($data['name']),
+            rh_email_plain('New Gym Booking Request - ' . $data['name']), // plain text: no entities
             $htmlBody
         );
     } catch (Exception $e) {
@@ -6378,6 +6381,31 @@ function wrapEmailTemplate(string $content, string $title = '')
 }
 
 /**
+ * PURE. A value for an HTML email body, escaped exactly once. The public forms store sanitizeString() output
+ * ("O&apos;Brien"), so the value is decoded first: never double-escaped, never inserted raw.
+ */
+function rh_email_h($value): string
+{
+    if (!is_scalar($value)) {
+        return '';
+    }
+    return htmlspecialchars(html_entity_decode((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8'), ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * PURE. A plain-text header value (subject): entities decoded ("O&apos;Brien" -> "O'Brien"), line breaks and other
+ * control characters turned into spaces so a typed value can never add a header line.
+ */
+function rh_email_plain($value): string
+{
+    if (!is_scalar($value)) {
+        return '';
+    }
+    $t = html_entity_decode((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    return trim((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $t));
+}
+
+/**
  * Load and populate an email template
  *
  * @param string $template Template filename (without path)
@@ -6416,13 +6444,8 @@ function loadEmailTemplate(string $template, array $data)
     // Merge user data with common data
     $data = array_merge($common_data, $data);
 
-    // Replace simple placeholders {{key}}
-    $html = preg_replace_callback('/\{\{(\w+)\}\}/', function (array $matches) use ($data) {
-        $key = $matches[1];
-        return $data[$key] ?? '';
-    }, $html);
-
-    // Handle conditional blocks {{#if key}}...{{/if}}
+    // Handle conditional blocks {{#if key}}...{{/if}} first, on the template's own text, so a typed value holding
+    // "{{/if}}" can never open or close a block.
     $html = preg_replace_callback('/\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/s', function (array $matches) use ($data) {
         $key = $matches[1];
         $content = $matches[2];
@@ -6431,6 +6454,23 @@ function loadEmailTemplate(string $template, array $data)
             return $content;
         }
         return '';
+    }, $html);
+
+    // Replace simple placeholders {{key}}. Every value is HTML-escaped here (guest-typed company, contact, notes and
+    // hotel settings go into staff and guest emails). Values the public forms already ran through sanitizeString()
+    // arrive encoded, so they are decoded first: escaped once, never twice ("O&apos;Brien" -> "O&#039;Brien").
+    // Only keys holding HTML built by our own code go in as given; each builder escapes its own values.
+    $rawHtmlKeys = [
+        'packages_html' => true, // rh_conf_email_packages_html(): table of package lines, every value escaped there
+        'logo_html'     => true, // the hotel logo <img> tag slot (rh_email_logo_html_tag() escapes its src/alt)
+    ];
+    $html = preg_replace_callback('/\{\{(\w+)\}\}/', function (array $matches) use ($data, $rawHtmlKeys) {
+        $key = $matches[1];
+        $value = $data[$key] ?? '';
+        if (isset($rawHtmlKeys[$key])) {
+            return is_scalar($value) ? (string)$value : '';
+        }
+        return rh_email_h($value);
     }, $html);
 
     return $html;

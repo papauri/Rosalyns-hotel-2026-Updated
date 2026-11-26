@@ -3482,8 +3482,15 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
         $vatAmount = $vatParts['vat'];
         $totalWithVat = $vatParts['total'];
     }
-    $amountPaid = (float)($enquiry['amount_paid'] ?? $totalWithVat);
-    $balanceDue = (float)($enquiry['amount_due'] ?? max(0, $totalWithVat - $amountPaid));
+    // A row without amount_paid / amount_due is never "paid in full": paid falls back to the ledger rows above
+    // (same filter as rh_sum_account_paid, refunds netted), due to the gross total less that.
+    if (!isset($enquiry['amount_paid']) || $enquiry['amount_paid'] === '') {
+        $amountPaid = max(0.0, round(array_sum(array_map(static function ($p) { return (float)($p['total_amount'] ?? 0); }, $payments)), 2));
+    } else {
+        $amountPaid = (float)$enquiry['amount_paid'];
+    }
+    $balanceDue = (isset($enquiry['amount_due']) && $enquiry['amount_due'] !== '')
+        ? (float)$enquiry['amount_due'] : max(0.0, round($totalWithVat - $amountPaid, 2));
 
     $startTs = strtotime((string)($enquiry['start_time'] ?? ''));
     $endTs   = strtotime((string)($enquiry['end_time'] ?? ''));
@@ -3775,6 +3782,10 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             $ciVatAmt       = $ciVatParts['vat'];
             $ciTotalWithVat = $ciVatParts['total'];
         }
+        // A row without amount_paid / amount_due is never "Paid in full": nothing paid, the gross total due.
+        $ciAmountPaid = (isset($enquiry['amount_paid']) && $enquiry['amount_paid'] !== '') ? (float)$enquiry['amount_paid'] : 0.0;
+        $ciAmountDue = (isset($enquiry['amount_due']) && $enquiry['amount_due'] !== '')
+            ? (float)$enquiry['amount_due'] : max(0.0, round($ciTotalWithVat - $ciAmountPaid, 2));
         $ciVatNumHtml = $ciVatNum !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8') . '</p>'
             : '';
@@ -3846,7 +3857,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
                 </div>
 
                 <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-                    <h3 style="color: #155724; margin-top: 0;">' . ((float)($enquiry['amount_due'] ?? 0) > BALANCE_TOLERANCE ? 'Balance due: ' . $currency_symbol . ' ' . number_format((float)$enquiry['amount_due'], 2) : 'Paid in full') . '</h3>
+                    <h3 style="color: #155724; margin-top: 0;">' . ($ciAmountDue > BALANCE_TOLERANCE ? 'Balance due: ' . $currency_symbol . ' ' . number_format($ciAmountDue, 2) : 'Paid in full') . '</h3>
                     <p style="color: #155724; margin: 0;">Payments you have made were acknowledged by their own receipts. We look forward to hosting your event!</p>
                 </div>
 
@@ -3928,8 +3939,22 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
         $vatAmount = $vatParts['vat'];
         $totalWithVat = $vatParts['total'];
     }
-    $amountPaid = (float)($inquiry['amount_paid'] ?? $totalWithVat);
-    $balanceDue = (float)($inquiry['amount_due'] ?? 0);
+    // A row without amount_paid / amount_due is never "paid in full": paid falls back to the ledger rows above
+    // (same filter as rh_sum_account_paid, refunds netted), due to the gross total less that.
+    if (!isset($inquiry['amount_paid']) || $inquiry['amount_paid'] === '') {
+        $amountPaid = max(0.0, round(array_sum(array_map(static function ($p) { return (float)($p['total_amount'] ?? 0); }, $payments)), 2));
+    } else {
+        $amountPaid = (float)$inquiry['amount_paid'];
+    }
+    $balanceDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
+        ? (float)$inquiry['amount_due'] : max(0.0, round($totalWithVat - $amountPaid, 2));
+
+    // deposit_required / deposit_paid are 0/1 flags (the flag printed as "MWK1"): the money is deposit_amount,
+    // and the deposit paid is what has been paid towards it (the payment snapshot rule). deposit_paid is never
+    // read here: callers pass either the flag or the snapshot's money figure under that key.
+    $depositAmount = (!empty($inquiry['deposit_required']) && (float)($inquiry['deposit_amount'] ?? 0) > 0)
+        ? round((float)$inquiry['deposit_amount'], 2) : 0.0;
+    $depositPaid = $depositAmount > 0 ? max(0.0, min($amountPaid, $depositAmount)) : 0.0;
 
     $package = trim((string)($inquiry['membership_type'] ?? ''));
     $desc = rh_pdf_e('Gym membership') . rh_inv_sub($package !== '' ? $package : '');
@@ -3954,9 +3979,9 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
         'amount_paid' => $amountPaid,
         'amount_due' => $balanceDue,
         'deposit' => [
-            'required' => !empty($inquiry['deposit_required']) && $inquiry['deposit_required'] > 0,
-            'amount' => (float)($inquiry['deposit_amount'] ?? 0),
-            'paid' => (float)($inquiry['deposit_paid'] ?? 0),
+            'required' => $depositAmount > 0,
+            'amount' => $depositAmount,
+            'paid' => $depositPaid,
         ],
         'payments' => $payments,
         'closing' => 'Thank you for your payment! We look forward to seeing you at the gym.',
@@ -4160,8 +4185,11 @@ function sendGymInvoiceEmailToClient(array $inquiry, string $invoice_file, array
     try {
         $currency_symbol = getSetting('currency_symbol');
         $totalAmount = (float)($inquiry['total_amount'] ?? 0);
-        $amountPaid = (float)($inquiry['amount_paid'] ?? $totalAmount);
-        $amountDue = (float)($inquiry['amount_due'] ?? 0);
+        // A row without amount_paid / amount_due is never "Paid in full": nothing paid, the gross total due.
+        $amountPaid = (isset($inquiry['amount_paid']) && $inquiry['amount_paid'] !== '') ? (float)$inquiry['amount_paid'] : 0.0;
+        $grossTotal = (float)($inquiry['total_with_vat'] ?? 0) > 0.001 ? (float)$inquiry['total_with_vat'] : $totalAmount;
+        $amountDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
+            ? (float)$inquiry['amount_due'] : max(0.0, round($grossTotal - $amountPaid, 2));
 
         $subject = 'Gym Membership Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
         $htmlBody = '
@@ -4254,8 +4282,22 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
         $vatAmount = $vatParts['vat'];
         $totalWithVat = $vatParts['total'];
     }
-    $amountPaid = (float)($inquiry['amount_paid'] ?? $totalWithVat);
-    $balanceDue = (float)($inquiry['amount_due'] ?? 0);
+    // A row without amount_paid / amount_due is never "paid in full": paid falls back to the ledger rows above
+    // (same filter as rh_sum_account_paid, refunds netted), due to the gross total less that.
+    if (!isset($inquiry['amount_paid']) || $inquiry['amount_paid'] === '') {
+        $amountPaid = max(0.0, round(array_sum(array_map(static function ($p) { return (float)($p['total_amount'] ?? 0); }, $payments)), 2));
+    } else {
+        $amountPaid = (float)$inquiry['amount_paid'];
+    }
+    $balanceDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
+        ? (float)$inquiry['amount_due'] : max(0.0, round($totalWithVat - $amountPaid, 2));
+
+    // deposit_required / deposit_paid are 0/1 flags (the flag printed as "MWK1"): the money is deposit_amount,
+    // and the deposit paid is what has been paid towards it (the payment snapshot rule). deposit_paid is never
+    // read here: callers pass either the flag or the snapshot's money figure under that key.
+    $depositAmount = (!empty($inquiry['deposit_required']) && (float)($inquiry['deposit_amount'] ?? 0) > 0)
+        ? round((float)$inquiry['deposit_amount'], 2) : 0.0;
+    $depositPaid = $depositAmount > 0 ? max(0.0, min($amountPaid, $depositAmount)) : 0.0;
 
     $guests = (int)($inquiry['guests'] ?? 1);
     $eventTitle = trim((string)($inquiry['event_title'] ?? ''));
@@ -4283,9 +4325,9 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
         'amount_paid' => $amountPaid,
         'amount_due' => $balanceDue,
         'deposit' => [
-            'required' => !empty($inquiry['deposit_required']) && $inquiry['deposit_required'] > 0,
-            'amount' => (float)($inquiry['deposit_amount'] ?? 0),
-            'paid' => (float)($inquiry['deposit_paid'] ?? 0),
+            'required' => $depositAmount > 0,
+            'amount' => $depositAmount,
+            'paid' => $depositPaid,
         ],
         'payments' => $payments,
         'closing' => 'Thank you for your payment! We look forward to seeing you at the event.',
@@ -4495,8 +4537,11 @@ function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, arr
     try {
         $currency_symbol = getSetting('currency_symbol');
         $totalAmount = (float)($inquiry['total_amount'] ?? 0);
-        $amountPaid = (float)($inquiry['amount_paid'] ?? $totalAmount);
-        $amountDue = (float)($inquiry['amount_due'] ?? 0);
+        // A row without amount_paid / amount_due is never "Paid in full": nothing paid, the gross total due.
+        $amountPaid = (isset($inquiry['amount_paid']) && $inquiry['amount_paid'] !== '') ? (float)$inquiry['amount_paid'] : 0.0;
+        $grossTotal = (float)($inquiry['total_with_vat'] ?? 0) > 0.001 ? (float)$inquiry['total_with_vat'] : $totalAmount;
+        $amountDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
+            ? (float)$inquiry['amount_due'] : max(0.0, round($grossTotal - $amountPaid, 2));
 
         $subject = 'Event Booking Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
         $htmlBody = '
