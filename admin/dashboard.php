@@ -3582,7 +3582,7 @@ $currency_symbol = getSetting('currency_symbol');
                 _insightModal.removeAttribute('inert');
                 _insightModal.classList.add('is-open', 'active');
                 _insightModal.setAttribute('aria-hidden', 'false');
-                document.body.classList.add('dashboard-insight-open', 'modal-open');
+                document.body.classList.add('modal-open'); // the shared lock: the admin SPA clears it when the page is left
                 if (_insightCloseBtn instanceof HTMLElement) {
                     requestAnimationFrame(() => {
                         _insightCloseBtn.focus();
@@ -3597,7 +3597,6 @@ $currency_symbol = getSetting('currency_symbol');
             _insightModal.classList.remove('is-open', 'active');
             _insightModal.setAttribute('aria-hidden', 'true');
             _insightModal.setAttribute('inert', '');
-            document.body.classList.remove('dashboard-insight-open');
             if (!document.querySelector('.modal-overlay.active')) {
                 document.body.classList.remove('modal-open');
             }
@@ -3762,7 +3761,6 @@ $currency_symbol = getSetting('currency_symbol');
         // and coming back. Drop the earlier visit's listeners before adding this visit's.
         if (window.__rhDashInsightClick) document.removeEventListener('click', window.__rhDashInsightClick);
         if (window.__rhDashInsightKey) document.removeEventListener('keydown', window.__rhDashInsightKey);
-        document.body.classList.remove('dashboard-insight-open'); // left by a modal open when the page was left
         // A link inside the modal (Open full page, a row link) leaves the Dashboard in place without a reload:
         // close the modal first so its scroll lock does not follow onto the next page.
         if (_insightModal) {

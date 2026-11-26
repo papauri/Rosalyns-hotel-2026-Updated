@@ -778,8 +778,10 @@
             el.classList.remove('active');
         });
 
-        // Restore body scroll if a modal had locked it
+        // Restore body scroll if a modal had locked it. The modal-open class too: leaving a page with a
+        // modal still open (browser Back, a link inside the modal) kept it, so the next page could not scroll.
         document.body.style.overflow = '';
+        document.body.classList.remove('modal-open');
     }
 
     // ── SPA eligibility check ────────────────────────────────────────────────

@@ -5,10 +5,6 @@
 /* Dashboard page — card-insight modal and system-health alert.
    The cockpit layout itself lives in admin-cockpit.css. */
 
-body.dashboard-insight-open {
-    overflow: hidden;
-}
-
 .dashboard-insight-modal {
     position: fixed;
     inset: 0;
