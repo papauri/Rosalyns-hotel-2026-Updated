@@ -36,15 +36,16 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   (guarded by `rh_conf_has_packages()`).
 - Deposit lines on gym/event/conference invoices + email template escaping (security PATCH): Liwonde 0ff45bf /
   Rosalyn's 085706d. Tests: `scripts/tests/deposit_line_test.php`, `email_template_escape_test.php` (Liwonde only).
+- Follow-up faults (owner "go" 2026-11-26): Liwonde 26822e7 / Rosalyn's 35a6679: emails match the PDF
+  (rh_flat_invoice_figures), 20 email subjects plain text (rh_email_plain), conference confirm locks enquiry then
+  room, delegate cap max(500, current) only when changed, OWNER DECISION: a move to a conference room with no
+  rate is refused, package picker restyled. station_reports_job test fixed (Liwonde 166a5f9 / Rosalyn's e0d34c7).
 - LATER (not built):
-  - conference confirm path locks room then enquiry; the new actions lock enquiry then room;
-  - more than 500 delegates can't be rescheduled;
-  - a new room with no rate keeps the old price;
-  - the Assistant's package_ack for room-type changes;
-  - the invoice email shows 0 paid when amount_paid is NULL (the attached PDF adds up the payments);
-  - gym/event email subjects htmlspecialchars the site name;
-  - station_reports_job has 1 failure (from d9475a0, not ours);
-  - UI_REQUEST for the conference package picker look (`.conf-pkg-pick*`).
+  - the Assistant's package_ack for room-type changes (owner: not now);
+  - the event-change form has no manual venue price, so a no-rate room can only be fixed by setting its rate;
+  - DB email templates (invoice.php ~2619, ~3907) may still carry entities in the subject;
+  - gym/event emails show no gross total line;
+  - room booking emails' booking-reference subjects in admin/create-booking.php still use htmlspecialchars (refs are system-made; harmless).
 
 ## Shipped 2026-11-25: Guides + Assistant sync (owner prompted; port of Liwonde e48fc69)
 - Staff guides (Rosalyn's branding kept), Assistant answers (why cancelled, unapproved counts, arrivals to chase) and the
