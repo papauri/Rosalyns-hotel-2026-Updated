@@ -8204,11 +8204,11 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                             <small>Saved in the booking History with every figure above.</small>
                         </div>
                         <div class="form-group rh-mt">
-                            <label style="display: flex; gap: 8px; align-items: flex-start; font-weight: 600; margin: 0;">
-                                <input type="checkbox" id="sn_email_guest" value="1" style="margin-top: 3px;">
-                                <span>Email the guest about this change</span>
+                            <label class="rh-choice" for="sn_email_guest">
+                                <input type="checkbox" id="sn_email_guest" value="1">
+                                <span><strong>Email the guest about this change</strong>
+                                    <small>Sends the "Booking updated" email with the new check-out, nights and total. Off by default.</small></span>
                             </label>
-                            <small style="color: #666; display: block; margin-top: 4px;">Sends the "Booking updated" email with the new check-out, nights and total. Off by default.</small>
                             <div class="ew-open-row" id="snWordingRow" hidden>
                                 <button type="button" class="btn btn-secondary" id="snWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit email wording</button>
                                 <i class="help" data-tip="Change the words of this Booking updated email before it goes. The saved template stays the default. Prices and payment details come from the booking and cannot be changed.">?</i>
