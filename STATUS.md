@@ -43,9 +43,10 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
 - LATER (not built):
   - the Assistant's package_ack for room-type changes (owner: not now);
   - the event-change form has no manual venue price, so a no-rate room can only be fixed by setting its rate;
-  - DB email templates (invoice.php ~2619, ~3907) may still carry entities in the subject;
-  - gym/event emails show no gross total line;
-  - room booking emails' booking-reference subjects in admin/create-booking.php still use htmlspecialchars (refs are system-made; harmless).
+  - Template subjects + gym/event email total line DONE: Liwonde b44368f / Rosalyn's f93acb6.
+  - email_send_log_test has 4 failures from before (bookings.php, booking-details.php, tentative-bookings.php);
+  - rh_email_plain returns '' on invalid UTF-8 (unlikely with utf8mb4): add a fallback;
+  - the conference email total line uses rh_conf_gross with 0 decimals, not the PDF figure.
 
 ## Shipped 2026-11-25: Guides + Assistant sync (owner prompted; port of Liwonde e48fc69)
 - Staff guides (Rosalyn's branding kept), Assistant answers (why cancelled, unapproved counts, arrivals to chase) and the
