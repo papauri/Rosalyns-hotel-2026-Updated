@@ -549,19 +549,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
+            // "Email the guest about this change" (default off): checked before anything changes, sent after.
+            $chgMail = rh_change_email_check($_POST);
+            if ($chgMail !== null && empty($chgMail['ok'])) {
+                throw new Exception('Nothing was changed. ' . $chgMail['error']);
+            }
+            $chgBefore = $chgMail !== null ? bookings_change_email_snapshot($pdo, (int)($_POST['booking_id'] ?? 0)) : [];
             // Shared with the bulk Assign rooms: admin/includes/booking-row-actions.php.
             $pairRes = bookings_assign_room_pair($pdo, (int)($_POST['booking_id'] ?? 0), (int)($_POST['combination_id'] ?? 0), $user);
             if (empty($pairRes['success'])) {
                 throw new Exception($pairRes['message']);
             }
+            $pairMsg = (string)$pairRes['message'] . bookings_change_email_send($pdo, (int)($_POST['booking_id'] ?? 0), $chgBefore, $chgMail, $user, 'a room move');
             header('Content-Type: application/json');
-            echo json_encode(['success' => true, 'message' => $pairRes['message']]);
+            echo json_encode(['success' => true, 'message' => $pairMsg]);
             exit;
         } elseif ($action === 'assign_individual_room') {
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
 
+            // "Email the guest about this change" (default off): checked before anything changes, sent after.
+            $chgMail = rh_change_email_check($_POST);
+            if ($chgMail !== null && empty($chgMail['ok'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Nothing was changed. ' . $chgMail['error']]);
+                exit;
+            }
+            $chgBefore = $chgMail !== null ? bookings_change_email_snapshot($pdo, (int)($_POST['booking_id'] ?? 0)) : [];
             // Shared with the bulk Assign rooms: admin/includes/booking-row-actions.php (same gates, same locked assign).
             $assignRes = bookings_assign_individual_room(
                 $pdo,
@@ -571,8 +586,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 isset($_POST['allow_child_policy_override']) && $_POST['allow_child_policy_override'] === '1',
                 trim((string)($_POST['child_policy_override_note'] ?? ''))
             );
+            $assignMsg = (string)$assignRes['message'];
+            if (!empty($assignRes['success'])) {
+                $assignMsg .= bookings_change_email_send($pdo, (int)($_POST['booking_id'] ?? 0), $chgBefore, $chgMail, $user, 'a room move');
+            }
             header('Content-Type: application/json');
-            echo json_encode(['success' => !empty($assignRes['success']), 'message' => $assignRes['message']]);
+            echo json_encode(['success' => !empty($assignRes['success']), 'message' => $assignMsg]);
             exit;
         } elseif ($action === 'update_status') {
             $booking_id = (int)($_POST['id'] ?? 0);
@@ -581,6 +600,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($booking_id <= 0) {
                 throw new Exception('Invalid booking id');
+            }
+
+            // Edited email wording only goes with Confirm (pending / tentative) or Cancel (owner 2026-11-27): posted with
+            // any other change (check-in, undo check-in, check-out, no-show...) it is refused before anything changes,
+            // never silently dropped. A cancel that will not email the guest refuses it too.
+            if (rh_email_wording_posted($_POST)) {
+                require_once __DIR__ . '/../includes/email-send-log.php';
+                $wsSt = $pdo->prepare("SELECT status FROM bookings WHERE id = ? AND deleted_at IS NULL");
+                $wsSt->execute([$booking_id]);
+                $wsKey = rh_email_wording_status_key((string)$wsSt->fetchColumn(), (string)$new_status);
+                if ($wsKey === '') {
+                    throw new Exception('Nothing was changed. Edited email wording only goes with Confirm (a pending or tentative booking) or Cancel; this change sends no email whose words can be edited. Close the wording editor and try again.');
+                }
+                if ($wsKey === 'booking_cancelled' && !rh_cancel_email_choice($_POST, true)) {
+                    throw new Exception('Nothing was cancelled. You edited the cancellation email but "Email the guest" is not ticked. Tick it, or cancel without editing the wording.');
+                }
             }
 
             // Enforce business rules:
@@ -2689,6 +2724,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]]);
                 exit;
             }
+            // "Email the guest about this change" (default off): checked before anything changes, sent after.
+            $chgMail = rh_change_email_check($_POST);
+            if ($chgMail !== null && empty($chgMail['ok'])) {
+                echo json_encode(['success' => false, 'message' => 'Nothing was changed. ' . $chgMail['error']]);
+                exit;
+            }
+            $chgBefore = $chgMail !== null ? bookings_change_email_snapshot($pdo, $snId) : [];
             try {
                 $snRes = rh_stay_nights_apply($pdo, $snId, [
                     'delta' => $snDelta,
@@ -2739,6 +2781,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             // Plain text: the page's toast (showBookingActionMessage) escapes it (escaping here too showed &#039; etc.).
+            $snNote .= bookings_change_email_send($pdo, $snId, $chgBefore, $chgMail, $user, 'a change of nights');
             echo json_encode(['success' => true, 'message' => $snRes['describe'] . $snNote]);
             exit;
         } elseif ($action === 'extend_stay') {
@@ -2937,6 +2980,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $newNights_acd = max(1, (int)$newCoDt->diff($checkInDt_acd)->days);
 
+            // "Email the guest about this change" (default off): checked before anything changes, sent after.
+            $chgMail = rh_change_email_check($_POST);
+            if ($chgMail !== null && empty($chgMail['ok'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Nothing was changed. ' . $chgMail['error']]);
+                exit;
+            }
+            $chgBefore = $chgMail !== null ? bookings_change_email_snapshot($pdo, $booking_id) : [];
+
             $oldCheckout_acd = $acd_bk['check_out_date'];
 
             // Reprice at the BOOKED nightly rate; VAT/levy extracted from the gross (never
@@ -3021,7 +3073,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'success'      => true,
                 'message'      => 'Checkout date updated to ' . date('M j, Y', strtotime($new_checkout)) . ". ({$newNights_acd} nights, total recalculated"
                     . ($acdLine['ok'] ? (!empty($acdDrop['removed']) ? ': ' : ' at the booked rate: ') . $acdLine['text'] : '') . '.)'
-                    . (!empty($acdDrop['removed']) ? ' ' . rh_rate_plan_drop_sentence($acdDrop) : ''),
+                    . (!empty($acdDrop['removed']) ? ' ' . rh_rate_plan_drop_sentence($acdDrop) : '')
+                    . bookings_change_email_send($pdo, $booking_id, $chgBefore, $chgMail, $user, 'a checkout date change'),
                 'new_checkout' => $new_checkout,
                 'new_nights'   => $newNights_acd,
                 'new_total'    => number_format($totalWithVat_acd, 2),
@@ -8150,6 +8203,20 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                             <input type="text" id="sn_reason" class="form-control" maxlength="300" placeholder="e.g. guest staying one more night (company LPO)">
                             <small>Saved in the booking History with every figure above.</small>
                         </div>
+                        <div class="form-group rh-mt">
+                            <label style="display: flex; gap: 8px; align-items: flex-start; font-weight: 600; margin: 0;">
+                                <input type="checkbox" id="sn_email_guest" value="1" style="margin-top: 3px;">
+                                <span>Email the guest about this change</span>
+                            </label>
+                            <small style="color: #666; display: block; margin-top: 4px;">Sends the "Booking updated" email with the new check-out, nights and total. Off by default.</small>
+                            <div class="ew-open-row" id="snWordingRow" hidden>
+                                <button type="button" class="btn btn-secondary" id="snWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit email wording</button>
+                                <i class="help" data-tip="Change the words of this Booking updated email before it goes. The saved template stays the default. Prices and payment details come from the booking and cannot be changed.">?</i>
+                                <span class="ew-open-state" id="snWordingState"></span>
+                            </div>
+                            <input type="hidden" id="sn_email_wording_key" value="">
+                            <input type="hidden" id="sn_email_wording_html" value="">
+                        </div>
                     </div>
                     <div id="sn_error" class="alert alert-error rh-mt" role="alert" style="display:none;"></div>
                 </div>
@@ -9404,15 +9471,21 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 return;
             }
 
-            const confirmed = await confirmAdminAction({
+            // "Email the guest about this change" (owner 2026-11-27): DEFAULT OFF; when ticked, "Edit email wording"
+            // can change the "Booking updated" email for this one send.
+            const chgKeyInput = document.createElement('input');
+            const chgHtmlInput = document.createElement('input');
+            const assignAnswer = await confirmAdminActionWithCheck({
                 title: isPair ? 'Confirm joined-room assignment' : 'Confirm room assignment',
                 message: (isPair ? 'Assign this pair of rooms to booking ' : 'Assign this room to booking ') + (bookingRef || bookingId) + '?',
                 details: [(isPair ? 'Rooms: ' : 'Room: ') + roomName, 'Stay dates: ' + dates],
                 confirmText: isPair ? 'Assign Rooms' : 'Assign Room',
                 icon: 'fa-door-open',
-                tone: 'success'
+                tone: 'success',
+                check: { label: 'Email the guest about this change', checked: false, help: 'Sends the "Booking updated" email listing the new room. Off by default.' },
+                wording: { key: 'booking_modified', bookingId: bookingId, keyInput: chgKeyInput, htmlInput: chgHtmlInput }
             });
-            if (!confirmed) return;
+            if (!assignAnswer.confirmed) return;
 
             const submitBtn = document.querySelector('#quickRoomAssignModal button[onclick="submitQuickRoomAssign()"]');
             if (submitBtn) setButtonLoading(submitBtn, true);
@@ -9420,6 +9493,11 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
 
             const formData = new FormData();
             formData.append('booking_id', bookingId);
+            formData.append('change_email_guest', assignAnswer.checked ? '1' : '0');
+            if (assignAnswer.checked && chgKeyInput.value && chgHtmlInput.value) {
+                formData.append('email_wording_key', chgKeyInput.value);
+                formData.append('email_wording_html', chgHtmlInput.value);
+            }
             if (isPair) {
                 formData.append('action', 'assign_room_combination');
                 formData.append('combination_id', selectedRoomId);
@@ -10446,6 +10524,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             fd.append('expected_new_total', String(q.new_total));
             fd.append('expected_total_delta', String(q.total_delta));
             fd.append('reason', reason);
+            const snMail = !!snEl('sn_email_guest')?.checked;
+            fd.append('change_email_guest', snMail ? '1' : '0');
+            if (snMail && snEl('sn_email_wording_key').value && snEl('sn_email_wording_html').value) {
+                fd.append('email_wording_key', snEl('sn_email_wording_key').value);
+                fd.append('email_wording_html', snEl('sn_email_wording_html').value);
+            }
             const fi = snFeeInputs();
             if (fi.ov !== snState.feeOv || fi.rs !== snState.feeRs) {
                 snShowError('Press "Update the figures" after changing the amount kept for unused nights.');
@@ -10528,6 +10612,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             const daysToTomorrow = Math.round((todayUtc - coUtc) / 86400000) + 1;
             snState.delta = Math.max(1, isFinite(daysToTomorrow) ? daysToTomorrow : 1);
             snEl('sn_reason').value = '';
+            snEl('sn_email_guest').checked = false; // "Email the guest about this change": off by default
+            bkSnWordingSync(true);
             snFeeReset();
             snShowError('');
             snSetStep(1);
@@ -10538,6 +10624,38 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         function closeExtendStayModal() {
             const modal = document.getElementById('extendStayModal');
             setBookingPageModalOpen(modal, false);
+        }
+
+        // "Email the guest about this change" on Add / take off nights (owner 2026-11-27): off by default; while ticked,
+        // "Edit email wording" changes the "Booking updated" email for this one send. Unticking drops the edit.
+        function bkSnWordingSync(clear) {
+            const row = document.getElementById('snWordingRow');
+            const box = document.getElementById('sn_email_guest');
+            if (!row || !box) return;
+            const on = !!window.RhEmailWording && box.checked;
+            if (clear || !on) {
+                document.getElementById('sn_email_wording_key').value = '';
+                document.getElementById('sn_email_wording_html').value = '';
+                document.getElementById('snWordingState').textContent = '';
+            }
+            row.hidden = !on;
+        }
+        if (!window.__bkSnWordingBound) {
+            window.__bkSnWordingBound = true;
+            document.addEventListener('change', function (e) {
+                if (e.target && e.target.id === 'sn_email_guest') bkSnWordingSync(false);
+            });
+            document.addEventListener('click', function (e) {
+                const btn = e.target && e.target.closest ? e.target.closest('#snWordingBtn') : null;
+                if (!btn || !window.RhEmailWording) return;
+                window.RhEmailWording.open({
+                    key: 'booking_modified',
+                    bookingId: document.getElementById('extend_booking_id').value,
+                    keyInput: document.getElementById('sn_email_wording_key'),
+                    htmlInput: document.getElementById('sn_email_wording_html'),
+                    onDone: function () { document.getElementById('snWordingState').textContent = 'Your edited wording will be sent.'; }
+                });
+            });
         }
 
         snEl('sn_minus')?.addEventListener('click', function() { snStep(-1); });
@@ -10589,7 +10707,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             const newCheckout = document.getElementById('acd_new_checkout')?.value || '';
             const submitBtn = this.querySelector('button[type="submit"]');
             const form = this;
-            bkStayRateQuote(formData.get('booking_id'), '', newCheckout, 'leave').then(rateQ => confirmAdminAction({
+            // "Email the guest about this change" (owner 2026-11-27): off by default; "Edit email wording" while ticked.
+            const acdKeyInput = document.createElement('input');
+            const acdHtmlInput = document.createElement('input');
+            bkStayRateQuote(formData.get('booking_id'), '', newCheckout, 'leave').then(rateQ => confirmAdminActionWithCheck({
+                    check: { label: 'Email the guest about this change', checked: false, help: 'Sends the "Booking updated" email with the new check-out, nights and total. Off by default.' },
+                    wording: { key: 'booking_modified', bookingId: formData.get('booking_id'), keyInput: acdKeyInput, htmlInput: acdHtmlInput },
                     title: 'Confirm checkout date change',
                     message: 'Update checkout date for booking ' + (bookingRef || 'this booking') + '?',
                     details: [
@@ -10600,9 +10723,16 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     icon: 'fa-calendar-pen',
                     tone: 'warning'
                 }))
-                .then(confirmed => {
-                    if (!confirmed) {
+                .then(acdAnswer => {
+                    if (!acdAnswer.confirmed) {
                         return;
+                    }
+                    formData.set('change_email_guest', acdAnswer.checked ? '1' : '0');
+                    formData.delete('email_wording_key');
+                    formData.delete('email_wording_html');
+                    if (acdAnswer.checked && acdKeyInput.value && acdHtmlInput.value) {
+                        formData.append('email_wording_key', acdKeyInput.value);
+                        formData.append('email_wording_html', acdHtmlInput.value);
                     }
 
                     if (submitBtn) setButtonLoading(submitBtn, true);

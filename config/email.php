@@ -1984,6 +1984,8 @@ function ensureBookingEmailTemplateDefaults()
                         ['Guests',     '{{number_of_guests}}'],
                         ['Total',      '{{currency_symbol}} {{total_amount_formatted}}', true],
                     ])
+                    // "Includes VAT and tourism levy" under the Total, as the fixed wording printed (rh_booking_tax_rows_html).
+                    . '<tr><td style="padding:0 48px 16px;">{{tax_rows_html}}</td></tr>'
                     . '<tr><td style="padding:0 48px 48px;font-size:12px;line-height:1.8;color:#9b8f7e;text-align:center;font-style:italic;">Check-in from {{check_in_time}} &middot; Check-out by {{check_out_time}}. Questions about these changes? Contact us at <a href="mailto:{{contact_email}}" style="color:#524b3f;">{{contact_email}}</a>.</td></tr>'
             ),
         ],
@@ -2972,13 +2974,21 @@ function rh_render_booking_email_template_row(string $templateKey, array $templa
             $template[$part] = rh_email_drop_empty_phone($template[$part], $phoneSet);
         }
     }
+    // Booking updated: a stored copy seeded before {{tax_rows_html}} existed still prints the VAT / levy line (after the
+    // change list), as the fixed wording did. Placed in the template BEFORE the fill, so it is filled in the same pass.
+    if ($templateKey === 'booking_modified' && array_key_exists('tax_rows_html', $vars)) {
+        $template['html_body'] = rh_booking_modified_ensure_tax_rows((string)$template['html_body']);
+        if (!empty($template['text_body']) && strpos((string)$template['text_body'], '{{tax_rows_html}}') === false) {
+            $template['text_body'] .= "\n\n{{tax_rows_html}}";
+        }
+    }
     $replace = [];
     foreach ($vars as $k => $v) {
         $replace['{{' . $k . '}}'] = (string)$v;
     }
     // A block of HTML placed in the plain-text part goes in as plain lines.
     $textReplace = $replace;
-    foreach (['{{booked_rate_block}}', '{{group_rooms_block}}', '{{payment_policy}}', '{{quotation_notes}}'] as $blockKey) {
+    foreach (['{{booked_rate_block}}', '{{group_rooms_block}}', '{{payment_policy}}', '{{quotation_notes}}', '{{tax_rows_html}}'] as $blockKey) {
         if (isset($replace[$blockKey])) {
             $textReplace[$blockKey] = htmlspecialchars(rh_email_block_plain($replace[$blockKey]), ENT_QUOTES, 'UTF-8');
         }
@@ -3433,6 +3443,24 @@ function rh_booking_modified_changes_html(array $changes): string
         . '</td></tr></table>';
 }
 
+/**
+ * PURE. A booking_modified template without {{tax_rows_html}} (stored rows seeded before the tag existed; stored rows are
+ * never edited) gets it straight after the change list, else before </body>, else at the end. Unchanged when it has it.
+ */
+function rh_booking_modified_ensure_tax_rows(string $html): string
+{
+    if (strpos($html, '{{tax_rows_html}}') !== false) {
+        return $html;
+    }
+    $at = strpos($html, '{{changes_html}}');
+    if ($at !== false) {
+        $at += strlen('{{changes_html}}');
+        return substr($html, 0, $at) . '{{tax_rows_html}}' . substr($html, $at);
+    }
+    $at = stripos($html, '</body>');
+    return $at !== false ? substr($html, 0, $at) . '{{tax_rows_html}}' . substr($html, $at) : $html . '{{tax_rows_html}}';
+}
+
 function sendBookingModifiedEmail(array $booking, array $changes = [])
 {
     $emailCtx = rh_email_context(['kind' => 'booking_modified'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
@@ -3484,6 +3512,8 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
         // when it is missing or switched off. With edited wording set, a missing template throws instead (no fallback).
         $templateVars = buildBookingEmailVariables($booking, $room);
         $templateVars['changes_html'] = rh_booking_modified_changes_html($changes);
+        // The same VAT / levy line the fixed wording below prints (rh_booking_tax_rows_html; '' when both are off).
+        $templateVars['tax_rows_html'] = rh_booking_tax_rows_html($booking);
         $dbTemplate = renderBookingEmailTemplate('booking_modified', $templateVars);
         if ($dbTemplate) {
             return sendEmail(

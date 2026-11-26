@@ -241,6 +241,53 @@ $cbPosCheck = strpos($cbSrc, 'rh_email_wording_from_post($cbWordingKey');
 $cbPosTx = strpos($cbSrc, '// ── Transaction: create bookings for all lines');
 check($cbPosCheck !== false && $cbPosTx !== false && $cbPosCheck < $cbPosTx, 'create: the wording is checked before the booking transaction starts');
 
+/* ── Booking updated: the VAT / levy line is a locked token (owner 2026-11-27) ── */
+check(rh_email_wording_is_financial_token('tax_rows_html'), 'tax_rows_html is locked (money)');
+$tagsSrc = (string)file_get_contents($root . '/includes/email-template-tags.php');
+check(preg_match("/'booking_modified'\s*=>\s*array_merge\(\\\$booking, \[[^\]]*'tax_rows_html'/", $tagsSrc) === 1, 'tax_rows_html is in the Booking updated tag list');
+
+/* ── update_status: wording only with Confirm (pending / tentative) or Cancel ── */
+check(rh_email_wording_status_key('confirmed', 'cancelled') === 'booking_cancelled' && rh_email_wording_status_key('pending', 'cancelled') === 'booking_cancelled', 'status key: cancel');
+check(rh_email_wording_status_key('pending', 'confirmed') === 'booking_confirmed' && rh_email_wording_status_key('tentative', 'confirmed') === 'booking_confirmed', 'status key: confirm a hold');
+foreach ([['confirmed', 'checked-in'], ['checked-in', 'confirmed'], ['checked-in', 'checked-out'], ['confirmed', 'no-show'], ['confirmed', 'confirmed'], ['pending', 'tentative'], ['', 'confirmed']] as [$from, $to]) {
+    check(rh_email_wording_status_key($from, $to) === '', "status key: $from -> $to sends no editable email (wording refused)");
+}
+check(rh_email_wording_posted(['email_wording_key' => 'booking_confirmed']) && rh_email_wording_posted(['email_wording_html' => '<p>x</p>'])
+    && !rh_email_wording_posted([]) && !rh_email_wording_posted(['email_wording_key' => ' ', 'email_wording_html' => '']), 'wording posted: key or body');
+$bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
+$usPos = strpos($bkSrc, "} elseif (\$action === 'update_status') {");
+$usRefuse = strpos($bkSrc, 'Edited email wording only goes with Confirm', (int)$usPos);
+$usFirstChange = strpos($bkSrc, 'bookings_checkin_gates($pdo', (int)$usPos);
+check($usPos !== false && $usRefuse !== false && $usFirstChange !== false && $usRefuse < $usFirstChange, 'update_status: wrong-status wording refused before any branch changes anything');
+check(strpos($bkSrc, 'rh_email_wording_status_key(', (int)$usPos) !== false && strpos($bkSrc, 'Nothing was cancelled. You edited the cancellation email but', (int)$usPos) !== false, 'update_status: cancel with the guest email unticked refuses edited wording');
+
+/* ── "Email the guest about this change" on room moves / nights / checkout date: DEFAULT OFF ── */
+check(!rh_change_email_wanted([]) && !rh_change_email_wanted(['change_email_guest' => '0']) && !rh_change_email_wanted(['change_email_guest' => 'on'])
+    && rh_change_email_wanted(['change_email_guest' => '1']) && rh_change_email_wanted(['change_email_guest' => ['0', '1']]), 'change email: only an explicit 1 sends (missing = off)');
+check(rh_change_email_check([]) === null && rh_change_email_check(['change_email_guest' => '0']) === null, 'change email: unticked = no email, no refusal');
+$ceRef = rh_change_email_check(['change_email_guest' => '0', 'email_wording_key' => 'booking_modified', 'email_wording_html' => '<p>x</p>']);
+check(is_array($ceRef) && empty($ceRef['ok']) && strpos($ceRef['error'], 'not ticked') !== false, 'change email: edited wording with the tick off is refused');
+$ceOn = rh_change_email_check(['change_email_guest' => '1']);
+check(is_array($ceOn) && !empty($ceOn['ok']) && $ceOn['wording'] === null, 'change email: ticked, no edit = the template wording');
+$ceWrong = rh_change_email_check(['change_email_guest' => '1', 'email_wording_key' => 'booking_confirmed', 'email_wording_html' => '<p>x</p>']);
+check(is_array($ceWrong) && empty($ceWrong['ok']) && strpos($ceWrong['error'], 'different email') !== false, 'change email: wording of another email is refused');
+$qaPos = strpos($bkSrc, 'async function submitQuickRoomAssign()');
+$qaEnd = strpos($bkSrc, 'function openMakeTentativeModal', (int)$qaPos);
+$qaJs = $qaPos !== false && $qaEnd !== false ? substr($bkSrc, $qaPos, $qaEnd - $qaPos) : '';
+check(strpos($qaJs, "check: { label: 'Email the guest about this change', checked: false") !== false && strpos($qaJs, "key: 'booking_modified'") !== false
+    && strpos($qaJs, "formData.append('change_email_guest', assignAnswer.checked ? '1' : '0')") !== false, 'room move dialog: the tick starts off and posts the choice');
+check(strpos($bkSrc, "snEl('sn_email_guest').checked = false;") !== false && preg_match('/id="sn_email_guest" value="1" style/', $bkSrc) === 1, 'nights dialog: the tick starts off');
+check(substr_count($bkSrc, "check: { label: 'Email the guest about this change', checked: false") === 2, 'checkout date dialog: the tick starts off');
+foreach (["\$action === 'assign_room_combination'", "\$action === 'assign_individual_room'", "\$action === 'stay_nights_quote' || \$action === 'stay_nights_apply'", "\$action === 'admin_update_checkout_date'"] as $hd) {
+    $hp = strpos($bkSrc, $hd);
+    $hc = $hp !== false ? strpos($bkSrc, 'rh_change_email_check($_POST)', $hp) : false;
+    $hs = $hc !== false ? strpos($bkSrc, 'bookings_change_email_send(', $hc) : false;
+    check($hp !== false && $hc !== false && $hs !== false && $hs - $hp < 16000, 'change email wired (checked first, sent after): ' . $hd);
+}
+$raSrc = (string)file_get_contents($root . '/admin/includes/booking-row-actions.php');
+$raFn = substr($raSrc, (int)strpos($raSrc, 'function bookings_change_email_send('));
+check(strpos($raFn, 'catch (Throwable $e)') !== false && strpos($raFn, 'rollBack') === false && strpos($raFn, "logBookingAudit(\$bookingId, \$ok ? 'email_sent' : 'email_not_sent'") !== false, 'change email: a failed send never rolls back, the outcome goes to History');
+
 /* ── seam (READ-ONLY database read of one template row) ── */
 $dbOk = false;
 try {
@@ -288,6 +335,46 @@ if ($dbOk) {
     } else {
         echo "SKIP seam: booking_confirmed template not active\n";
     }
+}
+
+/* ── Booking updated VAT / levy line (READ-ONLY: config/email.php pure functions, settings overridden in memory) ── */
+if ($dbOk && stripos(str_replace('\\', '/', $root), 'liwonde') !== false && stripos((string)DB_NAME, 'rosalyn') === false) {
+    require_once $root . '/config/email.php';
+    $emSrc = (string)file_get_contents($root . '/config/email.php');
+    $seedAt = strpos($emSrc, "        'booking_modified' => [");
+    check($seedAt !== false && strpos(substr($emSrc, $seedAt, 4000), '{{tax_rows_html}}') !== false, 'seeded Booking updated default has {{tax_rows_html}}');
+    // A stored row seeded before the token: the line is added after the change list at render (the row is never edited).
+    $oldRow = ['subject' => 'Booking updated {{booking_reference}}', 'html_body' => '<html><body><p>Dear {{guest_name}}</p>{{changes_html}}<p>Total {{currency_symbol}} {{total_amount_formatted}}</p></body></html>', 'text_body' => 'Dear {{guest_name}}'];
+    $vars = ['guest_name' => 'T', 'booking_reference' => 'LSH1', 'changes_html' => '<table>CHG</table>', 'currency_symbol' => 'MWK', 'total_amount_formatted' => '900,600',
+        'tax_rows_html' => '<p style="x">Includes VAT and tourism levy</p>'];
+    $out = rh_render_booking_email_template_row('booking_modified', $oldRow, $vars);
+    $hb = (string)$out['html_body'];
+    check(strpos($hb, '<table>CHG</table><p style="x">Includes VAT and tourism levy</p>') !== false, 'stored row without the token: line appended right after the change list');
+    check(strpos($hb, '{{tax_rows_html}}') === false && substr_count($hb, 'Includes VAT and tourism levy') === 1, 'stored row: line filled once, no raw token left');
+    check(strpos((string)$out['text_body'], 'Includes VAT and tourism levy') !== false && strpos((string)$out['text_body'], '<p') === false, 'stored row: plain-text part gets the line as plain text');
+    $newRow = $oldRow;
+    $newRow['html_body'] = '<html><body>{{changes_html}}<div>{{tax_rows_html}}</div></body></html>';
+    check(substr_count((string)rh_render_booking_email_template_row('booking_modified', $newRow, $vars)['html_body'], 'Includes VAT and tourism levy') === 1, 'row that places the token: not added twice');
+    check(rh_booking_modified_ensure_tax_rows('<html><body><p>x</p></body></html>') === '<html><body><p>x</p>{{tax_rows_html}}</body></html>', 'no change list: line goes before </body>');
+    $other = rh_render_booking_email_template_row('booking_confirmed', $oldRow, $vars);
+    check(strpos((string)$other['html_body'], 'Includes VAT') === false, 'other emails are not touched');
+    // Same figures as the fixed wording (rh_booking_tax_rows_html): the includes note, never the amounts, in both VAT modes.
+    $savedSettings = $GLOBALS['_SITE_SETTINGS'] ?? null;
+    $bkRow = ['total_amount' => 767600, 'vat_amount' => 133000, 'tourism_levy_amount' => 7600, 'total_with_vat' => 900600];
+    foreach (['inclusive', 'exclusive'] as $mode) {
+        $GLOBALS['_SITE_SETTINGS'] = array_merge((array)($GLOBALS['_SITE_SETTINGS'] ?? []), ['vat_enabled' => '1', 'vat_rate' => '17.5', 'vat_pricing_mode' => $mode,
+            'tourism_levy_enabled' => '1', 'tourism_levy_percent' => '1']);
+        $line = rh_booking_tax_rows_html($bkRow);
+        check(strpos($line, 'Includes VAT and tourism levy') !== false && strpos($line, '133') === false && strpos($line, '7,600') === false, "$mode VAT: the line says what the total includes, no amounts");
+        check(rh_booking_owed($bkRow)['owed'] == 900600.0, "$mode VAT: the total is the guest total the fixed wording prints");
+    }
+    $GLOBALS['_SITE_SETTINGS'] = array_merge((array)($GLOBALS['_SITE_SETTINGS'] ?? []), ['vat_enabled' => '0', 'tourism_levy_enabled' => '0']);
+    check(rh_booking_tax_rows_html($bkRow) === '', 'VAT and levy both off: no line');
+    if ($savedSettings === null) { unset($GLOBALS['_SITE_SETTINGS']); } else { $GLOBALS['_SITE_SETTINGS'] = $savedSettings; }
+    $modSrc = substr($emSrc, (int)strpos($emSrc, 'function sendBookingModifiedEmail('), 6000);
+    check(strpos($modSrc, "\$templateVars['tax_rows_html'] = rh_booking_tax_rows_html(\$booking);") !== false, 'sendBookingModifiedEmail fills the token from the same helper as its fallback');
+} else {
+    echo "SKIP VAT line: database not loaded or not the test hotel\n";
 }
 
 echo "\n$pass passed, $fail failed\n";

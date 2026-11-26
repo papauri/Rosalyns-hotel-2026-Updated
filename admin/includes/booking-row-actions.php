@@ -694,3 +694,100 @@ if (!function_exists('bookings_convert_tentative_booking')) {
         return ['message' => $message, 'cancelled' => $done, 'email' => $emailOut];
     }
 }
+
+if (!function_exists('bookings_change_email_snapshot')) {
+    /**
+     * What the guest sees of a stay, for the "Booking updated" change list of a room move / nights / checkout change:
+     * room(s) (every room in booking_rooms), dates, nights and the total owed (VAT and levy included). [] if not found.
+     * @return array<string,string>
+     */
+    function bookings_change_email_snapshot(PDO $pdo, int $bookingId): array
+    {
+        $st = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ? AND b.deleted_at IS NULL");
+        $st->execute([$bookingId]);
+        $bk = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$bk) {
+            return [];
+        }
+        require_once __DIR__ . '/../../config/email.php';
+        $cur = function_exists('getSetting') ? trim((string)getSetting('currency_symbol', '')) : '';
+        $fmtDate = static function ($d): string {
+            $t = strtotime((string)$d);
+            return $t ? date('D j M Y', $t) : (string)$d;
+        };
+        $rooms = getBookingRoomLabel($bookingId, '');
+        $type = trim((string)($bk['room_name'] ?? ''));
+        return [
+            'room' => trim($type . ($rooms !== '' ? ($type !== '' ? ', room ' : 'Room ') . $rooms : '')),
+            'check_in_date' => $fmtDate($bk['check_in_date'] ?? ''),
+            'check_out_date' => $fmtDate($bk['check_out_date'] ?? ''),
+            'number_of_nights' => (string)(int)($bk['number_of_nights'] ?? 0),
+            'total_amount' => trim($cur . ' ' . number_format(rh_booking_owed($bk)['owed'], 0)),
+        ];
+    }
+}
+
+if (!function_exists('bookings_change_email_diff')) {
+    /** PURE. Old -> new pairs of the fields that changed between two snapshots (the email's "What changed" rows). */
+    function bookings_change_email_diff(array $before, array $after): array
+    {
+        $changes = [];
+        foreach ($after as $field => $new) {
+            $old = (string)($before[$field] ?? '');
+            if ($old !== (string)$new) {
+                $changes[$field] = ['old' => $old, 'new' => (string)$new];
+            }
+        }
+        return $changes;
+    }
+}
+
+if (!function_exists('bookings_change_email_send')) {
+    /**
+     * After a room move / nights / checkout change has COMMITTED: when "Email the guest about this change" was ticked
+     * ($check from rh_change_email_check: ['ok'=>true,'wording'=>?array]) send the "Booking updated" email with the real
+     * change list. Never throws and never undoes the change; the outcome is written to the booking's history.
+     * @return string sentence for the action's message ('' when no email was asked for)
+     */
+    function bookings_change_email_send(PDO $pdo, int $bookingId, array $before, ?array $check, array $user, string $what): string
+    {
+        if ($check === null || empty($check['ok'])) {
+            return '';
+        }
+        $wording = $check['wording'] ?? null;
+        $ref = null;
+        try {
+            $after = bookings_change_email_snapshot($pdo, $bookingId);
+            $changes = bookings_change_email_diff($before, $after);
+            if ($changes === []) {
+                return ' No email sent: nothing the guest sees changed.';
+            }
+            $st = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
+            $st->execute([$bookingId]);
+            $bk = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$bk) {
+                return ' Email NOT sent: booking not found.';
+            }
+            $ref = (string)($bk['booking_reference'] ?? '');
+            $res = rh_email_wording_send($wording, static function () use ($bk, $changes) {
+                return sendBookingModifiedEmail($bk, $changes);
+            }, $bookingId, $ref, $user);
+            $ok = !empty($res['success']);
+            $why = (string)($res['message'] ?? '');
+        } catch (Throwable $e) {
+            $ok = false;
+            $why = $e->getMessage();
+        }
+        if (function_exists('logBookingAudit')) {
+            $who = (string)($user['full_name'] ?? ($user['username'] ?? 'staff'));
+            logBookingAudit($bookingId, $ok ? 'email_sent' : 'email_not_sent', null, null,
+                ($ok ? '"Booking updated" email sent to the guest after ' : '"Booking updated" email NOT sent after ')
+                . $what . ' by ' . $who . ($ok ? '' : ': ' . $why), $ref);
+        }
+        if ($ok) {
+            return ' Guest emailed about the change.';
+        }
+        error_log('Change email failed for booking ' . $bookingId . ' (' . $what . '): ' . $why);
+        return ' Email NOT sent: ' . $why;
+    }
+}

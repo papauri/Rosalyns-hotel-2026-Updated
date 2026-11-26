@@ -137,6 +137,69 @@ if (!function_exists('rh_email_wording_create_key')) {
     }
 }
 
+if (!function_exists('rh_email_wording_posted')) {
+    /** PURE. Did the action post edited wording at all (a key or a body)? */
+    function rh_email_wording_posted(array $post): bool
+    {
+        return trim((string)($post['email_wording_key'] ?? '')) !== '' || trim((string)($post['email_wording_html'] ?? '')) !== '';
+    }
+}
+
+if (!function_exists('rh_email_wording_status_key')) {
+    /**
+     * PURE. The email All Bookings "update_status" sends whose wording may be edited, for current -> new status:
+     * Cancel -> booking_cancelled, Confirm of a pending / tentative hold -> booking_confirmed; '' = this change sends no
+     * email whose wording can be edited (wording posted with it is refused, never silently dropped).
+     */
+    function rh_email_wording_status_key(string $current, string $new): string
+    {
+        if ($new === 'cancelled') {
+            return 'booking_cancelled';
+        }
+        if ($new === 'confirmed' && in_array($current, ['pending', 'tentative'], true)) {
+            return 'booking_confirmed';
+        }
+        return '';
+    }
+}
+
+if (!function_exists('rh_change_email_wanted')) {
+    /**
+     * PURE. "Email the guest about this change" on a room move, Add / take off nights or Change checkout date (owner
+     * 2026-11-27): DEFAULT OFF, only an explicit change_email_guest=1 sends (callers that never post it stay silent).
+     */
+    function rh_change_email_wanted(array $post): bool
+    {
+        $v = $post['change_email_guest'] ?? '0';
+        if (is_array($v)) {
+            $v = end($v);
+        }
+        return (string)$v === '1';
+    }
+}
+
+if (!function_exists('rh_change_email_check')) {
+    /**
+     * The "Booking updated" email of a room move / nights / checkout change, checked BEFORE the change is saved.
+     * null = no email (tick off, nothing posted); ['ok'=>false,'error'] = refuse, change nothing;
+     * ['ok'=>true,'wording'=>?array] = email after the change commits (wording null = the template's own wording).
+     */
+    function rh_change_email_check(array $post): ?array
+    {
+        if (!rh_change_email_wanted($post)) {
+            if (rh_email_wording_posted($post)) {
+                return ['ok' => false, 'error' => 'You edited the "Booking updated" email but "Email the guest about this change" is not ticked. Tick it, or close the editor without changes.'];
+            }
+            return null;
+        }
+        $w = rh_email_wording_from_post('booking_modified', $post);
+        if ($w !== null && empty($w['ok'])) {
+            return ['ok' => false, 'error' => (string)$w['error']];
+        }
+        return ['ok' => true, 'wording' => $w];
+    }
+}
+
 if (!function_exists('rh_email_wording_is_financial_token')) {
     /** PURE. A token that carries money or payment terms: locked (same count and order as the default). */
     function rh_email_wording_is_financial_token(string $name): bool
@@ -170,7 +233,8 @@ if (!function_exists('rh_email_wording_token_label')) {
     {
         $labels = ['total_amount_formatted' => 'Total', 'currency_symbol' => 'Currency', 'packages_html' => 'Extras and prices',
             'payment_policy' => 'Payment terms', 'logo_html' => 'Logo', 'site_name' => 'Hotel name', 'guest_name' => 'Guest name',
-            'booking_reference' => 'Reference', 'urgency_notice' => 'Reminder notice', 'changes_html' => 'What changed'];
+            'booking_reference' => 'Reference', 'urgency_notice' => 'Reminder notice', 'changes_html' => 'What changed',
+            'tax_rows_html' => 'VAT and levy line'];
         if (isset($labels[$name])) {
             return $labels[$name];
         }

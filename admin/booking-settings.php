@@ -826,6 +826,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{rate_plan_label}}'          => 'Standard Rate',
             '{{packages_html}}'            => '',
             '{{group_rooms_block}}'        => '', // a single-room booking prints no group list
+            '{{tax_rows_html}}'            => rh_booking_tax_rows_html([]), // Booking updated: the VAT / levy line
             '{{account_reference}}'        => 'BK-PREVIEW-001',
             '{{days_left}}'                => '2 days from now',
             '{{quote_total}}'              => number_format(4500, 2),
@@ -1430,6 +1431,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{rate_plan_label}}'          => 'Standard Rate',
                 '{{packages_html}}'            => '',
                 '{{group_rooms_block}}'        => '', // a single-room booking prints no group list
+                '{{tax_rows_html}}'            => rh_booking_tax_rows_html([]), // Booking updated: the VAT / levy line
                 '{{amount_paid}}'              => $currencySymbol . number_format(1000, 2),
                 '{{account_reference}}'        => 'BK-PREVIEW-001',
                 '{{days_left}}'                => '2 days from now',
