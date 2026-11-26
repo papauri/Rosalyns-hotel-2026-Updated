@@ -613,8 +613,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($wsKey === '') {
                     throw new Exception('Nothing was changed. Edited email wording only goes with Confirm (a pending or tentative booking) or Cancel; this change sends no email whose words can be edited. Close the wording editor and try again.');
                 }
+                if (trim((string)($_POST['email_wording_key'] ?? '')) !== $wsKey) {
+                    throw new Exception('Nothing was changed. The edited wording belongs to a different email. Open "Edit wording" again.');
+                }
                 if ($wsKey === 'booking_cancelled' && !rh_cancel_email_choice($_POST, true)) {
                     throw new Exception('Nothing was cancelled. You edited the cancellation email but "Email the guest" is not ticked. Tick it, or cancel without editing the wording.');
+                }
+                if ($wsKey === 'booking_cancelled') {
+                    // Only a confirmed room gets the cancellation email (bookings_cancel_commit): when none of the rooms
+                    // this cancel covers is confirmed, the edited wording would never be sent, so refuse it.
+                    $wsIds = ($_POST['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, $booking_id) : [];
+                    if (count($wsIds) < 2) {
+                        $wsIds = [$booking_id];
+                    }
+                    $wsPh = implode(',', array_fill(0, count($wsIds), '?'));
+                    $wsCo = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE id IN ($wsPh) AND deleted_at IS NULL AND status = 'confirmed'");
+                    $wsCo->execute(array_map('intval', $wsIds));
+                    if ((int)$wsCo->fetchColumn() === 0) {
+                        throw new Exception('Nothing was cancelled. Only a confirmed booking gets a cancellation email, so the edited wording would not be sent. Cancel without editing the wording.');
+                    }
                 }
             }
 

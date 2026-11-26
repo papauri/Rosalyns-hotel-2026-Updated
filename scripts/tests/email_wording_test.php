@@ -260,6 +260,10 @@ $usRefuse = strpos($bkSrc, 'Edited email wording only goes with Confirm', (int)$
 $usFirstChange = strpos($bkSrc, 'bookings_checkin_gates($pdo', (int)$usPos);
 check($usPos !== false && $usRefuse !== false && $usFirstChange !== false && $usRefuse < $usFirstChange, 'update_status: wrong-status wording refused before any branch changes anything');
 check(strpos($bkSrc, 'rh_email_wording_status_key(', (int)$usPos) !== false && strpos($bkSrc, 'Nothing was cancelled. You edited the cancellation email but', (int)$usPos) !== false, 'update_status: cancel with the guest email unticked refuses edited wording');
+$usKeyRefuse = strpos($bkSrc, 'The edited wording belongs to a different email', (int)$usPos);
+$usNoConfirmed = strpos($bkSrc, 'Only a confirmed booking gets a cancellation email', (int)$usPos);
+check($usKeyRefuse !== false && $usKeyRefuse < $usFirstChange, 'update_status: wording posted for a different email than the status change is refused before anything changes');
+check($usNoConfirmed !== false && $usNoConfirmed < $usFirstChange, 'update_status: cancel wording refused when no room the cancel covers is confirmed (no email would go)');
 
 /* ── "Email the guest about this change" on room moves / nights / checkout date: DEFAULT OFF ── */
 check(!rh_change_email_wanted([]) && !rh_change_email_wanted(['change_email_guest' => '0']) && !rh_change_email_wanted(['change_email_guest' => 'on'])
@@ -276,7 +280,7 @@ $qaEnd = strpos($bkSrc, 'function openMakeTentativeModal', (int)$qaPos);
 $qaJs = $qaPos !== false && $qaEnd !== false ? substr($bkSrc, $qaPos, $qaEnd - $qaPos) : '';
 check(strpos($qaJs, "check: { label: 'Email the guest about this change', checked: false") !== false && strpos($qaJs, "key: 'booking_modified'") !== false
     && strpos($qaJs, "formData.append('change_email_guest', assignAnswer.checked ? '1' : '0')") !== false, 'room move dialog: the tick starts off and posts the choice');
-check(strpos($bkSrc, "snEl('sn_email_guest').checked = false;") !== false && preg_match('/id="sn_email_guest" value="1" style/', $bkSrc) === 1, 'nights dialog: the tick starts off');
+check(strpos($bkSrc, "snEl('sn_email_guest').checked = false;") !== false && preg_match('/<input type="checkbox" id="sn_email_guest" value="1">/', $bkSrc) === 1, 'nights dialog: the tick starts off');
 check(substr_count($bkSrc, "check: { label: 'Email the guest about this change', checked: false") === 2, 'checkout date dialog: the tick starts off');
 foreach (["\$action === 'assign_room_combination'", "\$action === 'assign_individual_room'", "\$action === 'stay_nights_quote' || \$action === 'stay_nights_apply'", "\$action === 'admin_update_checkout_date'"] as $hd) {
     $hp = strpos($bkSrc, $hd);
