@@ -42,11 +42,12 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   rate is refused, package picker restyled. station_reports_job test fixed (Liwonde 166a5f9 / Rosalyn's e0d34c7).
 - LATER (not built):
   - the Assistant's package_ack for room-type changes (owner: not now);
-  - the event-change form has no manual venue price, so a no-rate room can only be fixed by setting its rate;
   - Template subjects + gym/event email total line DONE: Liwonde b44368f / Rosalyn's f93acb6.
-  - email_send_log_test has 4 failures from before (bookings.php, booking-details.php, tentative-bookings.php);
-  - rh_email_plain returns '' on invalid UTF-8 (unlikely with utf8mb4): add a fallback;
-  - the conference email total line uses rh_conf_gross with 0 decimals, not the PDF figure.
+  - Manual venue price + conference email total = PDF + subject never blank DONE: Liwonde e4bf933 / Rosalyn's 60d5cc7.
+  - email_send_log_test brought up to date (test only): Liwonde 88a0728 / Rosalyn's 49d22ae.
+  - a room move without packages does not save the booked rates (conference-management.php ~887);
+  - gym/event confirmation emails (email.php ~4382, ~4601) have no VAT-rate fallback (old code);
+  - Conference Packages page has no live icon preview (Room Packages has one).
 
 ## Shipped 2026-11-25: Guides + Assistant sync (owner prompted; port of Liwonde e48fc69)
 - Staff guides (Rosalyn's branding kept), Assistant answers (why cancelled, unapproved counts, arrivals to chase) and the
