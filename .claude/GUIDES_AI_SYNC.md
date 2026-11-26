@@ -42,6 +42,12 @@ when prompted."
   EOD has a conference packages line. Guides: conference page + a packages section (Help now opens #conf-amount).
   Assistant: conference answers should include package lines. Manager Guide: none.
 
+- 2026-11-26 Liwonde (0ff45bf + 26822e7 / Rosalyn's 085706d + 35a6679, owner PATCH): gym/event invoices show the
+  deposit amount (was the yes/no flag); invoice emails show the same paid / total / due as the PDF; email subjects
+  show the hotel name as typed. Conference event change: moving to a conference room with no rate is refused ("set
+  its rate in Conference Rooms first"); events over 500 delegates can be rescheduled. Guides: conference page, one
+  line on the no-rate refusal. Assistant: none. Manager Guide: none.
+
 - 2026-11-26 Liwonde (d9a3bb8 / Rosalyn's 5559e09, ROOM_PACKAGES_FIX_PLAN.md, owner PATCH): room packages now follow stay changes.
   Shorter/longer stays and adult changes work per-night and per-person-per-night packages out again (per-stay kept);
   in a group the lead room's party package is recalculated from the party's adults x the lead's nights, History
