@@ -335,7 +335,7 @@ $cpVatNote = vat_mode() === 'exclusive' ? 'before VAT (VAT is added on top, as f
                                     <span class="icon-preview-badge"><i class="fas fa-gift" id="cpIconPreview"></i></span>
                                     <input type="text" id="cpIcon" name="icon" maxlength="60" placeholder="fas fa-utensils" data-icon-preview="cpIconPreview">
                                 </div>
-                                <p class="icon-preview-hint">Browse free icons at fontawesome.com/icons</p>
+                                <p class="icon-preview-hint">Type a name or press Choose icon.</p>
                             </div>
                         </div>
                         <div class="form-group">

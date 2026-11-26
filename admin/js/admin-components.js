@@ -1297,27 +1297,238 @@
 })();
 
 /* Live Font Awesome icon preview. Input: data-icon-preview="<preview <i> id>", optional data-icon-fallback, data-icon-prefix ("fas" added when no style prefix).
-   Sets className only, value limited to letters, digits, spaces, hyphens. Call rhIconPreview(input) after filling an input from code. */
+   Sets className only, value limited to letters, digits, spaces, hyphens. Call rhIconPreview(input) after filling an input from code.
+   Preview shows "coffee" or "fa-coffee" typed without a style as solid; on change/submit such a plain name is rewritten to the format the field stores (see normalize). */
 (function () {
     'use strict';
+    if (window.__rhIconPreviewLoaded) return;
+    window.__rhIconPreviewLoaded = true;
     var STYLE = /(^|\s)(fas|far|fab|fal|fat|fad|fa-solid|fa-regular|fa-brands|fa-light|fa-thin|fa-duotone)(\s|$)/;
     function update(input) {
         if (!input || !input.getAttribute) return;
         var prev = document.getElementById(input.getAttribute('data-icon-preview') || '');
         if (!prev) return;
         var fallback = input.getAttribute('data-icon-fallback') || 'fas fa-gift';
-        var prefix = input.getAttribute('data-icon-prefix') || '';
+        var prefix = input.getAttribute('data-icon-prefix') || 'fas';
         var v = String(input.value || '').trim().replace(/\s+/g, ' ');
-        if (!v || !/^[A-Za-z0-9 -]+$/.test(v) || !/(^|\s)fa-[a-z0-9-]+/.test(v)) { prev.className = fallback; return; }
-        if (prefix && !STYLE.test(v)) v = prefix + ' ' + v;
+        if (!v || !/^[A-Za-z0-9 -]+$/.test(v)) { prev.className = fallback; return; }
+        if (v.indexOf(' ') === -1 && !STYLE.test(v) && !/^fa-/.test(v)) v = 'fa-' + v; /* bare name: "coffee" */
+        var rest = v.replace(STYLE, ' ');
+        if (!/(^|\s)fa-[a-z0-9-]+/.test(rest)) { prev.className = fallback; return; }
+        if (!STYLE.test(v)) v = prefix + ' ' + v;
         prev.className = v;
     }
+    /* A plain name typed by hand ("coffee", "fa-coffee") is rewritten to the format the field stores, on change (blur) and before submit:
+       full-class fields -> "fas fa-coffee", data-icon-prefix fields -> "fa-coffee". Anything else is left as typed. */
+    function normalize(input) {
+        if (!input || !input.getAttribute || !input.getAttribute('data-icon-preview')) return;
+        var v = String(input.value || '').trim();
+        if (!/^(fa-)?[a-z0-9-]+$/.test(v) || STYLE.test(v)) return;
+        var name = v.replace(/^fa-/, '');
+        if (!name) return;
+        var out = input.hasAttribute('data-icon-prefix') ? 'fa-' + name : 'fas fa-' + name;
+        if (out !== input.value) { input.value = out; update(input); }
+    }
     window.rhIconPreview = update;
+    window.rhIconNormalize = normalize;
     document.addEventListener('input', function (e) {
         if (e.target && e.target.getAttribute && e.target.getAttribute('data-icon-preview')) update(e.target);
     });
-    document.addEventListener('DOMContentLoaded', function () {
+    document.addEventListener('change', function (e) { normalize(e.target); });
+    document.addEventListener('submit', function (e) {
+        var f = e.target && e.target.querySelectorAll ? e.target.querySelectorAll('input[data-icon-preview]') : [];
+        for (var i = 0; i < f.length; i++) normalize(f[i]);
+    }, true);
+    function refresh() {
         var all = document.querySelectorAll('input[data-icon-preview]');
         for (var i = 0; i < all.length; i++) update(all[i]);
-    });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refresh); else refresh();
+    /* in-app (SPA) navigation swaps the page content without re-running this script */
+    document.addEventListener('rh:content-updated', refresh);
+})();
+
+/* Built-in Font Awesome icon picker. Every input[data-icon-preview] gets a "Choose icon" button that opens a searchable window
+   (list from fa-icons.js, loaded only on first open; no network call). Click an icon: the input gets the same format it already stores.
+   Fields with data-icon-prefix (the page prints "fas" itself) store just "fa-name" and only offer solid icons;
+   all other fields store the full class ("fas fa-mug-hot", "far ...", "fab ..."). */
+(function () {
+    'use strict';
+    if (window.__rhIconPickerLoaded) return;
+    window.__rhIconPickerLoaded = true;
+    var CAP = 120;
+    var listSrc = '';
+    try { listSrc = document.currentScript && document.currentScript.src ? document.currentScript.src.replace(/admin-components\.js/, 'fa-icons.js') : ''; } catch (e) { listSrc = ''; }
+    var els = null, state = { input: null, style: 'all', solidOnly: false }, loading = null, searchTimer = 0;
+
+    function styleClass(st) { return st === 'b' ? 'fab' : (st === 'r' ? 'far' : 'fas'); }
+
+    function loadList() {
+        if (window.RH_FA_ICONS) return Promise.resolve(window.RH_FA_ICONS);
+        if (loading) return loading;
+        loading = new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = listSrc || 'js/fa-icons.js';
+            s.onload = function () { resolve(window.RH_FA_ICONS || []); };
+            s.onerror = function () { loading = null; reject(new Error('Icon list failed to load')); };
+            document.head.appendChild(s);
+        });
+        return loading;
+    }
+
+    function build() {
+        if (els) return els;
+        var ov = document.createElement('div');
+        ov.className = 'rh-ip-overlay';
+        ov.hidden = true;
+        ov.innerHTML =
+            '<div class="rh-ip" role="dialog" aria-modal="true" aria-labelledby="rhIpTitle">' +
+            '<div class="rh-ip__head"><h3 id="rhIpTitle" class="rh-ip__title">Choose icon</h3>' +
+            '<button type="button" class="rh-ip__close" aria-label="Close">&times;</button></div>' +
+            '<div class="rh-ip__tools"><input type="search" class="rh-ip__search" placeholder="Search, e.g. coffee, bed, wifi" aria-label="Search icons" autocomplete="off">' +
+            '<div class="rh-ip__filters" role="group" aria-label="Icon style">' +
+            '<button type="button" class="rh-ip__chip is-on" data-style="all">All</button>' +
+            '<button type="button" class="rh-ip__chip" data-style="s">Solid</button>' +
+            '<button type="button" class="rh-ip__chip" data-style="r">Regular</button>' +
+            '<button type="button" class="rh-ip__chip" data-style="b">Brands</button></div></div>' +
+            '<div class="rh-ip__status" aria-live="polite"></div>' +
+            '<div class="rh-ip__grid" role="list"></div></div>';
+        document.body.appendChild(ov);
+        els = {
+            ov: ov,
+            search: ov.querySelector('.rh-ip__search'),
+            filters: ov.querySelector('.rh-ip__filters'),
+            status: ov.querySelector('.rh-ip__status'),
+            grid: ov.querySelector('.rh-ip__grid')
+        };
+        ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
+        ov.querySelector('.rh-ip__close').addEventListener('click', function () { close(); });
+        els.search.addEventListener('input', function () { clearTimeout(searchTimer); searchTimer = setTimeout(render, 120); });
+        els.filters.addEventListener('click', function (e) {
+            var b = e.target.closest ? e.target.closest('.rh-ip__chip') : null;
+            if (!b) return;
+            state.style = b.getAttribute('data-style');
+            syncChips();
+            render();
+        });
+        els.grid.addEventListener('click', function (e) {
+            var b = e.target.closest ? e.target.closest('.rh-ip__item') : null;
+            if (b) pick(b.getAttribute('data-name'), b.getAttribute('data-st'));
+        });
+        return els;
+    }
+
+    function syncChips() {
+        var chips = els.filters.querySelectorAll('.rh-ip__chip');
+        for (var i = 0; i < chips.length; i++) {
+            var on = chips[i].getAttribute('data-style') === state.style;
+            chips[i].classList.toggle('is-on', on);
+            chips[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+    }
+
+    function render() {
+        var list = window.RH_FA_ICONS || [];
+        var terms = els.search.value.toLowerCase().replace(/^\s*fa-/, '').split(/\s+/).filter(Boolean);
+        var want = state.solidOnly ? 's' : state.style;
+        var out = [], total = 0, i, r, hay, ok, j;
+        for (i = 0; i < list.length; i++) {
+            r = list[i];
+            if (want !== 'all' && r[1].indexOf(want) === -1) continue;
+            hay = r[0] + ' ' + r[2];
+            ok = true;
+            for (j = 0; j < terms.length; j++) { if (hay.indexOf(terms[j]) === -1) { ok = false; break; } }
+            if (!ok) continue;
+            total++;
+            if (out.length < CAP) out.push(r);
+        }
+        var html = '';
+        for (i = 0; i < out.length; i++) {
+            r = out[i];
+            var st = want !== 'all' ? want : (r[1].indexOf('s') !== -1 ? 's' : r[1].charAt(0));
+            html += '<button type="button" class="rh-ip__item" role="listitem" data-name="' + r[0] + '" data-st="' + st + '" title="' + r[0] + '">' +
+                '<i class="' + styleClass(st) + ' fa-' + r[0] + '" aria-hidden="true"></i><span>' + r[0] + '</span></button>';
+        }
+        els.grid.innerHTML = html;
+        els.grid.scrollTop = 0;
+        els.status.textContent = total === 0 ? 'No icons match. Try another word.' :
+            (total > out.length ? 'Showing ' + out.length + ' of ' + total + ' icons. Type to narrow.' : total + (total === 1 ? ' icon' : ' icons'));
+    }
+
+    function pick(name, st) {
+        var input = state.input;
+        if (!input) { close(); return; }
+        input.value = input.hasAttribute('data-icon-prefix') ? 'fa-' + name : styleClass(st) + ' fa-' + name;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        if (window.rhIconPreview) window.rhIconPreview(input);
+        close();
+    }
+
+    function onKey(e) {
+        if (!els || els.ov.hidden) return;
+        if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); e.stopImmediatePropagation(); close(); }
+        else if (e.key === 'Tab') { /* keep focus inside the window */
+            var f = els.ov.querySelectorAll('button:not([hidden]), input');
+            if (!f.length) return;
+            var first = f[0], last = f[f.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+    }
+
+    function close() {
+        if (!els || els.ov.hidden) return;
+        els.ov.hidden = true;
+        document.removeEventListener('keydown', onKey, true);
+        var input = state.input;
+        state.input = null;
+        if (input && input.focus) { try { input.focus(); } catch (e) { /* input hidden */ } }
+    }
+
+    function open(input) {
+        build();
+        state.input = input;
+        state.solidOnly = input.hasAttribute('data-icon-prefix');
+        state.style = 'all';
+        els.search.value = '';
+        els.filters.hidden = state.solidOnly;
+        syncChips();
+        els.ov.hidden = false;
+        document.addEventListener('keydown', onKey, true);
+        els.status.textContent = 'Loading icons...';
+        els.grid.innerHTML = '';
+        els.search.focus();
+        loadList().then(function () { if (!els.ov.hidden) render(); }).catch(function () {
+            els.status.textContent = 'The icon list could not be loaded. You can still type the class name.';
+        });
+    }
+
+    function attach(input) {
+        if (input.getAttribute('data-icon-picker') === '1') return;
+        var nx = input.nextElementSibling;
+        if (nx && nx.classList && nx.classList.contains('rh-ip-btn')) { input.setAttribute('data-icon-picker', '1'); return; }
+        input.setAttribute('data-icon-picker', '1');
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'rh-ip-btn';
+        b.textContent = 'Choose icon';
+        b.addEventListener('click', function () { open(input); });
+        var wrap = input.parentNode;
+        if (wrap && wrap.classList && wrap.classList.contains('icon-preview-wrap')) {
+            wrap.appendChild(b);
+        } else {
+            b.className += ' rh-ip-btn--solo';
+            input.insertAdjacentElement('afterend', b);
+        }
+    }
+
+    function scan() {
+        var all = document.querySelectorAll('input[data-icon-preview]');
+        for (var i = 0; i < all.length; i++) attach(all[i]);
+    }
+    window.rhIconPickerScan = scan;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scan); else scan();
+    /* in-app (SPA) navigation swaps the page content without re-running this script; one listener, set up once */
+    document.addEventListener('rh:content-updated', scan);
 })();

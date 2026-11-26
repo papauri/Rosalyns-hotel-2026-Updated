@@ -6558,3 +6558,30 @@ body.rh-pwa-bar-on .admin-bulk-bar {
 .icon-preview-wrap:focus-within .icon-preview-badge { background: rgba(139, 115, 85, .12); }
 .icon-preview-wrap input { flex: 1; min-width: 0; padding: 8px 10px; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; background: transparent; }
 .icon-preview-hint { font-size: 12px; color: #888; margin: 4px 0 0; }
+
+/* Icon picker (admin-components.js "Choose icon"): button beside the field + searchable window above any open modal */
+.rh-ip-btn { flex: 0 0 auto; min-height: 44px; padding: 0 14px; border: 0; border-left: 1px solid #ced4da; background: #f6f3ee; color: #5c4a33; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.rh-ip-btn:hover, .rh-ip-btn:focus-visible { background: #ece6db; outline: none; }
+.rh-ip-btn--solo { margin-top: 6px; border: 1px solid #ced4da; border-radius: 5px; }
+.rh-ip-overlay { position: fixed; inset: 0; z-index: 10050; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(0, 0, 0, .55); }
+.rh-ip-overlay[hidden] { display: none; }
+.rh-ip { display: flex; flex-direction: column; width: 100%; max-width: 560px; max-height: min(640px, calc(100vh - 24px)); background: #fff; border-radius: 8px; box-shadow: 0 8px 28px rgba(0, 0, 0, .25); overflow: hidden; }
+.rh-ip__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #e3ddd2; }
+.rh-ip__title { margin: 0; font-size: 16px; color: #2b2b2b; }
+.rh-ip__close { width: 44px; height: 44px; margin: -6px -10px -6px 0; border: 0; background: transparent; font-size: 26px; line-height: 1; color: #555; cursor: pointer; }
+.rh-ip__tools { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 8px; }
+.rh-ip__search { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid #ced4da; border-radius: 5px; font: inherit; font-size: 16px; box-sizing: border-box; }
+.rh-ip__search:focus { border-color: #7E684B; outline: none; }
+.rh-ip__filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.rh-ip__filters[hidden] { display: none; }
+.rh-ip__chip { min-height: 44px; padding: 0 14px; border: 1px solid #ced4da; border-radius: 5px; background: #fff; color: #333; font: inherit; font-size: 13px; cursor: pointer; }
+.rh-ip__chip.is-on { background: #7E684B; border-color: #7E684B; color: #fff; }
+.rh-ip__status { padding: 0 16px 8px; font-size: 12px; color: #6b6b6b; min-height: 20px; }
+.rh-ip__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; padding: 0 16px 16px; overflow-y: auto; min-height: 120px; flex: 1 1 auto; align-content: start; }
+.rh-ip__item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 64px; padding: 8px 4px; border: 1px solid #e3ddd2; border-radius: 5px; background: #fff; color: #2b2b2b; font: inherit; cursor: pointer; }
+.rh-ip__item:hover, .rh-ip__item:focus-visible { border-color: #7E684B; background: rgba(139, 115, 85, .08); outline: none; }
+.rh-ip__item i { font-size: 20px; color: #7E684B; }
+.rh-ip__item span { max-width: 100%; font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 480px) { .rh-ip-overlay { padding: 0; align-items: flex-end; } .rh-ip { max-width: none; max-height: 92vh; border-radius: 8px 8px 0 0; } .rh-ip__grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); } }
+/* inside a modal the icon input keeps no border of its own: the wrapper draws it (beats the shared modal field rule) */
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay) .icon-preview-wrap input[data-icon-preview][type] { width: auto; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: transparent; }

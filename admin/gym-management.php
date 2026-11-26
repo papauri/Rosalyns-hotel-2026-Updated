@@ -519,7 +519,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                                 <span class="icon-preview-badge"><i class="fas fa-leaf" id="addGymIconPreview"></i></span>
                                 <input type="text" name="icon_class" id="addGymIconClass" class="form-control" maxlength="100" value="fas fa-leaf" placeholder="fas fa-dumbbell" data-icon-preview="addGymIconPreview" data-icon-fallback="fas fa-leaf">
                             </div>
-                            <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code>. Browse free icons at fontawesome.com/icons</small>
+                            <small class="form-text text-muted">Type a name or press Choose icon.</small>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
@@ -620,7 +620,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                                 <span class="icon-preview-badge"><i class="fas fa-leaf" id="editGymIconPreview"></i></span>
                                 <input type="text" name="icon_class" id="editGymIconClass" class="form-control" maxlength="100" data-icon-preview="editGymIconPreview" data-icon-fallback="fas fa-leaf">
                             </div>
-                            <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code>. Browse free icons at fontawesome.com/icons</small>
+                            <small class="form-text text-muted">Type a name or press Choose icon.</small>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">

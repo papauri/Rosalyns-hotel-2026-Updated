@@ -348,7 +348,6 @@ $priceTypeLabels = [
             position: fixed;
             inset: 0;
             background: rgba(0, 0, 0, .55);
-            z-index: 1000;
             overflow-y: auto;
             padding: 20px;
         }
@@ -766,9 +765,9 @@ $priceTypeLabels = [
                             <label>Icon (Font Awesome class)</label>
                             <div class="icon-preview-wrap">
                                 <span class="icon-preview-badge"><i class="fas fa-gift" id="fpIconPreview"></i></span>
-                                <input type="text" id="fpIcon" name="icon" placeholder="fas fa-coffee" oninput="updateIconPreview(this.value)">
+                                <input type="text" id="fpIcon" name="icon" placeholder="fas fa-coffee" data-icon-preview="fpIconPreview">
                             </div>
-                            <p class="form-hint">Browse at fontawesome.com/icons</p>
+                            <p class="form-hint">Type a name or press Choose icon.</p>
                         </div>
                     </div>
 
@@ -907,12 +906,6 @@ $priceTypeLabels = [
             }
         }
 
-        function updateIconPreview(val) {
-            const prev = document.getElementById('fpIconPreview');
-            if (!prev) return;
-            prev.className = (val && val.trim()) ? val.trim() : 'fas fa-gift';
-        }
-
         function openPkgModal(pkg) {
             document.getElementById('pkgModalTitle').innerHTML = pkg ?
                 '<i class="fas fa-edit"></i> Edit Package' :
@@ -928,7 +921,7 @@ $priceTypeLabels = [
             document.getElementById('fpIsFeatured').checked = pkg ? !!+pkg.is_featured : false;
             document.getElementById('fpIsActive').checked = pkg ? !!+pkg.is_active : true;
 
-            updateIconPreview(pkg ? (pkg.icon || '') : '');
+            if (window.rhIconPreview) rhIconPreview(document.getElementById('fpIcon'));
 
             // Sync complimentary toggle
             const isComp = pkg ? parseFloat(pkg.price_amount) === 0 : false;
