@@ -84,6 +84,22 @@ function sh_code_defaults(): array
 
     $root = dirname(__DIR__);
     $files = array_merge(glob($root . '/*.php') ?: [], glob($root . '/includes/*.php') ?: []);
+
+    // The scan reads ~140 files on every load, so keep its result in cache/ and redo it only when a scanned
+    // file (path, mtime or size) or this file's own default list changes. Any cache problem falls back to scanning.
+    $sig = [__FILE__ . '|' . (int)@filemtime(__FILE__) . '|' . (int)@filesize(__FILE__)];
+    foreach ($files as $file) {
+        $sig[] = $file . '|' . (int)@filemtime($file) . '|' . (int)@filesize($file);
+    }
+    $sigHash = md5(implode('|', $sig));
+    $cacheFile = $root . '/cache/section_headers_scan.json';
+    $cached = is_file($cacheFile) ? json_decode((string)@file_get_contents($cacheFile), true) : null;
+    if (is_array($cached) && ($cached['sig'] ?? '') === $sigHash && is_array($cached['rows'] ?? null)) {
+        $all = array_merge($all, $cached['rows']);
+        return $all;
+    }
+    $baseCount = count($all);
+
     $q = '(?:\'((?:[^\'\\\\]|\\\\.)*)\'|"((?:[^"\\\\]|\\\\.)*)")';
     foreach ($files as $file) {
         $code = @file_get_contents($file);
@@ -109,6 +125,16 @@ function sh_code_defaults(): array
             }
             $known[$id] = true;
             $all[] = [$call[1], $call[2], $text['label'] ?: null, $text['subtitle'] ?: null, $text['title'], $text['description'] ?: null, 99];
+        }
+    }
+
+    $rows = array_slice($all, $baseCount);
+    if (is_dir($root . '/cache') || @mkdir($root . '/cache', 0755, true)) {
+        $tmp = $cacheFile . '.' . getmypid() . '.tmp';
+        if (@file_put_contents($tmp, json_encode(['sig' => $sigHash, 'rows' => $rows])) !== false) {
+            if (!@rename($tmp, $cacheFile)) {
+                @unlink($tmp);
+            }
         }
     }
     return $all;

@@ -1359,6 +1359,7 @@
     var CAP = 120;
     var listSrc = '';
     try { listSrc = document.currentScript && document.currentScript.src ? document.currentScript.src.replace(/admin-components\.js/, 'fa-icons.js') : ''; } catch (e) { listSrc = ''; }
+    var closedAt = 0;
     var els = null, state = { input: null, style: 'all', solidOnly: false }, loading = null, searchTimer = 0;
 
     function styleClass(st) { return st === 'b' ? 'fab' : (st === 'r' ? 'far' : 'fas'); }
@@ -1401,7 +1402,17 @@
             status: ov.querySelector('.rh-ip__status'),
             grid: ov.querySelector('.rh-ip__grid')
         };
-        ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
+        /* Close on the CLICK (not mousedown/touchstart): on a phone the browser sends mousedown, mouseup and click after the tap,
+           and if the window vanished on mousedown the click would land on the window underneath and close it too.
+           Nothing inside the picker may bubble a click to the parent window's own outside-click handler. */
+        var downOnBackdrop = false;
+        ov.addEventListener('mousedown', function (e) { downOnBackdrop = (e.target === ov); });
+        ov.addEventListener('touchstart', function (e) { downOnBackdrop = (e.target === ov); }, { passive: true });
+        ov.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (e.target === ov && downOnBackdrop) close();
+            downOnBackdrop = false;
+        });
         ov.querySelector('.rh-ip__close').addEventListener('click', function () { close(); });
         els.search.addEventListener('input', function () { clearTimeout(searchTimer); searchTimer = setTimeout(render, 120); });
         els.filters.addEventListener('click', function (e) {
@@ -1417,6 +1428,16 @@
         });
         return els;
     }
+
+    /* Safety net for the tap that closed the picker: a late mouse/click event for that same tap (touch browsers send it
+       after touchend) must not reach the window underneath. Anything inside the picker, and any click after 450 ms, is untouched. */
+    document.addEventListener('click', function (e) {
+        if (!closedAt || Date.now() - closedAt > 450) return;
+        if (els && els.ov.contains(e.target)) return;
+        if (e.target && e.target.closest && e.target.closest('.rh-ip-btn')) return;
+        e.stopPropagation();
+        e.preventDefault();
+    }, true);
 
     function syncChips() {
         var chips = els.filters.querySelectorAll('.rh-ip__chip');
@@ -1480,6 +1501,7 @@
     function close() {
         if (!els || els.ov.hidden) return;
         els.ov.hidden = true;
+        closedAt = Date.now();
         document.removeEventListener('keydown', onKey, true);
         var input = state.input;
         state.input = null;
