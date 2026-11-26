@@ -86,6 +86,12 @@ when prompted."
   to fill; typing just "coffee" works too. The "browse fontawesome.com" hints are gone. Room Packages New Package window
   no longer opens under the sidebar. Guides: wherever a guide says to look up an icon on fontawesome.com, say "press
   Choose icon" instead. Assistant: none.
+- d570ccc / Rosalyn's 266ea3c (2026-11-27, owner): "Edit wording" now also on bulk sends (Confirm, Cancel, Send a
+  reminder, Resend confirmation: one wording for the whole batch, each guest's own figures; invoice stays fixed), New
+  booking (beside the email tick, follows Status), Edit booking (new "Booking updated" template in Email & PDF templates,
+  change list locked), Convert on Booking details, and "Confirm and edit email" in the All Bookings row menu. Quick Modify
+  now emails only what really changed. Guides: bookings (bulk, create, edit, convert). Assistant: update the "can I
+  change the email before it goes" answer. Manager Guide: Bookings line.
 
 ## Synced 2026-11-26 (owner prompted "assistant and guide sync"; guides + Assistant: commit "Guides + Assistant sync 2026-11-26" in both repos · guides 06, 07, 12, 13, 19, 99 (+ Liwonde-only brand fix in 01, 02, 14, 23; guide 07 Blocked Dates note) · Assistant: when-did-they-pay -> Paid "i", dashboard vs End of Day rule, email Tone, calendar arrow keys, bare pre-arrival question gets its own answer (payment chase needs "payment"), expired / cancelled / no-show answers point to the Status pill, movements arrows for tomorrow / next week, receipt comment per b145620, expiry questions never catch stock or gym questions · Manager Guides: Money and End of Day, Bookings, Daily checklist refreshed; others no change) - entries kept for reference
 
