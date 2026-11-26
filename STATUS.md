@@ -32,8 +32,8 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
 ## Shipped 2026-11-26: room + conference packages, deposit lines, email escaping (owner, profile Claude session 94b37144)
 - Room packages follow stay changes (PATCH): Liwonde d9a3bb8 / Rosalyn's 5559e09. Plan: Liwonde `.claude/ROOM_PACKAGES_FIX_PLAN.md`.
 - Conference packages (FEATURE): Liwonde 823e9bd / Rosalyn's c5753bf. Plan: Liwonde `.claude/CONF_PACKAGES_PLAN.md`.
-  **Rosalyn's needs migration 092 run on deploy** (owner); until then, no package screens appear and prices are unchanged
-  (guarded by `rh_conf_has_packages()`).
+  Migration 092 APPLIED to Rosalyn's live DB 2026-11-26 (owner asked; backup first: Rosalyn's
+  backups/2026/11/db-20261126-030806.sql.gz). Code is guarded by `rh_conf_has_packages()`.
 - Deposit lines on gym/event/conference invoices + email template escaping (security PATCH): Liwonde 0ff45bf /
   Rosalyn's 085706d. Tests: `scripts/tests/deposit_line_test.php`, `email_template_escape_test.php` (Liwonde only).
 - Follow-up faults (owner "go" 2026-11-26): Liwonde 26822e7 / Rosalyn's 35a6679: emails match the PDF

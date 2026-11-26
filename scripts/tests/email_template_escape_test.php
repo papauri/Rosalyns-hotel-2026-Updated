@@ -203,6 +203,43 @@ foreach (['sendConferenceEnquiryEmail' => 'contact_person', 'sendGymBookingEmail
 }
 ok('rh_email_plain: sanitized name reads as typed', rh_email_plain(sanitizeString("Seán O'Brien & Co")) === "Seán O'Brien & Co");
 
+// Subjects from admin-edited (DB) templates are plain text (fault 2026-11-26: "&amp;" / "&#039;" in the inbox).
+// Template text holds a typed & and ' (and, saved through the editor, their entities); the value comes raw or already
+// escaped, and the senders' maps escape it once more for the HTML body.
+$want = "Invoice & receipt for O'Brien & Sons - Rosalyn's Hotel";
+foreach (["Invoice & receipt for {{guest_name}} - Rosalyn's Hotel", 'Invoice &amp; receipt for {{guest_name}} - Rosalyn&#039;s Hotel'] as $ti => $tplSubject) {
+    foreach (['raw' => "O'Brien & Sons", 'pre-escaped' => 'O&#039;Brien &amp; Sons'] as $vk => $val) {
+        $map = ['{{guest_name}}' => htmlspecialchars($val, ENT_QUOTES, 'UTF-8')];
+        $got = rh_email_subject_fill($tplSubject, $map);
+        ok("subject fill: template $ti, $vk value reads as typed", $got === $want, var_export($got, true));
+        $row = rh_render_booking_email_template_row('payment_invoice', ['subject' => $tplSubject, 'html_body' => '<p>{{guest_name}}</p>', 'text_body' => ''], ['guest_name' => htmlspecialchars($val, ENT_QUOTES, 'UTF-8')]);
+        ok("rendered template subject: template $ti, $vk value reads as typed", $row['subject'] === $want, var_export($row['subject'], true));
+        ok("rendered template body still escaped: template $ti, $vk", strpos($row['html_body'], '&amp;') !== false && strpos($row['html_body'], '<p>O') !== false);
+    }
+}
+ok('subject fill: an HTML block tag reads as text, no tags, no line break',
+    rh_email_subject_fill('Policy: {{payment_policy}}', ['{{payment_policy}}' => "<p>Pay &amp; stay</p>\n<br>"]) === 'Policy: Pay & stay');
+ok('subject fill: an unknown tag is left as typed', rh_email_subject_fill('Hi {{x}} & {{y}}', ['{{x}}' => 'A']) === 'Hi A & {{y}}');
+
+// Every subject handed to a sender is made plain there, and the template-filled subjects use the plain fill.
+$fileSrc = static function (string $rel) use ($root): string { return (string)file_get_contents($root . '/' . $rel); };
+foreach (['sendEmail', 'sendEmailWithAttachments', 'sendEmailWithCC', 'sendEmailWithBinaryAttachment'] as $fn) {
+    ok("$fn: subject made plain on entry", (bool)preg_match('/\{\s*(?:global[^;]*;\s*)+\$subject = rh_email_plain\(\$subject\);/s', $srcOf($fn)));
+}
+$invSrc = $fileSrc('config/invoice.php');
+ok('sendEmailWithAttachmentAndCC: subject made plain on entry', (bool)preg_match('/function sendEmailWithAttachmentAndCC\([^)]*\)\s*\{\s*(?:global[^;]*;\s*)+\$subject = rh_email_plain\(\$subject\);/s', $invSrc));
+ok('invoice.php: DB template subjects made plain (room + conference invoice)', substr_count($invSrc, "\$subject = rh_email_plain(\$dbTemplate['subject'])") === 2
+    && strpos($invSrc, "\$subject = \$dbTemplate['subject']") === false);
+ok('email.php: no raw strtr / str_replace into a template subject', !preg_match("/\\\$subject\s*=\s*(?:strtr|str_replace)\(/", $fileSrc('config/email.php')));
+ok('email.php: conference + event quotation subjects use the plain fill', substr_count($fileSrc('config/email.php'), "\$subject = rh_email_subject_fill((string)\$tplConfig['subject'], \$tagMap)") === 2);
+ok('receipts.php: both receipt subjects use the plain fill', substr_count($fileSrc('config/receipts.php'), '$subject = rh_email_subject_fill(') === 2);
+$cnSrc = $fileSrc('config/credit-notes.php');
+ok('credit-notes.php: subject uses the plain fill and is plain when handed over', strpos($cnSrc, "\$cnEmailSubject = rh_email_subject_fill((string)\$dbTpl['subject'], \$cnPlaceholders)") !== false
+    && (bool)preg_match('/\$cnEmailSubject = rh_email_plain\(\$cnEmailSubject\);[^\n]*\n\s*\$mail->Subject = \$cnEmailSubject;/', $cnSrc));
+$cbSrc = $fileSrc('admin/create-booking.php');
+ok('create-booking: admin copy subject is plain, not htmlspecialchars', strpos($cbSrc, "\$adminCcSubject   = rh_email_plain('[Admin Copy] New Booking Created — ' . \$primary_ref)") !== false
+    && !preg_match('/\$adminCcSubject\s*=[^;]*htmlspecialchars/', $cbSrc));
+
 restore_error_handler();
 echo "\nemail_template_escape_test: $pass passed, $fail failed, $warn warnings\n";
 exit($fail === 0 && $warn === 0 ? 0 : 1);

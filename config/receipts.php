@@ -1689,13 +1689,13 @@ if (!function_exists('receipt_send_email')) {
             ? getBookingEmailTemplateConfig('payment_receipt', [])
             : [];
         if (!empty($receiptTemplate['subject']) && !empty($receiptTemplate['html_body']) && (int)($receiptTemplate['is_active'] ?? 1) === 1) {
-            $subject = str_replace(array_keys($placeholders), array_values($placeholders), (string)$receiptTemplate['subject']);
+            $subject = rh_email_subject_fill((string)$receiptTemplate['subject'], $placeholders); // plain text: no entities
             $body = str_replace(array_keys($placeholders), array_values($placeholders), (string)$receiptTemplate['html_body']);
             $textBody = !empty($receiptTemplate['text_body'])
                 ? str_replace(array_keys($placeholders), array_values($placeholders), (string)$receiptTemplate['text_body'])
                 : '';
         } else {
-            $subject = str_replace(array_keys($placeholders), array_values($placeholders), getSetting('receipt_email_subject', 'Receipt {{receipt_number}}'));
+            $subject = rh_email_subject_fill((string)getSetting('receipt_email_subject', 'Receipt {{receipt_number}}'), $placeholders); // plain text
             $body = str_replace(array_keys($placeholders), array_values($placeholders), getSetting('receipt_email_template', 'Your receipt is attached.'));
             $textBody = '';
         }

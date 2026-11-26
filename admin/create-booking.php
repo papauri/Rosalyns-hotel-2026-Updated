@@ -1407,7 +1407,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $adminCcName      = getSetting('site_name', 'Hotel');
                     $adminBookingUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/booking-details.php?id=' . $primary_id;
                     $adminCreatedBy   = htmlspecialchars($user['full_name'] ?? $user['username'] ?? 'Admin');
-                    $adminCcSubject   = '[Admin Copy] New Booking Created — ' . htmlspecialchars($primary_ref);
+                    $adminCcSubject   = rh_email_plain('[Admin Copy] New Booking Created — ' . $primary_ref); // plain text: no entities
                     $adminCcBody      = '<h2 style="color:#7E684B;">Admin Copy — Booking Created</h2>'
                         . '<p>A new booking has been created by <strong>' . $adminCreatedBy . '</strong>.</p>'
                         . '<p><strong>Reference:</strong> ' . htmlspecialchars($primary_ref) . '<br>'

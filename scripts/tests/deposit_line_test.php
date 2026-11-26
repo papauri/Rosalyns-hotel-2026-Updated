@@ -176,7 +176,35 @@ foreach (['sendConferenceInvoiceEmailToClient' => 'conference', 'sendGymInvoiceE
     ok("$fnName due and paid come from the helper", preg_match("/\\\$(amountDue|ciAmountDue)\s*=\s*\\\$(fig|ciFig)\['amount_due'\]/", $body) === 1);
     ok("$fnName subject is rh_email_plain", preg_match('/\$subject\s*=\s*rh_email_plain\(/', $body) === 1);
     ok("$fnName subject is not htmlspecialchars", preg_match('/\$subject\s*=\s*[^;]*htmlspecialchars/', $body) === 0);
+    if ($type !== 'conference') {
+        $totPos = strpos($body, 'rh_flat_invoice_email_total_row($fig,');
+        ok("$fnName prints the total line from the helper", $totPos !== false);
+        ok("$fnName total line sits above paid / due", $totPos !== false && $totPos < (int)strpos($body, 'Paid so far') && $totPos < (int)strpos($body, 'Balance due: '));
+    }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Gym / event invoice EMAIL total line = the attached PDF's total row (fault 2026-11-26: the emails had no total).
+// A VAT-bearing row (20,000 + 3,000 VAT = 23,000) so the total cannot match the subtotal by accident. Read-only: the
+// made-up id has no payments, amount_paid is given.
+// ---------------------------------------------------------------------------------------------------------------
+$vatOn = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+$totLabel = $vatOn ? 'Total (incl. VAT)' : 'Total';
+echo "  (VAT at this hotel: " . ($vatOn ? 'on' : 'off') . ", mode " . (function_exists('vat_mode') ? vat_mode() : (string)getSetting('vat_mode', '')) . ")\n";
+foreach (['gym' => 'buildGymInvoiceHTML', 'event' => 'buildEventInvoiceHTML'] as $type => $fn) {
+    $row = array_merge($base, ['deposit_required' => 0, 'deposit_amount' => 0, 'deposit_paid' => 0,
+        'total_amount' => 20000, 'vat_rate' => 15, 'vat_amount' => 3000, 'total_with_vat' => 23000, 'amount_paid' => 5000, 'amount_due' => 18000]);
+    $fig = rh_flat_invoice_figures($pdo, $type, $row);
+    $pdf = strip_tags($fn($row, 'TEST-INV-1', 'Test Hotel', 'hotel@example.invalid', '000', 'Somewhere', 'MWK'));
+    $line = rh_flat_invoice_email_total_row($fig, 'MWK');
+    $pdfTot = preg_match('/' . preg_quote($totLabel, '/') . '(?:\s|&nbsp;)*MWK\s*([\d,]+\.\d{2})/', $pdf, $pm) ? $pm[1] : null;
+    $mailTot = preg_match('/' . preg_quote($totLabel, '/') . ':(?:\s|&nbsp;)*MWK\s*([\d,]+\.\d{2})/', strip_tags($line), $mm) ? $mm[1] : null;
+    ok("$type email total line: locked total 23,000.00", $mailTot === '23,000.00', 'got ' . var_export($mailTot, true));
+    ok("$type email total line = PDF '$totLabel' row", $pdfTot !== null && $mailTot === $pdfTot, 'pdf ' . var_export($pdfTot, true) . ' email ' . var_export($mailTot, true));
+    ok("$type email total line: label follows the VAT setting", strpos($line, $totLabel . ':') !== false && ($vatOn || strpos($line, 'incl. VAT') === false));
+    ok("$type email total line: styled like the conference total", strpos($line, 'color: #8B7355; font-size: 18px;') !== false);
+}
+ok('email total line: currency escaped', strpos(rh_flat_invoice_email_total_row(['total' => 1], '<b>'), '<b>') === false);
 
 echo "\ndeposit_line_test: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

@@ -1470,7 +1470,7 @@ if (!function_exists('sendCreditNoteEmail')) {
                     ];
                     $htmlBody = str_replace(array_keys($cnPlaceholders), array_values($cnPlaceholders), $dbTpl['html_body']);
                     if (!empty($dbTpl['subject'])) {
-                        $cnEmailSubject = str_replace(array_keys($cnPlaceholders), array_values($cnPlaceholders), $dbTpl['subject']);
+                        $cnEmailSubject = rh_email_subject_fill((string)$dbTpl['subject'], $cnPlaceholders); // plain text: no entities
                     }
                 }
             }
@@ -1495,6 +1495,7 @@ if (!function_exists('sendCreditNoteEmail')) {
             rh_mail_add_staff_bcc($mail, (string)$cn['guest_email'], (bool)getEmailSetting('email_bcc_admin', 0));
 
             $mail->isHTML(true);
+            $cnEmailSubject = rh_email_plain($cnEmailSubject); // a subject is plain text (the default holds the site name)
             $mail->Subject = $cnEmailSubject;
             $mail->Body    = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $cnEmailSubject));
             $mail->AltBody = "Dear {$cn['guest_name']},\n\nYour credit note {$cn['credit_note_number']} for {$currency_symbol} " . number_format((float)$cn['original_amount'], 2) . " is attached.\n\nPlease quote this reference when making your next booking.\n\nWarm regards,\n{$site_name}";

@@ -173,6 +173,8 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
 
+    $subject = rh_email_plain($subject); // a subject is plain text: no entities from an edited template, no header break
+
     // Automated (scheduler) sends: optional test-recipient redirect + BCC policy.
     $bccAdmin = (bool)$email_bcc_admin;
     rh_automated_email_adjust($to, $subject, $bccAdmin);
@@ -303,6 +305,8 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
+
+    $subject = rh_email_plain($subject); // a subject is plain text: no entities from an edited template, no header break
 
     // Automated (scheduler) sends: optional test-recipient redirect + BCC policy.
     $bccAdmin = (bool)$email_bcc_admin;
@@ -2958,7 +2962,7 @@ function rh_render_booking_email_template_row(string $templateKey, array $templa
     // Variables arrive HTML-escaped (safe for the HTML body); the subject and plain-text part
     // are not HTML, so decode entities there ("O&#039;Brien" -> "O'Brien").
     $out = [
-        'subject' => html_entity_decode(strtr($template['subject'], $replace), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+        'subject' => rh_email_subject_fill((string)$template['subject'], $replace),
         'html_body' => strtr($template['html_body'], $replace),
         'text_body' => !empty($template['text_body']) ? html_entity_decode(strtr($template['text_body'], $textReplace), ENT_QUOTES | ENT_HTML5, 'UTF-8') : ''
     ];
@@ -4948,6 +4952,8 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
 
+    $subject = rh_email_plain($subject); // a subject is plain text: no entities from an edited template, no header break
+
     // If in development mode and no password or preview enabled, show preview
     if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
         return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
@@ -6406,6 +6412,21 @@ function rh_email_plain($value): string
 }
 
 /**
+ * PURE. Fill an admin-edited subject template ({{tag}} => value) as plain text. The maps the senders share with the
+ * HTML body hold HTML-escaped values (and a value read from the DB may already carry entities), so each value goes in
+ * as plain text (tags dropped, entities decoded) and the finished subject is made plain once more: "O'Brien & Sons",
+ * never "O&#039;Brien &amp; Sons", whatever the template text or the value held.
+ */
+function rh_email_subject_fill(string $template, array $map): string
+{
+    $plain = [];
+    foreach ($map as $tag => $value) {
+        $plain[(string)$tag] = is_scalar($value) ? rh_email_plain(strip_tags((string)$value)) : '';
+    }
+    return rh_email_plain(strtr($template, $plain));
+}
+
+/**
  * Load and populate an email template
  *
  * @param string $template Template filename (without path)
@@ -6937,7 +6958,7 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
     $fromName = trim((string)($email_from_name ?: $siteName));
     $phone = trim((string)getSetting('phone_main', ''));
     $adminName = trim((string)($adminUser['full_name'] ?? $adminUser['username'] ?? 'Reservations Team'));
-    $emailSubject = trim($replySubject);
+    $emailSubject = rh_email_plain($replySubject); // typed in admin: plain text, no entities, no header break
 
     if ($reference !== '' && stripos($emailSubject, $reference) === false) {
         $emailSubject .= ' [' . $reference . ']';
@@ -7320,6 +7341,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         }
 
         // ── Send ──────────────────────────────────────────────────────────────
+        $subject = rh_email_plain($subject); // plain text for both paths below (the PDF path builds its own mailer)
         if ($pdfContent === null) {
             // No attachment — use the standard sendEmail helper
             $result = sendEmail($booking['guest_email'], $booking['guest_name'], $subject, $htmlBody, $textBody);
@@ -7410,6 +7432,8 @@ function sendEmailWithBinaryAttachment(
     global $email_from_name, $email_from_email, $email_site_name, $email_admin_email, $email_bcc_admin;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $development_mode, $email_preview_enabled;
+
+    $subject = rh_email_plain($subject); // a subject is plain text: no entities from an edited template, no header break
 
     try {
         if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
@@ -7675,7 +7699,7 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
                     '{{guest_email}}' => htmlspecialchars($recipientEmail, ENT_QUOTES, 'UTF-8'),
                     '{{payment_policy}}' => rh_email_payment_policy_html(),
                 ];
-                $subject = strtr((string)$tplConfig['subject'], $tagMap);
+                $subject = rh_email_subject_fill((string)$tplConfig['subject'], $tagMap); // plain text: no entities
                 $htmlBody = strtr(rh_email_drop_empty_phone((string)$tplConfig['html_body'], (string)$tagMap['{{contact_phone}}']), $tagMap);
             }
         }
@@ -7826,7 +7850,7 @@ function sendEventQuotationEmail(array $event, array $options = []): array
                     '{{guest_email}}' => htmlspecialchars($recipientEmail, ENT_QUOTES, 'UTF-8'),
                     '{{payment_policy}}' => rh_email_payment_policy_html(),
                 ];
-                $subject = strtr((string)$tplConfig['subject'], $tagMap);
+                $subject = rh_email_subject_fill((string)$tplConfig['subject'], $tagMap); // plain text: no entities
                 $htmlBody = strtr(rh_email_drop_empty_phone((string)$tplConfig['html_body'], (string)$tagMap['{{contact_phone}}']), $tagMap);
             }
         }

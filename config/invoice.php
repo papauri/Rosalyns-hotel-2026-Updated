@@ -2616,7 +2616,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
         $subject = 'Invoice - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']';
         $textBody = '';
         if ($dbTemplate) {
-            $subject = $dbTemplate['subject'];
+            $subject = rh_email_plain($dbTemplate['subject']); // edited template: plain text, no entities
             $htmlBody = $dbTemplate['html_body'];
             $textBody = $dbTemplate['text_body'] ?? '';
         }
@@ -2737,6 +2737,8 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
     global $email_from_name, $email_from_email, $email_admin_email;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug, $email_site_name;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
+
+    $subject = rh_email_plain($subject); // a subject is plain text: no entities from an edited template, no header break
 
     // Check if we're on localhost
     $is_localhost = isset($_SERVER['HTTP_HOST']) && (
@@ -3502,6 +3504,22 @@ function rh_flat_invoice_figures(PDO $pdo, string $type, array $row): array
 }
 
 /**
+ * PURE (reads the vat_enabled setting). The total line of the gym / event invoice EMAIL: the same figure and label as
+ * the attached PDF's total row (rh_inv_flat_invoice: "Total (incl. VAT)" with VAT on, "Total" with it off), styled like
+ * the conference invoice email's total line. $fig = rh_flat_invoice_figures().
+ */
+function rh_flat_invoice_email_total_row(array $fig, string $currencySymbol): string
+{
+    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $label = $vatEnabled ? 'Total (incl. VAT)' : 'Total';
+    return '
+                    <div style="display: flex; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid #eee;">
+                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">' . $label . ':</span>
+                        <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . rh_email_h($currencySymbol) . ' ' . number_format((float)($fig['total'] ?? 0), 2) . '</span>
+                    </div>';
+}
+
+/**
  * Build HTML content for conference invoice
  */
 function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol)
@@ -3904,7 +3922,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
         </div>';
 
         if ($dbTemplate) {
-            $subject = $dbTemplate['subject'];
+            $subject = rh_email_plain($dbTemplate['subject']); // edited template: plain text, no entities
             $htmlBody = $dbTemplate['html_body'];
         }
 
@@ -4206,6 +4224,7 @@ function sendGymInvoiceEmailToClient(array $inquiry, string $invoice_file, array
                         <span style="font-weight: bold; color: #333;">Package:</span>
                         <span style="color: #666;">' . htmlspecialchars($inquiry['membership_type'] ?? 'N/A') . '</span>
                     </div>
+' . rh_flat_invoice_email_total_row($fig, (string)$currency_symbol) . '
 
                     <div style="display: flex; justify-content: space-between; padding: 15px 0;">
                         <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Paid so far:</span>
@@ -4531,6 +4550,7 @@ function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, arr
                         <span style="font-weight: bold; color: #333;">Event:</span>
                         <span style="color: #666;">' . htmlspecialchars($inquiry['event_title'] ?? 'N/A') . '</span>
                     </div>
+' . rh_flat_invoice_email_total_row($fig, (string)$currency_symbol) . '
 
                     <div style="display: flex; justify-content: space-between; padding: 15px 0;">
                         <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Paid so far:</span>
