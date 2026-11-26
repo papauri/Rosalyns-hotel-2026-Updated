@@ -95,7 +95,14 @@ $schedSrc = (string)file_get_contents($root . '/includes/auto-scheduler.php');
 check(strpos($schedSrc, "rh_email_context_fresh(['by_label' => 'System (scheduler)'])") !== false, 'scheduler: rh_auto_ctx_begin uses the fresh context');
 check(preg_match('/function rh_auto_ctx_end\(\): void\s*\{[^}]*rh_email_context_clear\(\)/s', $schedSrc) === 1, 'scheduler: rh_auto_ctx_end clears the context');
 $bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
-check(preg_match("/\\} finally \\{\\s*\\\$emailCtx = null;\\s*rh_email_context_clear\\(\\);/", $bkSrc) === 1, 'resend handler clears its context in a finally');
+// Since 1b3bfcf (G5a, 2026-11-18) the resend body lives in bookings_send_booking_email() (admin/includes/bookings-bulk.php),
+// shared with the bulk Send a reminder / Resend confirmation; bookings.php resend_email only calls it.
+$bulkSrc = (string)file_get_contents($root . '/admin/includes/bookings-bulk.php');
+$rsStart = strpos($bulkSrc, 'function bookings_send_booking_email(');
+$rsFn = $rsStart === false ? '' : substr($bulkSrc, $rsStart, (strpos($bulkSrc, "\n    function ", $rsStart + 10) ?: strlen($bulkSrc)) - $rsStart);
+check(strpos($bkSrc, '$email_result = bookings_send_booking_email($pdo, $booking,') !== false
+    && preg_match("/\\\$emailCtx = rh_email_context\\(.*?\\} finally \\{\\s*\\\$emailCtx = null;\\s*rh_email_context_clear\\(\\);\\s*\\}\\s*return \\\$email_result;/s", $rsFn) === 1,
+    'resend handler clears its context in a finally');
 check(rh_email_ctx_account('room', 0, '') === ['account_type' => 'room'], 'account: no id or ref -> type only');
 check(rh_email_ctx_account('Bad Type!', 5, 'R') === ['account_id' => 5, 'account_ref' => 'R'], 'account: a bad type is dropped');
 
@@ -307,7 +314,15 @@ check(preg_match("/if \(\\\$dbTemplate\) \{.*?sendEmailWithCC\(.*?sendBookingCan
 check(substr_count($cxFn, 'sendBookingCancelledWhatsApp(') === 2 && substr_count($cxFn, 'return sendEmailWithCC(') === 0,
     'cancel: both email paths (saved template, built-in) send the WhatsApp; none returns before it');
 $bdSrc = (string)file_get_contents($root . '/admin/booking-details.php');
-$bkSrc2 = (string)file_get_contents($root . '/admin/bookings.php');
+// All Bookings cancel: since 24b8c2f (G5c, 2026-11-18) the row Cancel (bookings.php update_status) and the bulk Cancel
+// share bookings_cancel_commit() in admin/includes/booking-row-actions.php; check that function, and that both call it.
+$bkPage = (string)file_get_contents($root . '/admin/bookings.php');
+$braSrc = (string)file_get_contents($root . '/admin/includes/booking-row-actions.php');
+$ccStart = strpos($braSrc, 'function bookings_cancel_commit(');
+$bkSrc2 = $ccStart === false ? '' : substr($braSrc, $ccStart, (strpos($braSrc, "\n    function ", $ccStart + 10) ?: strlen($braSrc)) - $ccStart);
+check(strpos($bkPage, '$cancelDone = bookings_cancel_commit($pdo, (int)$booking_id,') !== false && strpos($bkPage, 'sendBookingCancelledHotelAlert(') === false
+    && strpos((string)$bulkSrc, '$c = bookings_cancel_commit($pdo, $id,') !== false,
+    'quiet: All Bookings row Cancel and bulk Cancel both go through bookings_cancel_commit()');
 $tbSrc = (string)file_get_contents($root . '/admin/tentative-bookings.php');
 check(substr_count($bdSrc, 'sendBookingCancelledHotelAlert(') === 2 && substr_count($bkSrc2, 'sendBookingCancelledHotelAlert(') === 1 && substr_count($tbSrc, 'sendBookingCancelledHotelAlert(') === 1,
     'quiet: every quiet branch (booking page single + group, All Bookings, holds) alerts the hotel');
