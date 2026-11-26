@@ -11,7 +11,8 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  * required" = deposit_amount; "Deposit paid" = min(amount_paid, deposit_amount), never the deposit_paid column.
  *
  * Read-only: the builders are called with made-up rows whose id matches no payment, so the one SELECT on payments
- * returns nothing. Nothing is written to the database and no email is sent.
+ * returns nothing. The email-vs-PDF block writes one made-up payment per type inside a transaction it rolls back.
+ * No email is sent. Run at Liwonde only (Rosalyn's is live).
  */
 $root = dirname(__DIR__, 2);
 chdir($root);
@@ -126,6 +127,55 @@ foreach ($builders as $type => $fn) {
     $row = array_merge($base, ['deposit_required' => 0, 'deposit_amount' => 0, 'deposit_paid' => 0, 'amount_paid' => 20000, 'amount_due' => 0]);
     $html = $fn($row, 'TEST-INV-1', 'Test Hotel', 'hotel@example.invalid', '000', 'Somewhere', 'MWK');
     ok("$type invoice, really paid in full: still says Paid in full", stripos($html, 'Paid in full') !== false);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The invoice EMAIL shows the attached PDF's figures (fault 2026-11-26): both read rh_flat_invoice_figures().
+// One made-up completed payment per type is written inside a transaction that is rolled back at the end.
+// ---------------------------------------------------------------------------------------------------------------
+$recBy = (int)$pdo->query("SELECT id FROM admin_users ORDER BY id LIMIT 1")->fetchColumn();
+$pdo->beginTransaction();
+try {
+    $payIns = $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, total_amount, payment_method, payment_status, recorded_by)
+                             VALUES (?, ?, ?, ?, ?, 7000, 7000, 'cash', 'completed', ?)");
+    foreach ($builders as $type => $fn) {
+        $payIns->execute(['DEPTEST' . random_int(100000, 999999), $type, $noPaymentId, 'TEST-DEP-1', date('Y-m-d'), $recBy ?: null]);
+
+        // amount_paid / amount_due missing: the helper falls back to the ledger, the PDF prints the same figure.
+        $row = array_merge($base, ['deposit_required' => 0, 'deposit_amount' => 0, 'deposit_paid' => 0]);
+        unset($row['amount_paid'], $row['amount_due']);
+        $fig = rh_flat_invoice_figures($pdo, $type, $row);
+        $html = $fn($row, 'TEST-INV-1', 'Test Hotel', 'hotel@example.invalid', '000', 'Somewhere', 'MWK');
+        ok("$type email figures: paid from the ledger = 7,000.00", abs($fig['amount_paid'] - 7000) < 0.01, 'got ' . $fig['amount_paid']);
+        ok("$type email figures: due = 13,000.00", abs($fig['amount_due'] - 13000) < 0.01, 'got ' . $fig['amount_due']);
+        ok("$type email paid = PDF Amount paid", figure_after($html, 'Amount paid') === number_format($fig['amount_paid'], 2), 'pdf ' . var_export(figure_after($html, 'Amount paid'), true));
+        ok("$type email due = PDF Balance due", preg_match('/Balance due(\s|&nbsp;)*MWK\s*' . preg_quote(number_format($fig['amount_due'], 2), '/') . '/i', strip_tags($html)) === 1);
+
+        // No locked total_with_vat: the gross is the current VAT mode's gross of total_amount, as on the PDF.
+        $row2 = array_merge($row, ['total_with_vat' => 0, 'amount_paid' => 0]);
+        $fig2 = rh_flat_invoice_figures($pdo, $type, $row2);
+        $vp = vat_components(20000.0);
+        ok("$type email figures: no locked total uses the VAT gross", abs($fig2['total'] - (float)$vp['total']) < 0.01 && abs($fig2['amount_due'] - (float)$vp['total']) < 0.01, 'got ' . $fig2['total'] . ' / ' . $fig2['amount_due']);
+    }
+} finally {
+    $pdo->rollBack();
+}
+$st->execute([$noPaymentId]);
+ok('rolled back: the made-up id has no payments left', (int)$st->fetchColumn() === 0);
+
+// Source checks: the three invoice emails read the shared helper and send a plain-text subject.
+$src = file_get_contents($root . '/config/invoice.php');
+foreach (['sendConferenceInvoiceEmailToClient' => 'conference', 'sendGymInvoiceEmailToClient' => 'gym', 'sendEventInvoiceEmailToClient' => 'event'] as $fnName => $type) {
+    $start = strpos($src, 'function ' . $fnName . '(');
+    $end = $start === false ? false : strpos($src, "\nfunction ", $start + 10);
+    $body = ($start === false) ? '' : substr($src, $start, ($end === false ? strlen($src) : $end) - $start);
+    ok("$fnName found", $body !== '');
+    ok("$fnName uses rh_flat_invoice_figures('$type')", strpos($body, "rh_flat_invoice_figures(\$pdo, '$type'") !== false);
+    ok("$fnName has no 'paid = 0' fallback", strpos($body, ': 0.0;') === false);
+    ok("$fnName has no leftover own figures (totalAmount/grossTotal/ciAmountPaid)", preg_match('/\$(totalAmount|grossTotal|ciAmountPaid)\b/', $body) === 0);
+    ok("$fnName due and paid come from the helper", preg_match("/\\\$(amountDue|ciAmountDue)\s*=\s*\\\$(fig|ciFig)\['amount_due'\]/", $body) === 1);
+    ok("$fnName subject is rh_email_plain", preg_match('/\$subject\s*=\s*rh_email_plain\(/', $body) === 1);
+    ok("$fnName subject is not htmlspecialchars", preg_match('/\$subject\s*=\s*[^;]*htmlspecialchars/', $body) === 0);
 }
 
 echo "\ndeposit_line_test: $pass passed, $fail failed\n";

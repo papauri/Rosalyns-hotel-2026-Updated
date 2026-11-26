@@ -2613,7 +2613,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
         </body>
         </html>';
 
-        $subject = 'Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
+        $subject = 'Invoice - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']';
         $textBody = '';
         if ($dbTemplate) {
             $subject = $dbTemplate['subject'];
@@ -2699,7 +2699,7 @@ function sendInvoiceCopyEmails(array $booking, string $invoice_file, array $reci
         $result = sendEmailWithAttachment(
             $recipient,
             'Accounts Team',
-            'Invoice Copy - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Invoice Copy - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody,
             $invoice_file
         );
@@ -3268,7 +3268,7 @@ function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_r
             </div>
         </div>';
 
-        $subject = ($fiOwed ? 'Final Invoice - ' : 'Stay Statement (paid in full) - ') . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
+        $subject = ($fiOwed ? 'Final Invoice - ' : 'Stay Statement (paid in full) - ') . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']';
 
         // Send email with attachment
         return sendEmailWithAttachmentAndCC(
@@ -3442,6 +3442,66 @@ function generateConferenceInvoicePDF(int $enquiry_id, ?string $invoice_number_o
 }
 
 /**
+ * The money figures of a conference / gym / event invoice, read ONCE here and used by both the PDF builder and the
+ * invoice email, so the email always shows what the attached PDF shows.
+ * - total: the VAT breakdown locked on the record (total_with_vat) when there is one, else the gross worked out from
+ *   total_amount in the current VAT mode (a re-sent invoice never re-bases to the current rate).
+ * - amount_paid: the stored figure; a row without it falls back to the ledger rows (genuine receipts plus settled
+ *   refunds shown negative, the rh_sum_account_paid filter), never 0 and never "paid in full".
+ * - amount_due: the stored figure, else the gross total less what was paid.
+ *
+ * @return array{subtotal: float, vat_rate: float, vat_amount: float, total: float, payments: array, amount_paid: float, amount_due: float}
+ */
+function rh_flat_invoice_figures(PDO $pdo, string $type, array $row): array
+{
+    if (!in_array($type, ['conference', 'gym', 'event'], true)) {
+        throw new InvalidArgumentException('rh_flat_invoice_figures: unknown account type ' . $type);
+    }
+    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
+
+    $paymentsStmt = $pdo->prepare("
+        SELECT * FROM payments
+        WHERE booking_type = ? AND booking_id = ?
+        AND deleted_at IS NULL
+        AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
+             OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+        ORDER BY payment_date ASC
+    ");
+    $paymentsStmt->execute([$type, (int)($row['id'] ?? 0)]);
+    $payments = rh_invoice_signed_payments($paymentsStmt->fetchAll(PDO::FETCH_ASSOC));
+
+    $subtotal = (float)($row['total_amount'] ?? 0);
+    if ((float)($row['total_with_vat'] ?? 0) > 0.001) {
+        $vatRate      = (float)($row['vat_rate'] ?? $vatRate);
+        $vatAmount    = (float)($row['vat_amount'] ?? 0);
+        $totalWithVat = (float)$row['total_with_vat'];
+    } else {
+        $vatParts = vat_components($subtotal);
+        $vatRate = $vatParts['rate'];
+        $vatAmount = $vatParts['vat'];
+        $totalWithVat = $vatParts['total'];
+    }
+    if (!isset($row['amount_paid']) || $row['amount_paid'] === '') {
+        $amountPaid = max(0.0, round(array_sum(array_map(static function ($p) { return (float)($p['total_amount'] ?? 0); }, $payments)), 2));
+    } else {
+        $amountPaid = (float)$row['amount_paid'];
+    }
+    $balanceDue = (isset($row['amount_due']) && $row['amount_due'] !== '')
+        ? (float)$row['amount_due'] : max(0.0, round($totalWithVat - $amountPaid, 2));
+
+    return [
+        'subtotal' => $subtotal,
+        'vat_rate' => (float)$vatRate,
+        'vat_amount' => (float)$vatAmount,
+        'total' => (float)$totalWithVat,
+        'payments' => $payments,
+        'amount_paid' => (float)$amountPaid,
+        'amount_due' => (float)$balanceDue,
+    ];
+}
+
+/**
  * Build HTML content for conference invoice
  */
 function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol)
@@ -3452,45 +3512,17 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
 
     // VAT settings
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
-    // Get payment details for this conference enquiry - genuine receipts plus
-    // settled refunds (refund rows also sit at payment_status='completed' and
-    // must show as negative, not as extra payments).
-    $paymentsStmt = $pdo->prepare("
-        SELECT * FROM payments
-        WHERE booking_type = 'conference' AND booking_id = ?
-        AND deleted_at IS NULL
-        AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
-             OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
-        ORDER BY payment_date ASC
-    ");
-    $paymentsStmt->execute([$enquiry['id']]);
-    $payments = rh_invoice_signed_payments($paymentsStmt->fetchAll(PDO::FETCH_ASSOC));
-
-    // Totals - prefer the VAT breakdown LOCKED on the record at invoice time so a
-    // re-sent invoice never re-bases to the current rate; only compute fresh when
-    // the record was never populated.
-    $subtotal = (float)$enquiry['total_amount'];
-    if ((float)($enquiry['total_with_vat'] ?? 0) > 0.001) {
-        $vatRate      = (float)($enquiry['vat_rate'] ?? $vatRate);
-        $vatAmount    = (float)($enquiry['vat_amount'] ?? 0);
-        $totalWithVat = (float)$enquiry['total_with_vat'];
-    } else {
-        $vatParts = vat_components($subtotal);
-        $vatRate = $vatParts['rate'];
-        $vatAmount = $vatParts['vat'];
-        $totalWithVat = $vatParts['total'];
-    }
-    // A row without amount_paid / amount_due is never "paid in full": paid falls back to the ledger rows above
-    // (same filter as rh_sum_account_paid, refunds netted), due to the gross total less that.
-    if (!isset($enquiry['amount_paid']) || $enquiry['amount_paid'] === '') {
-        $amountPaid = max(0.0, round(array_sum(array_map(static function ($p) { return (float)($p['total_amount'] ?? 0); }, $payments)), 2));
-    } else {
-        $amountPaid = (float)$enquiry['amount_paid'];
-    }
-    $balanceDue = (isset($enquiry['amount_due']) && $enquiry['amount_due'] !== '')
-        ? (float)$enquiry['amount_due'] : max(0.0, round($totalWithVat - $amountPaid, 2));
+    // Payments (receipts plus settled refunds shown negative), the locked VAT breakdown, paid and due: one helper,
+    // shared with the invoice email so the two always agree.
+    $fig = rh_flat_invoice_figures($pdo, 'conference', $enquiry);
+    $payments = $fig['payments'];
+    $subtotal = $fig['subtotal'];
+    $vatRate = $fig['vat_rate'];
+    $vatAmount = $fig['vat_amount'];
+    $totalWithVat = $fig['total'];
+    $amountPaid = $fig['amount_paid'];
+    $balanceDue = $fig['amount_due'];
 
     $startTs = strtotime((string)($enquiry['start_time'] ?? ''));
     $endTs   = strtotime((string)($enquiry['end_time'] ?? ''));
@@ -3769,23 +3801,13 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
 
         // VAT / tax vars for conference invoice email
         $ciVatNum     = (string)getSetting('vat_number', '');
-        $ciSubtotal   = (float)($enquiry['total_amount'] ?? 0);
-        // Match the attached PDF invoice: use the VAT breakdown locked on the
-        // record; only compute from the current mode when never populated.
-        if ((float)($enquiry['total_with_vat'] ?? 0) > 0.001) {
-            $ciVatRate      = (float)($enquiry['vat_rate'] ?? 0);
-            $ciVatAmt       = (float)($enquiry['vat_amount'] ?? 0);
-            $ciTotalWithVat = (float)$enquiry['total_with_vat'];
-        } else {
-            $ciVatParts     = vat_components($ciSubtotal);
-            $ciVatRate      = $ciVatParts['rate'];
-            $ciVatAmt       = $ciVatParts['vat'];
-            $ciTotalWithVat = $ciVatParts['total'];
-        }
-        // A row without amount_paid / amount_due is never "Paid in full": nothing paid, the gross total due.
-        $ciAmountPaid = (isset($enquiry['amount_paid']) && $enquiry['amount_paid'] !== '') ? (float)$enquiry['amount_paid'] : 0.0;
-        $ciAmountDue = (isset($enquiry['amount_due']) && $enquiry['amount_due'] !== '')
-            ? (float)$enquiry['amount_due'] : max(0.0, round($ciTotalWithVat - $ciAmountPaid, 2));
+        // The attached PDF's own figures (same helper): locked VAT breakdown, paid (ledger when not stored) and due.
+        $ciFig          = rh_flat_invoice_figures($pdo, 'conference', $enquiry);
+        $ciSubtotal     = $ciFig['subtotal'];
+        $ciVatRate      = $ciFig['vat_rate'];
+        $ciVatAmt       = $ciFig['vat_amount'];
+        $ciTotalWithVat = $ciFig['total'];
+        $ciAmountDue    = $ciFig['amount_due'];
         $ciVatNumHtml = $ciVatNum !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($ciVatNum, ENT_QUOTES, 'UTF-8') . '</p>'
             : '';
@@ -3819,7 +3841,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             : null;
 
         // Prepare email content
-        $subject = 'Conference Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']';
+        $subject = rh_email_plain('Conference Invoice - ' . $email_site_name . ' [' . $enquiry['inquiry_reference'] . ']'); // plain text: no entities
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
@@ -3912,42 +3934,17 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
     global $pdo;
 
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
-    // Genuine receipts plus settled refunds (shown negative).
-    $paymentsStmt = $pdo->prepare("
-        SELECT * FROM payments
-        WHERE booking_type = 'gym' AND booking_id = ?
-        AND deleted_at IS NULL
-        AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
-             OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
-        ORDER BY payment_date ASC
-    ");
-    $paymentsStmt->execute([$inquiry['id']]);
-    $payments = rh_invoice_signed_payments($paymentsStmt->fetchAll(PDO::FETCH_ASSOC));
-
-    $subtotal = (float)$inquiry['total_amount'];
-    // Prefer the VAT breakdown locked on the record at invoice time; only
-    // compute from the current mode when it was never populated.
-    if ((float)($inquiry['total_with_vat'] ?? 0) > 0.001) {
-        $vatRate      = (float)($inquiry['vat_rate'] ?? $vatRate);
-        $vatAmount    = (float)($inquiry['vat_amount'] ?? 0);
-        $totalWithVat = (float)$inquiry['total_with_vat'];
-    } else {
-        $vatParts = vat_components($subtotal);
-        $vatRate = $vatParts['rate'];
-        $vatAmount = $vatParts['vat'];
-        $totalWithVat = $vatParts['total'];
-    }
-    // A row without amount_paid / amount_due is never "paid in full": paid falls back to the ledger rows above
-    // (same filter as rh_sum_account_paid, refunds netted), due to the gross total less that.
-    if (!isset($inquiry['amount_paid']) || $inquiry['amount_paid'] === '') {
-        $amountPaid = max(0.0, round(array_sum(array_map(static function ($p) { return (float)($p['total_amount'] ?? 0); }, $payments)), 2));
-    } else {
-        $amountPaid = (float)$inquiry['amount_paid'];
-    }
-    $balanceDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
-        ? (float)$inquiry['amount_due'] : max(0.0, round($totalWithVat - $amountPaid, 2));
+    // Payments (receipts plus settled refunds shown negative), the locked VAT breakdown, paid and due: one helper,
+    // shared with the invoice email so the two always agree.
+    $fig = rh_flat_invoice_figures($pdo, 'gym', $inquiry);
+    $payments = $fig['payments'];
+    $subtotal = $fig['subtotal'];
+    $vatRate = $fig['vat_rate'];
+    $vatAmount = $fig['vat_amount'];
+    $totalWithVat = $fig['total'];
+    $amountPaid = $fig['amount_paid'];
+    $balanceDue = $fig['amount_due'];
 
     // deposit_required / deposit_paid are 0/1 flags (the flag printed as "MWK1"): the money is deposit_amount,
     // and the deposit paid is what has been paid towards it (the payment snapshot rule). deposit_paid is never
@@ -3956,7 +3953,7 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
         ? round((float)$inquiry['deposit_amount'], 2) : 0.0;
     $depositPaid = $depositAmount > 0 ? max(0.0, min($amountPaid, $depositAmount)) : 0.0;
 
-    $package = trim((string)($inquiry['membership_type'] ?? ''));
+    $package =trim((string)($inquiry['membership_type'] ?? ''));
     $desc = rh_pdf_e('Gym membership') . rh_inv_sub($package !== '' ? $package : '');
 
     return rh_inv_flat_invoice([
@@ -4180,18 +4177,16 @@ function sendGymInvoiceEmail(int $inquiry_id)
 function sendGymInvoiceEmailToClient(array $inquiry, string $invoice_file, array $cc_recipients = [])
 {
     $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
-    global $email_from_email, $email_site_name, $email_site_url;
+    global $pdo, $email_from_email, $email_site_name, $email_site_url;
 
     try {
         $currency_symbol = getSetting('currency_symbol');
-        $totalAmount = (float)($inquiry['total_amount'] ?? 0);
-        // A row without amount_paid / amount_due is never "Paid in full": nothing paid, the gross total due.
-        $amountPaid = (isset($inquiry['amount_paid']) && $inquiry['amount_paid'] !== '') ? (float)$inquiry['amount_paid'] : 0.0;
-        $grossTotal = (float)($inquiry['total_with_vat'] ?? 0) > 0.001 ? (float)$inquiry['total_with_vat'] : $totalAmount;
-        $amountDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
-            ? (float)$inquiry['amount_due'] : max(0.0, round($grossTotal - $amountPaid, 2));
+        // The attached PDF's own figures (same helper): paid falls back to the ledger, due to the gross total less paid.
+        $fig = rh_flat_invoice_figures($pdo, 'gym', $inquiry);
+        $amountPaid = $fig['amount_paid'];
+        $amountDue = $fig['amount_due'];
 
-        $subject = 'Gym Membership Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
+        $subject = rh_email_plain('Gym Membership Invoice - ' . $email_site_name . ' [' . $inquiry['reference_number'] . ']'); // plain text: no entities
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
@@ -4255,42 +4250,17 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
     global $pdo;
 
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-    $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
-    // Genuine receipts plus settled refunds (shown negative).
-    $paymentsStmt = $pdo->prepare("
-        SELECT * FROM payments
-        WHERE booking_type = 'event' AND booking_id = ?
-        AND deleted_at IS NULL
-        AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
-             OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
-        ORDER BY payment_date ASC
-    ");
-    $paymentsStmt->execute([$inquiry['id']]);
-    $payments = rh_invoice_signed_payments($paymentsStmt->fetchAll(PDO::FETCH_ASSOC));
-
-    $subtotal = (float)$inquiry['total_amount'];
-    // Prefer the VAT breakdown locked on the record at invoice time; only
-    // compute from the current mode when it was never populated.
-    if ((float)($inquiry['total_with_vat'] ?? 0) > 0.001) {
-        $vatRate      = (float)($inquiry['vat_rate'] ?? $vatRate);
-        $vatAmount    = (float)($inquiry['vat_amount'] ?? 0);
-        $totalWithVat = (float)$inquiry['total_with_vat'];
-    } else {
-        $vatParts = vat_components($subtotal);
-        $vatRate = $vatParts['rate'];
-        $vatAmount = $vatParts['vat'];
-        $totalWithVat = $vatParts['total'];
-    }
-    // A row without amount_paid / amount_due is never "paid in full": paid falls back to the ledger rows above
-    // (same filter as rh_sum_account_paid, refunds netted), due to the gross total less that.
-    if (!isset($inquiry['amount_paid']) || $inquiry['amount_paid'] === '') {
-        $amountPaid = max(0.0, round(array_sum(array_map(static function ($p) { return (float)($p['total_amount'] ?? 0); }, $payments)), 2));
-    } else {
-        $amountPaid = (float)$inquiry['amount_paid'];
-    }
-    $balanceDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
-        ? (float)$inquiry['amount_due'] : max(0.0, round($totalWithVat - $amountPaid, 2));
+    // Payments (receipts plus settled refunds shown negative), the locked VAT breakdown, paid and due: one helper,
+    // shared with the invoice email so the two always agree.
+    $fig = rh_flat_invoice_figures($pdo, 'event', $inquiry);
+    $payments = $fig['payments'];
+    $subtotal = $fig['subtotal'];
+    $vatRate = $fig['vat_rate'];
+    $vatAmount = $fig['vat_amount'];
+    $totalWithVat = $fig['total'];
+    $amountPaid = $fig['amount_paid'];
+    $balanceDue = $fig['amount_due'];
 
     // deposit_required / deposit_paid are 0/1 flags (the flag printed as "MWK1"): the money is deposit_amount,
     // and the deposit paid is what has been paid towards it (the payment snapshot rule). deposit_paid is never
@@ -4532,18 +4502,16 @@ function sendEventInvoiceEmail(int $inquiry_id)
 function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, array $cc_recipients = [])
 {
     $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('event', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
-    global $email_from_email, $email_site_name, $email_site_url;
+    global $pdo, $email_from_email, $email_site_name, $email_site_url;
 
     try {
         $currency_symbol = getSetting('currency_symbol');
-        $totalAmount = (float)($inquiry['total_amount'] ?? 0);
-        // A row without amount_paid / amount_due is never "Paid in full": nothing paid, the gross total due.
-        $amountPaid = (isset($inquiry['amount_paid']) && $inquiry['amount_paid'] !== '') ? (float)$inquiry['amount_paid'] : 0.0;
-        $grossTotal = (float)($inquiry['total_with_vat'] ?? 0) > 0.001 ? (float)$inquiry['total_with_vat'] : $totalAmount;
-        $amountDue = (isset($inquiry['amount_due']) && $inquiry['amount_due'] !== '')
-            ? (float)$inquiry['amount_due'] : max(0.0, round($grossTotal - $amountPaid, 2));
+        // The attached PDF's own figures (same helper): paid falls back to the ledger, due to the gross total less paid.
+        $fig = rh_flat_invoice_figures($pdo, 'event', $inquiry);
+        $amountPaid = $fig['amount_paid'];
+        $amountDue = $fig['amount_due'];
 
-        $subject = 'Event Booking Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
+        $subject = rh_email_plain('Event Booking Invoice - ' . $email_site_name . ' [' . $inquiry['reference_number'] . ']'); // plain text: no entities
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">

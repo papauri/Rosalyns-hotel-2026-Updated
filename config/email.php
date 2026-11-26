@@ -494,7 +494,7 @@ function sendSimpleStatusUpdateEmail(array $booking, string $status)
         return sendEmail(
             $booking['guest_email'],
             $booking['guest_name'],
-            $msg['subject'] . ' - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            $msg['subject'] . ' - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -3218,7 +3218,7 @@ function sendBookingReceivedEmail(array $booking)
         return sendEmail(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Booking Received - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Booking Received - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -3336,7 +3336,7 @@ function sendBookingConfirmedEmail(array $booking)
         $emailResult = sendEmail(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Booking Confirmed - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Booking Confirmed - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody
         );
 
@@ -3445,7 +3445,7 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
         return sendEmail(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Booking Updated - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Booking Updated - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -3576,7 +3576,7 @@ function sendAdminNotificationEmail(array $booking)
         ]);
 
         $adminSubject = ($isTentative ? 'Tentative Hold' : 'New Booking')
-            . ' - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
+            . ' - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']';
 
         // "Also send booking alerts to" (booking_notification_cc_emails): each address gets its own copy.
         $ccList = [];
@@ -4049,7 +4049,7 @@ function sendConferencePaymentEmail(array $data)
         return sendEmail(
             $data['email'],
             $data['contact_person'],
-            'Payment Confirmation - ' . htmlspecialchars($email_site_name) . ' [' . $data['inquiry_reference'] . ']',
+            'Payment Confirmation - ' . rh_email_plain($email_site_name) . ' [' . $data['inquiry_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -4159,7 +4159,7 @@ function sendConferenceConfirmedEmail(array $enquiry)
         return sendEmail(
             $enquiry['email'],
             $enquiry['contact_person'],
-            'Conference Confirmed - ' . htmlspecialchars($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']',
+            'Conference Confirmed - ' . rh_email_plain($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -4224,7 +4224,7 @@ function sendConferenceCancelledEmail(array $enquiry)
         return sendEmail(
             $enquiry['email'],
             $enquiry['contact_person'],
-            'Conference Cancelled - ' . htmlspecialchars($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']',
+            'Conference Cancelled - ' . rh_email_plain($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -4281,7 +4281,7 @@ function sendGymConfirmedEmail(array $inquiry)
         return sendEmail(
             $inquiry['email'],
             $inquiry['name'],
-            'Gym Membership Confirmed - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
+            'Gym Membership Confirmed - ' . rh_email_plain($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -4333,7 +4333,7 @@ function sendGymCancelledEmail(array $inquiry)
         return sendEmail(
             $inquiry['email'],
             $inquiry['name'],
-            'Gym Membership Cancelled - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
+            'Gym Membership Cancelled - ' . rh_email_plain($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -4495,7 +4495,7 @@ function sendEventBookingConfirmedEmail(array $inquiry): array
         return sendEmail(
             $inquiry['email'],
             $inquiry['name'],
-            'Event Booking Confirmed - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
+            'Event Booking Confirmed - ' . rh_email_plain($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -4547,7 +4547,7 @@ function sendEventCancelledEmail(array $inquiry): array
         return sendEmail(
             $inquiry['email'],
             $inquiry['name'],
-            'Event Booking Cancelled - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
+            'Event Booking Cancelled - ' . rh_email_plain($email_site_name) . ' [' . $inquiry['reference_number'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -4773,7 +4773,7 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
         $emailResult = sendEmailWithCC(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Booking Cancelled - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Booking Cancelled - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody,
             '',
             $ccEmails
@@ -5320,7 +5320,7 @@ function sendTentativeBookingConfirmedEmail(array $booking)
         return sendEmail(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Tentative Booking Confirmed - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Tentative Booking Confirmed - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -5625,7 +5625,7 @@ function sendTentativeBookingConvertedEmail(array $booking)
         return sendEmail(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Booking Confirmed (Converted) - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Booking Confirmed (Converted) - ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody
         );
     } catch (Exception $e) {
@@ -6636,7 +6636,7 @@ function sendNoShowEmail(array $booking, float $refund_amount = 0.0, string $ref
         $emailResult = sendEmailWithCC(
             $booking['guest_email'],
             $booking['guest_name'],
-            'No-Show Notification — ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'No-Show Notification — ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody,
             '',
             $ccEmails
@@ -6768,7 +6768,7 @@ function sendExtendStayEmail(array $booking, float $amount_delta = 0.0, string $
         $emailResult = sendEmailWithCC(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Updated Stay Dates — ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            'Updated Stay Dates — ' . rh_email_plain($email_site_name) . ' [' . $booking['booking_reference'] . ']',
             $htmlBody,
             '',
             $ccEmails

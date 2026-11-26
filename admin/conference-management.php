@@ -514,28 +514,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             // Double-booking guard: block confirmation if the same conference room
             // is already confirmed for this date with an overlapping time window.
             // (Two pending enquiries can coexist; only confirmation commits the room.)
-            $roomId    = (int)($enquiry['conference_room_id'] ?? 0);
-            $eventDate = (string)($enquiry['event_date'] ?? '');
-            $startTime = (string)($enquiry['start_time'] ?? '');
-            $endTime   = (string)($enquiry['end_time'] ?? '');
-            // Lock the room row so two staff confirming overlapping enquiries at once cannot both pass
-            // the clash check, then re-read this enquiry's status under the lock.
+            // Lock order (every conference path): the enquiry row first, then its room. The room lock stops two
+            // staff confirming overlapping enquiries at once from both passing the clash check. Only locking reads
+            // run before the room lock, so the clash check sees every confirm committed before it.
             $pdo->beginTransaction();
             try {
+            $statusLock = $pdo->prepare("SELECT status, conference_room_id, event_date, " . ($confHasEndDate ? 'end_date' : 'NULL AS end_date') . ", start_time, end_time FROM conference_inquiries WHERE id = ? FOR UPDATE");
+            $statusLock->execute([$enquiry_id]);
+            $confirmRow = $statusLock->fetch(PDO::FETCH_ASSOC) ?: [];
+            if ((string)($confirmRow['status'] ?? '') !== 'pending') {
+                throw new Exception('Only pending enquiries can be confirmed.');
+            }
+            $roomId    = (int)($confirmRow['conference_room_id'] ?? 0);
+            $eventDate = (string)($confirmRow['event_date'] ?? '');
+            $startTime = (string)($confirmRow['start_time'] ?? '');
+            $endTime   = (string)($confirmRow['end_time'] ?? '');
             if ($roomId > 0) {
                 $roomLock = $pdo->prepare("SELECT id FROM conference_rooms WHERE id = ? FOR UPDATE");
                 $roomLock->execute([$roomId]);
             }
-            $statusLock = $pdo->prepare("SELECT status FROM conference_inquiries WHERE id = ? FOR UPDATE");
-            $statusLock->execute([$enquiry_id]);
-            if ((string)$statusLock->fetchColumn() !== 'pending') {
-                throw new Exception('Only pending enquiries can be confirmed.');
-            }
             if ($roomId > 0 && $eventDate !== '') {
-                if ($clash = conferenceFindClash($pdo, $roomId, $enquiry_id, $eventDate, $confHasEndDate ? ($enquiry['end_date'] ?? null) : null, $startTime, $endTime)) {
+                if ($clash = conferenceFindClash($pdo, $roomId, $enquiry_id, $eventDate, $confHasEndDate ? ($confirmRow['end_date'] ?? null) : null, $startTime, $endTime)) {
                     throw new Exception(sprintf(
                         'This room is already confirmed for %s (%s–%s) under %s. Choose a different room or time before confirming.',
-                        rh_conf_format_range($eventDate, $confHasEndDate ? ($enquiry['end_date'] ?? null) : null, 'M j, Y'),
+                        rh_conf_format_range($eventDate, $confHasEndDate ? ($confirmRow['end_date'] ?? null) : null, 'M j, Y'),
                         $clash['start_time'] ? date('H:i', strtotime($clash['start_time'])) : '—',
                         $clash['end_time'] ? date('H:i', strtotime($clash['end_time'])) : '—',
                         $clash['inquiry_reference'] ?: 'another confirmed enquiry'
@@ -777,10 +779,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             $postedAttendees = null;
             if (isset($_POST['number_of_attendees']) && trim((string)$_POST['number_of_attendees']) !== '') {
                 $attRaw = trim((string)$_POST['number_of_attendees']);
-                if (!ctype_digit($attRaw) || (int)$attRaw < 1 || (int)$attRaw > 500) {
-                    throw new Exception('Delegates must be a whole number from 1 to 500.');
+                if (!ctype_digit($attRaw) || (int)$attRaw < 1 || strlen(ltrim($attRaw, '0')) > 9) {
+                    throw new Exception('Delegates must be a whole number of 1 or more.');
                 }
-                $postedAttendees = (int)$attRaw;
+                $postedAttendees = (int)$attRaw; // the 500 cap is checked under the lock: it applies to a NEW count only
             }
             $confPkgs = rh_conf_has_packages($pdo);
             $tol = (float)BALANCE_TOLERANCE;
@@ -810,6 +812,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 if (($roomChanged || $newAttendees !== $oldAttendees) && !$canPrice) {
                     throw new Exception('Changing the delegates or the conference room changes the price, so it needs conference pricing permission.');
                 }
+                // Delegates cap = the guest form's 500, for a NEW count only: an unchanged count (an enquiry already above
+                // 500 from older data) never blocks a reschedule, and lowering it is always allowed.
+                $delegateCap = max(500, $oldAttendees);
+                if ($newAttendees !== $oldAttendees && $newAttendees > $delegateCap) {
+                    throw new Exception('Delegates must be a whole number from 1 to ' . $delegateCap . '.');
+                }
                 $lockIds = array_values(array_unique(array_filter([$oldRoomId, $newRoomId], static function ($v) {
                     return $v > 0;
                 })));
@@ -838,6 +846,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 // New suggestion: same room = the booked rates; a different room = that room's current rates.
                 $priceRoom = $roomChanged ? $newRoom : rh_conf_booked_room($locked, $oldRoom);
                 $newSuggest = rh_conf_price($priceRoom, $newStart, $newEnd, $newFrom, $newTo);
+                // Owner 2026-11-26: a move to a room with no rate for this booking (daily / half-day rate empty or 0, as the
+                // pricing reads it) is refused; the old room's price is never kept silently. Nothing is written (rollback).
+                if ($roomChanged && $newSuggest['amount'] <= $tol) {
+                    throw new Exception(((string)($newRoom['name'] ?? '') !== '' ? (string)$newRoom['name'] : 'The chosen room')
+                        . ' has no rate set. Set its rate in Conference Rooms first, then move the event.');
+                }
                 $replaceAmount = $canPrice && (!$wasManual || !empty($_POST['recalculate_amount']))
                     && abs($newSuggest['amount'] - $oldVenue) > $tol && $newSuggest['amount'] > 0;
 
@@ -2445,7 +2459,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         ${CONF_CAN_PRICE ? `<div class="form-row">
                             <div class="form-group">
                                 <label>Delegates: <i class="help" data-tip="Number of people at the event. Packages priced per delegate per day are repriced from this.">?</i></label>
-                                <input type="number" name="number_of_attendees" min="1" max="500" step="1" value="${Number(enquiry.number_of_attendees) || 1}" required>
+                                <input type="number" name="number_of_attendees" min="1" max="${Math.max(500, Number(enquiry.number_of_attendees) || 1)}" step="1" value="${Number(enquiry.number_of_attendees) || 1}" required>
                             </div>
                             <div class="form-group">
                                 <label>Conference room:</label>

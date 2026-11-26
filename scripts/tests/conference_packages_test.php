@@ -239,6 +239,11 @@ if (is_resource($smtp) && is_file($spool . '.ready')) {
     $mails = [];
     foreach ((is_file($spool) ? (file($spool, FILE_IGNORE_NEW_LINES) ?: []) : []) as $l) { $j = json_decode($l, true); if (is_array($j)) { $mails[] = $j; } }
     ok('guest form emails were captured locally (none sent out)', count($mails) >= 1, (string)count($mails));
+    // PATCH 2026-11-26 fault 3: confirm with the new lock order (enquiry, then room) still confirms; its emails go to the capture server.
+    $r = $admin('confirm ok', array_merge($S, $enq('inclusive', 'CO', 750000, [])), ['enquiry_action' => 'confirm', 'enquiry_id' => '{e}'],
+        ["SELECT status FROM conference_inquiries WHERE id = @e"], ['fake_smtp' => $port]);
+    ok('fault 3: confirm (enquiry locked first, then the room) confirms a free slot', (string)($r['verify'][0][0]['status'] ?? '') === 'confirmed'
+        && strpos($r['flash'], 'confirmed successfully') !== false, json_encode([$r['flash'], $r['verify'] ?? null, $r['raw']]));
 } else {
     ok('capture SMTP server started (needed for the guest form case)', false);
 }
@@ -297,6 +302,50 @@ ok('7F Keep clears the flag; the total is unchanged', (int)($linesOf($r)['Banner
 $r = $admin('F remove', array_merge($S, $enq('inclusive', 'FR', 900000, $B_LINES, ['room' => '@rb', 'flag' => 'Banner'])), ['enquiry_action' => 'remove_package', 'enquiry_id' => '{e}', 'line_id' => '{lb}'], $enqVerify('FR'));
 ok('7F Remove deletes the line and lowers the total by 50,000 (3,390,000)', !isset($linesOf($r)['Banner']) && $totalsOk($r, 'inclusive', 3390000, 2490000)
     && strpos($logs($r), 'package removed: ' . $tag . ' Banner') !== false && strpos($logs($r), 'total 3,440,000 → 3,390,000') !== false, json_encode([$row($r), $r['flash'], $logs($r)]));
+
+// PATCH 2026-11-26 fault 5 (owner decision): a move to a room with no rate is refused, nothing written.
+$noRateB = ['UPDATE conference_rooms SET daily_rate = 0, half_day_rate = NULL WHERE id = @rb'];
+$r = $admin('no-rate move', array_merge($S, $enq('inclusive', 'NR', 750000, $B_LINES), $noRateB), $sched(3, 40, '{rb}'), $enqVerify('NR'));
+ok('fault 5: move to a room with no rate refused with "<Room> has no rate set"', strpos($r['flash'], $tag . ' Room B has no rate set. Set its rate in Conference Rooms first') !== false, $r['flash']);
+ok('fault 5: refused move writes nothing (room, totals, lines, history unchanged)', empty($row($r)['in_b']) && $totalsOk($r, 'inclusive', 3290000, 2540000)
+    && (int)($linesOf($r)['Banner']['needs_review'] ?? 1) === 0 && $logs($r) === '', json_encode([$row($r), $logs($r)]));
+$r = $admin('no-rate move manual', array_merge($S, $enq('inclusive', 'NRM', 600000, $B_LINES), $noRateB), $sched(2, 35, '{rb}'), $enqVerify('NRM'));
+ok('fault 5: a manual venue price is not kept silently either: refused, dates/delegates unchanged', strpos($r['flash'], 'has no rate set') !== false && empty($row($r)['in_b'])
+    && $totalsOk($r, 'inclusive', 3140000, 2540000) && (int)($row($r)['number_of_attendees'] ?? 0) === 40, json_encode([$row($r), $r['flash']]));
+$r = $admin('half-day-only move', array_merge($S, $enq('inclusive', 'HD', 750000, $B_LINES), ['UPDATE conference_rooms SET daily_rate = 0, half_day_rate = 120000 WHERE id = @rb']), $sched(3, 40, '{rb}'), $enqVerify('HD'));
+ok('fault 5: a full-day move to a room with only a half-day rate is refused (no rate for this booking)', strpos($r['flash'], 'has no rate set') !== false && empty($row($r)['in_b']), $r['flash']);
+
+// PATCH 2026-11-26 fault 4: the 500 cap applies to a NEW delegate count only.
+$r = $admin('600 unchanged', array_merge($S, $enq('inclusive', 'D6', 750000, [], ['delegates' => 600])), $sched(2, 600), $enqVerify('D6'));
+ok('fault 4: an enquiry with 600 delegates can be rescheduled (count unchanged): 2 days, venue 500,000', $totalsOk($r, 'inclusive', 500000, 0)
+    && (int)($row($r)['number_of_attendees'] ?? 0) === 600 && strpos($r['flash'], 'Event updated') !== false, json_encode([$row($r), $r['flash']]));
+$r = $admin('600 lowered', array_merge($S, $enq('inclusive', 'D6L', 750000, [], ['delegates' => 600])), $sched(3, 550), $enqVerify('D6L'));
+ok('fault 4: lowering 600 to 550 is allowed', (int)($row($r)['number_of_attendees'] ?? 0) === 550, json_encode([$row($r), $r['flash']]));
+$r = $admin('600 raised', array_merge($S, $enq('inclusive', 'D6R', 750000, [], ['delegates' => 600])), $sched(2, 601), $enqVerify('D6R'));
+ok('fault 4: raising 600 to 601 is refused, nothing changes', strpos($r['flash'], 'from 1 to 600') !== false && (int)($row($r)['number_of_attendees'] ?? 0) === 600
+    && $totalsOk($r, 'inclusive', 750000, 0), json_encode([$row($r), $r['flash']]));
+$r = $admin('40 to 501', array_merge($S, $enq('inclusive', 'D501', 750000, $B_LINES)), $sched(3, 501), $enqVerify('D501'));
+ok('fault 4: a new count above 500 is refused (40 → 501), nothing changes', strpos($r['flash'], 'from 1 to 500') !== false && (int)($row($r)['number_of_attendees'] ?? 0) === 40
+    && $totalsOk($r, 'inclusive', 3290000, 2540000), json_encode([$row($r), $r['flash']]));
+
+// PATCH 2026-11-26 fault 3: every conference path locks the enquiry first, then rooms (confirm used to lock the room first).
+$cmSrc = (string)file_get_contents($root . '/admin/conference-management.php');
+$cA = strpos($cmSrc, "if (\$action === 'confirm') {");
+$cB = $cA !== false ? strpos($cmSrc, "} elseif (\$action === 'cancel') {", $cA) : false;
+$cBlock = ($cA !== false && $cB !== false) ? substr($cmSrc, $cA, $cB - $cA) : '';
+$pE = strpos($cBlock, 'FROM conference_inquiries WHERE id = ? FOR UPDATE');
+$pR = strpos($cBlock, 'FROM conference_rooms WHERE id = ? FOR UPDATE');
+ok('fault 3: confirm locks the enquiry before the room', $cBlock !== '' && $pE !== false && $pR !== false && $pE < $pR, json_encode([$pE, $pR]));
+$sA = strpos($cmSrc, "} elseif (\$action === 'update_schedule') {");
+$sB = $sA !== false ? strpos($cmSrc, "} elseif (\$action === 'update_amount') {", $sA) : false;
+$sBlock = ($sA !== false && $sB !== false) ? substr($cmSrc, $sA, $sB - $sA) : '';
+$sE = strpos($sBlock, 'FROM conference_inquiries WHERE id = ? FOR UPDATE');
+$sR = strpos($sBlock, 'FROM conference_rooms WHERE id IN (');
+ok('fault 3: event change locks the enquiry, then the rooms in id order', $sE !== false && $sR !== false && $sE < $sR && strpos($sBlock, 'sort($lockIds)') !== false && strpos($sBlock, 'ORDER BY id FOR UPDATE') !== false);
+$r = $admin('confirm clash', array_merge($S, $enq('inclusive', 'CB', 750000, [], ['status' => 'confirmed']), $enq('inclusive', 'CP', 750000, [])), ['enquiry_action' => 'confirm', 'enquiry_id' => '{e}'],
+    ["SELECT status FROM conference_inquiries WHERE id = @e"]);
+ok('fault 3: confirm (enquiry locked first) still refuses an overlapping confirmed booking in the same room', strpos($r['flash'], 'already confirmed for') !== false
+    && (string)($r['verify'][0][0]['status'] ?? '') === 'pending', json_encode([$r['flash'], $r['verify'] ?? null]));
 
 // 9: permissions (test.staff: conference page yes, pricing no, conference rooms no).
 $perm = ["SET @ts = (SELECT id FROM admin_users WHERE username = 'test.staff' AND is_active = 1 LIMIT 1)",
