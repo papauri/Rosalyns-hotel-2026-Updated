@@ -1448,6 +1448,7 @@
         let previousFocus = null;
         let activeInputMin = 0; // 0 = the answer is optional (every caller before 2026-11-24)
         let activeInputMinMessage = '';
+        let activeWording = null; // {key, bookingId, keyInput, htmlInput}: optional "Edit email wording" (owner 2026-11-26)
 
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>"']/g, function (char) {
@@ -1490,6 +1491,10 @@
                 '<input type="checkbox" id="adminConfirmCheck">',
                 '<span><span id="adminConfirmCheckLabel"></span><small id="adminConfirmCheckHelp"></small></span>',
                 '</label>',
+                '<div id="adminConfirmWordingWrap" class="ew-open-row" hidden>',
+                '<button type="button" class="btn btn-secondary" id="adminConfirmWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit email wording</button>',
+                '<span id="adminConfirmWordingState" class="ew-open-state"></span>',
+                '</div>',
                 '</div>',
                 '<div class="admin-confirm-actions">',
                 '<button type="button" class="btn btn-secondary" data-admin-confirm-cancel>Cancel</button>',
@@ -1511,6 +1516,30 @@
             modal.querySelector('#adminConfirmInput').addEventListener('input', function () {
                 const err = modal.querySelector('#adminConfirmInputError');
                 if (err && !err.hidden && this.value.trim().length >= activeInputMin) err.hidden = true;
+            });
+            // Optional "Edit email wording": shown only while the email will go (tick on, or no tick).
+            modal.querySelector('#adminConfirmWordingBtn').addEventListener('click', function () {
+                if (!activeWording || !window.RhEmailWording) return;
+                const w = activeWording;
+                window.RhEmailWording.open({
+                    key: w.key,
+                    bookingId: w.bookingId,
+                    keyInput: w.keyInput,
+                    htmlInput: w.htmlInput,
+                    onDone: function () {
+                        const st = modal.querySelector('#adminConfirmWordingState');
+                        if (st && activeWording === w) st.textContent = 'Your edited wording will be sent.';
+                    }
+                });
+            });
+            modal.querySelector('#adminConfirmCheck').addEventListener('change', function () {
+                if (!activeWording) return;
+                modal.querySelector('#adminConfirmWordingWrap').hidden = !this.checked;
+                if (!this.checked) {
+                    activeWording.keyInput.value = '';
+                    activeWording.htmlInput.value = '';
+                    modal.querySelector('#adminConfirmWordingState').textContent = '';
+                }
             });
 
             return modal;
@@ -1567,6 +1596,12 @@
             const checkWrap = modal.querySelector('#adminConfirmCheckWrap');
             const checkShown = !!(check && checkWrap && !checkWrap.hidden);
             const checked = !!(check && check.checked);
+            // Edited wording only travels with a confirmed action that still emails the guest.
+            if (activeWording && (!confirmed || (checkShown && !checked))) {
+                activeWording.keyInput.value = '';
+                activeWording.htmlInput.value = '';
+            }
+            activeWording = null;
             modal.classList.remove('active');
             document.body.classList.remove('modal-open');
             document.removeEventListener('keydown', handleConfirmKeydown);
@@ -1656,6 +1691,12 @@
                     modal.querySelector('#adminConfirmCheckLabel').textContent = opts.check.label || '';
                     modal.querySelector('#adminConfirmCheckHelp').textContent = opts.check.help || '';
                 }
+            }
+            const wordingWrap = modal.querySelector('#adminConfirmWordingWrap');
+            if (wordingWrap) {
+                activeWording = opts.wording && opts.wording.keyInput && opts.wording.htmlInput && window.RhEmailWording ? opts.wording : null;
+                wordingWrap.hidden = !activeWording || (!!opts.check && !opts.check.checked);
+                modal.querySelector('#adminConfirmWordingState').textContent = '';
             }
 
             modal.classList.add('active');
@@ -1799,6 +1840,20 @@
                         if (Array.isArray(presetList)) confirmOpts.inputPresets = presetList;
                     } catch (e) { /* bad JSON: no pick list, the box still works */ }
                 }
+            }
+            // Optional "Edit email wording" (data-admin-email-wording="<template key>" + data-booking-id on the form or
+            // the button): writes email_wording_key / email_wording_html. Forms without it behave as before.
+            const wordingKey = confirmTarget.dataset.adminEmailWording || form.dataset.adminEmailWording || '';
+            if (wordingKey && window.RhEmailWording) {
+                const wordingInputs = window.RhEmailWording.inputsFor(form);
+                wordingInputs.keyInput.value = '';
+                wordingInputs.htmlInput.value = '';
+                confirmOpts.wording = {
+                    key: wordingKey,
+                    bookingId: confirmTarget.dataset.bookingId || form.dataset.bookingId || '',
+                    keyInput: wordingInputs.keyInput,
+                    htmlInput: wordingInputs.htmlInput
+                };
             }
             const proceed = function () {
                 form.dataset.adminConfirmBypass = '1';

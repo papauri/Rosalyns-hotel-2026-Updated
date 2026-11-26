@@ -363,9 +363,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 });
             }
 
+            // Edited wording (owner 2026-11-26): checked before sending; a refusal sends nothing (never the default instead).
+            require_once __DIR__ . '/../includes/email-wording.php';
+            $resendWording = rh_email_wording_from_post(rh_email_wording_key_for_resend_type((string)$email_type), $_POST);
+            if ($resendWording !== null && empty($resendWording['ok'])) {
+                throw new Exception($resendWording['error']);
+            }
+
             // Send the chosen email (admin/includes/bookings-bulk.php: the same sender the bulk Send a reminder /
             // Resend confirmation use; it sets and clears the email-log context for this booking).
-            $email_result = bookings_send_booking_email($pdo, $booking, (string)$email_type, array_values($cc_array), $user);
+            $email_result = bookings_send_booking_email($pdo, $booking, (string)$email_type, array_values($cc_array), $user, $resendWording);
 
             if ($email_result['success']) {
                 $message = 'Email sent successfully to ' . htmlspecialchars($booking['guest_email']);
@@ -703,7 +710,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Cancellation (one room, or the whole group when scope=group: all go or none), History, and the
                     // guest email for each room that was confirmed: shared with the bulk Cancel,
                     // admin/includes/booking-row-actions.php bookings_cancel_commit().
-                    $cancelDone = bookings_cancel_commit($pdo, (int)$booking_id, (string)$current_status, $current_booking['booking_reference'] ?? null, $user, $_POST);
+                    // Edited email wording (owner 2026-11-26): checked before anything changes, only when the guest
+                    // is to be emailed; a refusal cancels nothing (never the default wording instead).
+                    require_once __DIR__ . '/../includes/email-wording.php';
+                    require_once __DIR__ . '/../includes/email-send-log.php';
+                    $cancelWording = null;
+                    if (rh_cancel_email_choice($_POST, true)) {
+                        $cancelWording = rh_email_wording_from_post('booking_cancelled', $_POST);
+                        if ($cancelWording !== null && empty($cancelWording['ok'])) {
+                            throw new Exception('Nothing was cancelled. ' . $cancelWording['error']);
+                        }
+                    }
+                    $cancelDone = bookings_cancel_commit($pdo, (int)$booking_id, (string)$current_status, $current_booking['booking_reference'] ?? null, $user, $_POST, $cancelWording);
                     $message = $cancelDone['message'];
                 } elseif ($new_status === 'checked-out') {
                     // Checkout always passes the balance gate (override needs the permission + explicit confirm).
@@ -3749,6 +3767,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <link rel="stylesheet" href="css/bookings.css?v=<?php echo @filemtime(__DIR__ . '/css/bookings.css'); ?>">
+    <link rel="stylesheet" href="css/email-wording.css?v=<?php echo @filemtime(__DIR__ . '/css/email-wording.css'); ?>">
+    <script src="js/email-wording.js?v=<?php echo @filemtime(__DIR__ . '/js/email-wording.js'); ?>" defer></script>
 </head>
 
 <body>
@@ -7495,6 +7515,13 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                             <option value="booking_reminder" id="opt_booking_reminder" style="display:none;">&#9888; Check-in Reminder (Late / Overdue)</option>
                         </select>
                         <small style="color: #666;">Select the type of email to resend based on current booking status</small>
+                        <div class="ew-open-row" id="resendWordingRow" hidden>
+                            <button type="button" class="btn btn-secondary" id="resendWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit wording</button>
+                            <i class="help" data-tip="Change the words of this one email before it goes, for example to add details for the guest. The saved template stays the default. Prices, totals and payment details come from the booking and cannot be changed. The invoice keeps its fixed wording.">?</i>
+                            <span class="ew-open-state" id="resendWordingState"></span>
+                        </div>
+                        <input type="hidden" name="email_wording_key" id="resend_email_wording_key" value="">
+                        <input type="hidden" name="email_wording_html" id="resend_email_wording_html" value="">
                     </div>
 
                     <div class="form-group">
@@ -7740,6 +7767,13 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         </label>
                         <small style="color: #666; display: block; margin-top: 4px;">Untick to cancel quietly: no email or WhatsApp goes to the guest.</small>
                         <small id="cancel_email_unconfirmed" style="color: #666; display: none; margin-top: 4px;">This booking was not confirmed yet, so no email goes to the guest.</small>
+                        <div class="ew-open-row" id="cancelWordingRow" hidden>
+                            <button type="button" class="btn btn-secondary" id="cancelWordingBtn"><i class="fas fa-pen" aria-hidden="true"></i> Edit email wording</button>
+                            <i class="help" data-tip="Change the words of this cancellation email before it goes. The saved template stays the default. Prices and payment details come from the booking and cannot be changed.">?</i>
+                            <span class="ew-open-state" id="cancelWordingState"></span>
+                        </div>
+                        <input type="hidden" name="email_wording_key" id="cancel_email_wording_key" value="">
+                        <input type="hidden" name="email_wording_html" id="cancel_email_wording_html" value="">
                     </div>
                     <div class="form-group" style="background: #f8f9fa; padding: 12px; border-radius: 8px;">
                         <p style="margin: 0; color: #666; font-size: 13px;">
@@ -8911,6 +8945,46 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     if (isLateOrOverdue) emailTypeSelect.value = 'booking_reminder';
                     break;
             }
+            bkResendWordingSync();
+        }
+
+        // "Edit wording" (owner 2026-11-26): the Resend email types whose wording may be edited for one send
+        // (the invoice keeps fixed wording). Same map as includes/email-wording.php rh_email_wording_key_for_resend_type().
+        const BK_WORDING_KEYS = {
+            booking_received: 'booking_received',
+            booking_confirmed: 'booking_confirmed',
+            tentative_confirmed: 'tentative_booking_created',
+            tentative_converted: 'tentative_booking_converted',
+            booking_cancelled: 'booking_cancelled',
+            booking_reminder: 'booking_reminder'
+        };
+        function bkResendWordingSync() {
+            const sel = document.getElementById('email_type');
+            const row = document.getElementById('resendWordingRow');
+            if (!sel || !row) return;
+            document.getElementById('resend_email_wording_key').value = '';
+            document.getElementById('resend_email_wording_html').value = '';
+            document.getElementById('resendWordingState').textContent = '';
+            row.hidden = !window.RhEmailWording || !BK_WORDING_KEYS[sel.value];
+        }
+        if (!window.__bkWordingBound) { // once: the admin SPA runs this page script again on each visit
+        window.__bkWordingBound = true;
+        document.addEventListener('change', function (e) {
+            if (e.target && e.target.id === 'email_type') bkResendWordingSync();
+        });
+        document.addEventListener('click', function (e) {
+            const btn = e.target && e.target.closest ? e.target.closest('#resendWordingBtn') : null;
+            if (!btn || !window.RhEmailWording) return;
+            const key = BK_WORDING_KEYS[document.getElementById('email_type').value] || '';
+            if (!key) return;
+            window.RhEmailWording.open({
+                key: key,
+                bookingId: document.getElementById('modal_booking_id').value,
+                keyInput: document.getElementById('resend_email_wording_key'),
+                htmlInput: document.getElementById('resend_email_wording_html'),
+                onDone: function () { document.getElementById('resendWordingState').textContent = 'Your edited wording will be sent.'; }
+            });
+        });
         }
 
         function closeResendEmailModal() {
@@ -8918,6 +8992,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             setBookingPageModalOpen(modal, false);
             const form = document.getElementById('resendEmailForm');
             form.reset();
+            bkResendWordingSync(); // hidden inputs keep a value set by script through reset()
             // Restore form body if it was hidden by success state
             const body = form.querySelector('.modal-body');
             if (body) body.style.display = '';
@@ -9589,6 +9664,39 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             box.closest('label').style.display = wouldEmail ? 'flex' : 'none';
             if (box.closest('label').nextElementSibling) box.closest('label').nextElementSibling.style.display = wouldEmail ? 'block' : 'none';
             if (note) note.style.display = wouldEmail ? 'none' : 'block';
+            bkCancelWordingSync(false);
+        }
+
+        // "Edit email wording" on the cancellation email (owner 2026-11-26): shown while the guest is to be emailed;
+        // unticking the box (or closing / reopening the dialog) drops the edited wording.
+        function bkCancelWordingSync(clear) {
+            const row = document.getElementById('cancelWordingRow');
+            const box = document.getElementById('cancel_email_guest');
+            if (!row || !box) return;
+            const on = !!window.RhEmailWording && box.checked && !box.disabled;
+            if (clear || !on) {
+                document.getElementById('cancel_email_wording_key').value = '';
+                document.getElementById('cancel_email_wording_html').value = '';
+                document.getElementById('cancelWordingState').textContent = '';
+            }
+            row.hidden = !on;
+        }
+        if (!window.__bkCancelWordingBound) { // once: the admin SPA runs this page script again on each visit
+            window.__bkCancelWordingBound = true;
+            document.addEventListener('change', function (e) {
+                if (e.target && e.target.id === 'cancel_email_guest') bkCancelWordingSync(false);
+            });
+            document.addEventListener('click', function (e) {
+                const btn = e.target && e.target.closest ? e.target.closest('#cancelWordingBtn') : null;
+                if (!btn || !window.RhEmailWording) return;
+                window.RhEmailWording.open({
+                    key: 'booking_cancelled',
+                    bookingId: document.getElementById('cancel_booking_id').value,
+                    keyInput: document.getElementById('cancel_email_wording_key'),
+                    htmlInput: document.getElementById('cancel_email_wording_html'),
+                    onDone: function () { document.getElementById('cancelWordingState').textContent = 'Your edited wording will be sent.'; }
+                });
+            });
         }
 
         function openCancelBookingModal(bookingId, bookingReference, guestName, bookingStatus) {
@@ -9601,6 +9709,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             const cancelPreset = document.getElementById('cancellation_reason_preset');
             if (cancelPreset) { cancelPreset.value = ''; cancelPreset.dataset.lastFill = ''; }
             const cancelStatus = String(bookingStatus || '');
+            bkCancelWordingSync(true);
             bkApplyCancelEmailChoice(cancelStatus === '' || cancelStatus === 'confirmed');
             bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', { count: 0, members: [] });
             const submitBtn = document.querySelector('#cancelBookingForm button[type="submit"]');
@@ -9624,6 +9733,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             const modal = document.getElementById('cancelBookingModal');
             setBookingPageModalOpen(modal, false);
             document.getElementById('cancelBookingForm').reset();
+            bkCancelWordingSync(true);
             bkCancelQuote = null;
             bkApplyCancelFee();
         }

@@ -542,10 +542,12 @@ if (!function_exists('bookings_convert_tentative_booking')) {
      * locked snapshot, quoted figure re-checked under the row lock). The status transition is checked by the caller.
      * $in: the posted fields (cancellation_reason, scope, fee_quoted, fee_override, fee_override_pct, fee_override_reason,
      * email_guest). Throws "Cancellation failed - nothing was changed. ..." on a refusal.
+     * $wording: FOH's edited cancellation email wording, already checked by rh_email_wording_from_post() (the single
+     * Cancel only; the bulk Cancel passes none): used for each guest email of this request, then cleared.
      * @return array{message:string,cancelled:array,email:array} cancelled: [{id,previous_status,reference,summary}];
      *   email: [bookingId => 'sent' | 'not sent' | 'failed: ...'] for each emailed (previously confirmed) room.
      */
-    function bookings_cancel_commit(PDO $pdo, int $booking_id, string $current_status, ?string $booking_reference, array $user, array $in): array
+    function bookings_cancel_commit(PDO $pdo, int $booking_id, string $current_status, ?string $booking_reference, array $user, array $in, ?array $wording = null): array
     {
         $new_status = 'cancelled';
         $cancelledNow = []; // bookings cancelled by this request: [id, previous_status]
@@ -625,7 +627,11 @@ if (!function_exists('bookings_convert_tentative_booking')) {
                     }
                 } else {
                     // Send cancellation email
-                    $email_result = sendBookingCancelledEmail($booking, rh_cancel_guest_email_reason()); // the reason stays internal (owner 2026-11-25)
+                    // Edited wording (owner 2026-11-26) is set for this one send only; none posted = the default wording.
+                    require_once __DIR__ . '/../../includes/email-wording.php';
+                    $email_result = rh_email_wording_send($wording, static function () use ($booking) {
+                        return sendBookingCancelledEmail($booking, rh_cancel_guest_email_reason()); // the reason stays internal (owner 2026-11-25)
+                    }, (int)$booking['id'], (string)$booking['booking_reference'], $user);
                 }
 
                 // Log cancellation to database

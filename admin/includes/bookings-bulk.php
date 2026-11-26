@@ -616,9 +616,11 @@ if (!function_exists('rh_bk_bulk_ops')) {
      * Send one booking email: the body of the Resend email action (bookings.php resend_email), shared with the bulk
      * Send a reminder / Resend confirmation so both write the same email log and History.
      * $booking: b.* + room_name. $cc: valid CC addresses. Throws on a refused type, like the single action.
+     * $wording: FOH's edited wording already checked by rh_email_wording_from_post() (single Resend only; bulk passes
+     * none): used for this one send when it is for this email type, then cleared (includes/email-wording.php).
      * @return array{success:bool,message:string}
      */
-    function bookings_send_booking_email(PDO $pdo, array $booking, string $email_type, array $cc_array, array $user): array
+    function bookings_send_booking_email(PDO $pdo, array $booking, string $email_type, array $cc_array, array $user, ?array $wording = null): array
     {
         require_once __DIR__ . '/../../config/email.php';
         $booking_id = (int)($booking['id'] ?? 0);
@@ -626,54 +628,74 @@ if (!function_exists('rh_bk_bulk_ops')) {
         // Script scope: cleared in the finally below so it never reaches the scheduler that runs after the page.
         $emailCtx = rh_email_context(rh_email_ctx_account('room', $booking_id, (string)($booking['booking_reference'] ?? '')));
         $email_result = ['success' => false, 'message' => 'Invalid email type'];
+        $wordingKey = '';
         try {
-            switch ($email_type) {
-                case 'booking_received':
-                    $email_result = sendBookingReceivedEmail($booking);
-                    break;
-                case 'booking_confirmed':
-                    $email_result = sendBookingConfirmedEmail($booking);
-                    break;
-                case 'tentative_confirmed':
-                    $booking['tentative_expires_at'] = $booking['tentative_expires_at'] ?? date('Y-m-d H:i:s', strtotime('+48 hours'));
-                    $email_result = sendTentativeBookingConfirmedEmail($booking);
-                    break;
-                case 'tentative_converted':
-                    $email_result = sendTentativeBookingConvertedEmail($booking);
-                    break;
-                case 'booking_cancelled':
-                    // Never tell a guest with a live reservation that it was cancelled.
-                    if (!in_array($booking['status'], ['cancelled', 'expired', 'no-show'], true)) {
-                        throw new Exception('A cancellation email can only be resent for a cancelled, expired or no-show booking.');
-                    }
-                    $cancellation_reason = 'Resent by admin';
-                    $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
-                    break;
-                case 'booking_reminder':
-                    // Reminder emails are only valid for active bookings. A no-show
-                    // (or any closed status) is explicitly excluded here so it can
-                    // never receive a late/overdue alert — no-show takes precedence
-                    // over any time-based checkout logic. sendBookingReminderEmail()
-                    // enforces the same rule again as defence-in-depth.
-                    if (!in_array($booking['status'], ['confirmed', 'pending', 'checked-in'], true)) {
-                        throw new Exception('Reminder emails are only for active bookings (no-show, cancelled and closed bookings are excluded).');
-                    }
-                    $email_result = sendBookingReminderEmail($booking);
-                    break;
-                case 'invoice':
-                    require_once __DIR__ . '/../../config/invoice.php';
-                    $cc_recipients = array_values(array_filter($cc_array));
-                    $inv_smtp = getEmailSetting('smtp_username', '');
-                    if (!empty($inv_smtp) && !in_array($inv_smtp, $cc_recipients)) {
-                        $cc_recipients[] = $inv_smtp;
-                    }
-                    $email_result = sendPaymentInvoiceEmailWithCC($booking_id, $cc_recipients);
-                    if ($email_result['success']) {
-                        logBookingAudit($booking_id, 'email_sent', null, null, 'Invoice email resent by admin (' . ($user['full_name'] ?? ($user['username'] ?? '')) . ')', $booking['booking_reference'] ?? null);
-                    }
-                    break;
-                default:
-                    throw new Exception('Invalid email type selected');
+            if (!empty($wording['ok']) && isset($wording['html']) && function_exists('rh_email_wording_key_for_resend_type')) {
+                $wordingKey = rh_email_wording_key_for_resend_type($email_type);
+                if ($wordingKey === '' || (string)($wording['key'] ?? '') !== $wordingKey) {
+                    throw new Exception('The edited wording belongs to a different email. Open "Edit wording" again.');
+                }
+            }
+            // Edited wording (one-off, this send only): set just before the send, always cleared after it.
+            try {
+                if ($wordingKey !== '') {
+                    rh_email_wording_apply($wordingKey, (string)$wording['html']);
+                }
+                switch ($email_type) {
+                    case 'booking_received':
+                        $email_result = sendBookingReceivedEmail($booking);
+                        break;
+                    case 'booking_confirmed':
+                        $email_result = sendBookingConfirmedEmail($booking);
+                        break;
+                    case 'tentative_confirmed':
+                        $booking['tentative_expires_at'] = $booking['tentative_expires_at'] ?? date('Y-m-d H:i:s', strtotime('+48 hours'));
+                        $email_result = sendTentativeBookingConfirmedEmail($booking);
+                        break;
+                    case 'tentative_converted':
+                        $email_result = sendTentativeBookingConvertedEmail($booking);
+                        break;
+                    case 'booking_cancelled':
+                        // Never tell a guest with a live reservation that it was cancelled.
+                        if (!in_array($booking['status'], ['cancelled', 'expired', 'no-show'], true)) {
+                            throw new Exception('A cancellation email can only be resent for a cancelled, expired or no-show booking.');
+                        }
+                        $cancellation_reason = 'Resent by admin';
+                        $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
+                        break;
+                    case 'booking_reminder':
+                        // Reminder emails are only valid for active bookings. A no-show
+                        // (or any closed status) is explicitly excluded here so it can
+                        // never receive a late/overdue alert — no-show takes precedence
+                        // over any time-based checkout logic. sendBookingReminderEmail()
+                        // enforces the same rule again as defence-in-depth.
+                        if (!in_array($booking['status'], ['confirmed', 'pending', 'checked-in'], true)) {
+                            throw new Exception('Reminder emails are only for active bookings (no-show, cancelled and closed bookings are excluded).');
+                        }
+                        $email_result = sendBookingReminderEmail($booking);
+                        break;
+                    case 'invoice':
+                        require_once __DIR__ . '/../../config/invoice.php';
+                        $cc_recipients = array_values(array_filter($cc_array));
+                        $inv_smtp = getEmailSetting('smtp_username', '');
+                        if (!empty($inv_smtp) && !in_array($inv_smtp, $cc_recipients)) {
+                            $cc_recipients[] = $inv_smtp;
+                        }
+                        $email_result = sendPaymentInvoiceEmailWithCC($booking_id, $cc_recipients);
+                        if ($email_result['success']) {
+                            logBookingAudit($booking_id, 'email_sent', null, null, 'Invoice email resent by admin (' . ($user['full_name'] ?? ($user['username'] ?? '')) . ')', $booking['booking_reference'] ?? null);
+                        }
+                        break;
+                    default:
+                        throw new Exception('Invalid email type selected');
+                }
+            } finally {
+                if ($wordingKey !== '') {
+                    rh_email_wording_clear($wordingKey);
+                }
+            }
+            if ($wordingKey !== '' && !empty($email_result['success'])) {
+                logBookingAudit($booking_id, 'email_sent', null, null, 'Email wording edited before sending by ' . ($user['full_name'] ?? ($user['username'] ?? 'staff')) . ' (' . $wordingKey . ')', $booking['booking_reference'] ?? null);
             }
         } finally {
             $emailCtx = null;

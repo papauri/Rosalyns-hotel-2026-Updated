@@ -45,9 +45,9 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   - Template subjects + gym/event email total line DONE: Liwonde b44368f / Rosalyn's f93acb6.
   - Manual venue price + conference email total = PDF + subject never blank DONE: Liwonde e4bf933 / Rosalyn's 60d5cc7.
   - email_send_log_test brought up to date (test only): Liwonde 88a0728 / Rosalyn's 49d22ae.
-  - a room move without packages does not save the booked rates (conference-management.php ~887);
-  - gym/event confirmation emails (email.php ~4382, ~4601) have no VAT-rate fallback (old code);
-  - Conference Packages page has no live icon preview (Room Packages has one).
+  - Icon preview (Conference Packages, Gym, Page Management) + booked rates on any room move + gym/event quotation email total = PDF DONE: Liwonde 4aa3d3b / Rosalyn's ffc4f2c.
+  - LATER: gym/event quotation emails print the total with 0 decimals (email.php ~4412, ~4625; the PDF shows cents);
+  - LATER: conference-packages.php ~516 loads admin-components.js twice (listener registered twice, harmless).
 
 ## Shipped 2026-11-25: Guides + Assistant sync (owner prompted; port of Liwonde e48fc69)
 - Staff guides (Rosalyn's branding kept), Assistant answers (why cancelled, unapproved counts, arrivals to chase) and the

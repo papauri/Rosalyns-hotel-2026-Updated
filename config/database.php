@@ -1818,6 +1818,27 @@ function getBookingEmailTemplateConfig(string $templateKey, array $defaults = []
 {
     global $pdo;
 
+    // One-off wording edited by FOH for this single send (includes/email-wording.php). It replaces only the
+    // html_body of an active stored template; it is never cached and never saved to booking_email_templates.
+    if (isset($GLOBALS['rh_email_wording_override'][$templateKey]) && is_string($GLOBALS['rh_email_wording_override'][$templateKey])) {
+        $override = $GLOBALS['rh_email_wording_override'][$templateKey];
+        unset($GLOBALS['rh_email_wording_override'][$templateKey]);
+        try {
+            $row = getBookingEmailTemplateConfig($templateKey, $defaults);
+        } finally {
+            $GLOBALS['rh_email_wording_override'][$templateKey] = $override;
+        }
+        // FOH edited this email: never fall back to the coded default. A template switched off, emptied or removed
+        // since the editor opened stops the send (the senders catch this and report the email as not sent).
+        if (trim((string)($row['subject'] ?? '')) === '' || trim((string)($row['html_body'] ?? '')) === ''
+            || (int)($row['is_active'] ?? 0) !== 1 || trim($override) === '') {
+            throw new RuntimeException('The email template changed after the wording was edited, so nothing was sent. Open "Edit email wording" again.');
+        }
+        $row['html_body'] = $override;
+        $row['text_body'] = '';
+        return $row;
+    }
+
     $fallback = array_merge([
         'template_key' => $templateKey,
         'template_name' => $templateKey,
