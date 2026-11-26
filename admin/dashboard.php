@@ -3756,24 +3756,42 @@ $currency_symbol = getSetting('currency_symbol');
             }
         }
 
-        document.addEventListener('click', (event) => {
+        // The admin SPA re-runs this script on every return to the Dashboard. Listeners left on `document`
+        // by an earlier visit still point at that visit's (now removed) modal: they caught the click first,
+        // opened the removed modal and blocked this one, so the cards stopped opening after leaving the page
+        // and coming back. Drop the earlier visit's listeners before adding this visit's.
+        if (window.__rhDashInsightClick) document.removeEventListener('click', window.__rhDashInsightClick);
+        if (window.__rhDashInsightKey) document.removeEventListener('keydown', window.__rhDashInsightKey);
+        document.body.classList.remove('dashboard-insight-open'); // left by a modal open when the page was left
+        // A link inside the modal (Open full page, a row link) leaves the Dashboard in place without a reload:
+        // close the modal first so its scroll lock does not follow onto the next page.
+        if (_insightModal) {
+            _insightModal.addEventListener('click', (event) => {
+                if (event.target.closest('a[href]')) dashboardInsightSetOpen(false);
+            });
+        }
+
+        window.__rhDashInsightClick = (event) => {
             const trigger = event.target.closest('.js-dashboard-insight');
             if (!trigger) return;
+            if (!_insightModal || !_insightModal.isConnected) return; // this visit's page is gone
             if (event.defaultPrevented) return;
             if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
             dashboardInsightOpen(trigger);
-        });
+        };
+        document.addEventListener('click', window.__rhDashInsightClick);
 
         document.querySelectorAll('[data-close-dashboard-insight]').forEach((node) => {
             node.addEventListener('click', () => dashboardInsightSetOpen(false));
         });
 
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && _insightModal?.classList.contains('is-open')) {
+        window.__rhDashInsightKey = (event) => {
+            if (event.key === 'Escape' && _insightModal?.isConnected && _insightModal.classList.contains('is-open')) {
                 dashboardInsightSetOpen(false);
             }
-        });
+        };
+        document.addEventListener('keydown', window.__rhDashInsightKey);
 
         function dashboardConfirm(options) {
             if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
