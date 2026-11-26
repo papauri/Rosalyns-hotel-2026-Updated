@@ -144,6 +144,9 @@ when prompted."
   and the rest) open their details again after going to another page and back; before, none opened until a hard
   refresh. Following a link inside the details window now closes it first. Guides: none. Assistant: none. Manager
   Guides: none.
+- 2026-11-26 Liwonde 492bc02 / Rosalyn's 2ec4e0c (owner PATCH): leaving any admin page with a window still open
+  (browser Back, or a link) no longer leaves the next page unable to scroll. Guides: none. Assistant: none. Manager
+  Guides: none.
 
 ## Synced 2026-11-25 (owner prompted "sync guides, assistants and decisions"; guides + Assistant: commit "Guides + Assistant sync 2026-11-25" in both repos · Assistant: why-cancelled answer (reason from History, staff-only), Assistant cancel card uses rh_cancel_reason_check, counts_not_approved + count-measure hint, new arrivals_to_chase read · owner decisions 2026-11-24/25 written into guides + Assistant (cancel reason internal, guest emails unchanged; SMTP + copy lists unlocked) · Manager Guides: Stock, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed; POS and Kitchen Screens no change) - entries kept for reference
 
