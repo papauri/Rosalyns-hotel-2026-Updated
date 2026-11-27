@@ -101,6 +101,13 @@ when prompted."
   the page too). The amount follows the total until staff type their own; if the save is refused, the rooms and
   payment stay filled in. Guides: bookings (create, take payment now). Assistant: "why does it say more than the
   balance due" = only when the amount really is above the total; tick "The guest paid more than owed" for a credit note.
+- 22cefb1 / Rosalyn's 100498e (2026-11-28, owner): Bookings list shows "Checked in <date time> by <name>" under the
+  Status of checked-in/out rows; booking details has a Check-in block (each check-in/out step, time, who); new
+  "Checked in" tab (guests in house) and "Checked in on" date filter. Guides: bookings (list, filters, details).
+  Assistant: "who checked this guest in / when" = the details page Check-in block.
+- c270eb9 / Rosalyn's 26c7805 (2026-11-28, fault): guest booking page shows "Checking price…" and keeps Confirm
+  waiting after the party or dates change, until the price for exactly that stay is in. No guide change.
+  Assistant: "the total said Checking price" = normal for a few seconds after a change.
 
 ## Synced 2026-11-26 (owner prompted "assistant and guide sync"; guides + Assistant: commit "Guides + Assistant sync 2026-11-26" in both repos · guides 06, 07, 12, 13, 19, 99 (+ Liwonde-only brand fix in 01, 02, 14, 23; guide 07 Blocked Dates note) · Assistant: when-did-they-pay -> Paid "i", dashboard vs End of Day rule, email Tone, calendar arrow keys, bare pre-arrival question gets its own answer (payment chase needs "payment"), expired / cancelled / no-show answers point to the Status pill, movements arrows for tomorrow / next week, receipt comment per b145620, expiry questions never catch stock or gym questions · Manager Guides: Money and End of Day, Bookings, Daily checklist refreshed; others no change) - entries kept for reference
 
