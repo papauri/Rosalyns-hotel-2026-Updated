@@ -790,7 +790,9 @@
            Ctrl/Cmd or Shift + click picks several jobs / tasks: the bulk bar and the right-click menu then offer the
            list's own bulk actions (the page's bulk_schedules / bulk_assignments form: same fields, CSRF token and
            confirm words). Picked days (click, drag, Shift, room name, day head, keyboard, long press) offer New job /
-           New task: the page's add form, prefilled (cfg.newFor). Only on pages that pass cfg.bulk / cfg.newFor. */
+           New task: the page's add form, prefilled (cfg.newFor), for today and later. Picked days that hold tasks / jobs
+           (past days too) also offer the list's bulk actions for exactly those shown on the grid (owner 2026-11-28).
+           Only on pages that pass cfg.bulk / cfg.newFor. */
         function initPicks(st) {
             var G = window.RhGridSel;
             if (!G || (!st.cfg.bulk && !st.cfg.newFor)) return;
@@ -801,13 +803,15 @@
                 laneAttr: 'data-ops-lane',
                 dates: function () { return (st.cols || []).map(function (x) { return x.d; }); },
                 dayW: function () { return st.dayW || 44; },
-                selectable: function (lane, d) { return !!st.cfg.newFor && !!(st.lanesById && st.lanesById[lane]) && d >= st.data.today; },
+                // Past days only where the list has bulk actions (a past task can still be verified or deleted).
+                selectable: function (lane, d) { return !!(st.lanesById && st.lanesById[lane]) && (!!st.cfg.bulk || (!!st.cfg.newFor && d >= st.data.today)); },
                 cellLabel: function (lane, d) { var l = st.lanesById[lane]; return 'Room ' + (l ? l.number : lane) + ', ' + fmt(d); },
                 // Arrow past the edge = Prev / Next; not in a one-day mode whose columns are hours (Room Service).
                 page: st.A.fixedDays ? null : function (dir) { go(st, addDays(st.start, dir * st.days), st.days); },
                 onChange: function () { picksChanged(st); },
                 cellMenu: function (api, hit) { return cellMenu(st, hit); },
                 barIds: st.cfg.bulk ? function (bar) { return barIds(st, bar); } : null,
+                dragFromBars: !!st.cfg.bulk, // a task fills its day: a drag may start on it (a click still opens it)
                 barMenu: function (api, bar) { return barMenu(st, bar); }
             });
         }
@@ -833,8 +837,29 @@
             var w = window.RhGridSel.logic.countWords(keys);
             return st.page === 'housekeeping' ? w.replace(/^(\d+) nights?/, function (m, n) { return n + (n === '1' ? ' day' : ' days'); }) : w;
         }
+        /** The ids of the tasks / jobs drawn in the picked days: only what the grid shows (the filters and the date range
+            on screen), like the list's bulk bar acts only on the rows it shows. */
+        function cellIds(st, keys) {
+            if (!st.cfg.bulk || !keys.length || typeof st.A.range !== 'function') return [];
+            var items = [];
+            Object.keys(st.itemsByLane || {}).forEach(function (lane) {
+                st.itemsByLane[lane].forEach(function (it) {
+                    var r = st.A.range(it);
+                    items.push({ id: it.id, lane: String(it.room_id), from: r[0], to: r[1] });
+                });
+            });
+            return window.RhGridSel.logic.itemsIn(keys, items);
+        }
+        /** The tasks / jobs picked: Ctrl / Shift + click bars, plus those in the picked days. */
+        function pickedIds(st) {
+            var ids = st.picks.barIds().map(String), seen = {};
+            ids.forEach(function (id) { seen[id] = true; });
+            cellIds(st, st.picks.keys()).forEach(function (id) { if (!seen[id]) { seen[id] = true; ids.push(id); } });
+            return ids;
+        }
         function cellActs(st, keys) {
             var fn = st.cfg.newFor ? window[st.cfg.newFor] : null;
+            keys = keys.filter(function (k) { return window.RhGridSel.logic.parts(k).d >= st.data.today; }); // nothing is planned in the past
             if (typeof fn !== 'function' || !keys.length) return [];
             return [{
                 label: st.page === 'housekeeping' ? 'New task' : 'New job',
@@ -852,9 +877,10 @@
         }
         function picksChanged(st) {
             if (!st.pickBar) return;
-            var ids = st.picks.barIds(), keys = st.picks.keys();
+            var ids = pickedIds(st), keys = st.picks.keys();
             var clear = function () { st.picks.clear(); };
-            if (ids.length) st.pickBar.show(ids.length + ' ' + st.A.noun(ids.length) + ' selected', '', bulkActs(st, ids), clear);
+            if (ids.length) st.pickBar.show(ids.length + ' ' + st.A.noun(ids.length) + ' selected', keys.length ? '(' + dayWords(st, keys) + ' picked)' : '',
+                bulkActs(st, ids).concat(cellActs(st, keys)), clear);
             else if (keys.length) st.pickBar.show(dayWords(st, keys), window.RhGridSel.logic.where(keys, st.picks.lanes(), function (l) { // every picked day by name, also off screen
                 return 'Room ' + (st.lanesById[l] ? st.lanesById[l].number : l);
             }), cellActs(st, keys), clear);
@@ -862,10 +888,18 @@
         }
         function cellMenu(st, hit) {
             var keys = st.picks.keys();
-            var items = cellActs(st, keys);
+            var ids = cellIds(st, keys);
+            var spec = ids.length ? bulkSpec(st) : null;
+            var items = [];
+            if (spec) {
+                spec.ops.forEach(function (o) {
+                    items.push({ label: o.label, icon: o.icon, danger: o.cls === 'btn-danger', run: function () { window.RhGridSel.runListBulk(spec, o, ids); } });
+                });
+            }
+            items = items.concat(cellActs(st, keys));
             if (keys.length) items.push({ label: 'Clear selection', icon: 'fa-xmark', run: function () { st.picks.clear(); } });
             if (!items.length) items.push({ label: 'Nothing to do here', disabled: true, hint: hit && hit.d && hit.d < st.data.today ? 'Past days cannot be planned.' : '' });
-            return { title: keys.length ? dayWords(st, keys) : (hit && hit.d ? fmt(hit.d) : 'Room'), items: items };
+            return { title: ids.length ? ids.length + ' ' + st.A.noun(ids.length) + ' selected' : (keys.length ? dayWords(st, keys) : (hit && hit.d ? fmt(hit.d) : 'Room')), items: items };
         }
         function barMenu(st, bar) {
             var ids = st.picks.barIds(), items = [];
@@ -1202,6 +1236,7 @@
             columns: dayColumns,
             rows: 'room',
             day: function (it) { return it.day; },
+            range: function (it) { return [it.day, it.day]; }, // the days a task covers (picked days -> tasks)
             span: function (st, it) {
                 var i = dnum(it.day) - st.first;
                 return (i < 0 || i >= st.cols.length) ? null : [i, i, false, false];
@@ -1301,6 +1336,7 @@
             columns: dayColumns,
             rows: 'room',
             day: function (it) { return it.from; },
+            range: function (it) { return [it.from, it.draw_to]; }, // the days a job is drawn on (picked days -> jobs)
             span: function (st, it) {
                 var n = st.cols.length;
                 var a = dnum(it.from) - st.first, z = dnum(it.draw_to) - st.first;

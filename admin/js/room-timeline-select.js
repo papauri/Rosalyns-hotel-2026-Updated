@@ -13,7 +13,8 @@
  *             Touch: a tap toggles a night, a long press opens the menu (on a night outside the selection it
  *             offers "Select <anchor> to here", the touch Shift-click), no drag. The picks outlive the date range on
  *             screen: next / previous keep them until Clear (owner 2026-11-24). Bars keep their own gestures
- *             (booking drag, end grip, drawer); ops modes add Ctrl/Cmd or Shift + click to pick several bars.
+ *             (booking drag, end grip, drawer); ops modes add Ctrl/Cmd or Shift + click to pick several bars, and
+ *             (cfg.dragFromBars) a mouse drag may start on a bar: it picks the days crossed, a plain click still opens it.
  *  listBulk   reads a list's admin-bulk.js bar (its action, CSRF token, buttons, confirm words, fields) so a timeline
  *             can run exactly the same bulk action on the jobs / tasks picked on the grid
  *  lists      Shift+click on a row tick box ticks the range; right-click (or long press) on a row opens the menu with
@@ -256,13 +257,27 @@
         if (!dc || !dates.length || (c >= 0 && c < dates.length) || idx < 0 || idx >= dates.length) return null;
         return dstr(dnum(dates[idx]) + dc);
     }
+    /** The tasks / jobs in the picked days (owner 2026-11-28: picked days on Housekeeping / Maintenance act on what is
+        in them): items [{id, lane, from, to}] ('Y-m-d', both days included) -> the ids, once each, in item order, of
+        those with a picked day of their own room inside from..to. */
+    function itemsIn(keys, items) {
+        var byLane = {}, out = [], seen = {};
+        (keys || []).forEach(function (k) { var x = parts(k); (byLane[x.lane] = byLane[x.lane] || []).push(x.d); });
+        (items || []).forEach(function (it) {
+            var id = String(it.id), ds = byLane[String(it.lane)];
+            if (!ds || seen[id] || !it.from) return;
+            var to = it.to || it.from;
+            if (ds.some(function (d) { return d >= it.from && d <= to; })) { seen[id] = true; out.push(id); }
+        });
+        return out;
+    }
 
     var logic = {
         dnum: dnum, dstr: dstr, key: key, parts: parts, rect: rect, byLane: byLane, runs: runs, oneRun: oneRun,
         bounds: bounds, countWords: countWords, nightsText: nightsText, pairs: pairs, plural: plural,
         span: span, keep: keep, colAt: colAt, colOf: colOf, colsMoved: colsMoved, where: where,
         extendFrom: extendFrom, shiftAdd: shiftAdd, pressPlan: pressPlan, pastEdge: pastEdge,
-        holds: holds, windows: windows, judge: judge
+        holds: holds, windows: windows, judge: judge, itemsIn: itemsIn
     };
     if (typeof module === 'object' && module && module.exports) module.exports = logic;
     if (typeof window === 'undefined' || !window.document || window.RhGridSel) return;
@@ -439,6 +454,7 @@
      *      selectable(lane, d), cellLabel(lane, d), locked() true while a save / bar drag runs,
      *      onChange(api), cellMenu(api, hit) -> menu {title, items}, roomMenu / dayMenu optional (default cellMenu),
      *      barIds(barEl) -> ids a bar stands for (ops modes; omit = bars are not pickable), barMenu(api, barEl) -> menu,
+     *      dragFromBars: true = a mouse drag may start on a bar (ops modes; a plain click still opens the bar),
      *      roomClick: 'select' (the room name selects its row; a link in it still opens from the keyboard),
      *      page(dir) optional: show the previous (-1) / next (1) date range (the Prev / Next buttons); Left / Right past
      *      the first / last night shown then pages and the cursor lands on the next night in the same room.
@@ -589,15 +605,29 @@
         function onDown(e) {
             if (e.button !== 0 || (cfg.locked && cfg.locked())) return;
             var t = e.target;
-            if (!t.closest || t.closest('.tl-bar, .tl-hk-link, .tl-room, .tl-head__day, a.tl-room__link')) return;
+            if (!t.closest || t.closest('.tl-hk-link, .tl-room, .tl-head__day, a.tl-room__link, .tl-grip')) return;
+            var onBar = !!t.closest('.tl-bar');
+            if (onBar && !cfg.dragFromBars) return;
             var hit = hitAt(e.clientX, e.clientY, t);
             if (!hit) return;
             if (e.pointerType === 'touch' || (e.pointerType !== 'mouse' && mqCoarse.matches)) {
+                if (onBar) return; // touch: a tap on a bar opens it, as before
                 touch = { hit: hit, x: e.clientX, y: e.clientY, fired: false };
                 touch.timer = window.setTimeout(function () { longPress(); }, LONG_PRESS_MS);
                 return;
             }
             if (!ok(hit.lane, hit.d)) return;
+            if (onBar) {
+                // cfg.dragFromBars (Housekeeping / Maintenance, owner 2026-11-28: a task fills its whole day, so a drag
+                // had nowhere to start): a drag that starts on a bar picks the days it crosses; a plain click still
+                // opens the bar and Ctrl / Shift + click still picks it (nothing changes until the pointer leaves the day).
+                if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+                drag = { start: hit, last: hit, moved: false, ctrl: false, base: {}, mode: 'add', soleOff: false, from: hit, fromBar: true };
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+                window.addEventListener('pointercancel', onCancel);
+                return;
+            }
             e.preventDefault();
             var k = logic.key(hit.lane, hit.d);
             var ctrl = e.ctrlKey || e.metaKey;
@@ -635,6 +665,7 @@
             if (!drag) return;
             var hit = hitAt(e.clientX, e.clientY, null);
             if (!hit || (hit.lane === drag.last.lane && hit.d === drag.last.d)) return;
+            if (drag.fromBar && !drag.moved) { pickBarsClear(); anchor = { lane: drag.from.lane, d: drag.from.d }; }
             drag.last = hit;
             drag.moved = true;
             drag.soleOff = false;
@@ -649,6 +680,10 @@
             if (!drag) return;
             var d = drag;
             drag = null;
+            if (d.fromBar) {
+                if (!d.moved) return; // a plain click on the bar: it opens as before
+                muteNextClick(); // the click that ends the drag must not open the bar it started on
+            }
             if (!d.moved && d.soleOff) { sel = {}; paint(); }
             focusCell(d.last.lane, d.last.d);
         }

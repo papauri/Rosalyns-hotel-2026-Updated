@@ -6488,6 +6488,16 @@ body.rh-pwa-bar-on .admin-bulk-bar {
 #rh-admin-page:has(.admin-bulk-bar:not([hidden])) {
     padding-bottom: 104px;
 }
+/* Owner 2026-11-28: the floating help button covered the bar's last actions (Clear, Delete) and the folded notices pill
+   covered Verify. The bar stops short of the help button's corner (not while a side panel docks on the right: that rule
+   sets its own edge); the Assistant button already lifts above the bar (ai-panel.js); the pill is put away while a
+   selection is shown and comes back on Clear. */
+html:not(.rh-tl-open) body:has(.rh-help-toggle:not([data-inline="1"])) .admin-bulk-bar:not([hidden]) {
+    right: 72px;
+}
+body:has(.admin-bulk-bar:not([hidden])) .rh-ai-notice-pill {
+    display: none;
+}
 
 /* Extend... dialog (admin/js/admin-extend.js, GRID_UNIFY_PLAN Phase 3): solid surface, one accent. */
 .rh-extend {

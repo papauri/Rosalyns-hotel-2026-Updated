@@ -216,5 +216,24 @@ ok('byLane counts a night once', eq(L.byLane(['10|2026-12-01', '10|2026-12-01'])
         eq(L.rect(lanes, dates, { lane: '10', d: '2026-12-03' }, { lane: '10', d: L.pastEdge(dates, 3, 1) }), ['10|2026-12-03', '10|2026-12-04', '10|2026-12-05']));
 }
 
+// Picked days on Housekeeping / Maintenance act on the tasks / jobs in them (owner 2026-11-28): itemsIn.
+{
+    const items = [
+        { id: 1, lane: '10', from: '2026-12-01', to: '2026-12-01' },  // task, room 10, 1 Dec
+        { id: 2, lane: '10', from: '2026-12-01', to: '2026-12-01' },  // second task, same cell
+        { id: 3, lane: '11', from: '2026-12-02', to: '2026-12-04' },  // job over three days
+        { id: 4, lane: '12', from: '2026-11-20', to: '2026-11-20' },  // past task
+        { id: 5, lane: '11', from: '2026-12-06', to: '' }             // no end: its first day only
+    ];
+    ok('itemsIn: every task in a picked cell, once each, in item order',
+        eq(L.itemsIn(['10|2026-12-01', '10|2026-12-01'], items), ['1', '2']));
+    ok('itemsIn: a job counts when any picked day falls inside it (middle day)', eq(L.itemsIn(['11|2026-12-03'], items), ['3']));
+    ok('itemsIn: the same day in another room is not that room\'s job', eq(L.itemsIn(['10|2026-12-03', '12|2026-12-03'], items), []));
+    ok('itemsIn: past days resolve too (verify / delete a past task)', eq(L.itemsIn(['12|2026-11-20'], items), ['4']));
+    ok('itemsIn: a rectangle across rooms and days', eq(L.itemsIn(L.rect(lanes, dates, { lane: '10', d: '2026-12-01' }, { lane: '11', d: '2026-12-02' }), items), ['1', '2', '3']));
+    ok('itemsIn: the day after a job and an item with no end', eq(L.itemsIn(['11|2026-12-05'], items), []) && eq(L.itemsIn(['11|2026-12-06'], items), ['5']));
+    ok('itemsIn: nothing picked or no items', eq(L.itemsIn([], items), []) && eq(L.itemsIn(['10|2026-12-01'], []), []));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

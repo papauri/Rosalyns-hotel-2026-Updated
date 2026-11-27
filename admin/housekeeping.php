@@ -2007,7 +2007,8 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                     <?php endif; ?>
                 </tbody>
             </table>
-            <?php if (!empty($hkTableRows)): ?>
+            <?php /* Always printed (hidden until rows are ticked): the timeline's picks use this bar's actions even when the
+                     list below is filtered to nothing (?due=now, ?room=), as on Room Maintenance. */ ?>
                 <?php adminBulkBarStart('bulk_assignments', '#hkAssignmentsCard', $csrf_token); ?>
                     <select name="assigned_to" data-bulk-field aria-label="Assign selected to">
                         <option value="">Assign to...</option>
@@ -2030,7 +2031,6 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                     <button type="button" name="bulk_op" value="extend" class="btn btn-secondary btn-sm" data-rh-extend="hk"><i class="fas fa-repeat" aria-hidden="true"></i> Repeat until...</button>
                     <?php adminBulkButton('delete', 'Delete', 'fa-trash', 'Delete {n} selected assignment(s)? This cannot be undone. Verified tasks are kept.', 'btn-danger', '', 'Delete', 'danger'); ?>
                 <?php adminBulkBarEnd(); ?>
-            <?php endif; ?>
         </div>
     </div>
 
