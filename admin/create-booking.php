@@ -1635,6 +1635,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error !== '') {
         'paid'       => ($_POST['payment_received'] ?? '') === '1',
         'method'     => in_array($cbRpMethod, ['cash', 'bank_transfer', 'mobile_money', 'card', 'cheque', 'other'], true) ? $cbRpMethod : '',
         'amount'     => $cbRpAmount > 0 ? $cbRpAmount : 0,
+        // The step-by-step screen opens the step the refusal belongs to (the handler's own stage marker; read only).
+        'step'       => isset($cbStep) ? (int)$cbStep : 0,
+        'field'      => isset($cbField) ? (string)$cbField : '',
+        'message'    => (string)$error,
     ];
 }
 
@@ -2363,13 +2367,14 @@ try {
             font-size: 13px;
         }
     </style>
+    <link rel="stylesheet" href="css/create-booking-steps.css?v=<?php echo @filemtime(__DIR__ . '/css/create-booking-steps.css'); ?>">
 </head>
 
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="content">
-        <div class="create-booking-container">
+        <div class="create-booking-container cb-wide">
             <div class="page-header">
                 <h1 class="page-title"><i class="fas fa-plus-circle" style="color: var(--gold);"></i> Create Booking</h1>
                 <a href="bookings.php" style="color: var(--gold); text-decoration: none; font-weight: 600;"><i class="fas fa-arrow-left"></i> Back to Bookings</a>
@@ -2387,7 +2392,9 @@ try {
                 <strong class="cb-presence__title">Also booking right now</strong>
                 <ul class="cb-presence__list" id="rh-cb-presence-list"></ul>
             </div>
-            <form method="POST" id="createBookingForm" data-offline-queue="1">
+            <?php /* novalidate: the step checks (validateSection) replace the browser's own, which stopped at fields on
+                     hidden steps. The server checks everything again on save. */ ?>
+            <form method="POST" id="createBookingForm" data-offline-queue="1" novalidate>
                 <?php
                 if (empty($_SESSION['admin_create_booking_uuid'])) {
                     $_SESSION['admin_create_booking_uuid'] = bin2hex(random_bytes(16));
@@ -2399,44 +2406,41 @@ try {
                 <input type="hidden" name="auto_assign_room" id="autoAssignRoom" value="1">
                 <input type="hidden" name="payment_received" id="paymentReceivedHidden" value="0">
 
-                <!-- ── Section progress bar ─────────────────────────────────────── -->
-                <div class="cb-step-bar" id="cbStepBar">
+                <div class="cb-layout">
+                <div class="cb-main">
+                <!-- ── Steps: one on screen at a time (back to any earlier step, forward only to steps passed) ── -->
+                <nav class="cb-step-bar" id="cbStepBar" aria-label="New booking steps">
                     <div class="cb-step-track">
-                        <button type="button" class="cb-step active" id="cbStepBtn1" onclick="cbJumpTo(1)">
+                        <button type="button" class="cb-step active" id="cbStepBtn1" onclick="cbJumpTo(1)" aria-current="step">
                             <span class="cb-step-num">1</span>
-                            <span class="cb-step-label">Stay Details</span>
+                            <span class="cb-step-label">Dates and guests</span>
                         </button>
-                        <span class="cb-step-sep">›</span>
+                        <span class="cb-step-sep" aria-hidden="true">›</span>
                         <button type="button" class="cb-step" id="cbStepBtn2" onclick="cbJumpTo(2)">
                             <span class="cb-step-num">2</span>
                             <span class="cb-step-label">Rooms</span>
                         </button>
-                        <span class="cb-step-sep">›</span>
+                        <span class="cb-step-sep" aria-hidden="true">›</span>
                         <button type="button" class="cb-step" id="cbStepBtn3" onclick="cbJumpTo(3)">
                             <span class="cb-step-num">3</span>
-                            <span class="cb-step-label">Guest Info</span>
+                            <span class="cb-step-label">Guest</span>
                         </button>
-                        <span class="cb-step-sep">›</span>
+                        <span class="cb-step-sep" aria-hidden="true">›</span>
                         <button type="button" class="cb-step" id="cbStepBtn4" onclick="cbJumpTo(4)">
                             <span class="cb-step-num">4</span>
-                            <span class="cb-step-label">Status</span>
+                            <span class="cb-step-label">Status and payment</span>
                         </button>
-                        <span class="cb-step-sep">›</span>
+                        <span class="cb-step-sep" aria-hidden="true">›</span>
                         <button type="button" class="cb-step" id="cbStepBtn5" onclick="cbJumpTo(5)">
                             <span class="cb-step-num">5</span>
-                            <span class="cb-step-label">Payment</span>
-                        </button>
-                        <span class="cb-step-sep">›</span>
-                        <button type="button" class="cb-step" id="cbStepBtn6" onclick="cbJumpTo(6)">
-                            <span class="cb-step-num">6</span>
-                            <span class="cb-step-label">Review</span>
+                            <span class="cb-step-label">Review and create</span>
                         </button>
                     </div>
-                </div>
+                </nav>
 
-                <!-- ══ 1. STAY DETAILS ═══════════════════════════════════════════════════ -->
-                <div class="form-card" id="cbSection1">
-                    <h3><i class="fas fa-calendar-alt"></i> Stay Details</h3>
+                <!-- ══ 1. DATES AND GUESTS ═══════════════════════════════════════════════ -->
+                <div class="form-card cb-panel is-active" id="cbSection1">
+                    <h3 tabindex="-1"><i class="fas fa-calendar-alt"></i> Dates and guests</h3>
                     <div class="form-row three-col">
                         <div class="form-group">
                             <label>Check-in Date <span class="required">*</span></label>
@@ -2468,16 +2472,16 @@ try {
                         <label>Special Requests</label>
                         <textarea name="special_requests" rows="2" placeholder="Early check-in, extra pillows, allergies…"><?php echo htmlspecialchars($_POST['special_requests'] ?? ''); ?></textarea>
                     </div>
-                    <div class="cb-section-error" id="cbErr1"></div>
+                    <div class="cb-section-error" id="cbErr1" role="alert"></div>
                     <div class="cb-section-nav">
                         <span></span>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(1)">Rooms &amp; Availability <i class="fas fa-arrow-down"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(1)">Continue <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
                     </div>
                 </div>
 
-                <!-- ══ 2. ROOM ALLOCATION ════════════════════════════════════════════════ -->
-                <div class="form-card" id="cbSection2">
-                    <h3><i class="fas fa-bed"></i> Room Allocation</h3>
+                <!-- ══ 2. ROOMS ══════════════════════════════════════════════════════════ -->
+                <div class="form-card cb-panel" id="cbSection2">
+                    <h3 tabindex="-1"><i class="fas fa-bed"></i> Rooms</h3>
 
                     <div id="roomAvailabilityNotice" class="alert alert-warning" style="margin-bottom:14px;display:<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? 'none' : 'flex'; ?>;">
                         <i class="fas fa-calendar-alt"></i> Select check-in and check-out dates above to see available rooms.
@@ -2525,16 +2529,16 @@ try {
                             <div id="irList" class="ir-list"></div>
                         </div>
                     </div>
-                    <div class="cb-section-error" id="cbErr2"></div>
+                    <div class="cb-section-error" id="cbErr2" role="alert"></div>
                     <div class="cb-section-nav">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(2)"><i class="fas fa-arrow-up"></i> Stay Details</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(2)">Guest Information <i class="fas fa-arrow-down"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(2)"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" id="cbNextBtn2" onclick="cbNext(2)">Continue <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
                     </div>
                 </div>
 
-                <!-- ══ 3. GUEST INFORMATION ═══════════════════════════════════════════════ -->
-                <div class="form-card" id="cbSection3">
-                    <h3><i class="fas fa-user"></i> Guest Information</h3>
+                <!-- ══ 3. GUEST ══════════════════════════════════════════════════════════ -->
+                <div class="form-card cb-panel" id="cbSection3">
+                    <h3 tabindex="-1"><i class="fas fa-user"></i> Guest</h3>
 
                     <!-- Returning Guest Lookup -->
                     <div class="rg-lookup-bar">
@@ -2587,85 +2591,36 @@ try {
                         <label>Address</label>
                         <textarea name="guest_address" id="guestAddress" rows="2"><?php echo htmlspecialchars($_POST['guest_address'] ?? ''); ?></textarea>
                     </div>
-                    <div class="cb-section-error" id="cbErr3"></div>
+                    <div class="cb-section-error" id="cbErr3" role="alert"></div>
                     <div class="cb-section-nav">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(3)"><i class="fas fa-arrow-up"></i> Rooms</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(3)">Booking Status <i class="fas fa-arrow-down"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(3)"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(3)">Continue <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
                     </div>
                 </div>
 
-                <!-- ══ 4. BOOKING STATUS ══════════════════════════════════════════════════ -->
-                <div class="form-card" id="cbSection4">
-                    <h3><i class="fas fa-tag"></i> Booking Status</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Status</label>
-                            <select name="booking_status" id="bookingStatus" onchange="onBookingStatusChange()">
-                                <option value="pending">Pending</option>
-                                <option value="confirmed" selected>Confirmed</option>
-                                <?php if (getSetting('tentative_bookings_enabled', '1') !== '0'): ?>
-                                    <option value="tentative">Tentative (hold)</option>
-                                <?php endif; ?>
-                                <option value="checked-in">Checked In (walk-in)</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="cb-section-nav" style="margin-top:16px;">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(4)"><i class="fas fa-arrow-up"></i> Guest Info</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(4)">Payment <i class="fas fa-arrow-down"></i></button>
-                    </div>
-                </div>
+                <!-- ══ 4. STATUS AND PAYMENT ═════════════════════════════════════════════ -->
+                <?php // The figures here and on Review come from the price check (Phase B dry run): the save's own code
+                // run on this form with nothing saved. The page's own estimate (calculateTotal) only prices the room lines. ?>
+                <div class="form-card cb-panel" id="cbSection4">
+                    <h3 tabindex="-1"><i class="fas fa-tag"></i> Status and payment</h3>
+                    <fieldset class="cb-choices" id="cbStatusChoices">
+                        <legend>Booking status</legend>
+                        <label class="cb-choice"><input type="radio" name="booking_status" value="confirmed" checked onchange="onBookingStatusChange()"><span><span class="cb-choice__title">Confirmed</span><span class="cb-choice__text">The stay is agreed.</span></span></label>
+                        <label class="cb-choice"><input type="radio" name="booking_status" value="pending" onchange="onBookingStatusChange()"><span><span class="cb-choice__title">Pending</span><span class="cb-choice__text">Waiting for the guest to confirm.</span></span></label>
+                        <?php if (getSetting('tentative_bookings_enabled', '1') !== '0'): ?>
+                        <label class="cb-choice"><input type="radio" name="booking_status" value="tentative" onchange="onBookingStatusChange()"><span><span class="cb-choice__title">Tentative (hold)</span><span class="cb-choice__text">Rooms held for the guest. No payment is taken; a quotation can be sent.</span></span></label>
+                        <?php endif; ?>
+                        <label class="cb-choice cb-choice--minor"><input type="radio" name="booking_status" value="checked-in" onchange="onBookingStatusChange()"><span><span class="cb-choice__title">Checked in (walk-in)</span><span class="cb-choice__text">The guest is here now.</span></span></label>
+                    </fieldset>
 
-                <!-- ══ 5. PAYMENT TO COLLECT ══════════════════════════════════════════════ -->
-                <div class="form-card" id="cbSection5">
-                    <h3><i class="fas fa-receipt"></i> Payment to Collect</h3>
-
-                    <table class="accounting-table">
-                        <tbody>
-                            <tr id="accRowRoomRate">
-                                <td>Room rate</td>
-                                <td id="accRoomRate">—</td>
-                            </tr>
-                            <tr id="accRowRatePlan" class="tax-row" style="display:none;">
-                                <td id="accRatePlanLabel">Rate plan</td>
-                                <td id="accRatePlanTotal">—</td>
-                            </tr>
-                            <tr id="accRowNights">
-                                <td>× <span id="accNightsLabel">— nights</span></td>
-                                <td id="accBaseTotal">—</td>
-                            </tr>
-                            <tr id="accRowQty" style="display:none;">
-                                <td>× <span id="accQtyLabel">— rooms</span></td>
-                                <td id="accQtyTotal">—</td>
-                            </tr>
-                            <tr id="accRowChild" style="display:none;" class="tax-row">
-                                <td>Child supplement (<span id="accChildCount">0</span> <span id="accChildWord">child</span> × <span id="accChildPct">50</span>% rate)</td>
-                                <td id="accChildTotal">—</td>
-                            </tr>
-                            <?php // Owner 2026-11-15: the stay price is all-in, so the subtotal is the amount BEFORE levy and VAT;
-                            // the levy (once per booking) and VAT are each a % of that one subtotal and add up to the total. ?>
-                            <tr class="subtotal">
-                                <td>Subtotal (before levy and VAT)</td>
-                                <td id="accSubtotal">—</td>
-                            </tr>
-                            <?php if ($levy_enabled): ?>
-                                <tr id="accRowLevy" class="tax-row">
-                                    <td>Tourism levy (<?php echo $levy_pct_cfg; ?>%) — included in price</td>
-                                    <td id="accLevyTotal">—</td>
-                                </tr>
-                            <?php endif; ?>
-                            <?php if ($vat_enabled): ?>
-                                <tr id="accRowVat" class="tax-row">
-                                    <td>VAT (<?php echo $vat_rate_cfg; ?>%)<?php echo vat_mode() === 'inclusive' ? ' — included in price' : ''; ?></td>
-                                    <td id="accVatTotal">—</td>
-                                </tr>
-                            <?php endif; ?>
-                            <tr class="total-row">
-                                <td>Total to collect</td>
-                                <td id="accGrandTotal">—</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                    <div class="cb-quote-box" id="cbQuoteBox" aria-live="polite">
+                        <dl>
+                            <div class="cb-fig cb-fig--main"><dt>Total <i class="help" data-tip="The whole stay with VAT and levy, from the price check: the booking's own save code run on this form, with nothing saved. Checked again on Review.">?</i></dt><dd id="cbQTotal">—</dd></div>
+                            <div class="cb-fig" id="cbQCreditRow" hidden><dt>Guest credit to apply <i class="help" data-tip="Credit notes ticked below that will be used after the booking is created, capped at what is owed. Not cash.">?</i></dt><dd id="cbQCredit">—</dd></div>
+                            <div class="cb-fig"><dt>To collect <i class="help" data-tip="Total minus the guest credit to apply: the amount filled in below until you type your own.">?</i></dt><dd id="cbQCollect">—</dd></div>
+                        </dl>
+                        <p class="cb-quote-note" id="cbQNote">Checked when this step opens.</p>
+                    </div>
 
                     <div style="margin-top:20px;">
                         <label class="payment-toggle-label" id="paymentReceivedLabel">
@@ -2699,6 +2654,35 @@ try {
                                         <label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;color:#8a4b00;cursor:pointer;"><input type="checkbox" name="confirm_overpay" value="1" id="overCollectedCb" style="margin-top:2px;"> <span>The guest paid more than owed</span></label>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quotation options — shown only for Tentative (always posted, as before) -->
+                    <div id="quotationOptionGroup" style="display:none;margin-top:16px;padding:16px;background:#FAF6F0;border-radius:6px;border:1px solid #D2C8BC;">
+                        <h4 style="margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:0.06em;color:#766550;font-family:inherit;">
+                            <i class="fas fa-file-invoice"></i> Quotation
+                        </h4>
+                        <div class="checkbox-group" style="margin-bottom:12px;">
+                            <input type="checkbox" name="send_quotation" id="sendQuotationCheck" value="1" checked>
+                            <label for="sendQuotationCheck">Send quotation PDF to guest</label>
+                        </div>
+                        <div id="quotationValidDaysGroup" style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-top:4px;">
+                            <div class="form-group" style="flex:0 0 auto;margin:0;">
+                                <label style="font-size:12px;">Valid for</label>
+                                <select name="quotation_valid_days" id="quotationValidDays" style="width:auto;min-width:110px;">
+                                    <option value="1">1 day</option>
+                                    <option value="3">3 days</option>
+                                    <option value="7" selected>7 days</option>
+                                    <option value="14">14 days</option>
+                                    <option value="30">30 days</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex:1 1 200px;margin:0;">
+                                <label style="font-size:12px;">Note to include in quotation (optional)</label>
+                                <textarea name="quotation_notes" id="quotationNotes" rows="2"
+                                    placeholder="e.g. Price includes breakfast, airport transfer available on request…"
+                                    style="font-size:13px;"></textarea>
                             </div>
                         </div>
                     </div>
@@ -2737,10 +2721,11 @@ try {
                         <div id="creditList" style="margin-top:12px;font-size:13px;"></div>
                     </div>
 
-                    <div class="cb-section-error" id="cbErr5"></div>
+                    <div class="cb-step-warn" id="cbWarn4" role="status" hidden></div>
+                    <div class="cb-section-error" id="cbErr4" role="alert"></div>
                     <div class="cb-section-nav">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(5)"><i class="fas fa-arrow-up"></i> Status</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(5)">Review &amp; Submit <i class="fas fa-arrow-down"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(4)"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" id="cbNextBtn4" onclick="cbNext(4)">Continue <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
                     </div>
                     <script>
                         function onCreditOverrideToggle() {
@@ -2748,6 +2733,7 @@ try {
                             document.getElementById('creditOverrideBox').style.display = on ? 'block' : 'none';
                             // Clear any previously loaded list so the source can't be ambiguous.
                             document.getElementById('creditList').innerHTML = '';
+                            if (window.cbMarkStale) window.cbMarkStale();
                         }
 
                         function loadGuestCredit() {
@@ -2795,6 +2781,7 @@ try {
                                         + 'Total available: <strong>' + res.currency + Number(res.total_balance).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong>'
                                         + '<br>Selected credit is applied to the balance after the booking is created (capped at the amount due).</div>';
                                     listEl.innerHTML = html;
+                                    if (window.cbMarkStale) window.cbMarkStale();
                                 })
                                 .catch(function () {
                                     btn.disabled = false;
@@ -2804,9 +2791,13 @@ try {
                     </script>
                 </div>
 
-                <!-- ══ 6. ADMIN & NOTIFICATION ════════════════════════════════════════════ -->
-                <div class="form-card" id="cbSection6">
-                    <h3><i class="fas fa-cog"></i> Admin &amp; Notification</h3>
+                <!-- ══ 5. REVIEW AND CREATE ═════════════════════════════════════════════ -->
+                <?php // Read-only summary from the server's price check (filled by the page script), then the last
+                // fields and the one Create button. Create still posts this form exactly as before. ?>
+                <div class="form-card cb-panel" id="cbSection5">
+                    <h3 tabindex="-1"><i class="fas fa-clipboard-check"></i> Review and create</h3>
+                    <div id="cbReview" aria-live="polite"><p class="cb-review-loading">The booking is checked when this step opens.</p></div>
+                    <div class="cb-review-extras">
                     <div class="form-row">
                         <div class="form-group">
                             <label>Group / Company / Agent Reference</label>
@@ -2831,35 +2822,6 @@ try {
                         <span class="ew-open-state" id="cbWordingState" aria-live="polite"></span>
                         <input type="hidden" name="email_wording_key" id="cbWKey" value="">
                         <input type="hidden" name="email_wording_html" id="cbWHtml" value="">
-                    </div>
-
-                    <!-- Quotation options — visible only when Tentative status is selected -->
-                    <div id="quotationOptionGroup" style="display:none;margin-top:16px;padding:16px;background:#FAF6F0;border-radius:6px;border:1px solid #D2C8BC;">
-                        <h4 style="margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:0.06em;color:#766550;font-family:inherit;">
-                            <i class="fas fa-file-invoice"></i> Quotation
-                        </h4>
-                        <div class="checkbox-group" style="margin-bottom:12px;">
-                            <input type="checkbox" name="send_quotation" id="sendQuotationCheck" value="1" checked>
-                            <label for="sendQuotationCheck">Send quotation PDF to guest</label>
-                        </div>
-                        <div id="quotationValidDaysGroup" style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-top:4px;">
-                            <div class="form-group" style="flex:0 0 auto;margin:0;">
-                                <label style="font-size:12px;">Valid for</label>
-                                <select name="quotation_valid_days" id="quotationValidDays" style="width:auto;min-width:110px;">
-                                    <option value="1">1 day</option>
-                                    <option value="3">3 days</option>
-                                    <option value="7" selected>7 days</option>
-                                    <option value="14">14 days</option>
-                                    <option value="30">30 days</option>
-                                </select>
-                            </div>
-                            <div class="form-group" style="flex:1 1 200px;margin:0;">
-                                <label style="font-size:12px;">Note to include in quotation (optional)</label>
-                                <textarea name="quotation_notes" id="quotationNotes" rows="2"
-                                    placeholder="e.g. Price includes breakfast, airport transfer available on request…"
-                                    style="font-size:13px;"></textarea>
-                            </div>
-                        </div>
                     </div>
                     <?php
                     // Cancellation policy this booking will be locked to (current settings; nothing shown when switched off).
@@ -2900,15 +2862,30 @@ try {
                     })();
                     </script>
                     <?php endif; ?>
-                    <div class="cb-section-nav" style="border-top:none; padding-top:8px; margin-top:8px;">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(6)"><i class="fas fa-arrow-up"></i> Payment</button>
-                        <span></span>
+                    </div>
+                    <div class="cb-step-warn" id="cbWarn5" role="status" hidden></div>
+                    <div class="cb-section-error" id="cbErr5" role="alert"></div>
+                    <div class="cb-section-nav">
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(5)"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                        <button type="submit" class="btn-create" id="cbSubmitBtn">
+                            <i class="fas fa-plus-circle" aria-hidden="true"></i> Create booking
+                        </button>
                     </div>
                 </div>
+                </div><!-- /.cb-main -->
 
-                <button type="submit" class="btn-create" id="cbSubmitBtn">
-                    <i class="fas fa-plus-circle"></i> Create Booking
-                </button>
+                <?php // Always-visible summary: rooms and nights from the form, money from the latest price check. ?>
+                <aside class="cb-summary" id="cbSummary" aria-label="Booking summary">
+                    <h2 class="cb-summary__title">Summary <span class="cb-summary__state" id="cbSumState" aria-live="polite"></span></h2>
+                    <dl class="cb-summary__list">
+                        <div class="cb-summary__row cb-summary__row--count"><dt>Rooms <i class="help" data-tip="Rooms on this booking: every room line in step 2, counting the quantity of each.">?</i></dt><dd id="cbSumRooms">—</dd></div>
+                        <div class="cb-summary__row cb-summary__row--count"><dt>Nights <i class="help" data-tip="Nights between the check-in and check-out dates in step 1.">?</i></dt><dd id="cbSumNights">—</dd></div>
+                        <div class="cb-summary__row"><dt>Total <i class="help" data-tip="The whole stay with VAT and levy, from the latest price check (the save's own code, nothing saved). Shows checking… after a change until it is checked again.">?</i></dt><dd class="cb-money" id="cbSumTotal">—</dd></div>
+                        <div class="cb-summary__row"><dt>Paid <i class="help" data-tip="Money received now (step 4), as the save will record it. Guest credit is not counted here.">?</i></dt><dd class="cb-money" id="cbSumPaid">—</dd></div>
+                        <div class="cb-summary__row cb-summary__row--owed"><dt>Still owed <i class="help" data-tip="Total minus the money received now and the guest credit to apply, from the latest price check.">?</i></dt><dd class="cb-money" id="cbSumOwed">—</dd></div>
+                    </dl>
+                </aside>
+                </div><!-- /.cb-layout -->
             </form>
         </div>
     </div>
@@ -3851,6 +3828,7 @@ try {
 
         // ── Availability AJAX ─────────────────────────────────────────────────────
         function checkAvailabilityForDates(checkIn, checkOut) {
+            cbAvailBusy(true); // step 2 Continue waits for this answer; rooms already picked are checked again
             const notice = el('roomAvailabilityNotice');
             const panel  = el('availSummaryPanel');
             document.querySelectorAll('.line-room-select').forEach(s => s.disabled = true);
@@ -3938,7 +3916,8 @@ try {
                     if (notice) {
                         notice.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Could not check availability — all rooms shown.';
                     }
-                });
+                })
+                .finally(() => cbAvailBusy(false));
         }
 
         // ── Individual room AJAX loader ───────────────────────────────────────────
@@ -4314,37 +4293,76 @@ try {
             updateCollectAmount(grandTotal);
         }
 
+        // ── Status, payment and the price check (steps 4 and 5) ───────────────────
+        // Plan .claude/CREATE_BOOKING_WIZARD_PLAN.md Phase A (owner 2026-11-27). The figures in step 4, on Review and in
+        // the summary come from the price check: this form posted with response=wizard + dry_run=1 and answered by the
+        // save's own code with nothing saved (Phase B). A change in steps 1-4 marks it stale; Review and Create check
+        // again. Create itself still posts this form exactly as before.
+        const CB_TOL = 0.01; // BALANCE_TOLERANCE: the save's tolerance for paid / part paid / paid more than owed
+        const CB_STEPS = 5;
+        const cbNav = { current: 1, max: 1, moving: false };
+        const cbQ = {
+            quote: null,    // the latest price check that answered with figures
+            res: null,      // the latest reply, whatever it was
+            warnings: [],   // checks that would refuse the save, each with its step (overpay 4, email wording 5)
+            fresh: false,   // the figures match the form as it is now
+            ver: 0,         // bumped by every change that can alter the figures
+            availBusy: 0,   // room availability checks in flight
+            quoteBusy: 0,   // price checks in flight
+            est: null,      // the page's own estimate last seen (calculateTotal)
+            shown: '',      // the figures Review last showed (Create stops when they changed)
+            chain: Promise.resolve(),
+            timer: 0
+        };
+        function cbR2(x) { return Math.round((Number(x) + Number.EPSILON) * 100) / 100; }
+        function cbStatus() {
+            const r = document.querySelector('#createBookingForm input[name="booking_status"]:checked');
+            return r ? r.value : 'confirmed';
+        }
+
+        // Amount collected follows the price check (the server total minus the guest credit to apply: cbFillAmount)
+        // until staff type their own; before the first check it follows the page estimate, as before.
         function updateCollectAmount(grandTotal) {
             const amtEl = el('amountCollected');
             if (!amtEl) return;
-            if (!amtEl.value || amtEl.getAttribute('data-auto') === '1') {
+            // calculateTotal() runs on every change to the dates, rooms, occupancy or prices: the check is stale.
+            cbQ.est = grandTotal;
+            cbMarkStale();
+            if (!cbQ.quote && !amtEl.disabled && (!amtEl.value || amtEl.getAttribute('data-auto') === '1')) {
                 amtEl.value = grandTotal > 0 ? grandTotal.toFixed(2) : '';
                 amtEl.setAttribute('data-auto', '1');
             }
             checkPartialPayment();
+            cbRenderSummary();
         }
 
         function checkPartialPayment() {
             const amtEl = el('amountCollected');
             const hint = el('amountCollectedHint');
             if (!amtEl || !hint) return;
-            const grand = parseFloat((el('accGrandTotal')?.textContent || '').replace(/[^\d.]/g, '')) || 0;
+            // Judged against the price check's total (the save's own figure) with the save's 0.01 tolerance; before
+            // the first check, against the page estimate.
+            const q = cbQ.quote;
+            const grand = q ? (Number(q.totals.total_with_vat) || 0) : (cbQ.est || 0);
+            const credit = q && cbQ.fresh ? (Number(q.credit.will_apply) || 0) : 0;
             const entered = parseFloat(amtEl.value) || 0;
             // data-auto is cleared only when staff type an amount (the input's oninput), so an auto-filled amount
             // keeps following the total when the dates, room or extras change.
             const overBy = entered - grand;
             const overWrap = el('overCollectedWrap');
             if (overWrap) {
-                const isOver = grand > 0 && overBy > 0.01;
+                const isOver = grand > 0 && overBy > CB_TOL;
                 overWrap.style.display = isOver ? 'block' : 'none';
                 el('overCollectedWarn').textContent = isOver ? 'That is ' + fmt(overBy) + ' more than owed. The extra will be issued to the guest as a credit note.' : '';
-                el('overCollectedCb').required = isOver;
                 if (!isOver) el('overCollectedCb').checked = false;
             }
-            if (entered > 0 && entered < grand - 0.01) {
+            if (entered > 0 && entered < grand - CB_TOL && credit > 0 && entered + credit >= grand - CB_TOL) {
+                hint.textContent = 'Part paid now; the guest credit covers the rest — booking will be marked Paid.';
+                hint.style.color = '#27ae60';
+            } else if (entered > 0 && entered < grand - CB_TOL) {
                 hint.textContent = 'Partial payment — booking will be marked Partially Paid.';
                 hint.style.color = '#e67e22';
-            } else if (entered >= grand - 0.01 && grand > 0) {
+            } else if (entered >= grand - CB_TOL && grand > 0) {
                 hint.textContent = 'Full payment — booking will be marked Paid.';
                 hint.style.color = '#27ae60';
             } else {
@@ -4360,20 +4378,23 @@ try {
             hid.value = chk.checked ? '1' : '0';
             sec.classList.toggle('open', chk.checked);
             if (chk.checked) calculateTotal();
+            cbMarkStale();
             cbWordingSync();
         }
 
-        // ── Edited email wording (owner 2026-11-27) ──────────────────────────────
+        // ── Edited email wording (owner 2026-11-27; on Review since 2026-11-28) ───
         // Which email the booking sends: the same choice as rh_email_wording_create_key() in PHP (the server checks
-        // the posted key again and refuses a mismatch). Changing Status or payment after editing clears the edit.
+        // the posted key again and refuses a mismatch). A staff change of status or payment after editing clears the
+        // edit with a note (cbWordingClear); the key check stays as the safety net.
         const CB_EMAIL_NAMES = {
             booking_received: 'Booking received email',
             booking_confirmed: 'Booking confirmed email',
             tentative_booking_created: 'Tentative booking email'
         };
         function cbWordingKey() {
-            const status = el('bookingStatus') ? el('bookingStatus').value : 'confirmed';
-            const paid = el('paymentReceivedHidden') && el('paymentReceivedHidden').value === '1'
+            const status = cbStatus();
+            const hid = el('paymentReceivedHidden');
+            const paid = hid && !hid.disabled && hid.value === '1'
                 && (parseFloat(el('amountCollected') ? el('amountCollected').value : '0') || 0) > 0;
             if (!paid && status === 'tentative') return 'tentative_booking_created';
             return status === 'confirmed' ? 'booking_confirmed' : 'booking_received';
@@ -4396,6 +4417,15 @@ try {
             }
             if (!kIn.value && state && !send) state.textContent = '';
         }
+        function cbWordingClear(what) {
+            const kIn = el('cbWKey');
+            const hIn = el('cbWHtml');
+            const state = el('cbWordingState');
+            if (!kIn || !hIn || !kIn.value) return;
+            kIn.value = '';
+            hIn.value = '';
+            if (state) state.textContent = 'You changed the ' + what + ' after editing the email, so your edited wording was cleared. Edit it again if needed.';
+        }
         function cbWordingEdit() {
             if (!window.RhEmailWording) return;
             const key = cbWordingKey();
@@ -4412,31 +4442,469 @@ try {
         if (el('amountCollected')) el('amountCollected').addEventListener('input', cbWordingSync);
 
         function onBookingStatusChange() {
-            const status = el('bookingStatus').value;
-            const isTentative = status === 'tentative';
+            const isTentative = cbStatus() === 'tentative';
             const chk = el('paymentReceivedCheck');
             const lbl = el('paymentReceivedLabel');
             const notice = el('tentativePaymentNotice');
             const qtGroup = el('quotationOptionGroup');
+            const hid = el('paymentReceivedHidden');
+            const amt = el('amountCollected');
+            const overCb = el('overCollectedCb');
+            // The payment fields: disabled for Tentative, so the browser does not post them (no payment on a hold).
+            const payFields = [hid, el('paymentMethod'), amt, overCb];
+            const credit = el('creditPanel');
 
             if (isTentative) {
-                // Grey out & disable payment collection
+                // Grey out, clear & disable payment collection
                 chk.checked = false;
                 chk.disabled = true;
                 lbl.style.opacity = '0.4';
                 lbl.style.cursor = 'not-allowed';
-                el('paymentReceivedHidden').value = '0';
+                hid.value = '0';
                 el('paymentDetailsSection').classList.remove('open');
+                if (amt) { amt.value = ''; amt.setAttribute('data-auto', '1'); }
+                if (overCb) overCb.checked = false;
+                payFields.forEach(function (f) { if (f) f.disabled = true; });
                 notice.style.display = 'block';
                 qtGroup.style.display = 'block';
+                if (credit) credit.hidden = true; // the save applies no credit to a hold (its fields stay as before)
             } else {
+                payFields.forEach(function (f) { if (f) f.disabled = false; });
                 chk.disabled = false;
                 lbl.style.opacity = '';
                 lbl.style.cursor = '';
                 notice.style.display = 'none';
                 qtGroup.style.display = 'none';
+                if (credit) credit.hidden = false;
+                // The amount was cleared for the hold: it follows the total again.
+                if (amt && !amt.value) {
+                    if (cbQ.quote) cbFillAmount(cbQ.quote);
+                    else if (cbQ.est > 0) { amt.value = cbQ.est.toFixed(2); amt.setAttribute('data-auto', '1'); }
+                }
+                checkPartialPayment();
             }
+            cbMarkStale();
             cbWordingSync();
+        }
+
+        // ── Price check ───────────────────────────────────────────────────────────
+        // Something that can change the figures happened: the latest check no longer matches the form. Once the
+        // payment step has been reached, the check runs again by itself shortly after (one at a time, newest form).
+        function cbMarkStale() {
+            cbQ.ver++;
+            cbQ.fresh = false;
+            cbRenderSummary();
+            if (cbNav.current === 4) cbRenderQuoteBox();
+            if (cbNav.current === 5) cbRenderReview();
+            if (cbNav.max >= 4) cbQuoteSoon();
+        }
+        window.cbMarkStale = cbMarkStale;
+
+        // Room availability check in flight (checkAvailabilityForDates): step 2 Continue waits for its answer.
+        function cbAvailBusy(on) {
+            cbQ.availBusy = Math.max(0, cbQ.availBusy + (on ? 1 : -1));
+            cbBusyUi();
+            if (on) cbMarkStale();
+        }
+        function cbAvailIdle() {
+            return new Promise(function (resolve) {
+                const t0 = Date.now();
+                (function wait() {
+                    if (!cbQ.availBusy || Date.now() - t0 > 30000) { resolve(); return; }
+                    setTimeout(wait, 100);
+                })();
+            });
+        }
+        function cbBusyUi() {
+            const form = el('createBookingForm');
+            if (form) form.dataset.cbBusy = (cbQ.availBusy > 0 || cbQ.quoteBusy > 0) ? '1' : '0';
+            const next2 = el('cbNextBtn2');
+            if (next2) next2.disabled = cbQ.availBusy > 0;
+            cbRenderSummary();
+        }
+
+        function cbQuoteSoon() {
+            clearTimeout(cbQ.timer);
+            cbQ.timer = setTimeout(function () {
+                cbQuoteRun(false).then(function (res) {
+                    // Found in the background: shown where staff are (steps 4 and 5). Continue / Create open its step.
+                    if (!res || cbNav.current < 4) return;
+                    if (!res.ok && !res.offline) {
+                        cbStepError(cbNav.current, res.message || 'The booking could not be checked.', '', '', 'server');
+                    } else if (res.ok && !res.duplicate) {
+                        const box = el('cbErr' + cbNav.current);
+                        if (box && box.dataset.src === 'server') cbStepError(cbNav.current, '');
+                    }
+                }).catch(function () { /* the reply is shown by cbQuoteFetch */ });
+            }, 500);
+        }
+
+        // One price check at a time, in order, each on the form as it is when it starts.
+        function cbQuoteRun(force) {
+            const p = cbQ.chain.then(function () { return cbQuoteRunNow(force); });
+            cbQ.chain = p.catch(function () {});
+            return p;
+        }
+        async function cbQuoteRunNow(force) {
+            if (!force && cbQ.fresh && cbQ.res && cbQ.res.ok && !cbQ.res.duplicate) return cbQ.res;
+            await cbAvailIdle();
+            let res = await cbQuoteFetch();
+            // The amount sent changed to follow the new total: check again so payment, credit and owed match it.
+            if (res.ok && res.quote && !res.duplicate && cbFillAmount(res.quote)) res = await cbQuoteFetch();
+            return res;
+        }
+        // A fresh answer for the form as it is now (asks again when something changed during the check).
+        async function cbFreshQuote() {
+            let res = null;
+            for (let i = 0; i < 3; i++) {
+                res = await cbQuoteRun(true);
+                if (!res || !res.ok || res.duplicate || cbQ.fresh) break;
+            }
+            return res;
+        }
+        async function cbQuoteFetch() {
+            const form = el('createBookingForm');
+            const startVer = cbQ.ver;
+            cbQ.quoteBusy++;
+            cbBusyUi();
+            if (cbNav.current === 4) cbRenderQuoteBox();
+            let res = null;
+            try {
+                // The form exactly as Create would post it (disabled fields left out), plus the two price-check flags.
+                const body = new URLSearchParams(new FormData(form));
+                body.set('response', 'wizard');
+                body.set('dry_run', '1');
+                const r = await fetch(window.location.href, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: body.toString()
+                });
+                const text = await r.text();
+                try { res = JSON.parse(text); } catch (e) { res = null; }
+                if (!res || typeof res !== 'object' || typeof res.ok !== 'boolean') {
+                    res = { ok: false, step: 0, field: '', message: 'The price check did not answer as expected (your sign-in may have ended). Sign in again in a new tab, then try again. Nothing was saved.' };
+                }
+            } catch (e) {
+                const off = navigator.onLine === false;
+                res = { ok: false, step: 0, field: '', offline: off, message: off
+                    ? 'You are offline, so the price could not be checked.'
+                    : 'The price check could not reach the server. Check the connection and try again. Nothing was saved.' };
+            } finally {
+                cbQ.quoteBusy = Math.max(0, cbQ.quoteBusy - 1);
+            }
+            cbQ.res = res;
+            cbQ.warnings = Array.isArray(res.warnings) ? res.warnings : [];
+            if (res.ok && res.quote && !res.duplicate) {
+                cbQ.quote = res.quote;
+                cbQ.fresh = startVer === cbQ.ver;
+            } else {
+                cbQ.fresh = false;
+            }
+            cbBusyUi();
+            cbRenderQuote();
+            return res;
+        }
+        // Amount collected = the server total minus the guest credit to apply, while it is still auto-filled.
+        // true = the amount changed while payment is ticked, so the figures must be checked again.
+        function cbFillAmount(q) {
+            const amt = el('amountCollected');
+            if (!amt || amt.disabled) return false;
+            if (amt.value && amt.getAttribute('data-auto') !== '1') return false; // staff typed their own
+            const total = Number(q.totals && q.totals.total_with_vat) || 0;
+            const notes = (q.credit && Array.isArray(q.credit.notes)) ? q.credit.notes : [];
+            const eligible = cbR2(notes.reduce(function (s, n) { return s + (Number(n.balance) || 0); }, 0));
+            const credit = total > CB_TOL ? Math.min(eligible, total) : 0;
+            const want = cbR2(total - credit);
+            const next = want > 0 ? want.toFixed(2) : '';
+            amt.setAttribute('data-auto', '1');
+            if (amt.value === next) return false;
+            amt.value = next;
+            checkPartialPayment();
+            if (el('paymentReceivedHidden') && el('paymentReceivedHidden').value === '1') {
+                cbQ.ver++;
+                cbQ.fresh = false;
+                return true;
+            }
+            return false;
+        }
+
+        function cbRenderQuote() {
+            cbRenderQuoteBox();
+            [4, 5].forEach(function (s) {
+                const box = el('cbWarn' + s);
+                if (!box) return;
+                const msgs = (cbQ.warnings || []).filter(function (w) { return Number(w.step) === s; }).map(function (w) { return String(w.message || ''); });
+                box.textContent = msgs.join(' ');
+                box.hidden = msgs.length === 0;
+            });
+            checkPartialPayment();
+            cbRenderSummary();
+            if (cbNav.current === 5) cbRenderReview();
+        }
+        function cbRenderQuoteBox() {
+            const tEl = el('cbQTotal');
+            if (!tEl) return;
+            const q = cbQ.quote;
+            const crRow = el('cbQCreditRow');
+            if (q) {
+                const total = Number(q.totals.total_with_vat) || 0;
+                const wa = Number(q.credit.will_apply) || 0;
+                tEl.textContent = fmt(total);
+                el('cbQCredit').textContent = fmt(wa);
+                el('cbQCollect').textContent = fmt(cbR2(total - wa));
+                if (crRow) crRow.hidden = !(wa > 0 || (q.credit.notes || []).length > 0);
+            } else {
+                tEl.textContent = '—';
+                el('cbQCollect').textContent = '—';
+                if (crRow) crRow.hidden = true;
+            }
+            const box = el('cbQuoteBox');
+            if (box) box.classList.toggle('is-stale', !!q && !cbQ.fresh);
+            const note = el('cbQNote');
+            if (note) {
+                const res = cbQ.res;
+                note.textContent = cbQ.quoteBusy ? 'Checking the price…'
+                    : (res && res.offline) ? 'You are offline, so the price could not be checked.'
+                    : (q && cbQ.fresh) ? 'Checked by the booking\'s own save code. Nothing is saved until you press Create booking.'
+                    : (res && !res.ok) ? 'Could not be checked: see the message below.'
+                    : q ? 'Something changed: checking again…' : 'Checked when this step opens.';
+            }
+        }
+
+        // Summary beside the steps (a bar at the bottom on a phone): rooms and nights from the form, money from the
+        // latest price check, marked "checking…" while that check is stale.
+        function cbRenderSummary() {
+            const box = el('cbSummary');
+            if (!box) return;
+            let rooms = 0;
+            getVisibleLines().forEach(function (ln) {
+                if (!lineRoomId(ln)) return;
+                const qEl = ln.querySelector('[name="room_line_qty[]"]');
+                rooms += Math.max(1, parseInt(qEl ? qEl.value : '1', 10) || 1);
+            });
+            const ci = el('checkInDate') ? el('checkInDate').value : '';
+            const co = el('checkOutDate') ? el('checkOutDate').value : '';
+            const nights = ci && co ? Math.round((new Date(co + 'T00:00:00') - new Date(ci + 'T00:00:00')) / 86400000) : 0;
+            el('cbSumRooms').textContent = rooms > 0 ? String(rooms) : '—';
+            el('cbSumNights').textContent = nights > 0 ? String(nights) : '—';
+            const q = cbQ.quote;
+            el('cbSumTotal').textContent = q ? fmt(Number(q.totals.total_with_vat) || 0) : '—';
+            el('cbSumPaid').textContent = q ? fmt(Number(q.payment.amount) || 0) : '—';
+            el('cbSumOwed').textContent = q ? fmt(Number(q.still_owed) || 0) : '—';
+            const stale = !!q && !cbQ.fresh;
+            box.classList.toggle('is-stale', stale);
+            const busy = cbQ.quoteBusy > 0 || cbQ.availBusy > 0;
+            const failed = !busy && !!cbQ.res && !cbQ.res.ok;
+            el('cbSumState').textContent = (stale && failed) ? 'not up to date' : ((stale || (!q && cbQ.quoteBusy > 0)) ? 'checking…' : '');
+        }
+
+        // ── Review (step 5): read only, figures from the price check ──────────────
+        const CB_STATUS_NAMES = { confirmed: 'Confirmed', pending: 'Pending', tentative: 'Tentative (hold)', 'checked-in': 'Checked in (walk-in)' };
+        const CB_PAY_NAMES = { paid: 'Paid', partial: 'Partially paid', unpaid: 'Unpaid' };
+        const CB_OCC_NAMES = { single: 'Single', double: 'Double', triple: 'Triple' };
+        function cbEsc(s) {
+            return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function cbHelp(tip) { return ' <i class="help" data-tip="' + cbEsc(tip) + '">?</i>'; }
+        function cbDay(ymd) {
+            if (!ymd) return '—';
+            const d = new Date(ymd + 'T00:00:00');
+            return isNaN(d.getTime()) ? ymd : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        }
+        function cbReviewBlock(step, title, body) {
+            return '<section class="cb-review-block" aria-label="' + cbEsc(title) + '"><div class="cb-review-block__head"><h4>' + cbEsc(title) + '</h4>'
+                + '<button type="button" class="cb-nav-btn cb-nav-prev cb-review-change" onclick="cbJumpTo(' + step + ')" aria-label="Change ' + cbEsc(title.toLowerCase()) + '">Change</button></div>'
+                + body + '</section>';
+        }
+        // The figures Review shows, to see whether they changed before Create.
+        function cbReviewSnap(q) {
+            if (!q) return '';
+            return JSON.stringify([q.totals, q.payment, q.credit ? q.credit.will_apply : 0, q.still_owed, q.email_key,
+                (q.lines || []).map(function (l) {
+                    return [l.room_id, l.qty, l.occupancy, l.line_total_with_vat, (l.rows || []).map(function (r) {
+                        return [r.room_price, r.rate_plan_label, r.child_supplement, r.total_with_vat];
+                    })];
+                })]);
+        }
+        function cbRenderReview() {
+            const box = el('cbReview');
+            if (!box) return;
+            const q = cbQ.quote;
+            const res = cbQ.res;
+            if (!q || (res && res.offline)) {
+                box.innerHTML = '<p class="cb-review-loading">' + cbEsc(cbQ.quoteBusy ? 'Checking the booking…'
+                    : (res && res.offline) ? 'You are offline, so the booking could not be checked. Create booking keeps it on this device and saves it when the connection is back.'
+                    : (res && !res.ok) ? 'The booking could not be checked: see the message below.'
+                    : 'The booking is checked when this step opens.') + '</p>';
+                return;
+            }
+            const form = el('createBookingForm');
+            const val = function (name) { const f = form.querySelector('[name="' + name + '"]'); return f ? String(f.value || '').trim() : ''; };
+            const nights = Number(q.nights) || 0;
+            const guests = parseInt(val('number_of_guests'), 10) || 0;
+            const kids = parseInt(val('child_guests'), 10) || 0;
+            let h = '';
+            if (!cbQ.fresh) {
+                h += '<p class="cb-step-warn">' + cbEsc(cbQ.quoteBusy ? 'Something changed: checking again…'
+                    : 'Something changed since this was checked. It is checked again when you press Create booking.') + '</p>';
+            }
+            // 1. Dates and guests
+            let b1 = '<p>' + cbEsc(cbDay(val('check_in_date'))) + ' to ' + cbEsc(cbDay(val('check_out_date'))) + ' · ' + nights + ' night' + (nights === 1 ? '' : 's') + '</p>'
+                + '<p>' + guests + ' guest' + (guests === 1 ? '' : 's') + (kids > 0 ? ' (' + kids + (kids === 1 ? ' child' : ' children') + ')' : '') + '</p>';
+            if (val('special_requests')) b1 += '<p>Special requests: ' + cbEsc(val('special_requests')) + '</p>';
+            h += cbReviewBlock(1, 'Dates and guests', b1);
+            // 2. Rooms: one row per room, as the save will store it
+            let rows = '';
+            (q.lines || []).forEach(function (l) {
+                const rs = l.rows || [];
+                rs.forEach(function (r, i) {
+                    rows += '<tr><td>' + cbEsc(l.name) + (rs.length > 1 ? ' (' + (i + 1) + ' of ' + rs.length + ')' : '')
+                        + '<br><small>' + cbEsc(CB_OCC_NAMES[l.occupancy] || l.occupancy) + '</small></td>'
+                        + '<td class="num">' + fmt(Number(r.room_price) || 0) + '</td>'
+                        + '<td class="num">' + nights + '</td>'
+                        + '<td>' + cbEsc(r.rate_plan_label || (r.price_source === 'override' ? 'Price override' : 'Standard rate')) + '</td>'
+                        + '<td class="num">' + (Number(r.child_supplement) > 0 ? fmt(Number(r.child_supplement)) : '—') + '</td>'
+                        + '<td class="num">' + fmt(Number(r.total_with_vat) || 0) + '</td></tr>';
+                });
+            });
+            h += cbReviewBlock(2, 'Rooms', '<div class="cb-review-scroll"><table class="cb-review-table"><thead><tr>'
+                + '<th scope="col">Room</th>'
+                + '<th scope="col" class="num">Rate per night' + cbHelp('The nightly price the booking stores for this room, after any rate plan. A price override shows without VAT and levy.') + '</th>'
+                + '<th scope="col" class="num">Nights</th>'
+                + '<th scope="col">Plan' + cbHelp('The rate plan the save applies for these dates, or the standard rate.') + '</th>'
+                + '<th scope="col" class="num">Child charge' + cbHelp('The charge for the children in this room for the whole stay, by the room\'s child rule.') + '</th>'
+                + '<th scope="col" class="num">Room total' + cbHelp('This room for the whole stay with VAT and levy, as the save will store it.') + '</th>'
+                + '</tr></thead><tbody>' + rows + '</tbody></table></div>');
+            // 3. Guest
+            const who = [val('guest_name'), val('guest_email'), val('guest_phone')].filter(Boolean).map(cbEsc).join('<br>');
+            const where = [val('guest_country'), val('guest_address')].filter(Boolean).map(cbEsc).join(', ');
+            h += cbReviewBlock(3, 'Guest', '<p>' + who + '</p>' + (where ? '<p>' + where + '</p>' : ''));
+            // 4. Status and payment, with the money as the save will record it
+            const st = cbStatus();
+            const pm = el('paymentMethod');
+            const methodName = pm && pm.selectedIndex >= 0 ? pm.options[pm.selectedIndex].text : '';
+            let b4 = '<p>Status: ' + cbEsc(CB_STATUS_NAMES[st] || st) + '</p>';
+            if (st === 'tentative') {
+                const sq = el('sendQuotationCheck');
+                const vd = el('quotationValidDays');
+                b4 += '<p>No payment is taken for a tentative hold.</p><p>'
+                    + (sq && sq.checked ? 'Quotation PDF: sent to the guest when you create the booking, valid for ' + cbEsc(vd && vd.selectedIndex >= 0 ? vd.options[vd.selectedIndex].text : '') + '.' : 'Quotation PDF: not sent.') + '</p>';
+            } else if (q.payment.received) {
+                b4 += '<p>Payment received now: ' + fmt(Number(q.payment.amount) || 0) + (methodName ? ' by ' + cbEsc(methodName.toLowerCase()) : '') + '</p>';
+            } else {
+                b4 += '<p>No payment received now.</p>';
+            }
+            const notes = (q.credit && q.credit.notes) || [];
+            if (notes.length) {
+                b4 += '<p>Guest credit: ' + notes.map(function (n) {
+                    return cbEsc(n.number) + ' (' + fmt(Number(n.balance) || 0) + ' available' + (n.override ? ', another account' : '') + ')';
+                }).join(', ') + '</p>';
+            }
+            const tr = function (cls, label, tip, value) {
+                return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><th scope="row">' + label + cbHelp(tip) + '</th><td>' + value + '</td></tr>';
+            };
+            b4 += '<table class="cb-review-totals"><tbody>'
+                + tr('', 'Before VAT and levy', 'The stay without VAT and the tourism levy: each room\'s net figure as the save stores it, added up.', fmt(Number(q.totals.net) || 0))
+                + tr('', 'VAT', 'VAT on the stay at the hotel\'s rate, as the save stores it.', fmt(Number(q.totals.vat) || 0))
+                + tr('', 'Tourism levy', 'The tourism levy on the stay, as the save stores it (0 when the levy is off).', fmt(Number(q.totals.levy) || 0))
+                + tr('cb-total', 'Total', 'The whole stay with VAT and levy: what the booking costs the guest.', fmt(Number(q.totals.total_with_vat) || 0))
+                + tr('', 'Paid now', 'Money received now (step 4), as the save will record it. Guest credit is not counted here.', fmt(Number(q.payment.amount) || 0))
+                + tr('', 'Credit to apply', 'Guest credit notes used after the booking is created, capped at what is owed.', fmt(Number(q.credit.will_apply) || 0))
+                + tr('cb-owed', 'Still owed', 'Total minus paid now and the credit to apply.', fmt(Number(q.still_owed) || 0))
+                + '</tbody></table>'
+                + '<p class="cb-quote-note">Payment status after create: <strong id="cbReviewPayState">' + cbEsc(CB_PAY_NAMES[q.payment.final_status] || q.payment.final_status) + '</strong>'
+                + cbHelp('How the booking shows its payment once it is created: after the money received now and any guest credit.') + '</p>';
+            h += cbReviewBlock(4, 'Status and payment', b4);
+            box.innerHTML = h;
+            if (cbQ.fresh) cbQ.shown = cbReviewSnap(q);
+        }
+
+        // Error inside a step (the server's refusals are marked so a later good check can clear them).
+        function cbStepError(n, msg, link, fieldId, src) {
+            const box = el('cbErr' + n);
+            if (!box) return;
+            box.textContent = msg || '';
+            if (msg && link && /^[a-z0-9_\-]+\.php(\?[a-z0-9_=&\-]*)?$/i.test(link)) {
+                const a = document.createElement('a');
+                a.href = link;
+                a.textContent = 'Open the booking';
+                box.appendChild(document.createTextNode(' '));
+                box.appendChild(a);
+            }
+            box.style.display = msg ? 'block' : 'none';
+            if (msg) box.dataset.src = src || 'page'; else delete box.dataset.src;
+            if (msg && fieldId) {
+                const f = el(fieldId);
+                if (f) { f.classList.add('cb-field-error'); cbFocusField(f); }
+            }
+        }
+        function cbReduceMotion() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+        // Focus a field (or the first control in a box); one inside a closed part focuses its step heading instead.
+        function cbFocusField(f) {
+            if (!f) return;
+            let t = f.matches('input, select, textarea, button, [tabindex]') ? f
+                : f.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
+            if (t && !t.getClientRects().length) t = null;
+            if (!t) { const p = f.closest('.cb-panel'); t = p ? p.querySelector('h3') : null; }
+            if (!t) return;
+            try { t.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+            if (t.scrollIntoView) t.scrollIntoView({ block: 'center', behavior: cbReduceMotion() ? 'auto' : 'smooth' });
+        }
+        // Show one step: the bar goes back to any step, forward only to steps already reached (cbJumpTo).
+        function cbShowStep(n, opts) {
+            opts = opts || {};
+            const form = el('createBookingForm');
+            cbNav.current = n;
+            if (n > cbNav.max) cbNav.max = n;
+            for (let i = 1; i <= CB_STEPS; i++) {
+                const sec = el('cbSection' + i);
+                if (sec) sec.classList.toggle('is-active', i === n);
+                const btn = el('cbStepBtn' + i);
+                if (!btn) continue;
+                btn.classList.toggle('active', i === n);
+                btn.classList.toggle('done', i !== n && i < cbNav.max);
+                btn.setAttribute('aria-disabled', i > cbNav.max ? 'true' : 'false');
+                if (i === n) btn.setAttribute('aria-current', 'step'); else btn.removeAttribute('aria-current');
+            }
+            if (!opts.quiet && form) {
+                const top = form.getBoundingClientRect().top + window.scrollY - 80;
+                if (window.scrollY > top) window.scrollTo({ top: Math.max(0, top), behavior: cbReduceMotion() ? 'auto' : 'smooth' });
+                const h = el('cbSection' + n) ? el('cbSection' + n).querySelector('h3') : null;
+                if (h) { try { h.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+            }
+            cbRenderSummary();
+            if (n === 4) cbRenderQuoteBox();
+            if (n === 5) cbRenderReview();
+        }
+        // What a price-check reply means for moving on. A refusal opens the step it belongs to with its message
+        // (step 0 = where staff are); a check that would refuse the save (warning) keeps staff in its step.
+        // true = nothing stops the booking up to step `here`.
+        function cbGate(res, here, quiet) {
+            if (!res) return false;
+            if (res.offline) { cbStepError(cbNav.current, res.message, '', '', 'server'); return false; }
+            if (res.ok && res.duplicate) {
+                cbStepError(cbNav.current, res.message || 'This booking was already created.', res.redirect || '', '', 'server');
+                return false;
+            }
+            if (!res.ok) {
+                const step = Number(res.step) >= 1 && Number(res.step) <= CB_STEPS ? Number(res.step) : cbNav.current;
+                if (step !== cbNav.current) cbShowStep(step);
+                cbStepError(step, res.message || 'The booking could not be checked.', '', res.field || '', 'server');
+                return false;
+            }
+            const ws = cbQ.warnings || [];
+            if (here >= 4 && ws.some(function (w) { return Number(w.step) === 4; })) {
+                if (cbNav.current !== 4) cbShowStep(4);
+                if (!quiet) cbFocusField(el('overCollectedCb'));
+                return false;
+            }
+            if (here >= 5 && ws.some(function (w) { return Number(w.step) === 5; })) return false;
+            const box = el('cbErr' + cbNav.current);
+            if (box && box.dataset.src === 'server') cbStepError(cbNav.current, '');
+            return true;
         }
 
         // ── Init ──────────────────────────────────────────────────────────────────
@@ -4695,174 +5163,286 @@ try {
         })();
 
         // ═══════════════════════════════════════════════════════════════════
-        // Section step navigation
+        // Steps: one on screen at a time (plan .claude/CREATE_BOOKING_WIZARD_PLAN.md Phase A, owner 2026-11-27)
         // ═══════════════════════════════════════════════════════════════════
+        // Back to any earlier step; forward only to steps already reached, and forward always runs the checks.
+        // Create checks the booking once more, then posts this form exactly as before (the server checks it all
+        // again). Without JavaScript every step stays on screen and the form posts as it is.
         (function () {
-            const SECTIONS = 6;
-            let currentSection = 1;
+            const form = el('createBookingForm');
+            if (!form) return;
+            form.classList.add('cb-steps-on');
+            let submitOk = false; // the checks passed: the next submit goes on to the server as before
+            let creating = false; // Create is checking the booking
 
-            function getSection(n) { return document.getElementById('cbSection' + n); }
-            function getStepBtn(n) { return document.getElementById('cbStepBtn' + n); }
-            function getErrBox(n)  { return document.getElementById('cbErr' + n); }
-
-            function setActiveStep(n) {
-                currentSection = n;
-                for (let i = 1; i <= SECTIONS; i++) {
-                    const btn = getStepBtn(i);
-                    if (!btn) continue;
-                    btn.classList.remove('active', 'done');
-                    if (i < n) btn.classList.add('done');
-                    if (i === n) btn.classList.add('active');
-                }
+            function whole(f, empty) {
+                if (!f) return empty;
+                if (f.validity && f.validity.badInput) return NaN;
+                const v = f.value.trim();
+                if (v === '') return empty;
+                const num = Number(v);
+                return Number.isInteger(num) ? num : NaN;
             }
+            function money(v) { return /^(\d+(\.\d{1,2})?|\.\d{1,2})$/.test(v); }
 
-            function scrollToSection(n) {
-                const el = getSection(n);
-                if (!el) return;
-                const top = el.getBoundingClientRect().top + window.scrollY - 80;
-                window.scrollTo({ top, behavior: 'smooth' });
-            }
-
-            function showErr(n, msg) {
-                const box = getErrBox(n);
-                if (!box) return;
-                box.textContent = msg;
-                box.style.display = msg ? 'block' : 'none';
-            }
-
-            function clearFieldErrors(fields) {
-                fields.forEach(function (f) { f.classList.remove('cb-field-error'); });
-            }
-
-            // Section-specific validation
+            // Every check the browser made before the form had novalidate (required, min, max, whole numbers, email
+            // address, 2 decimals) plus the ones the page kept on fields: paid more than owed, the override reason
+            // and the edited email wording. [message, field] pairs; the first field gets the focus.
             function validateSection(n) {
                 const errs = [];
-                const badFields = [];
-
+                const add = function (msg, f) { errs.push([msg, f || null]); };
                 if (n === 1) {
-                    const ci = document.getElementById('checkInDate');
-                    const co = document.getElementById('checkOutDate');
-                    const guests = document.querySelector('[name="number_of_guests"]');
-                    if (!ci || !ci.value) { errs.push('Check-in date is required.'); if (ci) badFields.push(ci); }
-                    if (!co || !co.value) { errs.push('Check-out date is required.'); if (co) badFields.push(co); }
-                    if (ci && co && ci.value && co.value && co.value <= ci.value) {
-                        errs.push('Check-out must be after check-in.');
-                        badFields.push(co);
-                    }
-                    if (!guests || !guests.value || parseInt(guests.value) < 1) {
-                        errs.push('At least 1 guest is required.');
-                        if (guests) badFields.push(guests);
-                    }
+                    const ci = el('checkInDate');
+                    const co = el('checkOutDate');
+                    const g = el('numGuests');
+                    const c = el('childGuests');
+                    if (!ci.value) add('Check-in date is required.', ci);
+                    else if (ci.min && ci.value < ci.min) add('Check-in cannot be in the past.', ci);
+                    if (!co.value) add('Check-out date is required.', co);
+                    else if ((ci.value && co.value <= ci.value) || (co.min && co.value < co.min)) add('Check-out must be after check-in.', co);
+                    const guests = whole(g, NaN);
+                    const kids = whole(c, 0);
+                    if (!(guests >= 1)) add('At least 1 guest is required.', g);
+                    else if (guests > 20) add('A booking can have at most 20 guests.', g);
+                    if (!(kids >= 0 && kids <= 19)) add('Children must be a whole number from 0 to 19.', c);
+                    else if (guests >= 1 && kids >= guests) add('At least 1 adult is required.', c);
                 }
-
                 if (n === 2) {
-                    // Require at least one room line with a room selected
-                    const roomSelects = document.querySelectorAll('select[name="room_line_room_id[]"]');
-                    const hasRoom = Array.from(roomSelects).some(function (s) { return s.value; });
-                    if (!hasRoom) {
-                        errs.push('Please select at least one room type before continuing.');
+                    const box = el('roomLinesContainer');
+                    if (!getVisibleLines().some(function (ln) { return lineRoomId(ln) > 0; })) {
+                        add('Please select at least one room type before continuing.', box);
                     } else {
                         // Every room needs a type, none may exceed what is free, and the party must fit.
-                        allocationErrors().forEach(function (m) { errs.push(m); });
+                        allocationErrors().forEach(function (m) { add(m, box); });
                     }
+                    form.querySelectorAll('input[name="room_line_override[]"]').forEach(function (o) {
+                        if (o.disabled) return;
+                        const v = o.value.trim();
+                        if ((o.validity && o.validity.badInput) || (v !== '' && !money(v))) add('A price override must be a number of 0 or more, with at most 2 decimals.', o);
+                    });
                 }
-
                 if (n === 3) {
-                    const nm  = document.getElementById('guestName');
-                    const em  = document.getElementById('guestEmail');
-                    const ph  = document.getElementById('guestPhone');
-                    if (!nm || !nm.value.trim()) { errs.push('Guest name is required.'); if (nm) badFields.push(nm); }
-                    if (!em || !em.value.trim()) { errs.push('Guest email is required.'); if (em) badFields.push(em); }
-                    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em.value.trim())) {
-                        errs.push('Please enter a valid email address.');
-                        badFields.push(em);
-                    }
-                    if (!ph || !ph.value.trim()) { errs.push('Guest phone is required.'); if (ph) badFields.push(ph); }
+                    const nm = el('guestName');
+                    const em = el('guestEmail');
+                    const ph = el('guestPhone');
+                    if (!nm.value.trim()) add('Guest name is required.', nm);
+                    if (!em.value.trim()) add('Guest email is required.', em);
+                    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em.value.trim())) add('Please enter a valid email address.', em);
+                    if (!ph.value.trim()) add('Guest phone is required.', ph);
                 }
-
-                if (n === 5) {
-                    const check = document.getElementById('paymentReceivedCheck');
-                    if (check && check.checked) {
-                        const amt = document.getElementById('amountCollected');
-                        if (!amt || !amt.value || parseFloat(amt.value) <= 0) {
-                            errs.push('Please enter the amount collected, or uncheck "Payment Received Now".');
-                            if (amt) badFields.push(amt);
+                if (n === 4) {
+                    const chk = el('paymentReceivedCheck');
+                    const amt = el('amountCollected');
+                    if (cbStatus() !== 'tentative' && chk && chk.checked && amt && !amt.disabled) {
+                        const v = amt.value.trim();
+                        if ((amt.validity && amt.validity.badInput) || (v !== '' && !money(v))) add('Enter the amount collected as a number with at most 2 decimals.', amt);
+                        else if (!(parseFloat(v) > 0)) add('Please enter the amount collected, or uncheck "Payment Received Now".', amt);
+                        const wrap = el('overCollectedWrap');
+                        const over = el('overCollectedCb');
+                        if (wrap && over && wrap.style.display !== 'none' && !over.checked) {
+                            add('The amount is more than the booking costs. Tick "The guest paid more than owed" to confirm, or lower the amount.', over);
                         }
                     }
+                    const ov = el('creditOverrideCheck');
+                    const reason = el('creditOverrideReason');
+                    if (ov && ov.checked && reason && !reason.value.trim() && form.querySelector('.credit-cn-check:checked')) {
+                        add('Enter the reason for using credit from a different account.', reason);
+                    }
                 }
-
-                // Clear previous field errors then mark bad ones
-                document.querySelectorAll('.cb-field-error').forEach(function (el) {
-                    el.classList.remove('cb-field-error');
-                });
-                badFields.forEach(function (f) { f.classList.add('cb-field-error'); });
-
+                if (n === 5) {
+                    const send = el('sendEmail');
+                    const k = el('cbWKey');
+                    if (send && send.checked && k && k.value && k.value !== cbWordingKey()) {
+                        cbWordingSync(); // clears the edit, with its note
+                        add('The email for this booking changed, so your edited wording was cleared. Edit it again if needed, then press Create booking.', el('cbWordingBtn'));
+                    }
+                }
                 return errs;
             }
 
-            window.cbNext = function (n) {
-                showErr(n, '');
+            // The checks of step n. A problem opens that step with the message and focuses the field.
+            function checkStep(n) {
+                const sec = el('cbSection' + n);
+                if (sec) sec.querySelectorAll('.cb-field-error').forEach(function (f) { f.classList.remove('cb-field-error'); });
                 const errs = validateSection(n);
-                if (errs.length) {
-                    showErr(n, errs.join(' '));
-                    // Scroll to the error within the section
-                    const el = getSection(n);
-                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                if (!errs.length) {
+                    cbStepError(n, '');
+                    return true;
+                }
+                errs.forEach(function (e) { if (e[1]) e[1].classList.add('cb-field-error'); });
+                const first = errs.find(function (e) { return e[1]; });
+                if (cbNav.current !== n) cbShowStep(n, { quiet: !!first });
+                cbStepError(n, errs.map(function (e) { return e[0]; }).join(' '));
+                if (first) cbFocusField(first[1]);
+                return false;
+            }
+
+            // Step 4 asks for the price check as it opens; a refusal opens its own step.
+            async function enterStep4() {
+                const res = await cbQuoteRun(true);
+                if (cbNav.current === 4 && !creating) cbGate(res, 4, true);
+            }
+            // Review asks again, then shows the figures the save will store.
+            async function openReview() {
+                cbShowStep(CB_STEPS);
+                const res = await cbFreshQuote();
+                if (cbNav.current !== CB_STEPS || creating) return;
+                if (!(res && res.offline)) cbGate(res, CB_STEPS, true);
+                cbRenderReview();
+            }
+            async function goForward(from, to) {
+                if (cbNav.moving || creating) return;
+                cbNav.moving = true;
+                try {
+                    if (from <= 2 && to > 2) await cbAvailIdle(); // the room checks need the availability answer
+                    for (let i = from; i < to; i++) {
+                        if (!checkStep(i)) return;
+                    }
+                } finally {
+                    cbNav.moving = false;
+                }
+                if (to === CB_STEPS) { openReview(); return; }
+                cbShowStep(to);
+                if (to === 4) enterStep4();
+            }
+
+            window.cbNext = function (n) {
+                if (n === cbNav.current && n < CB_STEPS) goForward(n, n + 1);
+            };
+            window.cbPrev = function (n) {
+                if (n > 1) window.cbJumpTo(n - 1);
+            };
+            window.cbJumpTo = function (n) {
+                if (creating || cbNav.moving || n === cbNav.current || n < 1 || n > CB_STEPS) return;
+                if (n < cbNav.current) {
+                    cbShowStep(n);
+                    if (n === 4) enterStep4();
                     return;
                 }
-                const next = n + 1;
-                if (next > SECTIONS) return;
-                setActiveStep(next);
-                scrollToSection(next);
+                if (n > cbNav.max) return; // not reached yet: Continue gets there
+                goForward(cbNav.current, n);
             };
 
-            window.cbPrev = function (n) {
-                const prev = n - 1;
-                if (prev < 1) return;
-                showErr(n, '');
-                setActiveStep(prev);
-                scrollToSection(prev);
-            };
-
-            window.cbJumpTo = function (n) {
-                showErr(currentSection, '');
-                setActiveStep(n);
-                scrollToSection(n);
-            };
-
-            // Update active step on scroll via IntersectionObserver
-            if ('IntersectionObserver' in window) {
-                const obs = new IntersectionObserver(function (entries) {
-                    entries.forEach(function (entry) {
-                        if (entry.isIntersecting) {
-                            const id = entry.target.id;
-                            const num = parseInt(id.replace('cbSection', ''));
-                            if (!isNaN(num)) setActiveStep(num);
-                        }
-                    });
-                }, { rootMargin: '-40% 0px -40% 0px', threshold: 0 });
-
-                for (let i = 1; i <= SECTIONS; i++) {
-                    const el = getSection(i);
-                    if (el) obs.observe(el);
+            function createBusy(on) {
+                const btn = el('cbSubmitBtn');
+                if (!btn) return;
+                if (on) {
+                    if (btn.dataset.cbLabel === undefined) btn.dataset.cbLabel = btn.innerHTML;
+                    btn.disabled = true;
+                    btn.setAttribute('aria-busy', 'true');
+                    btn.textContent = 'Checking the booking…';
+                } else if (btn.dataset.cbLabel !== undefined) {
+                    btn.innerHTML = btn.dataset.cbLabel;
+                    delete btn.dataset.cbLabel;
+                    btn.disabled = false;
+                    btn.removeAttribute('aria-busy');
+                }
+            }
+            // The checks passed: the form goes to the server exactly as before (the page loader and, when offline,
+            // the offline queue take it from here).
+            function submitNow() {
+                createBusy(false);
+                const btn = el('cbSubmitBtn');
+                submitOk = true;
+                try {
+                    if (typeof form.requestSubmit === 'function') form.requestSubmit(btn || null);
+                    else HTMLFormElement.prototype.submit.call(form);
+                } catch (err) {
+                    cbStepError(CB_STEPS, 'The booking could not be sent. Try again.');
+                }
+                submitOk = false;
+            }
+            async function cbCreate() {
+                creating = true;
+                const before = cbQ.shown; // the figures Review showed when Create was pressed
+                let go = false;
+                createBusy(true);
+                try {
+                    for (let i = 1; i <= CB_STEPS; i++) {
+                        if (!checkStep(i)) return;
+                    }
+                    if (navigator.onLine === false) { go = true; return; } // kept on this device, saved when back online
+                    const res = await cbFreshQuote();
+                    if (res && res.offline) { go = true; return; }
+                    if (!cbGate(res, CB_STEPS)) return;
+                    if (!cbQ.fresh) {
+                        cbStepError(CB_STEPS, 'The booking changed while it was being checked. Check the figures, then press Create booking again.');
+                        return;
+                    }
+                    if (cbReviewSnap(cbQ.quote) !== before) {
+                        cbRenderReview();
+                        cbStepError(CB_STEPS, 'The figures changed since the Review was shown. Check them, then press Create booking again.');
+                        return;
+                    }
+                    const k = el('cbWKey');
+                    if (k && k.value && el('sendEmail') && el('sendEmail').checked && k.value !== cbQ.quote.email_key) {
+                        k.value = '';
+                        if (el('cbWHtml')) el('cbWHtml').value = '';
+                        if (el('cbWordingState')) el('cbWordingState').textContent = 'The email for this booking changed, so your edited wording was cleared. Edit it again if needed.';
+                        cbStepError(CB_STEPS, 'The email for this booking changed, so your edited wording was cleared. Edit it again if needed, then press Create booking.');
+                        return;
+                    }
+                    go = true;
+                } catch (err) {
+                    cbStepError(CB_STEPS, 'The booking could not be checked. Try again. Nothing was saved.');
+                } finally {
+                    creating = false;
+                    if (go) submitNow(); else createBusy(false);
                 }
             }
 
-            // On form submit: run validation across all sections before submitting
-            const form = document.getElementById('createBookingForm');
-            if (form) {
-                form.addEventListener('submit', function (e) {
-                    for (let i = 1; i <= SECTIONS; i++) {
-                        const errs = validateSection(i);
-                        if (errs.length) {
-                            e.preventDefault();
-                            showErr(i, errs.join(' '));
-                            setActiveStep(i);
-                            scrollToSection(i);
-                            return;
-                        }
-                    }
-                });
+            // Every submit of this form comes here first (window, capture phase: before the offline queue and the
+            // page loader). Only Create on Review lets it through, after its checks; Enter in a field on an earlier
+            // step means Continue.
+            window.cbSubmitHook = function (e) {
+                if (e.target !== form) return;
+                if (submitOk) { submitOk = false; return; }
+                e.preventDefault();
+                e.stopPropagation();
+                if (creating || cbNav.moving) return;
+                if (cbNav.current < CB_STEPS) window.cbNext(cbNav.current);
+                else cbCreate();
+            };
+            if (!window.__cbSubmitHooked) {
+                window.__cbSubmitHooked = true;
+                window.addEventListener('submit', function (e) {
+                    if (typeof window.cbSubmitHook === 'function') window.cbSubmitHook(e);
+                }, true);
+            }
+
+            // A change in steps 1-4 makes the price check stale. A staff change of status or payment after the email
+            // wording was edited clears that edit, with a note (plan item 7).
+            function onEdit(e) {
+                const t = e.target;
+                if (!t || !t.closest) return;
+                if (e.type === 'change' && t.name === 'booking_status') cbWordingClear('booking status');
+                else if (e.type === 'change' && t.id === 'paymentReceivedCheck') cbWordingClear('payment');
+                else if (e.type === 'change' && t.name === 'payment_method') cbWordingClear('payment method');
+                else if (t.name === 'amount_collected') cbWordingClear('amount received');
+                const sec = t.closest('.cb-panel');
+                const n = sec ? parseInt(sec.id.replace('cbSection', ''), 10) : 0;
+                if (n >= 1 && n <= 4 && (t.name || t.id === 'paymentReceivedCheck')) cbMarkStale();
+            }
+            form.addEventListener('input', onEdit);
+            form.addEventListener('change', onEdit);
+
+            // First step: 1, or after a refused save (everything sent is back on the form) the step it belongs to.
+            function start() {
+                if (cbRepost && cbRepost.message) {
+                    cbNav.max = CB_STEPS;
+                    const s = Number(cbRepost.step) >= 1 && Number(cbRepost.step) <= CB_STEPS ? Number(cbRepost.step) : CB_STEPS;
+                    cbShowStep(s, { quiet: true });
+                    cbStepError(s, String(cbRepost.message), '', String(cbRepost.field || ''), 'repost');
+                    if (s === 4) enterStep4();
+                    if (s === CB_STEPS) openReview();
+                    return;
+                }
+                cbShowStep(1, { quiet: true });
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', start);
+            } else {
+                start();
             }
         })();
     </script>
