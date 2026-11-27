@@ -96,6 +96,11 @@ when prompted."
   note again; new tick "Email the guest about this change" (off by default, with Edit wording) on room assign, Add / take
   off nights and Change checkout date. Guides: bookings (move room, change nights/checkout). Assistant: "does the guest
   get told when I move their room" = only if you tick it.
+- e9ecb8d / Rosalyn's b9a44fd (2026-11-27, owner fault): New Booking "Payment Received Now" takes the full amount
+  without the "more than the balance due" refusal (a room with no double/triple price now costs its nightly price on
+  the page too). The amount follows the total until staff type their own; if the save is refused, the rooms and
+  payment stay filled in. Guides: bookings (create, take payment now). Assistant: "why does it say more than the
+  balance due" = only when the amount really is above the total; tick "The guest paid more than owed" for a credit note.
 
 ## Synced 2026-11-26 (owner prompted "assistant and guide sync"; guides + Assistant: commit "Guides + Assistant sync 2026-11-26" in both repos · guides 06, 07, 12, 13, 19, 99 (+ Liwonde-only brand fix in 01, 02, 14, 23; guide 07 Blocked Dates note) · Assistant: when-did-they-pay -> Paid "i", dashboard vs End of Day rule, email Tone, calendar arrow keys, bare pre-arrival question gets its own answer (payment chase needs "payment"), expired / cancelled / no-show answers point to the Status pill, movements arrows for tomorrow / next week, receipt comment per b145620, expiry questions never catch stock or gym questions · Manager Guides: Money and End of Day, Bookings, Daily checklist refreshed; others no change) - entries kept for reference
 
