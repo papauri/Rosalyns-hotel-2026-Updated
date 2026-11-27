@@ -1226,13 +1226,15 @@
             return adultsText + childrenText;
         }
 
+        // The server's answer for exactly the room, dates and party on screen (null until it is in). Read from the
+        // per-party store that also gates Confirm, never from the last reply, which can be for another party.
         function getServerResultForCurrentParty() {
             const checkIn = document.getElementById('check_in_date')?.value;
             const checkOut = document.getElementById('check_out_date')?.value;
             const totalGuests = parseInt(document.getElementById('number_of_guests')?.value || '0', 10);
             if (!selectedRoomId || !checkIn || !checkOut || totalGuests < 1) return null;
             const key = buildAvailabilityStatusKey(selectedRoomId, checkIn, checkOut, getCurrentChildGuestCount(), totalGuests);
-            return currentAvailabilityResult && currentAvailabilityResult.status_key === key ? currentAvailabilityResult : null;
+            return roomAvailabilityStatus[key] || null;
         }
 
         function renderPartyPlan() {
@@ -1548,9 +1550,10 @@
                         vat_mode: mixedNow.vat_mode,
                         vat_shows_amount: mixedNow.vat_shows_amount,
                         rate_plan: mixedNow.rate_plan
-                    } : (currentAvailabilityResult && currentAvailabilityResult.status_key === statusKey ?
-                        currentAvailabilityResult.split_pricing :
-                        null);
+                    } : ((roomAvailabilityStatus[statusKey] || {}).split_pricing || null); // the server's price for exactly this stay
+                    // No server price for exactly this stay yet: no amount is shown, never one for another party or dates.
+                    const priceKnown = !!serverPricing;
+                    const noPriceText = roomAvailabilityStatus[statusKey] && !availabilityCheckPending ? '—' : 'Checking price…';
                     const allocation = serverPricing && Array.isArray(serverPricing.allocation) ?
                         serverPricing.allocation.map(part => ({
                             guests: Number(part.guests || 0),
@@ -1618,7 +1621,7 @@
                         stayVat = Number(serverPricing.vat || 0);
                         stayTotalWithVat = Number(serverPricing.total_with_vat ?? serverPricing.total_before_packages ?? 0);
                     } else {
-                        // Provisional figures until the server answers; same composition as the server.
+                        // No server price yet: these local figures only decide the "Includes VAT / levy" note; no amount is shown.
                         const rawStay = baseTotal + childSupplement;
                         const vr = vatModeNow === 'off' ? 0 : vatRateNow / 100;
                         const lr = (tourismLevyEnabled && tourismLevyPercent > 0) ? tourismLevyPercent / 100 : 0;
@@ -1677,7 +1680,7 @@
                         `${totalGuests} Guests (${roomsNeeded} rooms: ${allocation.map((part, index) => `R${index + 1} ${getOccupancyTierName(part.occupancyType)}`).join(', ')})` :
                         `${getOccupancyTierName(allocation[0].occupancyType)} rate (${totalGuests} Guest${totalGuests === 1 ? '' : 's'})`;
                     document.getElementById('summaryOccupancyType').textContent = occupancySummary;
-                    document.getElementById('summaryRatePerNight').textContent = roomsNeeded > 1 ?
+                    document.getElementById('summaryRatePerNight').textContent = !priceKnown ? '—' : roomsNeeded > 1 ?
                         `${currencySymbol}${roomRateTotalPerNight.toLocaleString()} across ${roomsNeeded} rooms` :
                         `${currencySymbol}${roomRateTotalPerNight.toLocaleString()}`;
 
@@ -1707,7 +1710,8 @@
                     if (childChargeRow && childChargeEl) {
                         if (childGuests > 0) {
                             childChargeRow.style.display = '';
-                            childChargeEl.textContent = childSupplement > 0
+                            childChargeEl.textContent = !priceKnown ? '—'
+                                : childSupplement > 0
                                 ? currencySymbol + childSupplement.toLocaleString() + ` (${childGuests} child${childGuests === 1 ? '' : 'ren'} across ${nights} night${nights === 1 ? '' : 's'})`
                                 : `No charge (${childGuests} child${childGuests === 1 ? '' : 'ren'})`;
                         } else {
@@ -1721,7 +1725,8 @@
                     const ratePlanLabel = document.getElementById('summaryRatePlanLabel');
                     const ratePlanValue = document.getElementById('summaryRatePlanValue');
                     const serverRatePlan = serverPricing && serverPricing.rate_plan ? serverPricing.rate_plan : null;
-                    const activeRatePlan = serverRatePlan || currentDynamicPricing;
+                    // The server's plan for exactly this stay (mixed rooms: the seating's), never the last reply's: it can be for other dates.
+                    const activeRatePlan = serverRatePlan || (mixedNow ? currentDynamicPricing : null);
                     if (ratePlanRow && activeRatePlan && activeRatePlan.rate_plan_id) {
                         const adj = Number(activeRatePlan.discount_amount_per_night_total ?? activeRatePlan.discount_amount ?? 0);
                         // adj > 0 = genuine discount (price reduced); adj < 0 = surcharge
@@ -1769,7 +1774,7 @@
                     }
 
                     // Update total
-                    document.getElementById('summaryTotal').textContent = currencySymbol + total.toLocaleString();
+                    document.getElementById('summaryTotal').textContent = priceKnown ? currencySymbol + total.toLocaleString() : noPriceText;
 
                     // Levy + VAT breakdown lines (VAT amount only when VAT display is on)
                     const tourismLevyNote = document.getElementById('summaryTourismLevyNote');
@@ -2020,9 +2025,18 @@
         });
 
         // Availability state tracking
-        let availabilityCheckPending = false;
+        let availabilityCheckPending = false; // true from the moment the party or dates change until the newest check answers
         let availabilityCheckTimer = null;
+        let availabilityCheckSeq = 0; // newest check asked for; an older reply is dropped (its party or dates are gone)
         let roomAvailabilityStatus = {}; // Track availability status per room
+
+        // The party or dates changed: a check is on its way, so Confirm waits from now (debounce included) and any reply
+        // still out is for the old party or dates.
+        function markAvailabilityCheckPending() {
+            availabilityCheckSeq++;
+            availabilityCheckPending = true;
+            validateFormForSubmit();
+        }
 
         // Initialize immediate availability validation
         function initAvailabilityValidation() {
@@ -2039,6 +2053,7 @@
 
                 // If both dates are entered, trigger availability check immediately
                 if (checkIn && checkOut) {
+                    markAvailabilityCheckPending();
                     clearTimeout(availabilityCheckTimer);
                     availabilityCheckTimer = setTimeout(() => {
                         performAvailabilityCheck();
@@ -2048,6 +2063,7 @@
 
             // Debounced availability check on date/guest changes
             const scheduleAvailabilityCheck = () => {
+                markAvailabilityCheckPending();
                 clearTimeout(availabilityCheckTimer);
                 availabilityCheckTimer = setTimeout(() => {
                     performAvailabilityCheck();
@@ -2116,6 +2132,7 @@
 
         // Perform availability check for all rooms or selected room
         function performAvailabilityCheck() {
+            const seq = ++availabilityCheckSeq;
             const checkIn = document.getElementById('check_in_date').value;
             const checkOut = document.getElementById('check_out_date').value;
             const guestsInput = document.getElementById('number_of_guests');
@@ -2125,8 +2142,10 @@
 
             // Clear previous availability status if dates are incomplete
             if (!checkIn || !checkOut) {
+                availabilityCheckPending = false;
                 clearAvailabilityMessage();
                 enableAllRoomOptions();
+                validateFormForSubmit();
                 return;
             }
 
@@ -2134,7 +2153,9 @@
             const checkInDate = new Date(checkIn);
             const checkOutDate = new Date(checkOut);
             if (checkOutDate <= checkInDate) {
+                availabilityCheckPending = false;
                 showAvailabilityMessage('<i class="fas fa-exclamation-triangle"></i> Check-out date must be after check-in date.', 'error');
+                validateFormForSubmit();
                 return;
             }
 
@@ -2150,6 +2171,7 @@
                 validateFormForSubmit();
                 return;
             }
+            validateFormForSubmit(); // Confirm waits for this check
 
             const totalGuests = Math.max(1, numGuests || 1);
             const adultGuests = Math.max(1, totalGuests - childGuests);
@@ -2165,6 +2187,8 @@
             fetch(`check-availability.php?${params.toString()}`)
                 .then(response => response.json())
                 .then(payload => {
+                    // An older check (the party or dates changed since): its answer is dropped, "pending" stays for the newest.
+                    if (seq !== availabilityCheckSeq) return;
                     const results = payload.rooms || {};
                     let availableCount = 0;
 
@@ -2279,9 +2303,11 @@
                         clearAvailabilityMessage();
                     }
 
+                    updateSummary(); // nothing pending now: the figures, or "—" when the answer has no price
                     validateFormForSubmit();
                 })
                 .catch(() => {
+                    if (seq !== availabilityCheckSeq) return;
                     availabilityCheckPending = false;
                     showAvailabilityMessage('<i class="fas fa-exclamation-triangle"></i> Unable to check availability. Please try again.', 'error');
                     validateFormForSubmit();
