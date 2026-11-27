@@ -181,6 +181,14 @@
     flex-basis: 100%;
 }
 
+/* Check out / Add nights on a room due out (housekeeping Needs action, owner 2026-11-28). */
+.ops-needs-row__stay {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
 .ops-needs-list__cols .ops-cell--status {
     display: block;
 }

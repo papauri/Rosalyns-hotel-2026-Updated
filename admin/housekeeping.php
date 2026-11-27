@@ -1732,6 +1732,9 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                 $hkOpenByRoom[$hkOpenRid] = $hkOpenRow;
             }
         }
+        // Owner 2026-11-28: a user who may check guests out sees Check out / Add nights on a room due out (today or
+        // overdue). Both open the bookings list's own dialogs (balance gate, settlement, availability) and come back here.
+        $hkCanCheckout = hasPermission((int)($user['id'] ?? 0), 'bookings') && hasPermission((int)($user['id'] ?? 0), 'checkout_guest');
         $hkNeedCols = [
             'room' => ['Room', 'The room number and name. Every room with a guest checked in, from current bookings, now.'],
             'status' => ['Status', 'Checkout today, Overdue (the checkout date has passed but the booking is still checked in: check the guest out on the booking or extend the stay; hover the pill for the date) or Occupied. A second pill shows when the guest has left and the departure clean has started.'],
@@ -1788,6 +1791,12 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                                             <span class="status-pill completed">Cleaned &middot; waiting for checkout</span>
                                         <?php elseif ($hkDueOut && $hkEarly !== ''): ?>
                                             <span class="status-pill <?php echo $hkEarly === 'blocked' ? 'blocked' : 'in_progress'; ?>">Guest left &middot; <?php echo $hkEarly === 'blocked' ? 'cleaning on hold' : 'cleaning before checkout'; ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($hkDueOut && $hkCanCheckout && (int)($room['booking_id'] ?? 0) > 0): $hkBkId = (int)$room['booking_id']; ?>
+                                            <span class="ops-needs-row__stay">
+                                                <a class="btn btn-sm btn-outline" href="bookings.php?action=checkout&amp;booking_id=<?php echo $hkBkId; ?>&amp;from=housekeeping" title="Check this guest out: opens the bookings checkout (balance and any extra nights are settled there)"><i class="fas fa-right-from-bracket" aria-hidden="true"></i> Check out</a>
+                                                <a class="btn btn-sm btn-outline" href="bookings.php?action=extend&amp;booking_id=<?php echo $hkBkId; ?>&amp;from=housekeeping" title="The guest is staying on: add nights to the booking (room availability is checked, extra nights at the booked rate)"><i class="fas fa-calendar-plus" aria-hidden="true"></i> Add nights</a>
+                                            </span>
                                         <?php endif; ?>
                                     </span>
                                     <span class="ops-cell ops-cell--guest" role="cell">
@@ -2184,6 +2193,22 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
     <?php renderAdminModalScript(); ?>
 
     <script>
+        // Back from Check out / Add nights on the bookings list (?from=housekeeping): show its result here.
+        (function () {
+            var show = function () { try {
+                var raw = sessionStorage.getItem('rh_booking_action_message');
+                if (!raw) return;
+                sessionStorage.removeItem('rh_booking_action_message');
+                var m = JSON.parse(raw);
+                if (!m || !m.message || !window.Alert || typeof window.Alert.show !== 'function') return;
+                var esc = String(m.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                window.Alert.show(esc, m.type === 'warning' || m.type === 'error' ? m.type : 'success');
+            } catch (e) {
+                try { sessionStorage.removeItem('rh_booking_action_message'); } catch (e2) {}
+            } };
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show, { once: true });
+            else show();
+        })();
         const hkTodayKey = <?php echo json_encode($statsToday, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         function toDateKey(value) {

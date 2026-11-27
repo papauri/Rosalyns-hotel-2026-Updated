@@ -3268,7 +3268,9 @@ $bk_more_active = $filter_kind !== '' || $filter_room_type > 0 || $filter_pay !=
 // that booking so its row is on screen, then the page script opens the matching modal. When the action
 // finishes or is cancelled the page returns to the booking (see BK_DEEP_RETURN_URL), so the list is
 // never left filtered down to one booking and a reload never re-opens the modal.
-$deep_link_action = in_array(($_GET['action'] ?? ''), ['assign-room', 'room-change', 'checkout', 'checkin'], true) ? (string)$_GET['action'] : '';
+// 'extend' (Add or take off nights) and &from=housekeeping (back to Housekeeping when done): owner 2026-11-28, the
+// Overdue / Checkout today rows on Housekeeping > Needs action.
+$deep_link_action = in_array(($_GET['action'] ?? ''), ['assign-room', 'room-change', 'checkout', 'checkin', 'extend'], true) ? (string)$_GET['action'] : '';
 $deep_link_booking_id = $deep_link_action !== '' ? (int)($_GET['booking_id'] ?? 0) : 0;
 if ($deep_link_booking_id > 0 && $search_query === '') {
     $dlSt = $pdo->prepare("SELECT booking_reference, status FROM bookings WHERE id = ? AND deleted_at IS NULL");
@@ -5734,7 +5736,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         // Set when a booking opened this page through a deep link (?action=...&booking_id=N):
         // finishing or cancelling that action goes back to the booking instead of leaving the
         // list filtered to one row (and a reload would re-open the modal).
-        window.BK_DEEP_RETURN_URL = <?php echo json_encode($deep_link_booking_id > 0 ? 'booking-details.php?id=' . (int)$deep_link_booking_id : ''); ?>;
+        window.BK_DEEP_RETURN_URL = <?php echo json_encode($deep_link_booking_id > 0 ? ((($_GET['from'] ?? '') === 'housekeeping') ? 'housekeeping.php#hkNeedsAction' : 'booking-details.php?id=' . (int)$deep_link_booking_id) : ''); ?>;
         window.bkDeepLeaving = false;
 
         function bkReturnOrReload() {
@@ -11492,6 +11494,15 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         btn.click();
                     } else {
                         bounce('You need permission to edit bookings to assign a room.');
+                    }
+                } else if (deepAction === 'extend') {
+                    // The row's own "Add or take off nights" button (shown only for an in-house stay and checkout_guest).
+                    const row = document.getElementById('booking-' + deepId);
+                    const exBtn = row ? row.querySelector('.quick-action.extend') : null;
+                    if (exBtn) {
+                        exBtn.click();
+                    } else {
+                        bounce('Only an in-house (checked-in) guest\'s nights can be changed, with the check-out permission.');
                     }
                 }
             };
