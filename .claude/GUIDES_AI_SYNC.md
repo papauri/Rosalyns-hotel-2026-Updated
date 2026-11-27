@@ -25,6 +25,11 @@ when prompted."
 
 ## Pending (oldest first)
 
+- 2026-11-28 Liwonde d8eda9e / Rosalyn's d645988 (owner FEATURE): Housekeeping > Needs action: on an Overdue or Checkout
+  today row, users with Bookings + Check out guest see 'Check out' and 'Add nights'; they open the bookings list's own
+  checkout / Add or take off nights dialogs and come back to Housekeeping with the result. Guides: housekeeping page
+  (Needs action) + bookings checkout. Assistant: 'check out an overdue room from housekeeping' -> those buttons.
+
 - 2026-11-28 Liwonde 23bd6fd / Rosalyn's e702401 (PATCH): Housekeeping > Needs action: hovering the Overdue pill says
   'Due out <date> (N days ago) but the booking is still checked in. Check the guest out on the booking, or extend the
   stay, to clear this.' Guides: housekeeping page (Needs action, what Overdue means). Assistant: 'why are rooms overdue in
