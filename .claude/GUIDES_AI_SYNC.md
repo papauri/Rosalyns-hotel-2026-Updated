@@ -25,6 +25,11 @@ when prompted."
 
 ## Pending (oldest first)
 
+- 2026-11-28 Liwonde 23bd6fd / Rosalyn's e702401 (PATCH): Housekeeping > Needs action: hovering the Overdue pill says
+  'Due out <date> (N days ago) but the booking is still checked in. Check the guest out on the booking, or extend the
+  stay, to clear this.' Guides: housekeeping page (Needs action, what Overdue means). Assistant: 'why are rooms overdue in
+  housekeeping' -> checked-in bookings past their checkout date; check them out or extend.
+
 - 2026-11-28 Liwonde 99e8a66 / Rosalyn's 04020a0 (owner FEATURE + PATCH): Housekeeping and Room Maintenance timelines: drag
   (or Shift-click) across cells, past days too, and the bottom bar offers the list's bulk actions for the tasks/jobs
   in those cells (Assign, Priority, Start, Mark done, Verify, Repeat/Extend, Delete); right-click on picked cells shows
