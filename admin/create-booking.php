@@ -22,6 +22,7 @@ require_once '../includes/idempotency.php';
 require_once '../includes/finance-sequences.php';
 require_once '../includes/pricing.php';
 require_once '../includes/guest-allocation.php';
+require_once __DIR__ . '/includes/finance-booking-credit.php'; // which selected credit notes apply (save + dry run)
 
 $message = '';
 $error   = '';
@@ -330,6 +331,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
 
 // ─── POST: create booking(s) ─────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
+    // Dry run ("price check", plan .claude/CREATE_BOOKING_WIZARD_PLAN.md Phase B): the step-by-step screen posts the
+    // normal form plus response=wizard and dry_run=1. The save's own code runs to the end of the totals and the quote is
+    // answered as JSON BEFORE the transaction: nothing is inserted, paid, assigned, emailed, logged or locked. dry_run
+    // is honoured ONLY with response=wizard; every other post (the Assistant's JSON replay, the plain form) is unchanged.
+    $cbDryRun   = ($_POST['response'] ?? '') === 'wizard' && ($_POST['dry_run'] ?? '') === '1';
+    $cbStep     = 0;   // stage marker: the wizard step an error belongs to (0 = shown where staff are)
+    $cbField    = '';  // the input to point at for that error ('' = none)
+    $cbWarnings = [];  // dry run only: checks that refuse a real save, returned next to the quote instead
+    $cbWizardReply = static function (array $reply): void {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE);
+        exit;
+    };
+    if ($cbDryRun && function_exists('rh_sa_hook_mark_refused')) {
+        rh_sa_hook_mark_refused(); // a price check is not work: no Staff Activity row (admin/includes/activity-hook.php)
+    }
     try {
         if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
             throw new Exception('Security token invalid — refresh the page.');
@@ -339,7 +356,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $__incomingClientUuid = $_POST['client_uuid'] ?? null;
         // Serialise same-uuid submissions (double click / retried tap): the second request waits here until
         // the first has finished, then finds the booking it created below. The lock frees when this request ends.
-        if ($__idemKey = idem_normalize_uuid($__incomingClientUuid)) {
+        // A dry run takes no lock (it saves nothing) but still looks for a booking this form already made.
+        if (!$cbDryRun && ($__idemKey = idem_normalize_uuid($__incomingClientUuid))) {
             if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote('rh_idem_bk_' . md5($__idemKey)) . ', 15)')->fetchColumn() !== 1) {
                 // The first click is still being saved: never risk a second booking.
                 http_response_code(409);
@@ -352,6 +370,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             }
         }
         if ($__existingBooking = idem_find_existing_booking($pdo, $__incomingClientUuid)) {
+            if ($cbDryRun) { // this form already saved a booking: say where it is, set no flash, quote nothing
+                $cbWizardReply(['ok' => true, 'duplicate' => true, 'redirect' => 'booking-details.php?id=' . (int)$__existingBooking['id'],
+                    'message' => 'Booking already created (reference ' . (string)$__existingBooking['booking_reference'] . ').']);
+            }
             $message = 'Booking already created (reference ' . htmlspecialchars((string)$__existingBooking['booking_reference']) . '). Duplicate submission ignored.';
             $_SESSION['flash_message'] = ['type' => 'success', 'text' => $message];
             if (($_POST['response'] ?? '') === 'json') { unset($_SESSION['flash_message']); header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => true, 'booking_id' => (int)$__existingBooking['id'], 'reference' => (string)$__existingBooking['booking_reference'], 'duplicate' => true, 'message' => 'Booking already created (reference ' . (string)$__existingBooking['booking_reference'] . ').']); exit; } // Assistant replay (additive)
@@ -381,24 +403,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         // Price override is a privileged action — only admin and manager roles may set it
         $hasNonEmptyOverride = !empty(array_filter(array_map('trim', $rl_overrides), static fn($v) => $v !== ''));
         if ($hasNonEmptyOverride && !in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+            $cbStep = 2; $cbField = 'roomLinesContainer';
             // Logged with the form's client_uuid so the booking saved on the retry (same uuid) shows the blocked
             // attempt in its History (includes/booking-history.php). No booking_id key: there is no booking yet.
+            // A dry run is refused the same way but not logged (nothing was attempted).
             $__blockedLines = [];
             foreach ($rl_overrides as $__li => $__ov) {
                 if (trim((string)$__ov) !== '') {
                     $__blockedLines[] = ['room_type_id' => (int)($rl_room_ids[$__li] ?? 0), 'amount' => round((float)$__ov, 2)];
                 }
             }
-            rh_log_event('create-booking', 'warning', 'Manual room price blocked: role may not override pricing', [
-                'event'       => 'price_override_blocked',
-                'client_uuid' => idem_normalize_uuid($__incomingClientUuid),
-                'user_id'     => (int)($user['id'] ?? 0),
-                'by'          => $user['username'] ?? null,
-                'role'        => (string)($user['role'] ?? ''),
-                'check_in'    => substr(trim((string)($_POST['check_in_date'] ?? '')), 0, 10),
-                'check_out'   => substr(trim((string)($_POST['check_out_date'] ?? '')), 0, 10),
-                'overrides'   => $__blockedLines,
-            ]);
+            if (!$cbDryRun) {
+                rh_log_event('create-booking', 'warning', 'Manual room price blocked: role may not override pricing', [
+                    'event'       => 'price_override_blocked',
+                    'client_uuid' => idem_normalize_uuid($__incomingClientUuid),
+                    'user_id'     => (int)($user['id'] ?? 0),
+                    'by'          => $user['username'] ?? null,
+                    'role'        => (string)($user['role'] ?? ''),
+                    'check_in'    => substr(trim((string)($_POST['check_in_date'] ?? '')), 0, 10),
+                    'check_out'   => substr(trim((string)($_POST['check_out_date'] ?? '')), 0, 10),
+                    'overrides'   => $__blockedLines,
+                ]);
+            }
             throw new Exception('Your role does not have permission to override room pricing.');
         }
         $individual_room_id = !empty($_POST['individual_room_id']) ? (int)$_POST['individual_room_id'] : null;
@@ -426,23 +452,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $amount_collected     = $amount_collected_raw !== '' ? max(0.0, (float)$amount_collected_raw) : 0.0;
 
         // ── Basic validation ─────────────────────────────────────────────────
+        // Each message carries its wizard step and field (1 stay, 2 rooms, 3 guest). A dry run answers the first step
+        // with errors and only that step's messages; every other post throws ALL messages in this order, as before.
         $errors = [];
-        if (empty($rl_room_ids))                                                      $errors[] = 'Please select at least one room.';
-        if (empty($guest_name))                                                       $errors[] = 'Guest name is required.';
-        if (empty($guest_email) || !filter_var($guest_email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Valid email is required.';
-        if (empty($guest_phone))                                                      $errors[] = 'Phone number is required.';
-        if ($number_of_guests < 1)                                                    $errors[] = 'At least 1 guest required.';
-        if ($child_guests >= $number_of_guests)                                       $errors[] = 'At least 1 adult is required.';
-        if (empty($check_in_date))                                                    $errors[] = 'Check-in date is required.';
-        if (empty($check_out_date))                                                   $errors[] = 'Check-out date is required.';
-        if (!empty($errors)) throw new Exception(implode(' ', $errors));
+        if (empty($rl_room_ids))                                                      $errors[] = [2, 'roomLinesContainer', 'Please select at least one room.'];
+        if (empty($guest_name))                                                       $errors[] = [3, 'guestName', 'Guest name is required.'];
+        if (empty($guest_email) || !filter_var($guest_email, FILTER_VALIDATE_EMAIL)) $errors[] = [3, 'guestEmail', 'Valid email is required.'];
+        if (empty($guest_phone))                                                      $errors[] = [3, 'guestPhone', 'Phone number is required.'];
+        if ($number_of_guests < 1)                                                    $errors[] = [1, 'numGuests', 'At least 1 guest required.'];
+        if ($child_guests >= $number_of_guests)                                       $errors[] = [1, 'childGuests', 'At least 1 adult is required.'];
+        if (empty($check_in_date))                                                    $errors[] = [1, 'checkInDate', 'Check-in date is required.'];
+        if (empty($check_out_date))                                                   $errors[] = [1, 'checkOutDate', 'Check-out date is required.'];
+        if (!empty($errors)) {
+            $cbStep  = min(array_column($errors, 0));
+            $cbShown = $cbDryRun ? array_values(array_filter($errors, static fn($cbErr) => $cbErr[0] === $cbStep)) : $errors;
+            $cbField = $cbShown[0][1];
+            throw new Exception(implode(' ', array_column($cbShown, 2)));
+        }
 
+        $cbStep   = 1; $cbField = 'checkInDate';
         $checkIn  = new DateTime($check_in_date);
+        $cbField  = 'checkOutDate';
         $checkOut = new DateTime($check_out_date);
         if ($checkOut <= $checkIn) throw new Exception('Check-out must be after check-in.');
 
         $number_of_nights = $checkIn->diff($checkOut)->days;
         $adult_guests     = max(1, $number_of_guests - $child_guests);
+        $cbStep = 2; $cbField = 'roomLinesContainer';
 
         // ── Build & validate room lines ─────────────────────────────────────
         $room_lines = [];
@@ -752,9 +788,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         unset($line);
 
         // More collected than the booking costs: only with the explicit tick (the extra becomes a credit note).
+        // A dry run returns this as a warning next to the quote instead of refusing.
+        $cbStep = 4; $cbField = 'overCollectedCb';
         if ($payment_received && $amount_collected > $grand_total_with_vat + BALANCE_TOLERANCE && empty($_POST['confirm_overpay'])) {
             require_once __DIR__ . '/includes/finance-account-sync.php';
-            throw new Exception(rh_payment_overpay_message());
+            if (!$cbDryRun) {
+                throw new Exception(rh_payment_overpay_message());
+            }
+            $cbWarnings[] = ['step' => 4, 'message' => rh_payment_overpay_message()];
         }
 
         // Derive payment_status from amount collected vs grand total
@@ -775,11 +816,141 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         // ── Edited email wording (owner 2026-11-27) ──────────────────────────
         // Checked against the email this booking will actually send (rh_email_wording_create_key: the same choice as
         // the Email section below) BEFORE anything is created: a mismatch or a refused wording saves nothing.
+        $cbStep = 5; $cbField = '';
         require_once __DIR__ . '/../includes/email-wording.php';
         $cbWordingKey = rh_email_wording_create_key((string)$booking_status, $payment_received && $amount_collected > 0);
         $cbWording = $send_email ? rh_email_wording_from_post($cbWordingKey, $_POST) : null;
         if ($cbWording !== null && empty($cbWording['ok'])) {
-            throw new Exception('The booking was not created. ' . $cbWording['error']);
+            if (!$cbDryRun) {
+                throw new Exception('The booking was not created. ' . $cbWording['error']);
+            }
+            $cbWarnings[] = ['step' => 5, 'message' => (string)$cbWording['error']]; // dry run: shown with the quote
+        }
+
+        // ── Availability check: ONE body, two callers ─────────────────────────
+        // The save runs it inside the locked transaction below (prevents the double-booking race); the dry run runs
+        // the same check without the transaction or lock, so "no longer free" shows before staff press Create.
+        // Past or blocked dates belong to the stay step (1); everything else here to the rooms step (2).
+        $cbCheckAvailability = static function () use ($room_lines, $check_in_date, $check_out_date, $child_guests_by_room, $child_rooms_by_room, &$cbStep, &$cbField): void {
+            $cbStep = 2; $cbField = 'roomLinesContainer';
+            // Sum requested qty per room_id (multiple lines may target the same type).
+            $requested_qty_by_room = [];
+            foreach ($room_lines as $line) {
+                $rid = (int)$line['room_id'];
+                $requested_qty_by_room[$rid] = ($requested_qty_by_room[$rid] ?? 0) + (int)$line['qty'];
+            }
+            foreach ($requested_qty_by_room as $rid => $needed) {
+                $avail = checkRoomAvailability($rid, $check_in_date, $check_out_date, null, (int)($child_guests_by_room[$rid] ?? 0), (int)($child_rooms_by_room[$rid] ?? 0));
+                if (empty($avail['available'])) {
+                    if (!empty($avail['blocked_dates']) || new DateTime($check_in_date) < new DateTime('today')) { $cbStep = 1; $cbField = 'checkInDate'; }
+                    throw new Exception($avail['error'] ?? 'Selected room is no longer available for those dates.');
+                }
+                $remaining = (int)($avail['remaining_rooms'] ?? 0);
+                if ($remaining < $needed) {
+                    $room_label = $avail['room']['name'] ?? ('room type ' . $rid);
+                    throw new Exception('Only ' . max(0, $remaining) . ' room(s) of "' . $room_label . '" remain available for those dates, but ' . $needed . ' were requested.');
+                }
+            }
+            // Joined rooms: a booking of a member room type committed a moment ago has no room yet, so the pair
+            // check cannot see it; the member type's own remaining count must still cover the pairs being sold.
+            $joined_pairs = [];
+            foreach ($room_lines as $line) {
+                foreach ((array)($line['combination_queue'] ?? []) as $pair) {
+                    $joined_pairs[] = $pair;
+                }
+            }
+            if ($joined_pairs) {
+                $joined_err = rh_joined_members_stock_error($joined_pairs, $check_in_date, $check_out_date);
+                if ($joined_err !== '') {
+                    throw new Exception($joined_err);
+                }
+            }
+        };
+
+        // ── Dry run: answer the quote now, before the transaction (nothing below runs) ──
+        if ($cbDryRun) {
+            $cbCheckAvailability();
+            $cbStep = 4; $cbField = '';
+            // Credit the save would apply after the commit: same eligibility helper, at the 0.01 below which
+            // applyCreditNote() refuses. Never applied here. 0 when tentative (the save applies none then).
+            $cbCreditNotes  = [];
+            $cbRawCreditIds = $_POST['apply_credit_note_ids'] ?? [];
+            if (!$is_tentative && is_array($cbRawCreditIds) && !empty($cbRawCreditIds)) {
+                $cbCreditNotes = rh_cb_credit_queue($pdo, $cbRawCreditIds, (string)$guest_email, !empty($_POST['apply_credit_override']),
+                    trim((string)($_POST['apply_credit_override_reason'] ?? '')), BALANCE_TOLERANCE)['notes'];
+            }
+            $cbEligible = round(array_sum(array_column($cbCreditNotes, 'balance')), 2);
+            $cbCash     = round($amount_collected, 2);                 // after the payment normalisation above (0 = none)
+            $cbOwed     = round($grand_total_with_vat - $cbCash, 2);
+            // applyCreditNote() also refuses an account that owes BALANCE_TOLERANCE or less: nothing is applied then.
+            $cbWillApply = $cbOwed > BALANCE_TOLERANCE ? round(max(0.0, min($cbEligible, $cbOwed)), 2) : 0.0;
+            $cbStillOwed = round(max(0.0, $cbOwed - $cbWillApply), 2);
+            // Every figure is the row the save would store ($line['rows'] above), summed the same way.
+            $cbLines    = [];
+            $cbNetTotal = 0.0;
+            foreach ($room_lines as $cbLine) {
+                $cbRows      = [];
+                $cbLineTotal = 0.0;
+                foreach ($cbLine['rows'] as $cbRow) {
+                    $cbNet = round($cbRow['total_amount'] - $cbRow['levy_amount'], 2); // ex VAT, ex levy
+                    $cbRows[] = [
+                        'room_price'       => round((float)$cbRow['room_price'], 2),
+                        'list_rate'        => $cbRow['list_rate'],
+                        'rate_plan_label'  => (string)$cbRow['rate_plan_label'],
+                        'child_supplement' => $cbRow['child_supplement'],
+                        'total_amount'     => $cbRow['total_amount'],
+                        'net'              => $cbNet,
+                        'vat_amount'       => $cbRow['vat_amount'],
+                        'levy_amount'      => $cbRow['levy_amount'],
+                        'total_with_vat'   => $cbRow['total_with_vat'],
+                        'price_source'     => $cbRow['price_source'],
+                    ];
+                    $cbLineTotal += $cbRow['total_with_vat'];
+                    $cbNetTotal  += $cbNet;
+                }
+                $cbNetTotal = round($cbNetTotal, 2); // rounded per line, as the grand totals above
+                $cbLines[] = [
+                    'room_id'             => (int)$cbLine['room_id'],
+                    'name'                => (string)$cbLine['room_data']['name'],
+                    'qty'                 => (int)$cbLine['qty'],
+                    'occupancy'           => (string)$cbLine['occupancy_type'],
+                    'rows'                => $cbRows,
+                    'line_total_with_vat' => round($cbLineTotal, 2),
+                ];
+            }
+            $cbWizardReply([
+                'ok'    => true,
+                'quote' => [
+                    'nights'    => (int)$number_of_nights,
+                    'currency'  => (string)$currency_symbol,
+                    'vat_mode'  => vat_mode(),
+                    'vat_rate'  => $room_lines[0]['rows'][0]['vat_rate'],
+                    'levy_rate' => $room_lines[0]['rows'][0]['levy_rate'],
+                    'lines'     => $cbLines,
+                    'totals'    => [
+                        'total_with_vat'   => $grand_total_with_vat,
+                        'vat'              => $grand_vat_amount,
+                        'levy'             => $grand_levy_amount,
+                        'child_supplement' => $grand_child_supplement,
+                        'net'              => $cbNetTotal,
+                    ],
+                    'payment'   => [
+                        'received'     => $payment_received && $amount_collected > 0,
+                        'amount'       => $cbCash,
+                        'status'       => $payment_status_val,   // cash only, as the save stores it
+                        'over_by'      => ($payment_received && $amount_collected > $grand_total_with_vat + BALANCE_TOLERANCE)
+                            ? round($amount_collected - $grand_total_with_vat, 2) : 0.0,
+                        'final_status' => rh_pay_state_key($cbCash + $cbWillApply, $cbStillOwed, false, $grand_total_with_vat, false),
+                    ],
+                    'credit'    => [
+                        'will_apply' => $cbWillApply,
+                        'notes'      => array_map(static fn($cbN) => ['id' => $cbN['id'], 'number' => $cbN['number'], 'balance' => $cbN['balance'], 'override' => $cbN['override']], $cbCreditNotes),
+                    ],
+                    'still_owed' => $cbStillOwed,
+                    'email_key'  => $cbWordingKey,
+                ],
+                'warnings' => $cbWarnings,
+            ]);
         }
 
         // ── Transaction: create bookings for all lines ───────────────────────
@@ -791,38 +962,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         rh_lock_room_types($pdo, $lock_type_ids);
 
         // ── Server-side availability guard (prevents double-booking race) ─────
-        // Re-verify capacity for every room type inside the locked transaction.
-        // Sum requested qty per room_id (multiple lines may target the same type).
-        $requested_qty_by_room = [];
-        foreach ($room_lines as $line) {
-            $rid = (int)$line['room_id'];
-            $requested_qty_by_room[$rid] = ($requested_qty_by_room[$rid] ?? 0) + (int)$line['qty'];
-        }
-        foreach ($requested_qty_by_room as $rid => $needed) {
-            $avail = checkRoomAvailability($rid, $check_in_date, $check_out_date, null, (int)($child_guests_by_room[$rid] ?? 0), (int)($child_rooms_by_room[$rid] ?? 0));
-            if (empty($avail['available'])) {
-                throw new Exception($avail['error'] ?? 'Selected room is no longer available for those dates.');
-            }
-            $remaining = (int)($avail['remaining_rooms'] ?? 0);
-            if ($remaining < $needed) {
-                $room_label = $avail['room']['name'] ?? ('room type ' . $rid);
-                throw new Exception('Only ' . max(0, $remaining) . ' room(s) of "' . $room_label . '" remain available for those dates, but ' . $needed . ' were requested.');
-            }
-        }
-        // Joined rooms: a booking of a member room type committed a moment ago has no room yet, so the pair
-        // check cannot see it; the member type's own remaining count must still cover the pairs being sold.
-        $joined_pairs = [];
-        foreach ($room_lines as $line) {
-            foreach ((array)($line['combination_queue'] ?? []) as $pair) {
-                $joined_pairs[] = $pair;
-            }
-        }
-        if ($joined_pairs) {
-            $joined_err = rh_joined_members_stock_error($joined_pairs, $check_in_date, $check_out_date);
-            if ($joined_err !== '') {
-                throw new Exception($joined_err);
-            }
-        }
+        // Re-verify capacity for every room type inside the locked transaction (the shared check above).
+        $cbCheckAvailability();
+        $cbStep = 5; $cbField = '';
 
         $created_bookings = [];
         $booking_number   = 0;
@@ -942,11 +1084,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     // Assign the exact combination this row was priced from. The assign
                     // call re-validates availability under the lock.
                     if (empty($line['combination_queue'][$room_idx])) {
+                        $cbStep = 2; $cbField = 'roomLinesContainer';
                         throw new Exception('Joined rooms are no longer available for ' . $r['name'] . '.');
                     }
                     $row_combo_id = (int)$line['combination_queue'][$room_idx]['id'];
                     $assignment = assignRoomCombinationToBooking($new_booking_id, $row_combo_id, (int)$user['id']);
                     if (empty($assignment['success'])) {
+                        $cbStep = 2; $cbField = 'roomLinesContainer';
                         throw new Exception($assignment['message'] ?: 'Failed to reserve joined rooms for ' . $r['name'] . '.');
                     }
                     $assigned_combination_id = $row_combo_id;
@@ -1138,41 +1282,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $credit_msg = ' (Note: credit override was selected without a reason, so credit from a different account was not applied.)';
                 }
 
-                // Build a queue of usable, selected credit notes.
-                $cnQueue = [];
-                foreach (array_unique(array_map('intval', $rawCreditIds)) as $cnId) {
-                    if ($cnId <= 0) {
-                        continue;
-                    }
-                    $cnStmt = $pdo->prepare("SELECT id, credit_note_number, balance, guest_email, status, expires_at FROM credit_notes WHERE id = ?");
-                    $cnStmt->execute([$cnId]);
-                    $cn = $cnStmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$cn) {
-                        continue;
-                    }
-                    if (!in_array((string)$cn['status'], ['active', 'partially_applied'], true)) {
-                        continue;
-                    }
-                    if ($cn['expires_at'] !== null && (string)$cn['expires_at'] < date('Y-m-d')) {
-                        continue;
-                    }
-                    if ((float)$cn['balance'] <= 0.005) {
-                        continue;
-                    }
-                    // Security: the guest's own credit applies freely; credit belonging to
-                    // a different account is only allowed under an explicit, audited override.
-                    $emailMatches = strcasecmp(trim((string)$cn['guest_email']), trim((string)$guest_email)) === 0;
-                    if (!$emailMatches && !$credit_override_active) {
-                        continue;
-                    }
-                    $cnQueue[] = [
-                        'id'       => (int)$cn['id'],
-                        'number'   => (string)$cn['credit_note_number'],
-                        'balance'  => (float)$cn['balance'],
-                        'override' => !$emailMatches,
-                        'cn_email' => (string)$cn['guest_email'],
-                    ];
-                }
+                // Build a queue of usable, selected credit notes: the eligibility rule shared with the dry run
+                // (admin/includes/finance-booking-credit.php; status, expiry, balance, email match or override
+                // with a reason). 0.005 is this save's own threshold, kept as it was.
+                $cnQueue = rh_cb_credit_queue($pdo, $rawCreditIds, (string)$guest_email, $credit_override, $credit_override_reason, 0.005)['notes'];
 
                 $applied_credit_total = 0.0;
                 $applied_credit_numbers = [];
@@ -1493,6 +1606,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
     } catch (\Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         $error = rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage();
+        if ($cbDryRun) { // a refused price check: the step to go back to; not logged (nothing was attempted)
+            $cbWizardReply(['ok' => false, 'step' => rh_is_lock_conflict($e) ? 0 : $cbStep, 'message' => $error, 'field' => $cbField, 'warnings' => $cbWarnings]);
+        }
         rh_log_event('create-booking', 'error', 'Booking creation failed: ' . $e->getMessage(), [
             'by'        => $user['username'] ?? null,
             'exception' => get_class($e),
