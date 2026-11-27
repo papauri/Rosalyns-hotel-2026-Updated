@@ -1734,7 +1734,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
         }
         $hkNeedCols = [
             'room' => ['Room', 'The room number and name. Every room with a guest checked in, from current bookings, now.'],
-            'status' => ['Status', 'Checkout today, Overdue (past the checkout date) or Occupied. A second pill shows when the guest has left and the departure clean has started.'],
+            'status' => ['Status', 'Checkout today, Overdue (the checkout date has passed but the booking is still checked in: check the guest out on the booking or extend the stay; hover the pill for the date) or Occupied. A second pill shows when the guest has left and the departure clean has started.'],
             'guest' => ['Guest / checkout', 'The booking guest (and the room guest if different) and the booking checkout date.'],
             'assigned' => ['Assigned to', 'Who has the room\'s open cleaning task (pending or in progress). A dash means the room has no open task.'],
             'assign' => ['Assign', 'Pick a staff member for this room. With no open task, it adds a cleaning task for today; with an open task, it gives that task to the person picked (or Unassigned).'],
@@ -1767,6 +1767,12 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                                 $hkDueOut = in_array($hkOccType, ['checkout_today', 'overdue_checkout'], true);
                                 $hkOccPill = $hkOccType === 'checkout_today' ? 'in_progress' : ($hkOccType === 'overdue_checkout' ? 'blocked' : 'occupied');
                                 $hkOccLabel = $hkOccType === 'checkout_today' ? 'Checkout today' : ($hkOccType === 'overdue_checkout' ? 'Overdue' : 'Occupied');
+                                // Hover says why (owner 2026-11-28): the checkout date, how late, and what clears it.
+                                $hkOutTs = strtotime((string)$room['check_out_date']);
+                                $hkLate = $hkOutTs ? (int)floor((strtotime(date('Y-m-d')) - $hkOutTs) / 86400) : 0;
+                                $hkOccTip = $hkOccType === 'overdue_checkout'
+                                    ? 'Due out ' . date('M j, Y', $hkOutTs) . ($hkLate > 0 ? ' (' . $hkLate . ' day' . ($hkLate === 1 ? '' : 's') . ' ago)' : '') . ' but the booking is still checked in. Check the guest out on the booking, or extend the stay, to clear this.'
+                                    : ($hkOccType === 'checkout_today' ? 'The guest is due out today.' : 'A guest is checked in; due out ' . date('M j, Y', $hkOutTs) . '.');
                                 $hkRoomLabel = trim($room['room_number'] . ' ' . ($room['room_name'] ?? ''));
                                 $hkEarly = (string)($room['early_task_status'] ?? '');
                                 $hkOpen = $hkOpenByRoom[(int)$room['id']] ?? null;
@@ -1777,7 +1783,7 @@ $opsPage = ['list' => '#hkAssignmentsCard', 'table' => '#assignmentsTable', 'con
                                     </span>
                                     <span class="ops-cell ops-cell--room" role="rowheader"><strong><?php echo htmlspecialchars($hkRoomLabel); ?></strong></span>
                                     <span class="ops-cell ops-cell--status" role="cell">
-                                        <span class="status-pill <?php echo $hkOccPill; ?>"><?php echo $hkOccLabel; ?></span>
+                                        <span class="status-pill <?php echo $hkOccPill; ?>" title="<?php echo htmlspecialchars($hkOccTip); ?>"><?php echo $hkOccLabel; ?></span>
                                         <?php if ($hkDueOut && $hkEarly === 'completed'): ?>
                                             <span class="status-pill completed">Cleaned &middot; waiting for checkout</span>
                                         <?php elseif ($hkDueOut && $hkEarly !== ''): ?>
