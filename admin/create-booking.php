@@ -1501,6 +1501,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
     }
 }
 
+// A refused save shows this page again: bring back the room types picked and the payment fields, so a quick
+// re-submit does not create an unpaid booking by mistake. Only fills the form. The "paid more than owed" tick is
+// never brought back: staff tick it again themselves.
+$cb_repost = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error !== '') {
+    $cbRpTypes = array_map('intval', array_column($rooms, 'id'));
+    $cbRpRooms = [];
+    foreach ((array)($_POST['room_line_room_id'] ?? []) as $cbRpId) {
+        $cbRpId = is_scalar($cbRpId) ? (int)$cbRpId : 0;
+        if ($cbRpId > 0 && in_array($cbRpId, $cbRpTypes, true)) { $cbRpRooms[] = $cbRpId; }
+    }
+    $cbRpMethod = is_scalar($_POST['payment_method'] ?? null) ? (string)$_POST['payment_method'] : '';
+    $cbRpAmount = is_scalar($_POST['amount_collected'] ?? null) ? round((float)$_POST['amount_collected'], 2) : 0.0;
+    $cb_repost = [
+        'room_types' => array_slice($cbRpRooms, 0, 20),
+        'paid'       => ($_POST['payment_received'] ?? '') === '1',
+        'method'     => in_array($cbRpMethod, ['cash', 'bank_transfer', 'mobile_money', 'card', 'cheque', 'other'], true) ? $cbRpMethod : '',
+        'amount'     => $cbRpAmount > 0 ? $cbRpAmount : 0,
+    ];
+}
+
 // ── Build rooms JSON for JavaScript ──────────────────────────────────────────
 $rooms_json = json_encode(array_map(function ($r) {
     $policy = resolveOccupancyPolicy($r, null);
@@ -1510,9 +1531,12 @@ $rooms_json = json_encode(array_map(function ($r) {
         'max_guests'             => (int)$r['max_guests'],
         'total_rooms'            => (int)($r['total_rooms'] ?? 1),
         'price_per_night'        => (float)$r['price_per_night'],
-        'price_single'           => (float)($r['price_single_occupancy'] ?? $r['price_per_night']),
-        'price_double'           => (float)($r['price_double_occupancy'] ?? $r['price_per_night'] * 1.2),
-        'price_triple'           => (float)($r['price_triple_occupancy'] ?? $r['price_per_night'] * 1.4),
+        // Same fallback as the save (the $r_prices tiers above): a tier with no price of its own costs the room's
+        // nightly price. An invented x1.2 / x1.4 here made the page total more than the save, so a full payment
+        // was refused as "more than the balance due".
+        'price_single'           => (float)(!empty($r['price_single_occupancy']) ? $r['price_single_occupancy'] : $r['price_per_night']),
+        'price_double'           => (float)(!empty($r['price_double_occupancy']) ? $r['price_double_occupancy'] : $r['price_per_night']),
+        'price_triple'           => (float)(!empty($r['price_triple_occupancy']) ? $r['price_triple_occupancy'] : $r['price_per_night']),
         'child_price_multiplier' => rh_child_rule($r)['percent'],
         'child_rule'             => rh_child_rule_js(rh_child_rule($r)),
         'rooms_available'        => (int)$r['rooms_available'],
@@ -2552,7 +2576,7 @@ try {
                                     <label>Amount Collected (<?php echo htmlspecialchars($currency_symbol); ?>)</label>
                                     <input type="number" name="amount_collected" id="amountCollected"
                                         step="0.01" min="0" placeholder="0.00"
-                                        oninput="checkPartialPayment()">
+                                        oninput="this.removeAttribute('data-auto'); checkPartialPayment()">
                                     <small id="amountCollectedHint">Enter full amount for complete payment, or partial amount for a deposit.</small>
                                     <div id="overCollectedWrap" style="display:none;margin-top:6px;">
                                         <div id="overCollectedWarn" style="color:#8a4b00;font-size:12px;margin-bottom:4px;"></div>
@@ -4190,7 +4214,8 @@ try {
             if (!amtEl || !hint) return;
             const grand = parseFloat((el('accGrandTotal')?.textContent || '').replace(/[^\d.]/g, '')) || 0;
             const entered = parseFloat(amtEl.value) || 0;
-            amtEl.removeAttribute('data-auto');
+            // data-auto is cleared only when staff type an amount (the input's oninput), so an auto-filled amount
+            // keeps following the total when the dates, room or extras change.
             const overBy = entered - grand;
             const overWrap = el('overCollectedWrap');
             if (overWrap) {
@@ -4303,6 +4328,8 @@ try {
         // "Pick a specific room" once its list loads. One-shot: dropped as soon as the user picks another room.
         const cbPrefill = <?php echo json_encode($cb_prefill, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         let cbPrefillRoom = (cbPrefill.room_type && cbPrefill.room) ? cbPrefill.room : 0;
+        // After a refused save (validated in PHP): the room types and payment fields that were sent.
+        const cbRepost = <?php echo json_encode($cb_repost, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         function initBookingForm() {
             if (cbPrefillRoom && el('irModePick')) {
@@ -4310,13 +4337,30 @@ try {
                 el('autoAssignRoom').value = '0';
                 el('irPickerSection').style.display = 'block';
             }
-            addRoomLine(cbPrefill.room_type || undefined);
+            if (cbRepost && cbRepost.room_types && cbRepost.room_types.length) {
+                cbRepost.room_types.forEach(t => addRoomLine(t));
+            } else {
+                addRoomLine(cbPrefill.room_type || undefined);
+            }
             const ci = el('checkInDate').value;
             const co = el('checkOutDate').value;
             if (ci && co) checkAvailabilityForDates(ci, co);
             calculateTotal();
             updateGroupSummary();
             onBookingStatusChange();
+            const payCb = el('paymentReceivedCheck');
+            if (cbRepost && cbRepost.paid && payCb && !payCb.disabled && !payCb.checked) {
+                payCb.checked = true;
+                togglePaymentSection();
+                if (cbRepost.method && el('paymentMethod')) el('paymentMethod').value = cbRepost.method;
+                const amt = el('amountCollected');
+                if (amt && cbRepost.amount > 0) {
+                    amt.value = Number(cbRepost.amount).toFixed(2);
+                    amt.removeAttribute('data-auto');
+                    checkPartialPayment();
+                    cbWordingSync();
+                }
+            }
         }
         // Run immediately if the DOM is already parsed (bfcache / SW-served page
         // where DOMContentLoaded has already fired), otherwise wait for it.
