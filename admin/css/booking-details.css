@@ -1581,3 +1581,51 @@
     min-height: 44px;
     text-decoration: none;
 }
+
+/* Check-in block (owner 2026-11-27): where the guest is now, then every check-in, cancelled check-in and check-out,
+   oldest first: what, then when (hotel time) with who under it, the same at every width. */
+.bd-checkin__log {
+    list-style: none;
+    padding: 0;
+}
+
+.bd-checkin__step {
+    display: grid;
+    grid-template-columns: 9.5rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: 2px 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--bd-line-soft);
+    font-size: 0.88rem;
+    color: var(--bd-ink);
+}
+
+.bd-checkin__step:first-child {
+    padding-top: 0;
+}
+
+.bd-checkin__step:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.bd-checkin__what {
+    font-weight: 600;
+}
+
+.bd-checkin__step--undo .bd-checkin__what {
+    color: var(--bd-danger);
+}
+
+.bd-checkin__when,
+.bd-checkin__who {
+    grid-column: 2;
+}
+
+.bd-checkin__who {
+    color: var(--bd-muted);
+}
+
+.bd-checkin .rh-panel__title .help {
+    margin-left: 4px;
+}

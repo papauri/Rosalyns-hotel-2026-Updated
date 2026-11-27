@@ -3994,8 +3994,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         data-help="Search Bookings|Search by booking reference, guest name, phone number, room number, or payment reference. Results update automatically as you type.">
                 </div>
                 <select name="date_type" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Which date From and To apply to"
-                    title="Which date From and To apply to. Arrival: check-in date. Departure: check-out date. Staying: in the hotel on at least one night in the range (the departure day is not a night). Booked on: the day the booking was made."
-                    data-help="Dates|Pick which date From and To look at. Arrival = the check-in date. Departure = the check-out date. Staying = guests in the hotel on at least one night in the range (the day they leave does not count as a night). Booked on = the day the booking was made. Both end days are included.">
+                    title="Which date From and To apply to. Arrival: check-in date. Departure: check-out date. Staying: in the hotel on at least one night in the range (the departure day is not a night). Booked on: the day the booking was made. Checked in on: the day staff checked the guest in (a cancelled check-in does not count)."
+                    data-help="Dates|Pick which date From and To look at. Arrival = the check-in date. Departure = the check-out date. Staying = guests in the hotel on at least one night in the range (the day they leave does not count as a night). Booked on = the day the booking was made. Checked in on = the day staff checked the guest in, from the booking's activity log (hotel time; the latest check-in; guests checked in now or checked out since, a cancelled check-in does not count). Both end days are included.">
                     <?php foreach (rh_bk_date_types() as $bk_dt_key => $bk_dt_label): ?>
                         <option value="<?php echo $bk_dt_key; ?>" <?php echo $filter_date_type === $bk_dt_key ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_dt_label); ?></option>
                     <?php endforeach; ?>
@@ -4007,11 +4007,11 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 </button>
                 <label class="rh-inline-field"><span class="rh-inline-field__text">From</span>
                 <input type="date" name="date_from" value="<?php echo htmlspecialchars($filter_date_from); ?>"
-                    placeholder="From" title="From: first day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="From date"
+                    placeholder="From" title="From: first day of the range, on the date chosen in Dates (Arrival, Departure, Staying, Booked on or Checked in on). The day itself is included. Same date in From and To = that one day." aria-label="From date"
                     class="bookings-toolbar__input bookings-toolbar__input--date"></label>
                 <label class="rh-inline-field"><span class="rh-inline-field__text">To</span>
                 <input type="date" name="date_to" value="<?php echo htmlspecialchars($filter_date_to); ?>"
-                    placeholder="To" title="To: last day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="To date"
+                    placeholder="To" title="To: last day of the range, on the date chosen in Dates (Arrival, Departure, Staying, Booked on or Checked in on). The day itself is included. Same date in From and To = that one day." aria-label="To date"
                     class="bookings-toolbar__input bookings-toolbar__input--date"></label>
                 <?php if ($bk_presets): ?>
                 <div class="bk-presets" role="group" aria-label="Quick dates">
@@ -4020,7 +4020,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                             data-from="<?php echo htmlspecialchars($bk_pr['from'], ENT_QUOTES); ?>" data-to="<?php echo htmlspecialchars($bk_pr['to'], ENT_QUOTES); ?>"
                             aria-pressed="<?php echo $bk_pr_on ? 'true' : 'false'; ?>"><?php echo htmlspecialchars($bk_pr['label']); ?></button>
                     <?php endforeach; ?>
-                    <i class="help" data-tip="Quick dates, on the hotel's date, for the date chosen in Dates (Arrival, Departure, Staying or Booked on). Today; Tomorrow; This week = Monday to Sunday; Next 7 days = today and the 6 days after; This month = the 1st to the last day. Both end days are included.">?</i>
+                    <i class="help" data-tip="Quick dates, on the hotel's date, for the date chosen in Dates (Arrival, Departure, Staying, Booked on or Checked in on). Today; Tomorrow; This week = Monday to Sunday; Next 7 days = today and the 6 days after; This month = the 1st to the last day. Both end days are included.">?</i>
                 </div>
                 <?php endif; ?>
                 <div class="bk-filter-drops" id="bkFilterDrops" data-bk-filter-drops>
@@ -4208,7 +4208,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 ['all', 'All', 'fa-list', $total_bookings, ''],
                 ['today-checkins', 'Arriving today', 'fa-calendar-day', $today_checkins, 'Arriving today: bookings checking in today that have not checked in yet.'],
                 ['today-checkouts', 'Leaving today', 'fa-calendar-times', $today_checkouts, 'Leaving today: guests in the hotel who are due to check out today.'],
-                ['checked-in', 'In house', 'fa-sign-in-alt', $checked_in, 'In house: guests checked in now.'],
+                ['checked-in', 'Checked in', 'fa-sign-in-alt', $checked_in, 'Guests checked in now (in house).'],
                 ['pending', 'Pending', 'fa-clock', $pending, 'Pending: bookings not confirmed yet.'],
                 ['unpaid', 'Unpaid', 'fa-exclamation-circle', $unpaid, 'Unpaid: bookings with money still to pay, part paid included.'],
             ];
@@ -4310,7 +4310,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                     <?php rh_server_sort_th('Nights' . $bk_tip('Nights: nights booked, check-in day to check-out day (the check-out day is not a night).'), 'nights', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-nights'); ?>
                                     <?php rh_server_sort_th('Guests', 'guests', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-guests'); ?>
                                     <?php rh_server_sort_th('Total' . $bk_tip('Total: the whole bill for the booking, room nights plus extras and charges, VAT and levy included. The small line is the booked rate a night times the nights.'), 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
-                                    <?php rh_server_sort_th('Status' . $bk_tip('Status: where the booking is now: Pending, Tentative, Confirmed, Checked in, Checked out, Cancelled, No-show or Expired. Hover over or tap the pill to see why and when (who, the reason, hold or pay-by time).'), 'status', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-status'); ?>
+                                    <?php rh_server_sort_th('Status' . $bk_tip('Status: where the booking is now: Pending, Tentative, Confirmed, Checked in, Checked out, Cancelled, No-show or Expired. Hover over or tap the pill to see why and when (who, the reason, hold or pay-by time). Checked in and Checked out bookings show under the pill when the guest was checked in and who did it, from the booking\'s activity log (hotel time; "time not recorded" = no log entry).'), 'status', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-status'); ?>
                                     <?php rh_server_sort_th('Payment' . $bk_tip('Payment: from the money on the booking (paid so far against the total): Paid, Part paid, Unpaid or Refunded. The small line is the latest payment reference. Hover over or tap the pill to see the total, paid so far, balance due and the latest payment.'), 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
                                     <?php rh_server_sort_th('Balance due' . $bk_tip('Balance due: what the guest still has to pay on this booking now (cancelled and no-show bookings: a fee or extras still owed). Blank = nothing to pay. Deleted bookings are blank. Same figure as the CSV export.' . ($bk_chase_bal ? ' Arrivals to chase filter: a group shows the whole group\'s balance (all its confirmed rooms, an overpaid room offsetting the others), the same figure as the Dashboard and the daily email.' : '')), 'balance', $bk_sort_key, $bk_sort_dir, 'col-optional-md bk-col-balance'); ?>
                                     <?php rh_server_sort_th('Created' . $bk_tip('Created: when the booking was made, and who made it (from the booking history).'), 'created', $bk_sort_key, $bk_sort_dir, 'col-optional-lg bk-col-created'); ?>
@@ -4492,6 +4492,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             $bk_status_pill = $is_deleted_row ? '' : rh_bk_pill_info_attrs(rh_bk_status_info($booking, $bk_status_ev[(int)$booking['id']] ?? null, [
                                                 'currency' => $currency_symbol, 'today' => $today_str, 'pending_hours' => $bk_pending_hours, 'left' => $bk_left_shown,
                                             ]), 'Status ' . $bk_status_word((string)$booking['status']) . ': show why and when');
+                                            // "Checked in 27 Nov 14:05 by ..." under the pill of a checked-in / checked-out row (owner 2026-11-27).
+                                            $bk_ci_line = $is_deleted_row ? '' : rh_bk_checkin_line($bk_status_ev[(int)$booking['id']] ?? null, (string)$booking['status'], $today_str);
                                             $bk_pill_tag = static fn (string $attrs): array => $attrs !== '' ? ['button type="button"', 'button', ' rh-pill-info'] : ['span', 'span', ''];
                                             [$bk_pt_open, $bk_pt_close, $bk_pt_cls] = $bk_pill_tag($bk_pay_pill);
                                             [$bk_st_open, $bk_st_close, $bk_st_cls] = $bk_pill_tag($bk_status_pill);
@@ -4501,7 +4503,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             <?php if ($bk_rate['ok']): ?>
                                                 <br><small class="bk-booked-rate" style="color:#666;white-space:nowrap;" title="<?php echo htmlspecialchars('Booked at ' . $bk_rate['text'] . '. Room rate a night × nights, at the price the booking was made at; today\'s room price does not change it.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bk_rate['compact'], ENT_QUOTES); ?></small>
                                             <?php endif; ?>
-                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><<?php echo $bk_st_open; ?> class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?><?php echo $bk_st_cls; ?>"<?php echo $bk_status_pill; ?>><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?></<?php echo $bk_st_close; ?>></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?>
+                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><<?php echo $bk_st_open; ?> class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?><?php echo $bk_st_cls; ?>"<?php echo $bk_status_pill; ?>><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?></<?php echo $bk_st_close; ?>></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?><?php if ($bk_ci_line !== ''): /* its twin for laptops and phones, where the Status column drops out (bookings.css) */ ?><small class="bk-checkin-line bk-checkin-line--twin"><?php echo htmlspecialchars($bk_ci_line); ?></small><?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
                                                     <br><span class="expires-soon"><i class="fas fa-exclamation-triangle"></i> Expires soon!</span>
@@ -4520,6 +4522,9 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             <<?php echo $bk_st_open; ?> class="badge badge-<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?><?php echo $bk_st_cls; ?>"<?php echo $bk_status_pill; ?>>
                                                 <?php echo htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: $bk_status_word((string)$booking['status'])); ?>
                                             </<?php echo $bk_st_close; ?>>
+                                            <?php if ($bk_ci_line !== ''): ?>
+                                                <small class="bk-checkin-line"><?php echo htmlspecialchars($bk_ci_line); ?></small>
+                                            <?php endif; ?>
                                             <?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <br><small style="color: #666; font-size: 10px;">
@@ -6018,7 +6023,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 'confirmed': 'Confirmed Bookings',
                 'today-checkins': 'Arriving today',
                 'today-checkouts': 'Leaving today',
-                'checked-in': 'In house',
+                'checked-in': 'Checked in',
                 'checked-out': 'Checked Out Bookings',
                 'cancelled': 'Cancelled Bookings',
                 'no-show': 'No-Show Bookings',

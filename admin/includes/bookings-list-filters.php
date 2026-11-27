@@ -13,6 +13,10 @@
  *             not "staying"; use Departure for them)
  *   booked    created_at on a hotel date between From and To: created_at >= From 00:00 AND < (To + 1 day) 00:00
  *             (the app's DB session time_zone is the hotel's, so these are hotel dates)
+ *   checked_in "Checked in on" (owner 2026-11-27): the latest check-in logged for the booking (booking_timeline_logs,
+ *             action_type 'check_in' with new_value 'checked-in', written by logBookingCheckIn) on a hotel date between
+ *             From and To, the same From 00:00 / (To + 1 day) 00:00 bounds as booked. Only while that check-in stands:
+ *             the booking is checked in now or checked out since (a cancelled check-in does not count).
  * ?since= + ?since_kind= (Dashboard "Since you were last here"): rh_bk_since_clause.
  */
 
@@ -76,7 +80,7 @@ if (!function_exists('rh_bk_valid_date')) {
     /** ?date_type= => which date From / To apply to. Label per type (the Dates select). */
     function rh_bk_date_types(): array
     {
-        return ['arrival' => 'Arrival', 'departure' => 'Departure', 'staying' => 'Staying', 'booked' => 'Booked on'];
+        return ['arrival' => 'Arrival', 'departure' => 'Departure', 'staying' => 'Staying', 'booked' => 'Booked on', 'checked_in' => 'Checked in on'];
     }
 
     /** Whitelisted ?date_type=; absent or unknown = 'arrival'. */
@@ -117,6 +121,18 @@ if (!function_exists('rh_bk_valid_date')) {
             }
             if ($to !== '') {
                 $clauses[] = 'b.created_at < ?';
+                $params[] = rh_bk_next_day($to) . ' 00:00:00';
+            }
+        } elseif ($type === 'checked_in') {
+            // Each clause carries the status test, so either end works alone and each clause keeps one placeholder.
+            $ci = "b.status IN ('checked-in', 'checked-out') AND (SELECT MAX(tci.created_at) FROM booking_timeline_logs tci"
+                . " WHERE tci.booking_id = b.id AND tci.action_type = 'check_in' AND tci.new_value = 'checked-in')";
+            if ($from !== '') {
+                $clauses[] = '(' . $ci . ' >= ?)';
+                $params[] = $from . ' 00:00:00';
+            }
+            if ($to !== '') {
+                $clauses[] = '(' . $ci . ' < ?)';
                 $params[] = rh_bk_next_day($to) . ' 00:00:00';
             }
         } else {
@@ -422,7 +438,7 @@ if (!function_exists('rh_bk_valid_date')) {
      */
     function rh_bk_date_scope_words(string $from, string $to, string $type): string
     {
-        $verb = ['arrival' => 'arriving', 'departure' => 'departing', 'staying' => 'staying', 'booked' => 'booked'][rh_bk_date_type($type)];
+        $verb = ['arrival' => 'arriving', 'departure' => 'departing', 'staying' => 'staying', 'booked' => 'booked', 'checked_in' => 'checked in'][rh_bk_date_type($type)];
         $dash = "\u{2013}";
         if ($from !== '' && $to !== '') {
             if ($from === $to) {

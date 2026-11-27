@@ -2473,6 +2473,29 @@ table.bookings-table td small.bk-status-note {
     display: none; /* bk-status-note: the Status cell's deleted-by / expiry lines, shown under the pill only when the Status column drops out (laptop rule below) */
 }
 
+/* Check-in who and when (owner 2026-11-27): "Checked in 27 Nov 14:05 by Ann Banda" under the Status pill of a checked-in
+   or checked-out row. It wraps inside its cell and never widens the column (width 0 + min-width 100%), so the
+   no-sideways-scroll widths below stay as they are. Its twin in the Total cell shows only where the Status column
+   drops out (laptop box under 1100px, phones: rules below); card mode shows the Status cell's own line. */
+table.bookings-table td small.bk-checkin-line {
+    display: block;
+    margin-top: 4px;
+    color: #555;
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+table.bookings-table:not(.mobile-enhanced) td small.bk-checkin-line {
+    width: 0;
+    min-width: 100%;
+}
+
+table.bookings-table td small.bk-checkin-line--twin {
+    display: none;
+}
+
 /* Part-paid booking: "MWK 12,500.00 left to pay" under the payment badge (Payment column; phone row line 3). */
 .bk-left-to-pay {
     color: var(--au-danger, #b4232f);
@@ -2643,6 +2666,11 @@ table.bookings-table td small.bk-status-note {
             font-size: 11px;
             line-height: 1.4;
             white-space: normal;
+        }
+
+        /* Check-in who and when, under the status pill (its Status cell copy is hidden with the column). */
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Total"] > small.bk-checkin-line--twin {
+            display: block;
         }
 
         /* Narrowest laptop box (1280px with the side menu open): 6px side padding so the row fits without a sideways scroll. */
@@ -2872,6 +2900,16 @@ table.bookings-table td small.bk-status-note {
 
     :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] > .expires-soon {
         grid-column: 2 / -1;
+        font-size: 12px;
+    }
+
+    /* Checked-in / checked-out rows: "Checked in 27 Nov 14:05 by ..." on its own line under the card's lines. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] > small.bk-checkin-line--twin {
+        display: block;
+        grid-column: 2 / -1;
+        width: auto;
+        min-width: 0;
+        margin-top: 2px;
         font-size: 12px;
     }
 

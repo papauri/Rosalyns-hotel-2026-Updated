@@ -1244,6 +1244,10 @@ try {
     require_once __DIR__ . '/../includes/booking-history.php';
     $timeline = array_reverse(rh_booking_history($pdo, (int)$booking_id, ['light' => true]));
 
+    // Check-in block (owner 2026-11-27): every check-in, cancelled check-in and check-out, who and when (read only).
+    require_once __DIR__ . '/includes/booking-status-info.php';
+    $bd_checkin_log = rh_checkin_log_load($pdo, $booking);
+
     // Fetch existing invoices for this booking
     $invoices_stmt = $pdo->prepare("
         SELECT id, invoice_number, invoice_path, invoice_generated, created_at
@@ -3130,8 +3134,40 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
         <div class="rh-layout">
 
-            <!-- LEFT: stay, folio, payment, invoices -->
+            <!-- LEFT: check-in, stay, folio, payment, invoices -->
             <div>
+
+                <?php
+                // Check-in (owner 2026-11-27): where the guest is now, then every check-in, cancelled check-in and check-out
+                // with when and who (admin/includes/booking-status-info.php, loaded with the activity timeline above).
+                $bd_ci_state = rh_checkin_state((string)$booking['status']);
+                $bd_ci_steps = $bd_checkin_log ?? [];
+                $bd_ci_no_in = in_array((string)$booking['status'], ['checked-in', 'checked-out'], true) && rh_checkin_last_in($bd_ci_steps) === null;
+                ?>
+                <section class="rh-panel bd-checkin" id="check-in" aria-labelledby="bdCheckinTitle">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title" id="bdCheckinTitle">Check-in
+                            <i class="help" data-tip="Where the guest is now (from the booking status), then every check-in, cancelled check-in and check-out of this booking, oldest first. The time is when staff recorded the step in the system (hotel time); the name is the staff member signed in at the time. From the booking's activity log and audit log.">?</i>
+                        </h2>
+                        <span class="rh-pill rh-pill--<?php echo htmlspecialchars($bd_ci_state['class']); ?>"><?php echo htmlspecialchars($bd_ci_state['label']); ?></span>
+                    </div>
+                    <?php if ($bd_ci_no_in): ?>
+                        <p class="rh-empty">Check-in time not recorded: no check-in log entry for this booking.</p>
+                    <?php endif; ?>
+                    <?php if ($bd_ci_steps): ?>
+                        <ol class="bd-checkin__log">
+                            <?php foreach ($bd_ci_steps as $bd_ci_step): $bd_ci_words = rh_checkin_step_words($bd_ci_step); ?>
+                                <li class="bd-checkin__step bd-checkin__step--<?php echo htmlspecialchars((string)$bd_ci_step['kind']); ?>">
+                                    <strong class="bd-checkin__what"><?php echo htmlspecialchars($bd_ci_words['what']); ?></strong>
+                                    <span class="bd-checkin__when"><?php echo htmlspecialchars($bd_ci_words['when']); ?></span>
+                                    <span class="bd-checkin__who"><?php echo htmlspecialchars($bd_ci_words['who']); ?></span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ol>
+                    <?php elseif (!$bd_ci_no_in): ?>
+                        <p class="rh-empty">No check-in recorded.</p>
+                    <?php endif; ?>
+                </section>
 
                 <section class="rh-panel" id="stay-details">
                     <div class="rh-panel__head">

@@ -2,7 +2,8 @@
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // never runnable over the web
 /**
  * Bookings list filter rules (admin/includes/bookings-list-filters.php). NO DATABASE.
- * Date builder per date type (arrival/departure/staying/booked; checked against an in-PHP evaluation over fixture bookings), tab -> clauses map,
+ * Date builder per date type (arrival/departure/staying/booked; checked against an in-PHP evaluation over fixture bookings; checked_in is
+ *   covered by scripts/tests/checkin_who_when_test.php), tab -> clauses map,
  * ?filter= / ?payment_status= resolution, overdue-arrival filter, Paid/Unpaid row flags (step 13: the badge's key).
  * Last block (Liwonde only, read-only): the tab / Payment-filter SQL equals the badge for every booking.
  * Usage (repo root): php scripts/tests/bookings_filters.php
@@ -30,7 +31,7 @@ eq(rh_bk_date_range('nonsense', ''), ['', ''], 'invalid only -> no dates');
 eq(rh_bk_date_type(''), 'arrival', 'absent date_type -> arrival');
 eq(rh_bk_date_type('Staying'), 'staying', 'case-insensitive');
 eq(rh_bk_date_type("booked' OR 1=1"), 'arrival', 'unknown date_type -> arrival');
-eq(array_keys(rh_bk_date_types()), ['arrival', 'departure', 'staying', 'booked'], 'four date types, Arrival first');
+eq(array_keys(rh_bk_date_types()), ['arrival', 'departure', 'staying', 'booked', 'checked_in'], 'five date types, Arrival first (Checked in on: owner 2026-11-27)');
 foreach (array_keys(rh_bk_date_types()) as $t) {
     eq(rh_bk_date_scope('', '', $t), ['clauses' => [], 'params' => []], "$t: no dates -> no clauses");
 }
