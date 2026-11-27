@@ -25,6 +25,14 @@ when prompted."
 
 ## Pending (oldest first)
 
+- 2026-11-28 Liwonde 99e8a66 / Rosalyn's 04020a0 (owner FEATURE + PATCH): Housekeeping and Room Maintenance timelines: drag
+  (or Shift-click) across cells, past days too, and the bottom bar offers the list's bulk actions for the tasks/jobs
+  in those cells (Assign, Priority, Start, Mark done, Verify, Repeat/Extend, Delete); right-click on picked cells shows
+  the same. A drag may start on a task bar; a plain click still opens it. New task/job only for today onwards. The
+  list's bulk bar no longer sits under the floating "?" button. Guides: housekeeping + maintenance pages (bulk
+  section). Assistant: "how do I verify/delete several tasks at once" -> pick the cells or tick the list rows.
+  Manager Guide: Housekeeping and Maintenance (one line).
+
 - 2026-11-26 Liwonde ddda9f4 / Rosalyn's 537e6ce (owner FEATURE): the booking total popup ("How this total is worked
   out") has a line "Room rate x nights (excl. VAT & levy)" with "N nights at X" right above the Tourism levy line (not
   added; the total is unchanged); its levy/VAT hints now say "included in the all-in room rate (first line)". Booking
