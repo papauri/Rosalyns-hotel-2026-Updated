@@ -339,6 +339,12 @@ when prompted."
 - 2026-11-28 Liwonde 9da2f3a / Rosalyn's abeab84 (owner FEATURE, guest phase G-B): the public booking page can ask for a
   price check of the guest's booking (same calculation as the save, nothing saved, no email). Nothing visible yet (the
   step-by-step guest page uses it in G-A / G-C). Guides: no change. Assistant: no change. Manager Guide: no change.
+- 2026-11-28 Liwonde c1a858a / Rosalyn's 1e1dc73 (owner FEATURE, guest phase G-A): the public booking page is now five
+  steps (dates, guests, room, your details, review). The price is checked by the server at each step and the Review
+  step shows the exact total that will be saved; a problem sends the guest back to the step it belongs to. Guides: any
+  guest-booking description or screenshot of the one-page form (front desk "how guests book online"). Assistant:
+  "how do guests book online / what does the guest see" = five steps, total checked before Book. Manager Guide:
+  Bookings guide if it shows the guest form.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
