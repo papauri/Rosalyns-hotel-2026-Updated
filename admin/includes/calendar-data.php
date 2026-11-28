@@ -795,7 +795,7 @@ if (!function_exists('rh_cal_timeline_payload')) {
      * upgrade_room_type), end = add / take off nights at the end (stay_nights_quote / stay_nights_apply, in-house
      * only). Everything else is "Open booking"; why says so in plain words. The user's permissions are applied on
      * top in the page (can.move / can.nights) and again by bookings.php on every save.
-     * @return array{move:bool,end:bool,why:string}
+     * @return array{move:bool,end:bool,dates?:bool,why:string}
      */
     function rh_cal_drag_rules(string $status, string $ci, string $co, string $today, bool $joined, bool $group, bool $missed): array
     {
@@ -810,11 +810,14 @@ if (!function_exists('rh_cal_timeline_payload')) {
             $why = 'The arrival date has passed: check the guest in or mark a no-show first.';
         } elseif ($status === 'checked-in' && $co < $today) {
             $why = 'Past check-out: check the guest out, or change the stay from the booking.';
-        } elseif ($status === 'pending' || $status === 'tentative') {
-            $why = 'Confirm the booking before giving it a room.';
         }
         if ($why !== '') {
             return ['move' => false, 'end' => false, 'why' => $why];
+        }
+        if ($status === 'pending' || $status === 'tentative') {
+            // Owner 2026-11-28: a pending / tentative stay may be dragged to other dates too (same hand-off to the
+            // booking's Change dates, nothing saved here). No room move until it is confirmed.
+            return ['move' => false, 'end' => false, 'dates' => true, 'why' => 'Confirm the booking before giving it a room.'];
         }
         if ($status === 'confirmed') {
             // dates: start / end / whole-stay drag opens the booking's own Change dates prefilled; nothing saved here.

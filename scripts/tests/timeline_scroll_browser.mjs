@@ -188,6 +188,48 @@ if (pick && pick.x) {
   check(false, 'A confirmed draggable stay on screen to drag', pick);
 }
 
+// 5a. Owner 2026-11-28: pending / tentative stays drag to other dates too (Change dates hand-off, no room move).
+await sleep(600);
+const pq = await ev(`(async () => {
+  const cfg = JSON.parse(document.querySelector('[data-tl-json]').textContent).data;
+  const rows = cfg.bookings.filter(b => (b.status === 'pending' || b.status === 'tentative'));
+  const wrong = rows.filter(b => !b.joined && !b.group && !b.missed && b.ci >= cfg.today && !(b.drag && b.drag.dates && !b.drag.move));
+  const sc = document.querySelector('[data-tl-scroller]'), sr = sc.getBoundingClientRect();
+  const room = document.querySelector('.tl-head .tl-corner').getBoundingClientRect().width;
+  const bars = [...document.querySelectorAll('.tl-bar--pending, .tl-bar--tentative')].filter(x => !x.classList.contains('tl-bar--ghost'));
+  const locked = bars.filter(x => { const b = cfg.bookings.find(y => String(y.id) === x.getAttribute('data-tl-booking')); return b && b.drag && b.drag.dates && x.getAttribute('data-tl-draggable') !== 'true'; });
+  for (const bar of bars) {
+    if (bar.getAttribute('data-tl-draggable') !== 'true') continue;
+    let r = bar.getBoundingClientRect();
+    if (r.width < 30) continue;
+    sc.scrollLeft += r.left - (sr.left + room + 120);
+    sc.scrollTop += r.top - (sr.top + sr.height / 2);
+    await new Promise(res => setTimeout(res, 1200));
+    const b2 = document.querySelector('.tl-bar[data-tl-booking="' + bar.getAttribute('data-tl-booking') + '"]:not(.tl-bar--ghost)');
+    if (!b2) continue;
+    r = b2.getBoundingClientRect();
+    if (r.left < sr.left + room + 5 || r.right > sr.left + sc.clientWidth - 5) continue;
+    return { n: rows.length, wrong: wrong.map(b => b.id), locked: locked.length, id: b2.getAttribute('data-tl-booking'), x: r.left + Math.min(30, r.width / 2), y: r.top + r.height / 2,
+      dayW: document.querySelector('.tl-head__day').getBoundingClientRect().width };
+  }
+  return { n: rows.length, wrong: wrong.map(b => b.id), locked: locked.length, none: true, bars: bars.length };
+})()`);
+console.log('pending pick', JSON.stringify(pq));
+check(pq.wrong.length === 0, 'Pending / tentative upcoming stays may change dates by drag (no room move)', pq.wrong);
+check(pq.locked === 0, 'Their bars are draggable on screen', pq.locked);
+if (pq.x) {
+  await mouse('mouseMoved', pq.x, pq.y); await mouse('mousePressed', pq.x, pq.y);
+  for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', pq.x + pq.dayW * 2 * i / 6, pq.y); await sleep(30); }
+  await mouse('mouseReleased', pq.x + pq.dayW * 2, pq.y);
+  await sleep(800);
+  const pqDlg = await ev(`(() => { const m = document.querySelector('.admin-confirm-overlay'); return m && getComputedStyle(m).display !== 'none' ? m.innerText.replace(/\\s+/g, ' ').slice(0, 300) : null; })()`);
+  check(!!pqDlg && /Change dates/.test(pqDlg), 'A pending / tentative stay dragged 2 nights opens the Change dates question', pqDlg);
+  await ev(`(() => { const c = document.querySelector('.admin-confirm-overlay [data-admin-confirm-cancel].btn') || document.querySelector('.admin-confirm-overlay [data-admin-confirm-cancel]'); if (c) c.click(); })()`);
+  await sleep(600);
+  const pqAfter = await ev(`({ href: location.pathname, ghosts: document.querySelectorAll('.tl-bar--ghost').length })`);
+  check(/calendar\.php/.test(pqAfter.href) && pqAfter.ghosts === 0, 'Cancel: nothing saved, no ghost left', pqAfter);
+} else console.log('NOTE: no pending / tentative bar on screen to drag (data check above still ran)');
+
 // 5b. Arrow keys on nights (commit bb3a41c): Right past the last drawn night goes on to the next night.
 await sleep(800);
 const edge = await ev(`(async () => { const sc = document.querySelector('[data-tl-scroller]'); sc.scrollLeft = sc.scrollWidth; await new Promise(r => setTimeout(r, 60));

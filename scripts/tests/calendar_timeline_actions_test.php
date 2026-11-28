@@ -36,7 +36,9 @@ $plus = static fn (int $d): string => date('Y-m-d', strtotime($today . ' ' . ($d
 // ---------------------------------------------------------------- (b) pure drag rules
 $R = static fn (string $s, string $ci, string $co, bool $j = false, bool $g = false, bool $m = false): array
     => rh_cal_drag_rules($s, $ci, $co, $today, $j, $g, $m);
-$locked = static fn (array $r): bool => $r['move'] === false && $r['end'] === false && $r['why'] !== '';
+$locked = static fn (array $r): bool => $r['move'] === false && $r['end'] === false && empty($r['dates']) && $r['why'] !== '';
+// Owner 2026-11-28: pending / tentative change dates by drag (Change dates hand-off) but never move room.
+$datesOnly = static fn (array $r): bool => $r['move'] === false && $r['end'] === false && ($r['dates'] ?? false) === true;
 
 $r = $R('confirmed', $plus(3), $plus(5));
 ok('(b) confirmed future stay: move yes, end no (dates from the booking)', $r['move'] === true && $r['end'] === false);
@@ -52,8 +54,10 @@ ok('(b) group in-house booking is locked', $locked($R('checked-in', $plus(-1), $
 ok('(b) missed arrival is locked', $locked($R('confirmed', $plus(-2), $plus(1), false, false, true)));
 ok('(b) arrival in the past (not checked in) is locked', $locked($R('confirmed', $plus(-1), $plus(2))));
 ok('(b) in-house past check-out (overdue) is locked', $locked($R('checked-in', $plus(-4), $plus(-1))));
-ok('(b) pending is locked', $locked($R('pending', $plus(3), $plus(5))));
-ok('(b) tentative is locked', $locked($R('tentative', $plus(3), $plus(5))));
+ok('(b) pending: dates drag only (no room move)', $datesOnly($R('pending', $plus(3), $plus(5))));
+ok('(b) tentative: dates drag only (no room move)', $datesOnly($R('tentative', $plus(3), $plus(5))));
+ok('(b) pending with a passed arrival is locked', $locked($R('pending', $plus(-1), $plus(2))));
+ok('(b) tentative group booking is locked', $locked($R('tentative', $plus(3), $plus(5), false, true)));
 ok('(b) closed wins over everything (checked-out + joined + group)', $R('checked-out', $plus(-3), $plus(-1), true, true)['why'] === 'This stay is closed. Open the booking to see it.');
 
 // ---------------------------------------------------------------- (b) synthetic booking item
@@ -98,6 +102,11 @@ foreach ($payload['bookings'] as $b) {
         || ($b['status'] !== 'checked-in' && $b['ci'] < $today);
     if ($mustLock && ($d['move'] || $d['end'])) {
         $bad[] = $b['id'] . ' ' . $b['status'];
+    }
+    $mustLockDates = $b['joined'] || $b['group'] || $b['missed'] || $b['overdue']
+        || !in_array($b['status'], ['confirmed', 'pending', 'tentative'], true) || $b['ci'] < $today;
+    if ($mustLockDates && !empty($d['dates'])) {
+        $bad[] = $b['id'] . ' dates on ' . $b['status'];
     }
     if ($d['move'] && $b['status'] !== 'confirmed') {
         $bad[] = $b['id'] . ' move on ' . $b['status'];
