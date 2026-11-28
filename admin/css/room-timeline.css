@@ -161,7 +161,10 @@
     border: 1px solid var(--tl-line);
     border-radius: var(--admin-radius, 10px);
     overscroll-behavior: contain;
+    scroll-padding-left: var(--tl-room-w); /* a night or bar scrolled into view lands beside the sticky room column */
+    scrollbar-gutter: stable; /* the up-down scrollbar never changes the width the days are fitted to */
 }
+.tl-scroller:focus-visible { outline: var(--tl-focus); outline-offset: 2px; } /* tabindex=0: arrow keys / Page keys scroll it */
 .tl-grid { width: max-content; min-width: 100%; font-size: 13px; }
 .tl-row { display: flex; }
 .tl-track {

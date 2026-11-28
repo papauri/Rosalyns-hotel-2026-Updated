@@ -113,8 +113,10 @@
             root: root,
             data: cfg.data,
             api: cfg.api || 'api/calendar-timeline.php',
-            start: cfg.data.start,
-            days: cfg.data.days,
+            // start = the first day on screen, days = days on one screen (the zoom). The page draws a wider window
+            // (st.win, about three screens) the user scrolls through sideways; see go() and the scroll handler.
+            start: /^\d{4}-\d{2}-\d{2}$/.test(String(ini.start || '')) ? String(ini.start) : cfg.data.start,
+            days: Number(ini.days) || cfg.data.days,
             // status: a room state carried in from bookings.php (calendar.php ?tl_status=), whitelisted again here.
             filters: { type: ini.type ? String(ini.type) : '', floor: ini.floor || '', status: ['free', 'occ', 'arr', 'dep', 'dirty', 'oos'].indexOf(ini.status) !== -1 ? ini.status : '', room: ini.room ? Number(ini.room) : 0, day: null },
             search: ini.search || '',
@@ -146,22 +148,34 @@
         go(st, st.start, st.days);
     }
 
-    /* Show [start, start+days). Uses the loaded data when it covers the range, else asks the server.
-       force: always ask the server (after a change was saved). */
+    /* Days on screen vs the drawn window (owner 2026-11-28: scroll sideways like a spreadsheet). st.days is the zoom
+       (days on one screen), st.start the first day on screen; the grid draws st.win = about three screens around it
+       (31 to 93 days, the same sums as admin/calendar.php) and fills in a new window when the view nears an end. */
+    function winLen(days) { return Math.max(31, Math.min(93, 3 * days)); }
+    function winStartFor(start, days) { return addDays(start, -Math.floor((winLen(days) - days) / 2)); }
+
+    /* Show start as the first day on screen, days per screen. Uses the loaded data when it covers the window, else
+       asks the server. force: ask the server again for the same window and keep the view (after a change was saved). */
     function go(st, start, days, force) {
-        st.start = start;
-        st.days = days;
+        if (!force || !st.win) {
+            st.start = start;
+            st.days = days;
+            st.anchor = dnum(start);
+            st.jump = true; // render puts start at the left edge (it does not read the old scroll)
+            st.win = { start: winStartFor(start, days), len: winLen(days) };
+        }
+        var w = st.win;
         var dateIn = q(st, '[data-tl-date]');
-        if (dateIn) dateIn.value = start;
-        if (!force && covers(st.data, start, days)) {
+        if (dateIn) dateIn.value = st.start;
+        if (!force && covers(st.data, w.start, w.len)) {
             ++st.loading; // a newer view wins over any fetch still in flight
             render(st);
             return;
         }
         var token = ++st.loading;
         st.root.classList.add('is-loading');
-        announce(st, 'Loading ' + fmtRange(start, addDays(start, days - 1)) + '...');
-        var url = st.api + '?start=' + encodeURIComponent(start) + '&days=' + encodeURIComponent(days);
+        announce(st, 'Loading ' + fmtRange(st.start, addDays(st.start, st.days - 1)) + '...');
+        var url = st.api + '?start=' + encodeURIComponent(w.start) + '&days=' + encodeURIComponent(w.len);
         fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
             .then(function (r) {
                 if (r.status === 401) throw new Error('You have been signed out. Reload the page to sign in again.');
@@ -173,7 +187,7 @@
             })
             .then(function (j) {
                 if (token !== st.loading || cur !== st) return;
-                if (!covers(j, st.start, st.days)) { st.root.classList.remove('is-loading'); return; }
+                if (!covers(j, st.win.start, st.win.len)) { st.root.classList.remove('is-loading'); return; }
                 st.data = j;
                 render(st);
             })
@@ -189,6 +203,131 @@
         if (!data || !data.start || !data.dates || !data.dates.length) return false;
         var a = dnum(data.start), s = dnum(start);
         return s >= a && s + days <= a + data.dates.length;
+    }
+
+    /* ---------------------------------------------------------------- sideways scroll
+       Measured on the RENDERED grid (like dayUnder): at a display size below 100% (html zoom) client pixels and
+       CSS pixels differ. px = one day in scroll units, room = the sticky room column in scroll units,
+       screen = whole days that fit beside it (never more than the zoom). null = the grid is not on screen. */
+    function geom(st) {
+        var sc = q(st, '[data-tl-scroller]'), grid = q(st, '[data-tl-grid]');
+        var n = st.dates ? st.dates.length : 0;
+        var tr = grid && grid.querySelector('.tl-head .tl-track');
+        var corner = grid && grid.querySelector('.tl-head .tl-corner');
+        if (!sc || !tr || !n || !sc.clientWidth) return null;
+        var gw = grid.getBoundingClientRect().width, tw = tr.getBoundingClientRect().width;
+        if (!gw || !tw) return null;
+        var ratio = sc.scrollWidth / gw; // scroll units per client pixel
+        var px = tw / n * ratio;
+        var room = corner ? corner.getBoundingClientRect().width * ratio : (st.roomW || 0);
+        var screen = Math.max(1, Math.min(st.days, Math.floor((sc.clientWidth - room + 1) / px)));
+        return { sc: sc, px: px, room: room, screen: screen, ratio: ratio };
+    }
+    /* The day at the left edge: st.anchor (day number, with the part of a day scrolled past) and st.start. */
+    function readScroll(st) {
+        if (st.mode !== 'grid') return null;
+        var g = geom(st);
+        if (!g) return null;
+        var n = st.dates.length;
+        st.anchor = st.first + Math.max(0, Math.min(n - 1, g.sc.scrollLeft / g.px));
+        st.start = st.dates[Math.max(0, Math.min(n - 1, Math.round(g.sc.scrollLeft / g.px)))].d;
+        return g;
+    }
+    /* Toolbar and labels follow the scroll: the date box shows the first day on screen. */
+    function syncNav(st) {
+        var g = geom(st);
+        var shown = g ? g.screen : st.days;
+        var dateIn = q(st, '[data-tl-date]');
+        if (dateIn && document.activeElement !== dateIn) dateIn.value = st.start;
+        var grid = q(st, '[data-tl-grid]');
+        if (grid) grid.setAttribute('aria-label', 'Room timeline, ' + fmtRange(st.start, addDays(st.start, shown - 1)) + ' on screen');
+        var word = shown + (shown === 1 ? ' day' : ' days');
+        var prev = q(st, '[data-tl-prev]'), next = q(st, '[data-tl-next]');
+        if (prev) prev.setAttribute('aria-label', 'Previous ' + word);
+        if (next) next.setAttribute('aria-label', 'Next ' + word);
+    }
+    function onScroll(st) {
+        if (st.scrollRaf) return;
+        st.scrollRaf = window.requestAnimationFrame(function () {
+            st.scrollRaf = 0;
+            if (cur !== st) return;
+            if (!readScroll(st)) return;
+            syncNav(st);
+            window.clearTimeout(st.refillTimer);
+            st.refillTimer = window.setTimeout(function () { maybeRefill(st); }, 150);
+        });
+    }
+    /* Nothing is drawn again while a drag, a save, a change step, a pick drag or a confirm is open. */
+    function refillBlocked(st) {
+        return !!(st.drag || st.busy || st.pending || st.gripDrag || st.handoff || st.blockBusy
+            || (st.picks && st.picks.busy && st.picks.busy()) || st.mode !== 'grid' || st.root.classList.contains('is-loading'));
+    }
+    /* Within one screen of an end of the drawn window: fetch a window centred on the view in the background (no dim)
+       and swap it in, the first day on screen staying at the same place. One fetch at a time. */
+    function maybeRefill(st) {
+        if (cur !== st || refillBlocked(st) || (st.refilling && st.refilling === st.loading)) return;
+        var g = readScroll(st);
+        if (!g) return;
+        var n = st.dates.length, leftDays = st.anchor - st.first, rightDays = n - (leftDays + g.screen);
+        if (leftDays >= g.screen && rightDays >= g.screen) return;
+        var want = { start: winStartFor(st.start, st.days), len: winLen(st.days) };
+        if (want.start === st.win.start && want.len === st.win.len) return;
+        var token = ++st.loading;
+        st.refilling = token;
+        var url = st.api + '?start=' + encodeURIComponent(want.start) + '&days=' + encodeURIComponent(want.len);
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                if (st.refilling === token) st.refilling = 0;
+                if (token !== st.loading || cur !== st || !j || !j.ok || !covers(j, want.start, want.len)) return;
+                if (refillBlocked(st)) { st.refillLater = true; return; } // dropped; tried again when that ends
+                st.data = j;
+                st.win = want;
+                var a = document.activeElement, cell = null;
+                if (a && a.classList && a.classList.contains('tl-cell') && st.root.contains(a)) {
+                    var row = a.closest('[data-tl-lane]');
+                    var di = Number(a.getAttribute('data-tl-day'));
+                    if (row && st.dates[di]) cell = { lane: row.getAttribute('data-tl-lane'), d: st.dates[di].d };
+                }
+                var openId = st.drawerBooking ? st.drawerBooking.id : null;
+                st.quiet = true; // a refill is not news: no screen reader message
+                try { redrawKeep(st, 'data-tl-booking', function () { render(st); }, openId); } finally { st.quiet = false; }
+                if (openId != null && st.byId[openId]) st.drawerBooking = st.byId[openId];
+                if (cell) {
+                    var r2 = st.root.querySelector('.tl-lane[data-tl-lane="' + cell.lane + '"]');
+                    var i2 = dnum(cell.d) - st.first;
+                    var c2 = r2 && r2.querySelector('.tl-cell[data-tl-day="' + i2 + '"]');
+                    if (c2) {
+                        st.root.querySelectorAll('.tl-cell[tabindex]').forEach(function (x) { if (x !== c2) x.removeAttribute('tabindex'); });
+                        c2.tabIndex = 0;
+                        try { c2.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+                    }
+                }
+            })
+            .catch(function () { if (st.refilling === token) st.refilling = 0; });
+    }
+    /* A blocking step ended: fill in the window the user scrolled to meanwhile. */
+    function refillSoon(st) {
+        window.clearTimeout(st.refillTimer);
+        st.refillTimer = window.setTimeout(function () { st.refillLater = false; maybeRefill(st); }, 150);
+    }
+    /* Put day number dn at the left edge: scroll there when it is drawn, else load a window around it. */
+    function showDay(st, dn, smooth) {
+        var g = st.mode === 'grid' ? geom(st) : null;
+        if (g && st.dates) {
+            var i = dn - st.first, n = st.dates.length;
+            if (i >= 0 && i + g.screen <= n) {
+                g.sc.scrollTo({ left: Math.round(i * g.px), behavior: smooth && !mqReduce.matches ? 'smooth' : 'auto' });
+                return;
+            }
+        }
+        go(st, dstr(dn), st.days);
+    }
+    /* Prev / Next / Alt+Page Up / Alt+Page Down: one screen. */
+    function pageScreen(st, dir) {
+        var g = st.mode === 'grid' ? readScroll(st) : null;
+        if (!g) { go(st, addDays(st.start, dir * st.days), st.days); return; }
+        showDay(st, Math.round(st.anchor) + dir * g.screen, true);
     }
 
     function announce(st, text) {
@@ -229,11 +368,14 @@
 
     /* ---------------------------------------------------------------- render */
     function render(st) {
-        var d = st.data;
-        if (!covers(d, st.start, st.days)) { go(st, st.start, st.days); return; }
+        var d = st.data, w = st.win;
+        if (!w || !covers(d, w.start, w.len)) { go(st, st.start, st.days); return; }
+        // The day at the left edge stays there across the redraw (filters, a refill, a new width), unless go() moved it.
+        if (!st.jump) readScroll(st);
+        st.jump = false;
         st.root.classList.remove('is-loading');
-        var offset = dnum(st.start) - dnum(d.start);
-        var dates = d.dates.slice(offset, offset + st.days);
+        var offset = dnum(w.start) - dnum(d.start);
+        var dates = d.dates.slice(offset, offset + w.len);
         st.dates = dates;
         st.first = dnum(dates[0].d);
         var n = dates.length;
@@ -263,9 +405,11 @@
         var scroller = q(st, '[data-tl-scroller]');
         var vp = viewport();
         var roomW = vp === 'phone' ? 92 : (vp === 'tablet' ? 168 : 208);
-        var avail = (scroller.clientWidth || st.root.clientWidth || 1000) - roomW - 2;
-        var dayW = Math.max(44, Math.floor(avail / n));
+        st.fitW = scroller.clientWidth || st.root.clientWidth || 1000; // the width the days were fitted to
+        var avail = st.fitW - roomW - 2;
+        var dayW = Math.max(44, Math.floor(avail / st.days)); // st.days fit on one screen; the rest scrolls
         st.dayW = dayW;
+        st.roomW = roomW;
         st.root.style.setProperty('--tl-day-w', dayW + 'px');
         st.root.style.setProperty('--tl-days', String(n));
         st.root.classList.toggle('is-compact', st.compact && !mqCoarse.matches);
@@ -410,17 +554,29 @@
         if (st.picks) st.picks.paint();
         renderAgenda(st);
         showMode(st);
-        if (st.keepScroll) { // after a saved change: stay where the user was
+        // Sideways: the anchor day (first on screen) goes back to the left edge, in the new window's place.
+        var anc = Math.max(st.first, Math.min(st.first + n - 1, st.anchor === undefined ? dnum(st.start) : st.anchor));
+        st.root.setAttribute('data-tl-window', w.start + '/' + w.len);
+        var g = st.mode === 'grid' ? geom(st) : null;
+        if (g) {
+            scroller.scrollLeft = Math.round((anc - st.first) * g.px);
+            readScroll(st);
+        } else {
+            st.anchor = anc;
+            st.start = dstr(Math.round(anc));
+        }
+        syncNav(st);
+        if (st.keepScroll) { // after a saved change: stay where the user was (up and down; sideways is the anchor)
             scroller.scrollTop = st.keepScroll.top;
-            scroller.scrollLeft = st.keepScroll.left;
             if (Math.abs(window.scrollY - st.keepScroll.win) > 1) window.scrollTo(window.scrollX, st.keepScroll.win);
             st.keepScroll = null;
         }
         if (st.flash) {
             announce(st, st.flash);
             st.flash = '';
-        } else {
-            announce(st, 'Showing ' + fmtRange(dates[0].d, dates[n - 1].d) + '.');
+        } else if (!st.quiet) {
+            var shown = g ? g.screen : st.days;
+            announce(st, 'Showing ' + fmtRange(st.start, addDays(st.start, shown - 1)) + '. Scroll sideways for other dates.');
         }
     }
 
@@ -982,6 +1138,8 @@
         st.root.querySelectorAll('.tl-bar.is-dragging').forEach(function (x) { x.classList.remove('is-dragging'); });
         st.root.classList.remove('is-dragging');
         clearDrop(st);
+        stopAutoScroll(st);
+        if (!st.handoff) refillSoon(st); // the user may have scrolled near an end during the drag
     }
     function clearDrop(st) {
         st.root.querySelectorAll('.tl-cell--drop-ok, .tl-cell--drop-bad').forEach(function (c) {
@@ -1030,8 +1188,11 @@
         var track = row.querySelector('.tl-track');
         if (!track) return;
         if (d.ghost.parentNode !== track) track.appendChild(d.ghost);
+        // Cut at the track like the bars are (a bar runs to mid check-out day), so the ghost never widens the grid.
+        var trackW = st.dates.length * st.dayW, right = Math.min(trackW, left + Math.max(12, width));
+        left = Math.max(0, Math.min(left, trackW - 12));
         d.ghost.style.left = left + 'px';
-        d.ghost.style.width = Math.max(12, width) + 'px';
+        d.ghost.style.width = Math.max(12, right - left) + 'px';
         d.ghost.style.top = '4px';
     }
 
@@ -1044,7 +1205,9 @@
         var kind = e.target.closest('.tl-bar__grip--end') ? (r.end ? 'end' : (r.dates ? 'co' : null))
             : (e.target.closest('.tl-bar__grip--start') ? (r.dates ? 'ci' : null) : ((r.move || r.dates) ? 'move' : null));
         if (!kind) return;
-        st.drag = { kind: kind, rules: r, bar: bar, b: b, row: bar.closest('.tl-lane'), x: e.clientX, y: e.clientY, id: e.pointerId, started: false };
+        var row0 = bar.closest('.tl-lane'), tr0 = row0 && row0.querySelector('.tl-track');
+        st.drag = { kind: kind, rules: r, bar: bar, b: b, row: row0, x: e.clientX, y: e.clientY, id: e.pointerId, started: false,
+            trackLeft0: tr0 ? tr0.getBoundingClientRect().left : 0 };
     }
     /* Pointer x -> night, measured on the RENDERED track (its width / number of nights, the same pixels as the pointer),
        never on the CSS day width: at a display size below 100% (html zoom) the two differ and the night before was
@@ -1077,7 +1240,14 @@
             var row = hit && hit.closest('.tl-lane');
             if (row && !q(st, '[data-tl-grid]').contains(row)) row = null;
             // Sideways on a confirmed stay = the same nights on other dates (Change dates). Another row = Move room.
-            d.shift = d.rules.dates ? nightsMoved(st, d.row, e.clientX - d.x) : 0;
+            // dx counts the grid scrolled under a still pointer too (auto-scroll at an edge); both in client pixels.
+            var tr1 = d.row && d.row.querySelector('.tl-track');
+            var dx = e.clientX - d.x + (tr1 ? d.trackLeft0 - tr1.getBoundingClientRect().left : 0);
+            d.shift = d.rules.dates ? nightsMoved(st, d.row, dx) : 0;
+            if (d.shift !== 0) { // the whole new stay stays inside the drawn window (a stay already cut off there cannot go further)
+                var lastN = st.first + st.dates.length - 1;
+                d.shift = Math.max(Math.min(0, st.first - dnum(d.b.ci)), Math.min(Math.max(0, lastN - (dnum(d.b.co) - 1)), d.shift));
+            }
             if (d.shift !== 0) {
                 var sameRow = !row || row === d.row || (row.hasAttribute('data-tl-lane') && d.b.lanes.indexOf(row.getAttribute('data-tl-lane')) !== -1);
                 d.target = null;
@@ -1840,13 +2010,16 @@
                     blk.style.width = (Math.max(0.3, n - st.first - a + 1) * st.dayW) + 'px';
                 },
                 onDone: function (n) {
+                    st.gripDrag = false;
+                    stopAutoScroll(st);
                     blk.classList.remove('is-resizing');
                     var revert = function () { blk.style.width = w0; };
-                    if (n === null || n === dnum(bl.to)) { revert(); return; }
+                    if (n === null || n === dnum(bl.to)) { revert(); refillSoon(st); return; }
                     resizeBlock(st, lane, bl, n, revert);
                 }
             });
             if (!started) e.stopPropagation(); // touch: no drag (the page scrolls); the tap opens Extend...
+            else st.gripDrag = true; // no refill while the handle is held; near an edge the grid scrolls
         });
         g.addEventListener('click', function (e) {
             e.preventDefault();
@@ -1863,7 +2036,7 @@
         var room = 'Room ' + lane.number;
         var item = { t: 'room', id: Number(lane.id), last: bl.to };
         st.blockBusy = true;
-        var done = function () { st.blockBusy = false; };
+        var done = function () { st.blockBusy = false; refillSoon(st); };
         var fail = function (err) { done(); revert(); toast(st, (err && err.message) || 'That did not work. Try again.', 'error'); };
         if (n > dnum(bl.to)) {
             var base = { action: 'extend_blocks', items: JSON.stringify([item]), mode: 'until', until: dstr(n) };
@@ -1898,7 +2071,7 @@
         if (day === null) return;
         var ci = dnum(d.b.ci), co = dnum(d.b.co), today = dnum(st.data.today);
         if (d.kind === 'ci') {
-            d.newCi = Math.max(today, Math.min(day, co - 1));
+            d.newCi = Math.max(today, st.first, Math.min(day, co - 1));
             var x1 = (d.newCi - st.first + 0.5) * st.dayW + 2;
             placeGhost(st, d, d.row, x1, left + width - x1);
             d.datesBad = '';
@@ -1921,7 +2094,9 @@
             + 'The booking\'s Change dates screen opens with these dates and shows the new price. Nothing is saved until you confirm there.';
         var ask = window.RhGridSel ? window.RhGridSel.ask({ title: 'Change dates', message: msg, confirmText: 'Open Change dates', icon: 'fa-calendar-pen' })
             : Promise.resolve({ confirmed: true });
+        st.handoff = true; // the grid is not drawn again while the question is open (the ghost stays put)
         ask.then(function (ans) {
+            st.handoff = false;
             endDrag(st);
             // Inside bookings.php's Calendar frame the booking opens in the whole window, not in the frame.
             if (ans && ans.confirmed) (window.top !== window.self ? window.top : window).location.href = new URL(href, window.location.href).href;
@@ -2073,11 +2248,11 @@
                 if (st.pending && typeof st.pending.dates === 'function') st.pending.dates();
                 return;
             }
-            if ((x = t.closest('[data-tl-today]'))) { go(st, st.data.today, st.days); return; }
-            if ((x = t.closest('[data-tl-prev]'))) { go(st, addDays(st.start, -st.days), st.days); return; }
-            if ((x = t.closest('[data-tl-next]'))) { go(st, addDays(st.start, st.days), st.days); return; }
-            if ((x = t.closest('[data-tl-days]'))) { go(st, st.start, Number(x.getAttribute('data-tl-days'))); return; }
-            if ((x = t.closest('[data-tl-mode]'))) { st.mode = x.getAttribute('data-tl-mode'); showMode(st); if (st.mode === 'grid') render(st); return; }
+            if ((x = t.closest('[data-tl-today]'))) { showDay(st, dnum(st.data.today), true); return; } // scrolls when drawn
+            if ((x = t.closest('[data-tl-prev]'))) { pageScreen(st, -1); return; } // one screen, scrolled
+            if ((x = t.closest('[data-tl-next]'))) { pageScreen(st, 1); return; }
+            if ((x = t.closest('[data-tl-days]'))) { readScroll(st); go(st, st.start, Number(x.getAttribute('data-tl-days'))); return; } // days per screen
+            if ((x = t.closest('[data-tl-mode]'))) { st.mode = x.getAttribute('data-tl-mode'); showMode(st); if (st.mode === 'grid') { st.jump = true; render(st); } return; } // jump: the grid was hidden, keep the anchor
             if ((x = t.closest('[data-tl-density]'))) { st.compact = !st.compact; store(STORE_DENSITY, st.compact); render(st); return; }
             if ((x = t.closest('[data-tl-clear]'))) {
                 st.filters = { type: '', floor: '', status: '', room: 0, day: null };
@@ -2194,14 +2369,80 @@
             if (onBar) beginDrag(st, e, onBar);
         });
         grid.addEventListener('pointermove', function (e) {
-            if (st.drag) dragMove(st, e);
+            if (st.drag) { dragMove(st, e); autoScroll(st, e.clientX, e.clientY); }
         });
         grid.addEventListener('pointerup', function () {
+            stopAutoScroll(st);
             if (st.drag) dragEnd(st);
         });
         grid.addEventListener('pointercancel', function () {
+            stopAutoScroll(st);
             if (st.drag) { st.drag = null; endDrag(st); }
         });
+
+        // Sideways scroll (owner 2026-11-28): the toolbar follows the first day on screen and the window fills in.
+        var scroller = q(st, '[data-tl-scroller]');
+        scroller.addEventListener('scroll', function () { onScroll(st); }, { passive: true });
+        // The box changed width without a window resize (the side menu or a panel settled after the first paint):
+        // fit the days per screen again, the first day on screen kept.
+        if (window.ResizeObserver) {
+            var roT = 0;
+            new window.ResizeObserver(function () {
+                window.clearTimeout(roT);
+                roT = window.setTimeout(function () {
+                    if (cur !== st || st.mode !== 'grid' || !scroller.clientWidth || Math.abs(scroller.clientWidth - (st.fitW || 0)) < 2) return;
+                    if (st.drag || st.busy || st.pending || st.gripDrag || st.handoff) return;
+                    redrawKeep(st, 'data-tl-booking', function () { render(st); }, st.drawerBooking ? st.drawerBooking.id : null);
+                }, 120);
+            }).observe(scroller);
+        }
+        // Alt+Page Down / Alt+Page Up: one screen right / left, anywhere in the timeline but a text box or list.
+        root.addEventListener('keydown', function (e) {
+            if (!e.altKey || e.ctrlKey || e.metaKey || (e.key !== 'PageDown' && e.key !== 'PageUp')) return;
+            var tg = e.target;
+            if (tg && tg.closest && tg.closest('input, select, textarea, [contenteditable="true"], [data-tl-drawer]')) return;
+            if (st.mode !== 'grid') return;
+            e.preventDefault();
+            pageScreen(st, e.key === 'PageDown' ? 1 : -1);
+        });
+        // A bar or night that gets focus off screen scrolls into view natively (focus / scrollIntoView); the CSS
+        // scroll-padding-left keeps it clear of the sticky room column.
+    }
+
+    /* ---------------------------------------------------------------- drag across the scroll
+       A bar or handle held within 40px of the scroller's left (beside the room column) or right edge scrolls that
+       way; the drag goes on as if the pointer moved, so a stay can be dropped on dates that were off screen. */
+    var EDGE = 40;
+    function autoScroll(st, x, y) {
+        var a = st.auto || (st.auto = { raf: 0 });
+        a.x = x;
+        a.y = y;
+        if (a.raf || !edgeSpeed(st, x)) return; // one loop at a time (the moves it sends come back here)
+        a.raf = window.requestAnimationFrame(function tick() {
+            var v = cur === st ? edgeSpeed(st, a.x) : 0;
+            if (!v) { a.raf = 0; return; }
+            var sc = q(st, '[data-tl-scroller]'), before = sc.scrollLeft;
+            sc.scrollLeft = before + v;
+            a.raf = window.requestAnimationFrame(tick);
+            if (sc.scrollLeft === before) return; // at the end of the drawn window
+            if (st.drag) dragMove(st, { clientX: a.x, clientY: a.y, preventDefault: function () {} });
+            else if (st.gripDrag) window.dispatchEvent(new PointerEvent('pointermove', { clientX: a.x, clientY: a.y, pointerType: 'mouse' }));
+        });
+    }
+    function edgeSpeed(st, x) { // scroll units per frame, signed; 0 = not near an edge
+        if (!((st.drag && st.drag.started) || st.gripDrag)) return 0;
+        var g = geom(st);
+        if (!g) return 0;
+        var r = g.sc.getBoundingClientRect();
+        var left = r.left + g.room / g.ratio, right = r.left + g.sc.clientWidth / g.ratio;
+        var depth = x < left + EDGE ? -(left + EDGE - x) : (x > right - EDGE ? x - (right - EDGE) : 0);
+        if (!depth) return 0;
+        var sp = Math.min(1, Math.abs(depth) / EDGE) * Math.max(6, g.px / 3); // deeper = faster
+        return (depth < 0 ? -1 : 1) * Math.max(2, Math.round(sp));
+    }
+    function stopAutoScroll(st) {
+        if (st.auto && st.auto.raf) window.cancelAnimationFrame(st.auto.raf);
+        if (st.auto) st.auto.raf = 0;
     }
 
     function toggleFilters(st, open) {
@@ -2246,6 +2487,11 @@
                 }
             }
             if (st.root.classList.contains('is-filters-open') && e.target.closest('[data-tl-backdrop]')) toggleFilters(st, false);
+        });
+        // A block's end handle (RhExtend.gripDrag listens on window) dragged near an edge scrolls too.
+        window.addEventListener('pointermove', function (e) {
+            var st = live();
+            if (st && st.gripDrag) autoScroll(st, e.clientX, e.clientY);
         });
         var t = null;
         window.addEventListener('resize', function () {

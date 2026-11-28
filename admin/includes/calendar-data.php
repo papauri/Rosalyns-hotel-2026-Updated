@@ -864,7 +864,7 @@ if (!function_exists('rh_cal_timeline_payload')) {
      */
     function rh_cal_timeline_payload(PDO $pdo, string $start, int $days, array $opts = []): array
     {
-        $days = max(3, min(31, $days));
+        $days = max(3, min(93, $days)); // up to three screens of 31 days (admin/js/room-timeline.js window)
         $today = rh_cal_valid_date($opts['today'] ?? '') ?? date('Y-m-d');
         $uid = (int)($opts['user_id'] ?? 0);
         $role = (string)($opts['role'] ?? '');

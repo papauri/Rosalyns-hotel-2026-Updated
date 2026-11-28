@@ -44,11 +44,11 @@ $tlDate = static function ($v, string $fmt = 'j M Y'): string {
                 <button type="button" class="tl-icon-btn" data-tl-next aria-label="Next 14 days"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
                 <label class="tl-toolbar__from">
                     <span>From</span>
-                    <input type="date" class="tl-toolbar__date" data-tl-date value="<?php echo $tlH($tlPayload['start']); ?>">
+                    <input type="date" class="tl-toolbar__date" data-tl-date value="<?php echo $tlH($tlInitial['start'] ?? $tlPayload['start']); ?>">
                 </label>
             </div>
 
-            <div class="ck-tabs tl-range" role="group" aria-label="Days shown">
+            <div class="ck-tabs tl-range" role="group" aria-label="Days per screen" title="Days on one screen. Scroll sideways (or Alt+Page Down / Alt+Page Up) for earlier and later days.">
                 <?php foreach ([3, 7, 14, 30] as $tlN): ?>
                     <button type="button" class="ck-tab tl-range__opt tl-range__opt--<?php echo $tlN; ?>" data-tl-days="<?php echo $tlN; ?>" aria-pressed="false"><?php echo $tlN; ?> days</button>
                 <?php endforeach; ?>
@@ -149,7 +149,7 @@ $tlDate = static function ($v, string $fmt = 'j M Y'): string {
 
         <p class="tl-sr tl-status" data-tl-status aria-live="polite"></p>
 
-        <div class="tl-scroller" data-tl-scroller data-disable-auto-pagination>
+        <div class="tl-scroller" data-tl-scroller data-disable-auto-pagination tabindex="0" role="region" aria-label="Room timeline: scroll sideways for other dates (arrow keys, Alt+Page Down / Alt+Page Up)">
             <div class="tl-grid" data-tl-grid role="grid" aria-label="Room timeline"></div>
         </div>
         <p class="tl-empty" data-tl-empty hidden>No rooms match these filters.</p>

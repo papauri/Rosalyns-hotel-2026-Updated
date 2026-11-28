@@ -1,6 +1,6 @@
 <?php
 /**
- * Room Timeline range data (read-only JSON). GET start=Y-m-d&days=3..31.
+ * Room Timeline range data (read-only JSON). GET start=Y-m-d&days=3..93 (the timeline loads about three screens).
  * Same payload as the Timeline's first paint (admin/includes/calendar-data.php rh_cal_timeline_payload).
  * Auth: admin session (api-init.php answers 401 without one) + the Calendar page permission and module (403).
  */
@@ -28,10 +28,10 @@ if ($start === null) {
     echo json_encode(['ok' => false, 'error' => 'Pick a valid start date.']);
     exit;
 }
-$days = filter_var($_GET['days'] ?? 14, FILTER_VALIDATE_INT, ['options' => ['min_range' => 3, 'max_range' => 31]]);
+$days = filter_var($_GET['days'] ?? 14, FILTER_VALIDATE_INT, ['options' => ['min_range' => 3, 'max_range' => 93]]);
 if ($days === false) {
     http_response_code(400);
-    echo json_encode(['ok' => false, 'error' => 'Days must be between 3 and 31.']);
+    echo json_encode(['ok' => false, 'error' => 'Days must be between 3 and 93.']);
     exit;
 }
 

@@ -174,7 +174,11 @@ if ($calIsMonth) {
         $tlDays = 14;
     }
     $tlStart = rh_cal_valid_date($_GET['start'] ?? '') ?? $today;
-    $tlPayload = rh_cal_timeline_payload($pdo, $tlStart, $tlDays, [
+    // $tlDays is the zoom (days per screen); the grid scrolls sideways through a window of about three screens
+    // around it, the same window room-timeline.js asks the range endpoint for (winLen / winBefore there).
+    $tlWinLen = max(31, min(93, 3 * $tlDays));
+    $tlWinStart = (new DateTime($tlStart))->modify('-' . intdiv($tlWinLen - $tlDays, 2) . ' day')->format('Y-m-d');
+    $tlPayload = rh_cal_timeline_payload($pdo, $tlWinStart, $tlWinLen, [
         'user_id' => $calUserId,
         'role' => (string)($user['role'] ?? ''),
     ]);
@@ -196,6 +200,8 @@ if ($calIsMonth) {
         'floor' => $filterFloor,
         'search' => $filterSearchRaw,
         'days_set' => isset($_GET['days']),
+        'start' => $tlStart, // the first day on screen (the payload starts earlier: the window)
+        'days' => $tlDays,
         // Room state filter carried in from bookings.php (Arriving today -> arr, Leaving today -> dep, In house -> occ).
         'status' => (is_scalar($_GET['tl_status'] ?? null) && in_array((string)$_GET['tl_status'], ['free', 'occ', 'arr', 'dep', 'dirty', 'oos'], true)) ? (string)$_GET['tl_status'] : '',
         'from' => (is_scalar($_GET['from'] ?? null) && (string)$_GET['from'] === 'bookings') ? 'bookings' : '',
