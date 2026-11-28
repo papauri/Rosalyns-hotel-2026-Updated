@@ -336,6 +336,9 @@ when prompted."
 - 2026-11-25 Liwonde d9475a0 / Rosalyn's 8926fd4 (owner FEATURE): Automated Emails > Recent activity has filters (job,
   sent/skipped/failed, dates, search) and 10/25/50/All pages instead of the last 100; every column has a "?". Guides:
   Automated Emails page. Assistant: "did the reminder go to X / why was it skipped". Manager Guide: no change.
+- 2026-11-28 Liwonde 9da2f3a / Rosalyn's abeab84 (owner FEATURE, guest phase G-B): the public booking page can ask for a
+  price check of the guest's booking (same calculation as the save, nothing saved, no email). Nothing visible yet (the
+  step-by-step guest page uses it in G-A / G-C). Guides: no change. Assistant: no change. Manager Guide: no change.
 
 ## Synced 2026-11-24 (owner prompted; guides + Assistant: commit "Guides + Assistant sync 2026-11-24" in both repos · Manager Guides: Stock, POS and Kitchen Screens, Bookings, Housekeeping and Maintenance, Money and End of Day, Daily checklist, Staff and Permissions refreshed) - entries kept for reference
 
