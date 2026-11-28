@@ -514,22 +514,26 @@
             return dates;
         }
 
-        // ── Graceful section-to-section scroll ────────────────────────────
-        // Custom RAF easing — cubic ease-in-out, ~900ms — far smoother than
-        // the browser's default behavior:'smooth' which often feels snappy.
+        // ── Graceful scroll (the booking steps scroll back to the step bar) ──
+        // Custom RAF easing, cubic ease-in-out; a plain jump when the guest asks for reduced motion.
+        function gbReducedMotion() {
+            return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        }
+
         function scrollToSection(el, delay) {
             if (!el) return;
             setTimeout(function () {
                 const headerEl = document.querySelector('header') || document.querySelector('.site-header');
-                const offset   = (headerEl ? headerEl.offsetHeight : 80) + 32;
+                const offset   = (headerEl ? headerEl.offsetHeight : 80) + 16;
                 const targetY  = Math.max(0, el.getBoundingClientRect().top + window.pageYOffset - offset);
                 const startY   = window.pageYOffset;
                 const dist     = targetY - startY;
 
                 if (Math.abs(dist) < 8) return; // already there
+                if (gbReducedMotion()) { window.scrollTo(0, targetY); return; }
 
-                // Duration scales with distance; cap between 640ms – 1100ms
-                const duration = Math.min(1100, Math.max(640, Math.abs(dist) * 0.75));
+                // Duration scales with distance; cap between 480ms – 900ms
+                const duration = Math.min(900, Math.max(480, Math.abs(dist) * 0.6));
                 let startTime  = null;
 
                 function easeInOutCubic(t) {
@@ -545,100 +549,7 @@
                 }
 
                 requestAnimationFrame(tick);
-            }, delay || 280);
-        }
-
-        /**
-         * Booking step progression system.
-         * Steps: 1 = When Are You Staying?, 2 = Select Your Room,
-         *        3 = Guest Information, 4 = Guest Details,
-         *        5 = Add-On Packages + Summary
-         */
-        function getStepSection(stepNumber) {
-            switch (stepNumber) {
-                case 1: return document.getElementById('bookingDetailsSection');
-                case 2: return document.getElementById('roomSectionWrapper');
-                case 3: return document.querySelector('.form-section-title .fa-user')?.closest('.form-section');
-                case 4: return document.getElementById('guestDetailsSection');
-                case 5: return document.getElementById('packagesSection');
-                default: return null;
-            }
-        }
-
-        function isStepComplete(stepNumber) {
-            switch (stepNumber) {
-                case 1: // Dates set?
-                    var ci = document.getElementById('check_in_date');
-                    var co = document.getElementById('check_out_date');
-                    return ci && co && ci.value && co.value && co.value > ci.value;
-                case 2: // Room selected?
-                    return !!document.querySelector('input[name="room_id"]:checked');
-                case 3: // Guest Information (name, email, phone filled AND validated green)?
-                    var n = document.getElementById('guest_name');
-                    var e = document.getElementById('guest_email');
-                    var p = document.getElementById('guest_phone');
-                    return n && e && p
-                        && n.value.trim() && e.value.trim() && p.value.trim()
-                        && n.classList.contains('is-valid')
-                        && e.classList.contains('is-valid')
-                        && p.classList.contains('is-valid');
-                case 4: // Guest Details (number of guests selected)?
-                    var g = document.getElementById('number_of_guests');
-                    return g && g.value && parseInt(g.value) > 0;
-                case 5: // Packages — always reachable (optional)
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
-        /** Advance to a step, ensuring all previous steps are complete.
-         *  Falls back to the earliest incomplete step if validation fails. */
-        function advanceToStep(targetStep) {
-            // Find the first incomplete step before target
-            for (var s = 1; s < targetStep; s++) {
-                if (!isStepComplete(s)) {
-                    var fallback = getStepSection(s);
-                    if (fallback) scrollToSection(fallback, 350);
-                    // Highlight incomplete fields on step 3
-                    if (s === 3) {
-                        ['guest_name','guest_email','guest_phone'].forEach(function(id) {
-                            var f = document.getElementById(id);
-                            if (f && !f.value.trim()) {
-                                f.style.borderColor = '#dc3545';
-                                var clr = function(){ this.style.borderColor = ''; };
-                                f.addEventListener('change', clr, {once:true});
-                                f.addEventListener('input', clr, {once:true});
-                            }
-                        });
-                    }
-                    return;
-                }
-            }
-            // All prior steps complete — scroll to target
-            var section = getStepSection(targetStep);
-            if (section) scrollToSection(section, 350);
-        }
-
-        // Reveal room selection section once both dates are set
-        function revealRoomSection() {
-            const ci = document.getElementById('check_in_date');
-            const co = document.getElementById('check_out_date');
-            const wrapper = document.getElementById('roomSectionWrapper');
-            const datesGood = ci && co && ci.value && co.value && co.value > ci.value;
-
-            if (datesGood) {
-                if (wrapper) {
-                    wrapper.style.display = '';
-                    refreshRoomCardPlansLocal();
-                    scrollToSection(document.getElementById('partySection') || wrapper, 350);
-                } else if (preselectedRoomId) {
-                    // Pre-selected room with dates set — advance to step 3 (Guest Information)
-                    advanceToStep(3);
-                }
-            } else {
-                if (wrapper) wrapper.style.display = 'none';
-            }
+            }, delay === undefined ? 0 : delay);
         }
 
         // Initialize calendars
@@ -692,7 +603,6 @@
                             }
                         }
                     }
-                    revealRoomSection();
                     updateSummary();
                 }
             });
@@ -719,7 +629,6 @@
                     }
                 },
                 onChange: function() {
-                    revealRoomSection();
                     updateSummary();
                 }
             });
@@ -736,6 +645,19 @@
 
             if (heroCheckOut && checkOutCalendar) {
                 checkOutCalendar.setDate(heroCheckOut);
+            }
+
+            // Guests from the hero widget / query: set before any room is chosen, so the first availability
+            // check already asks for this party.
+            if (heroGuests) {
+                const guestSelect = document.getElementById('number_of_guests');
+                if (guestSelect) {
+                    guestSelect.value = String(Math.min(Math.max(1, heroGuests), 20));
+                    if (heroChildren) {
+                        const childInput = document.getElementById('child_guests');
+                        if (childInput) childInput.value = String(Math.min(heroChildren, Math.max(0, heroGuests - 1)));
+                    }
+                }
             }
 
             // Handle room type from hero widget
@@ -758,32 +680,6 @@
                             selectRoom(roomOption);
                         }
                     }
-                }
-            }
-
-            // Handle guests from hero widget
-            if (heroGuests) {
-                const guestSelect = document.getElementById('number_of_guests');
-                if (guestSelect) {
-                    // Set guests value after room is selected
-                    setTimeout(() => {
-                        const maxSelectableGuests = 20;
-                        guestSelect.value = Math.min(heroGuests, maxSelectableGuests);
-
-                        // Handle children from hero widget
-                        if (heroChildren) {
-                            const childInput = document.getElementById('child_guests');
-                            if (childInput) {
-                                const maxChildren = Math.max(0, heroGuests - 1);
-                                const childCount = Math.min(heroChildren, maxChildren);
-                                childInput.value = childCount;
-                            }
-                        }
-
-                        enforceChildGuestRules();
-                        checkGuestCapacity();
-                        updateSummary();
-                    }, 100);
                 }
             }
 
@@ -872,13 +768,6 @@
 
                     // Call selectRoom to ensure all room-specific settings are applied (suppress scroll on page load)
                     selectRoom(syntheticRoomOption, true);
-
-                    // Trigger availability check for pre-selected room if dates are provided
-                    if (heroCheckIn && heroCheckOut) {
-                        setTimeout(() => {
-                            performAvailabilityCheck();
-                        }, 200);
-                    }
                 }
             }
 
@@ -887,20 +776,17 @@
             bookingTypeRadios.forEach(radio => {
                 radio.addEventListener('change', function() {
                     selectBookingType(this.value);
-                    // Scroll to packages if visible, otherwise go straight to summary
-                    const pkgSection = document.getElementById('packagesSection');
-                    if (pkgSection && pkgSection.style.display !== 'none') {
-                        scrollToSection(pkgSection, 400);
-                    } else {
-                        const bottomSection = document.querySelector('.booking-bottom-section')
-                                           || document.querySelector('.booking-action-bar');
-                        scrollToSection(bottomSection, 520);
-                    }
                 });
             });
 
-            // Reveal room section if dates are already set (e.g. hero widget pre-fill)
-            revealRoomSection();
+            // One availability check for what the page opened with (dates from the hero widget / query or a
+            // refused submission), unless choosing the room above already started it.
+            enforceChildGuestRules();
+            checkGuestCapacity();
+            updateSummary();
+            if (document.getElementById('check_in_date')?.value && document.getElementById('check_out_date')?.value && !availabilityCheckPending) {
+                performAvailabilityCheck();
+            }
         });
 
         // Helper function to update occupancy visual selection based on guest count
@@ -1128,10 +1014,6 @@
                 performAvailabilityCheck();
             }
 
-            // Scroll to Step 3: Guest Information after a room is picked (skip on page-load pre-selection)
-            if (!skipScroll) {
-                advanceToStep(3);
-            }
         }
 
         // Update guest dropdown options based on room capacity
@@ -1323,35 +1205,10 @@
             renderPartyPlan();
         }
 
-        // Validate form for submit
+        // Every caller means "the choices changed": the booking steps work out whether the price check still holds
+        // and whether Confirm can be pressed (gbSyncQuoteState, "Booking steps" below).
         function validateFormForSubmit() {
-            const checkIn = document.getElementById('check_in_date').value;
-            const checkOut = document.getElementById('check_out_date').value;
-            const numGuests = document.getElementById('number_of_guests').value;
-            const childGuests = parseInt(document.getElementById('child_guests').value || '0', 10);
-            const submitBtn = document.querySelector('.btn-submit');
-
-            const totalGuestsInt = parseInt(numGuests || '0', 10);
-            const adultsInt = totalGuestsInt - childGuests;
-            const childValid = childGuests >= 0 && childGuests < totalGuestsInt;
-            const selectedRoom = getSelectedRoomData();
-            let allocationValid = selectedRoom ? hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) : false;
-            if (allocationValid && selectedRoom && roomsFreeByType[selectedRoom.id] !== undefined &&
-                getRoomsNeededForGuests(totalGuestsInt, selectedRoom) > Number(roomsFreeByType[selectedRoom.id])) {
-                allocationValid = false;
-            }
-
-            if (selectedRoomId && checkIn && checkOut && numGuests && childValid && adultsInt >= 1 && allocationValid) {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm Booking';
-                submitBtn.style.opacity = '1';
-            } else {
-                submitBtn.disabled = true;
-                submitBtn.innerHTML = allocationValid || !selectedRoomId ?
-                    '<i class="fas fa-calendar-check"></i> Complete All Fields (1+ adult required)' :
-                    '<i class="fas fa-exclamation-triangle"></i> This Room Cannot Take Your Party';
-                submitBtn.style.opacity = '0.6';
-            }
+            gbSyncQuoteState();
         }
 
         function updateBlockedDatesForRoom(roomId) {
@@ -1415,7 +1272,7 @@
 
             section.style.display = '';
             // No auto-scroll here: packages load right after a room is picked, and jumping to them
-            // dragged guests past Guest Information. The step flow (advanceToStep) guides them.
+            // dragged guests past Guest Information. The booking steps guide them.
             list.innerHTML = currentPackages.map(pkg => {
                 const isComplimentary = parseFloat(pkg.price_amount) === 0;
                 let cost = 0;
@@ -1955,7 +1812,8 @@
 
         // Initialize booking type selection on page load
         document.addEventListener('DOMContentLoaded', function() {
-            selectBookingType('standard');
+            const checkedType = document.querySelector('input[name="booking_type"]:checked');
+            selectBookingType(checkedType ? checkedType.value : 'standard');
             enforceChildGuestRules();
             validateFormForSubmit();
             initInstantValidation();
@@ -2044,7 +1902,6 @@
             const checkOutInput = document.getElementById('check_out_date');
             const guestsInput = document.getElementById('number_of_guests');
             const childInput = document.getElementById('child_guests');
-            const bookingForm = document.getElementById('bookingForm');
 
             // Trigger availability check immediately when both dates are entered
             const triggerImmediateAvailabilityCheck = () => {
@@ -2085,48 +1942,6 @@
             }
             if (childInput) {
                 childInput.addEventListener('change', scheduleAvailabilityCheck);
-            }
-
-            // Prevent form submission if availability check is pending or failed
-            if (bookingForm) {
-                bookingForm.addEventListener('submit', function(e) {
-                    if (availabilityCheckPending) {
-                        e.preventDefault();
-                        showAvailabilityMessage('<i class="fas fa-spinner fa-spin"></i> Checking availability... Please wait.', 'warning');
-                        return false;
-                    }
-
-                    if (selectedRoomId) {
-                        const checkIn = checkInInput ? checkInInput.value : '';
-                        const checkOut = checkOutInput ? checkOutInput.value : '';
-                        const childGuests = childInput ? parseInt(childInput.value || '0', 10) : 0;
-                        const totalGuests = parseInt(guestsInput?.value || '1', 10);
-
-                        if (checkIn && checkOut) {
-                            const statusKey = buildAvailabilityStatusKey(selectedRoomId, checkIn, checkOut, childGuests, totalGuests);
-                            const roomStatus = roomAvailabilityStatus[statusKey];
-
-                            const mixedForSubmit = mixedInPlay() ? getMixedForCurrent() : null;
-                            if (mixedInPlay() && !(mixedForSubmit && mixedForSubmit.ok)) {
-                                // Not everyone has a room yet (or the rooms are still being checked).
-                                e.preventDefault();
-                                showAvailabilityMessage('<i class="fas fa-bed"></i> Add rooms until everyone in your party has one, then confirm.', 'warning');
-                                return false;
-                            }
-                            if (roomStatus && !roomStatus.available && !mixedForSubmit) {
-                                e.preventDefault();
-
-                                // Clean up any raw HTML that might be in the error message
-                                let reasonText = roomStatus.message || roomStatus.error || "This room cannot take your party on your selected dates.";
-                                // Strip HTML tags
-                                reasonText = reasonText.replace(/<\/?[^>]+(>|$)/g, "");
-
-                                showAvailabilityModal(`<strong>Room Unavailable:</strong><br>${reasonText}`);
-                                return false;
-                            }
-                        }
-                    }
-                });
             }
         }
 
@@ -2310,6 +2125,7 @@
                     if (seq !== availabilityCheckSeq) return;
                     availabilityCheckPending = false;
                     showAvailabilityMessage('<i class="fas fa-exclamation-triangle"></i> Unable to check availability. Please try again.', 'error');
+                    updateSummary(); // nothing pending now: clears "Checking price…"
                     validateFormForSubmit();
                 });
         }
@@ -2461,13 +2277,7 @@
                 summary.style.display = 'none';
             }
 
-            // Disable submit button
-            const submitBtn = document.querySelector('.btn-submit');
-            if (submitBtn) {
-                submitBtn.disabled = true;
-                submitBtn.innerHTML = '<i class="fas fa-bed"></i> Select a Room';
-                submitBtn.style.opacity = '0.6';
-            }
+            gbSyncQuoteState();
         }
 
         // Show availability message
@@ -2498,26 +2308,6 @@
             }
         }
 
-        // ── Guest info completion → scroll to Guest Details step 4 ──────
-        var _guestScrollFired = false;
-        function checkGuestInfoComplete() {
-            const n = document.getElementById('guest_name');
-            const e = document.getElementById('guest_email');
-            const p = document.getElementById('guest_phone');
-            const allValid = n && e && p
-                && n.classList.contains('is-valid')
-                && e.classList.contains('is-valid')
-                && p.classList.contains('is-valid');
-
-            if (allValid && !_guestScrollFired) {
-                _guestScrollFired = true;
-                // Advance to step 4 (Guest Details) which validates steps 1-3 first
-                advanceToStep(4);
-            } else if (!allValid) {
-                _guestScrollFired = false;
-            }
-        }
-
         // Instant field validation for better UX
         function initInstantValidation() {
             const nameInput = document.getElementById('guest_name');
@@ -2528,11 +2318,9 @@
             if (nameInput) {
                 nameInput.addEventListener('input', function() {
                     validateNameField(this);
-                    checkGuestInfoComplete();
                 });
                 nameInput.addEventListener('blur', function() {
                     validateNameField(this);
-                    checkGuestInfoComplete();
                 });
             }
 
@@ -2540,11 +2328,9 @@
             if (emailInput) {
                 emailInput.addEventListener('input', function() {
                     validateEmailField(this);
-                    checkGuestInfoComplete();
                 });
                 emailInput.addEventListener('blur', function() {
                     validateEmailField(this);
-                    checkGuestInfoComplete();
                 });
             }
 
@@ -2552,11 +2338,9 @@
             if (phoneInput) {
                 phoneInput.addEventListener('input', function() {
                     validatePhoneField(this);
-                    checkGuestInfoComplete();
                 });
                 phoneInput.addEventListener('blur', function() {
                     validatePhoneField(this);
-                    checkGuestInfoComplete();
                 });
             }
         }
@@ -2640,7 +2424,7 @@
 
             if (suggestions[domain]) {
                 input.classList.add('is-invalid');
-                feedback.innerHTML = `Did you mean <strong>${value.split('@')[0]}@${suggestions[domain]}</strong>?`;
+                feedback.innerHTML = `Did you mean <strong>${escapeHtml(value.split('@')[0])}@${suggestions[domain]}</strong>?`;
                 feedback.className = 'field-feedback text-warning';
                 return false;
             }
@@ -2711,85 +2495,6 @@
             return feedback;
         }
 
-        // Override validateFormForSubmit to include instant validation and availability check
-        const originalValidateFormForSubmit = validateFormForSubmit;
-        validateFormForSubmit = function() {
-            const checkIn = document.getElementById('check_in_date').value;
-            const checkOut = document.getElementById('check_out_date').value;
-            const numGuests = document.getElementById('number_of_guests').value;
-            const childGuests = parseInt(document.getElementById('child_guests').value || '0', 10);
-            const submitBtn = document.querySelector('.btn-submit');
-
-            const totalGuestsInt = parseInt(numGuests || '0', 10);
-            const adultsInt = totalGuestsInt - childGuests;
-            const childValid = childGuests >= 0 && childGuests < totalGuestsInt;
-
-            // Check availability status for selected room
-            let availabilityValid = true;
-            let availabilityKnown = true;
-            if (selectedRoomId && checkIn && checkOut) {
-                const statusKey = buildAvailabilityStatusKey(selectedRoomId, checkIn, checkOut, childGuests, totalGuestsInt);
-                const roomStatus = roomAvailabilityStatus[statusKey];
-                availabilityKnown = !!roomStatus;
-                // Too few rooms of this type for the whole party is not "fully booked": the guest adds other rooms.
-                if (roomStatus && !roomStatus.available && !isMixedCandidate(roomStatus)) {
-                    availabilityValid = false;
-                }
-            }
-
-            const selectedRoom = getSelectedRoomData();
-            // Rooms of different types: submit only once the server says every guest has a room.
-            const mixedActive = !!selectedRoomId && mixedInPlay();
-            // An adults-only room with children is not "unsupported" while the children are being given a room of their own.
-            const allocationValid = selectedRoom ? (hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) || (mixedActive && childGuests > 0 && adultsInt >= 1)) : false;
-            const mixedNow = mixedActive ? getMixedForCurrent() : null;
-
-            // Determine button state based on all validations — guide guest step by step
-            let btnText = '<i class="fas fa-calendar-check"></i> Complete All Fields';
-            let btnDisabled = true;
-
-            if (!checkIn || !checkOut) {
-                btnText = '<i class="fas fa-calendar-alt"></i> Select Your Dates First';
-                btnDisabled = true;
-            } else if (!selectedRoomId) {
-                btnText = '<i class="fas fa-bed"></i> Select a Room to Continue';
-                btnDisabled = true;
-            } else if (availabilityCheckPending || !availabilityKnown) {
-                btnText = '<i class="fas fa-spinner fa-spin"></i> Checking Availability…';
-                btnDisabled = true;
-            } else if (!availabilityValid) {
-                btnText = '<i class="fas fa-calendar-times"></i> Room Fully Booked — Try Different Dates';
-                btnDisabled = true;
-            } else if (!numGuests) {
-                btnText = '<i class="fas fa-users"></i> Select Number of Guests';
-                btnDisabled = true;
-            } else if (!childValid || adultsInt < 1) {
-                btnText = '<i class="fas fa-exclamation-triangle"></i> At Least 1 Adult Required';
-                btnDisabled = true;
-            } else if (!allocationValid) {
-                btnText = '<i class="fas fa-exclamation-triangle"></i> Guest Count Not Supported for This Room';
-                btnDisabled = true;
-            } else if (mixedActive && !mixedNow) {
-                btnText = '<i class="fas fa-spinner fa-spin"></i> Checking Rooms…';
-                btnDisabled = true;
-            } else if (mixedActive && !mixedNow.ok) {
-                btnText = Number(mixedNow.left_guests || 0) > 0 && mixedNow.why === 'children'
-                    ? '<i class="fas fa-bed"></i> Add a Room for the Children'
-                    : Number(mixedNow.left_guests || 0) > 0
-                    ? `<i class="fas fa-bed"></i> Add a Room for the Other ${plural(Number(mixedNow.left_guests), 'Guest')}`
-                    : '<i class="fas fa-exclamation-triangle"></i> These Rooms Cannot Take Your Party';
-                btnDisabled = true;
-            } else {
-                // All required fields are filled — browser validation handles contact fields on submit
-                btnText = '<i class="fas fa-check-circle"></i> Confirm Booking';
-                btnDisabled = false;
-            }
-
-            submitBtn.disabled = btnDisabled;
-            submitBtn.innerHTML = btnText;
-            submitBtn.style.opacity = btnDisabled ? '0.6' : '1';
-        };
-
         // ── Sidebar empty state toggle ─────────────────────────────────────────
         // Watch the summary div for JS-driven display changes and toggle the
         // empty state placeholder accordingly. Also trigger fade-in animation.
@@ -2817,3 +2522,687 @@
             // Run once on load in case JS already set display before observer attaches
             syncState();
         })();
+
+        // ── Booking steps (G-A) ──────────────────────────────────────────────────────────────────────────
+        // One step on screen at a time: 1 When, 2 Who, 3 Room, 4 Your details, 5 Review and book.
+        // Continue runs that step's checks. Room's Continue and Review ask booking.php for a price check (a dry run of
+        // the save, response=wizard); Review shows only the server's quote. Any change in steps 1-4 makes the quote
+        // stale and Review asks again. Book stays a normal form POST, enabled only while the quote is fresh.
+        // Without JavaScript the whole form shows at once (the steps are hidden only under .js-steps).
+        var gbCurrent = 1;
+        var gbReached = 1;
+        var gbReady = false;
+        var gbQuote = null;          // the last price check quote (server figures only)
+        var gbQuoteFp = '';          // the form as it was when that quote was asked for
+        var gbQuoteUpto = 0;         // 3 = Room's check, 5 = Review's check (only 5 can be booked)
+        var gbLastError = '';
+        var gbErrorFp = '';
+        var gbAutoFp = '';           // Review asks again at most once per version of the form
+        var gbCheckSeq = 0;          // newest price check; older replies are dropped
+        var gbCheckPending = false;
+        var gbCheckCtl = null;
+        var gbSubmitting = false;
+        var gbBusy = false;
+
+        function gbForm() { return document.getElementById('bookingForm'); }
+        function gbStepEl(n) { return document.getElementById('gbStep' + n); }
+        function gbVal(id) { const el = document.getElementById(id); return el ? String(el.value || '') : ''; }
+
+        // The form's choices (what the price check prices); the token and the booking's id are not choices.
+        function gbFingerprint() {
+            const form = gbForm();
+            if (!form) return '';
+            const parts = [];
+            new FormData(form).forEach(function (v, k) {
+                if (k === 'csrf_token' || k === 'client_uuid') return;
+                parts.push(k + '=' + (typeof v === 'string' ? v : ''));
+            });
+            return parts.join('&');
+        }
+
+        function gbQuoteState() {
+            if (gbCheckPending) return 'pending';
+            const fp = gbFingerprint();
+            if (gbQuote && gbQuoteUpto === 5 && gbQuoteFp === fp) return 'fresh';
+            if (gbLastError && gbErrorFp === fp) return 'error';
+            return 'stale';
+        }
+
+        function gbMoney(v) {
+            return currencySymbol + Number(v || 0).toLocaleString();
+        }
+
+        // Review's money, from the server's quote only (textContent / DOM, never markup from the reply).
+        function gbPaintQuote(state) {
+            const summary = document.getElementById('bookingSummary');
+            if (!summary) return;
+            const el = function (id) { return document.getElementById(id); };
+            const setText = function (id, text) { const n = el(id); if (n && n.textContent !== text) n.textContent = text; return n; };
+            const showRow = function (id, on) { const n = el(id); if (n) n.style.display = on ? '' : 'none'; return n; };
+            const children = getCurrentChildGuestCount();
+            const q = state === 'fresh' ? gbQuote : null;
+
+            if (!q) {
+                setText('summaryTotal', state === 'pending' ? 'Checking price…' : '—');
+                setText('summaryRatePerNight', '—');
+                if (children > 0) setText('summaryChildCharge', '—');
+                showRow('summaryRatePlanRow', false);
+                setText('summaryPackageTotal', '—');
+                return;
+            }
+
+            const rows = [];
+            (q.lines || []).forEach(function (line) {
+                (line.rows || []).forEach(function (r) { rows.push({ name: String(line.name || ''), r: r }); });
+            });
+            const nights = Number(q.nights || 0);
+            const totals = q.totals || {};
+
+            // Room(s)
+            setText('summaryRoom', rows.length > 1 ? rows.length + ' rooms' : (rows[0] ? rows[0].name : (selectedRoomName || '')));
+            const list = el('summaryRoomList');
+            if (list) {
+                list.textContent = '';
+                if (rows.length > 1) {
+                    rows.forEach(function (row) {
+                        const li = document.createElement('li');
+                        const strong = document.createElement('strong');
+                        strong.textContent = row.name;
+                        const adults = Number(row.r.adults || 0);
+                        const kids = Number(row.r.children || 0);
+                        const who = plural(adults, 'adult') + (kids > 0 ? ' + ' + kids + (kids === 1 ? ' child' : ' children') : '');
+                        li.appendChild(strong);
+                        li.appendChild(document.createTextNode(' · ' + who + ' · ' + gbMoney(row.r.room_price) + '/night'));
+                        list.appendChild(li);
+                    });
+                    list.style.display = '';
+                } else {
+                    list.style.display = 'none';
+                }
+            }
+
+            // Rate per night (the room rate of every room, summed)
+            const perNight = rows.reduce(function (s, row) { return s + Number(row.r.room_price || 0); }, 0);
+            setText('summaryRatePerNight', rows.length > 1 ? gbMoney(perNight) + ' across ' + rows.length + ' rooms' : gbMoney(perNight));
+
+            // Child supplement
+            const childRow = el('summaryChildChargeRow');
+            if (childRow) {
+                if (children > 0) {
+                    const sup = Number(totals.child_supplement || 0);
+                    const kidsWord = children + (children === 1 ? ' child' : ' children');
+                    setText('summaryChildCharge', sup > 0
+                        ? gbMoney(sup) + ' (' + kidsWord + ' across ' + plural(nights, 'night') + ')'
+                        : 'No charge (' + kidsWord + ')');
+                    childRow.style.display = '';
+                } else {
+                    childRow.style.display = 'none';
+                }
+            }
+
+            // Rate plan (the quote carries the plan's name; its effect is inside the room rate above)
+            let planLabel = '';
+            rows.some(function (row) { planLabel = String(row.r.rate_plan_label || ''); return planLabel !== ''; });
+            if (planLabel) {
+                setText('summaryRatePlanLabel', planLabel + ':');
+                setText('summaryRatePlanValue', 'Applied');
+                showRow('summaryRatePlanRow', true);
+            } else {
+                showRow('summaryRatePlanRow', false);
+            }
+
+            // Packages
+            const pkgs = Array.isArray(q.packages) ? q.packages : [];
+            const names = el('summaryPackageNames');
+            if (names) {
+                names.textContent = '';
+                pkgs.forEach(function (pk) {
+                    const li = document.createElement('li');
+                    const icon = document.createElement('i');
+                    icon.className = 'fas fa-check-circle';
+                    icon.setAttribute('aria-hidden', 'true');
+                    li.appendChild(icon);
+                    li.appendChild(document.createTextNode(String(pk.name || '')));
+                    if (Number(pk.total || 0) === 0) {
+                        const comp = document.createElement('span');
+                        comp.className = 'bsum-pkg-comp';
+                        comp.textContent = ' Complimentary';
+                        li.appendChild(comp);
+                    }
+                    names.appendChild(li);
+                });
+            }
+            const pkgTotal = Number(totals.package_total || 0);
+            const pkgEl = el('summaryPackageTotal');
+            if (pkgEl) {
+                const free = pkgs.filter(function (pk) { return Number(pk.total || 0) === 0; }).length;
+                if (pkgTotal > 0) {
+                    pkgEl.textContent = gbMoney(pkgTotal) + (free > 0 ? ' (+' + free + ' free)' : '');
+                    showRow('summaryPackageTotalRow', true);
+                } else if (pkgs.length) {
+                    pkgEl.textContent = 'Complimentary';
+                    showRow('summaryPackageTotalRow', true);
+                } else {
+                    showRow('summaryPackageTotalRow', false);
+                }
+            }
+
+            // Total + the one plain "Includes ..." note (no VAT/levy amounts for guests)
+            setText('summaryTotal', gbMoney(totals.total_with_vat));
+            const incVat = String(q.vat_mode || '') !== 'off' && Number(q.vat_rate || 0) > 0;
+            const incLevy = Number(totals.levy || 0) > 0;
+            const levyNote = el('summaryTourismLevyNote');
+            if (levyNote) {
+                if (incVat || incLevy) {
+                    setText('tourismLevyText', 'Includes ' + (incVat && incLevy ? 'VAT and tourism levy' : (incVat ? 'VAT' : 'tourism levy')));
+                    levyNote.style.display = '';
+                } else {
+                    levyNote.style.display = 'none';
+                }
+            }
+            if (summary.style.display !== 'block') summary.style.display = 'block';
+        }
+
+        // Book button, Review's money and the status line, for the quote's state now. Safe to call at any time.
+        function gbSyncQuoteState() {
+            if (!gbReady) return;
+            const state = gbQuoteState();
+            const summary = document.getElementById('bookingSummary');
+            if (summary && summary.getAttribute('data-quote') !== state) summary.setAttribute('data-quote', state);
+            gbPaintQuote(state);
+
+            const btn = document.querySelector('.btn-submit');
+            if (btn) {
+                const canBook = gbCurrent === 5 && state === 'fresh' && !gbSubmitting;
+                btn.disabled = !canBook;
+                btn.style.opacity = '';
+                const html = gbSubmitting
+                    ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Booking…'
+                    : state === 'pending'
+                    ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Checking price…'
+                    : '<i class="fas fa-check-circle" aria-hidden="true"></i> Confirm Booking';
+                if (btn.innerHTML !== html) btn.innerHTML = html;
+            }
+
+            const status = document.getElementById('gbQuoteStatus');
+            if (status) {
+                const text = state === 'pending' ? 'Checking the price with the hotel…'
+                    : (state === 'stale' && gbCurrent === 5) ? 'Your choices changed: checking the price again…'
+                    : '';
+                if (status.textContent !== text) status.textContent = text;
+            }
+
+            // Review asks again when the choices changed under it (once per version of the form).
+            if (gbCurrent === 5 && state === 'stale' && !gbSubmitting) {
+                const fp = gbFingerprint();
+                if (gbAutoFp !== fp) {
+                    gbAutoFp = fp;
+                    setTimeout(gbReviewCheck, 0);
+                }
+            }
+        }
+
+        // booking.php price check (dry run). Resolves to the reply, or null when a newer check replaced it.
+        function gbPriceCheck(upto) {
+            const form = gbForm();
+            if (!form) return Promise.resolve(null);
+            if (gbCheckCtl) {
+                try { gbCheckCtl.abort(); } catch (e) { /* already finished */ }
+            }
+            const seq = ++gbCheckSeq;
+            const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            gbCheckCtl = ctl;
+            gbCheckPending = true;
+            const fp = gbFingerprint();
+            const fd = new FormData(form);
+            fd.append('response', 'wizard');
+            fd.append('dry_run', '1');
+            fd.append('dry_run_upto', String(upto));
+            gbSyncQuoteState();
+
+            const finish = function () {
+                gbCheckPending = false;
+                gbCheckCtl = null;
+            };
+            return fetch(form.action, {
+                method: 'POST',
+                body: fd,
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' },
+                signal: ctl ? ctl.signal : undefined
+            }).then(function (res) {
+                return res.text();
+            }).then(function (text) {
+                if (seq !== gbCheckSeq) return null;
+                let j = null;
+                try { j = JSON.parse(text); } catch (e) { j = null; }
+                if (!j || typeof j !== 'object') j = { ok: false, step: 0, message: '' };
+                if (typeof j.csrf_token === 'string' && j.csrf_token !== '') {
+                    const tokenInput = form.querySelector('input[name="csrf_token"]');
+                    if (tokenInput) tokenInput.value = j.csrf_token;
+                }
+                if (j.duplicate && typeof j.redirect === 'string' && /^booking-confirmation\.php\?ref=[A-Za-z0-9_-]+$/.test(j.redirect)) {
+                    window.location.href = j.redirect; // this booking was already made (same booking id)
+                    return null;
+                }
+                finish();
+                if (j.ok && j.quote) {
+                    gbQuote = j.quote;
+                    gbQuoteFp = fp;
+                    gbQuoteUpto = upto;
+                    gbLastError = '';
+                } else if (!j.ok) {
+                    gbQuote = null;
+                    gbQuoteUpto = 0;
+                    gbLastError = String(j.message || '') || 'refused';
+                    gbErrorFp = fp;
+                }
+                gbSyncQuoteState();
+                return j;
+            }).catch(function () {
+                if (seq !== gbCheckSeq) return null; // replaced by a newer check
+                finish();
+                gbQuote = null;
+                gbQuoteUpto = 0;
+                gbLastError = 'We could not reach the hotel. Please check your connection and try again.';
+                gbErrorFp = fp;
+                gbSyncQuoteState();
+                return { ok: false, step: 0, message: gbLastError, network: true };
+            });
+        }
+
+        function gbReviewCheck() {
+            if (gbCurrent !== 5 || gbSubmitting) return;
+            gbPriceCheck(5).then(function (j) {
+                if (j && !j.ok) { gbShowRefusal(j); return; }
+                // An accepted check clears an earlier Review message (e.g. a broken reply), even after a script's change.
+                const p = j && j.ok ? (gbStepEl(5) || document).querySelector('.gb-step__error') : null;
+                if (p) { p.textContent = ''; p.hidden = true; }
+            });
+        }
+
+        // ── Messages ──
+        function gbFocus(node) {
+            if (!node) return;
+            try { node.focus({ preventScroll: true }); } catch (e) { node.focus(); }
+            const group = node.closest ? (node.closest('.form-group') || node) : node;
+            scrollToSection(group);
+        }
+
+        function gbStepError(step, text) {
+            const sec = gbStepEl(step);
+            const p = sec ? sec.querySelector('.gb-step__error') : null;
+            if (!p) return;
+            p.textContent = text;
+            p.hidden = false;
+        }
+
+        function gbClearErrors() {
+            document.querySelectorAll('#bookingForm .gb-field-error').forEach(function (p) { p.remove(); });
+            document.querySelectorAll('#bookingForm [data-gb-invalid]').forEach(function (input) {
+                input.removeAttribute('aria-invalid');
+                const prev = input.getAttribute('data-gb-describedby') || '';
+                if (prev) input.setAttribute('aria-describedby', prev); else input.removeAttribute('aria-describedby');
+                input.removeAttribute('data-gb-describedby');
+                input.removeAttribute('data-gb-invalid');
+            });
+            document.querySelectorAll('#bookingForm .gb-step__error').forEach(function (p) {
+                p.textContent = '';
+                p.hidden = true;
+            });
+        }
+
+        function gbFieldInput(field) {
+            const ids = {
+                check_in_date: 'check_in_date', check_out_date: 'check_out_date', dates: 'check_in_date',
+                number_of_guests: 'number_of_guests', child_guests: 'child_guests',
+                guest_name: 'guest_name', guest_email: 'guest_email', guest_phone: 'guest_phone',
+                guest_country: 'guest_country', guest_address: 'guest_address', special_requests: 'special_requests'
+            };
+            return ids[field] ? document.getElementById(ids[field]) : null;
+        }
+
+        // Open a step and show a plain message next to its field (or at the top of the room / package choice).
+        function gbFail(step, field, msg) {
+            step = Math.min(Math.max(parseInt(step, 10) || 1, 1), 5);
+            gbShowStep(step, { focus: false, noCheck: true });
+            const text = String(msg || '').replace(/<\/?[^>]+(>|$)/g, '').trim() || 'Please check this step.';
+            const sec = gbStepEl(step);
+            const input = gbFieldInput(field);
+            const p = document.createElement('p');
+            p.className = 'gb-field-error';
+            p.setAttribute('role', 'alert');
+            p.textContent = text;
+
+            if (input && sec && sec.contains(input)) {
+                p.id = 'gbErr_' + input.id;
+                (input.closest('.form-group') || input.parentNode).appendChild(p);
+                const prev = input.getAttribute('aria-describedby') || '';
+                input.setAttribute('data-gb-describedby', prev);
+                input.setAttribute('data-gb-invalid', '1');
+                input.setAttribute('aria-invalid', 'true');
+                input.setAttribute('aria-describedby', (prev ? prev + ' ' : '') + p.id);
+                gbFocus(input);
+                return;
+            }
+            let box = null;
+            if (field === 'room_id' && step === 3) box = document.getElementById('roomSectionWrapper') || document.getElementById('preselectedRoomSection');
+            if (field === 'package_ids' && step === 3) {
+                const pk = document.getElementById('packagesSection');
+                box = pk && pk.style.display !== 'none' ? pk : null;
+            }
+            if (box) {
+                p.id = 'gbErr_' + field;
+                box.insertBefore(p, box.firstChild);
+                const target = field === 'room_id'
+                    ? (box.querySelector('input[name="room_id"]:checked') || box.querySelector('input[name="room_id"]:not([disabled])'))
+                    : box.querySelector('input:not([disabled])');
+                if (target && target.type !== 'hidden') {
+                    target.setAttribute('data-gb-describedby', target.getAttribute('aria-describedby') || '');
+                    target.setAttribute('data-gb-invalid', '1');
+                    target.setAttribute('aria-describedby', p.id);
+                    try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+                } else if (sec) {
+                    try { sec.focus({ preventScroll: true }); } catch (e) { sec.focus(); }
+                }
+                scrollToSection(p);
+                return;
+            }
+            gbStepError(step, text);
+            gbFocus(sec);
+        }
+
+        // A refused price check: open its step; a whole-page refusal (step 0) or a broken reply shows where the guest is.
+        function gbShowRefusal(j) {
+            const step = parseInt(j && j.step, 10);
+            const message = j && typeof j.message === 'string' ? j.message.trim() : '';
+            if (step >= 1 && step <= 5 && message !== '') {
+                gbFail(step, j.field || '', message);
+                return;
+            }
+            let text = message || 'Something went wrong while checking your booking.';
+            if (!/refresh|try again/i.test(text)) text += ' Please refresh the page and try again.';
+            gbStepError(gbCurrent, text);
+            gbFocus(gbStepEl(gbCurrent));
+        }
+
+        // ── Step checks ──
+        function gbWaitIdle(maxMs) {
+            const started = Date.now();
+            return new Promise(function (resolve) {
+                (function poll() {
+                    const mixedLoading = !!selectedRoomId && mixedInPlay() && !getMixedForCurrent();
+                    if ((!availabilityCheckPending && !mixedLoading) || Date.now() - started > maxMs) {
+                        resolve();
+                        return;
+                    }
+                    setTimeout(poll, 100);
+                })();
+            });
+        }
+
+        function gbStatusKey() {
+            const ci = gbVal('check_in_date');
+            const co = gbVal('check_out_date');
+            const total = parseInt(gbVal('number_of_guests') || '0', 10);
+            if (!selectedRoomId || !ci || !co || total < 1) return '';
+            return buildAvailabilityStatusKey(selectedRoomId, ci, co, getCurrentChildGuestCount(), total);
+        }
+
+        // Why the chosen room cannot be booked as things stand ('' = it can), from the availability answers.
+        function gbRoomProblem() {
+            const total = parseInt(gbVal('number_of_guests') || '0', 10);
+            const children = getCurrentChildGuestCount();
+            const key = gbStatusKey();
+            const status = key ? roomAvailabilityStatus[key] : null;
+            if (!status) return 'We are still checking this room for your dates. Please try again in a moment.';
+            if (!status.available && !isMixedCandidate(status)) {
+                return String(status.message || status.error || 'This room cannot take your party on your selected dates.').replace(/<\/?[^>]+(>|$)/g, '');
+            }
+            const mixedActive = mixedInPlay();
+            const room = getSelectedRoomData();
+            const allocationOk = room ? (hasValidAllocation(total, room, children) || (mixedActive && children > 0 && total - children >= 1)) : false;
+            if (!allocationOk) {
+                return (room && getAllocationValidationMessage(total, room, children)) || 'This room cannot take your party. Please choose another room.';
+            }
+            if (mixedActive) {
+                const m = getMixedForCurrent();
+                if (!m) return 'We are still checking the rooms for your party. Please try again in a moment.';
+                if (!m.ok) {
+                    const left = Number(m.left_guests || 0);
+                    if (left > 0 && m.why === 'children') return 'Add a room for the children, then continue.';
+                    if (left > 0) return 'Add a room for the other ' + plural(left, 'guest') + ', then continue.';
+                    return String(m.message || 'These rooms cannot take your party. Please choose other rooms.').replace(/<\/?[^>]+(>|$)/g, '');
+                }
+            }
+            return '';
+        }
+
+        async function gbCheckStep(n) {
+            gbClearErrors();
+            if (n === 1) {
+                const ci = gbVal('check_in_date');
+                const co = gbVal('check_out_date');
+                if (!ci) { gbFail(1, 'check_in_date', 'Please choose your check-in date.'); return false; }
+                if (!co) { gbFail(1, 'check_out_date', 'Please choose your check-out date.'); return false; }
+                if (co <= ci) { gbFail(1, 'check_out_date', 'Your check-out date must be after your check-in date.'); return false; }
+                return true;
+            }
+            if (n === 2) {
+                const guests = Number(gbVal('number_of_guests'));
+                const rawKids = gbVal('child_guests').trim();
+                const kids = rawKids === '' ? 0 : Number(rawKids);
+                if (!Number.isInteger(guests) || guests < 1 || guests > 20) {
+                    gbFail(2, 'number_of_guests', 'Please choose how many guests are staying.');
+                    return false;
+                }
+                if (!Number.isInteger(kids) || kids < 0) {
+                    gbFail(2, 'child_guests', 'Please enter the number of children as a whole number (0 or more).');
+                    return false;
+                }
+                if (kids >= guests) {
+                    gbFail(2, 'child_guests', 'At least 1 adult must stay: the number of children must be lower than the number of guests.');
+                    return false;
+                }
+                return true;
+            }
+            if (n === 3) {
+                if (!selectedRoomId) { gbFail(3, 'room_id', 'Please choose a room.'); return false; }
+                const key = gbStatusKey();
+                if (key && !roomAvailabilityStatus[key] && !availabilityCheckPending) performAvailabilityCheck();
+                await gbWaitIdle(20000);
+                if (gbCurrent !== 3) return false;
+                const problem = gbRoomProblem();
+                if (problem) { gbFail(3, 'room_id', problem); return false; }
+                const j = await gbPriceCheck(3);
+                if (!j) return false;
+                if (!j.ok) { gbShowRefusal(j); return false; }
+                return true;
+            }
+            if (n === 4) {
+                const sec = gbStepEl(4);
+                const needed = [
+                    ['guest_name', 'Please enter your full name.'],
+                    ['guest_email', 'Please enter your email address.'],
+                    ['guest_phone', 'Please enter your phone number.']
+                ];
+                for (let i = 0; i < needed.length; i++) {
+                    const input = document.getElementById(needed[i][0]);
+                    if (!input) continue;
+                    if (input.value.trim() === '') { gbFail(4, needed[i][0], needed[i][1]); return false; }
+                    if (!input.checkValidity()) {
+                        gbFail(4, needed[i][0], needed[i][0] === 'guest_email' ? 'Please enter a valid email address.' : (input.validationMessage || needed[i][1]));
+                        return false;
+                    }
+                }
+                // Anything else the browser would have refused (lengths, types) under the old required attributes.
+                const bad = sec ? Array.from(sec.querySelectorAll('input, select, textarea')).find(function (f) { return !f.disabled && !f.checkValidity(); }) : null;
+                if (bad) {
+                    gbFail(4, bad.name || bad.id, bad.validationMessage || 'Please check this field.');
+                    return false;
+                }
+                return true;
+            }
+            return gbQuoteState() === 'fresh';
+        }
+
+        // ── Moving between steps ──
+        function gbShowStep(n, opts) {
+            opts = opts || {};
+            n = Math.min(Math.max(parseInt(n, 10) || 1, 1), 5);
+            gbCurrent = n;
+            if (n > gbReached) gbReached = n;
+            for (let i = 1; i <= 5; i++) {
+                const sec = gbStepEl(i);
+                if (sec) sec.classList.toggle('is-active', i === n);
+            }
+            document.querySelectorAll('#gbStepBar [data-gb-go]').forEach(function (b) {
+                const i = parseInt(b.getAttribute('data-gb-go'), 10);
+                if (i === n) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+                b.classList.toggle('is-done', i < n);
+                b.classList.toggle('is-reached', i > n && i <= gbReached);
+                if (i > gbReached) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+            });
+            if (opts.focus) {
+                const sec = gbStepEl(n);
+                if (sec) {
+                    try { sec.focus({ preventScroll: true }); } catch (e) { sec.focus(); }
+                }
+                scrollToSection(document.getElementById('gbStepBar'));
+            }
+            if (n === 3) {
+                refreshRoomCardPlansLocal();
+                const key = gbStatusKey();
+                if (key && !roomAvailabilityStatus[key] && !availabilityCheckPending) performAvailabilityCheck();
+            }
+            if (n === 5) {
+                // Review asks for its price check here (or not: a refusal shown on Review is not asked again by itself),
+                // so the automatic re-ask in gbSyncQuoteState must not fire for this same version of the form.
+                gbAutoFp = gbFingerprint();
+                updateSummary();
+                if (!opts.noCheck) {
+                    const state = gbQuoteState();
+                    if (state !== 'fresh' && state !== 'pending') gbReviewCheck();
+                }
+            }
+            gbSyncQuoteState();
+        }
+
+        function gbNext() {
+            if (gbBusy || gbCurrent >= 5) return;
+            const from = gbCurrent;
+            const sec = gbStepEl(from);
+            const btn = sec ? sec.querySelector('[data-gb-next]') : null;
+            const label = btn ? btn.innerHTML : null;
+            gbBusy = true;
+            if (btn && from === 3) {
+                btn.disabled = true;
+                btn.setAttribute('aria-busy', 'true');
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Checking…';
+            }
+            const done = function () {
+                gbBusy = false;
+                if (btn && from === 3) {
+                    btn.disabled = false;
+                    btn.removeAttribute('aria-busy');
+                    btn.innerHTML = label;
+                }
+            };
+            gbCheckStep(from).then(function (ok) {
+                done();
+                if (ok && gbCurrent === from) {
+                    gbReached = Math.max(gbReached, from + 1);
+                    gbShowStep(from + 1, { focus: true });
+                }
+            }, done);
+        }
+
+        // Step bar: back freely; forward only to steps already reached, running every check on the way.
+        function gbGo(target) {
+            if (gbBusy || target === gbCurrent || target < 1 || target > 5) return;
+            if (target < gbCurrent) { gbShowStep(target, { focus: true }); return; }
+            if (target > gbReached) return;
+            gbBusy = true;
+            (async function () {
+                const start = gbCurrent;
+                for (let s = start; s < target; s++) {
+                    const ok = await gbCheckStep(s);
+                    if (!ok || gbCurrent !== start) return false;
+                }
+                return true;
+            })().then(function (ok) {
+                gbBusy = false;
+                if (ok) gbShowStep(target, { focus: true });
+            }, function () { gbBusy = false; });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const form = gbForm();
+            const bar = document.getElementById('gbStepBar');
+            if (!form || !gbStepEl(1)) return;
+            form.classList.add('js-steps');
+            if (bar) bar.hidden = false;
+            gbReady = true;
+
+            form.addEventListener('click', function (e) {
+                const next = e.target.closest('[data-gb-next]');
+                if (next && form.contains(next)) { e.preventDefault(); gbNext(); return; }
+                const back = e.target.closest('[data-gb-back]');
+                if (back && form.contains(back)) { e.preventDefault(); if (!gbBusy && gbCurrent > 1) gbShowStep(gbCurrent - 1, { focus: true }); }
+            });
+            if (bar) {
+                bar.addEventListener('click', function (e) {
+                    const b = e.target.closest('[data-gb-go]');
+                    if (!b) return;
+                    e.preventDefault();
+                    gbGo(parseInt(b.getAttribute('data-gb-go'), 10));
+                });
+            }
+
+            // Any change makes the quote stale (the fingerprint differs); a guest's own edit clears the messages.
+            ['input', 'change'].forEach(function (type) {
+                form.addEventListener(type, function (e) {
+                    if (e.isTrusted) gbClearErrors();
+                    gbSyncQuoteState();
+                });
+            });
+            const extra = document.getElementById('extraRoomInputs');
+            if (extra && typeof MutationObserver !== 'undefined') {
+                new MutationObserver(function () { gbSyncQuoteState(); }).observe(extra, { childList: true, subtree: true });
+            }
+            window.addEventListener('pageshow', function () {
+                gbSubmitting = false;
+                gbSyncQuoteState();
+            });
+
+            // Book: a normal form POST, only from Review with a fresh server quote. Enter elsewhere = Continue.
+            form.addEventListener('submit', function (e) {
+                if (gbCurrent === 5 && gbQuoteState() === 'fresh' && !gbSubmitting) {
+                    gbSubmitting = true;
+                    setTimeout(gbSyncQuoteState, 0);
+                    return;
+                }
+                e.preventDefault();
+                if (gbCurrent < 5 && !gbBusy) gbNext();
+            });
+
+            // Landing step: a refused no-JS submission opens the step of its error; a prefill opens the first
+            // incomplete step (never past Room: rate plans and packages are chosen there).
+            const posted = typeof postedBooking !== 'undefined' && postedBooking ? postedBooking : null;
+            if (posted && typeof posted.error_step === 'number') {
+                gbReached = 5;
+                if (posted.error_step >= 1 && posted.error_step <= 5) {
+                    gbFail(posted.error_step, posted.error_field || '', posted.error_message || '');
+                } else {
+                    const first = !gbVal('check_in_date') || !gbVal('check_out_date') ? 1 : (!selectedRoomId ? 3 : 4);
+                    gbShowStep(first, { focus: false, noCheck: true });
+                    gbShowRefusal({ ok: false, step: 0, message: posted.error_message || '' });
+                }
+                return;
+            }
+            let landing = 3;
+            if (!gbVal('check_in_date') || !gbVal('check_out_date')) landing = 1;
+            else if (typeof heroGuests === 'undefined' || heroGuests === null) landing = 2;
+            gbReached = landing;
+            gbShowStep(landing, { focus: false });
+        });

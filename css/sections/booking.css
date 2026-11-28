@@ -5415,3 +5415,238 @@
     color: #1A1A1A;
     font-weight: 600;
 }
+
+/* ── Booking steps (G-A): one step on screen at a time (js/booking.js adds .js-steps) ── */
+
+.js-steps .gb-step:not(.is-active) {
+    display: none;
+}
+
+.gb-step:focus {
+    outline: none;
+}
+
+.gb-stepbar {
+    margin: 0 0 var(--space-6);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.gb-stepbar[hidden] {
+    display: none;
+}
+
+.gb-stepbar__list {
+    display: flex;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: none;
+}
+
+.gb-stepbar__item {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.gb-stepbar__btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    min-height: 44px;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-white);
+    color: var(--color-text-muted);
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--transition-fast) ease, background-color var(--transition-fast) ease, color var(--transition-fast) ease;
+}
+
+.gb-stepbar__num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    font-weight: var(--font-semibold);
+    line-height: 1;
+}
+
+.gb-stepbar__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gb-stepbar__btn.is-done {
+    color: var(--color-text-primary);
+}
+
+.gb-stepbar__btn.is-done .gb-stepbar__num {
+    border-color: var(--color-lux-gold);
+    color: var(--color-lux-gold);
+}
+
+.gb-stepbar__btn[aria-current="step"] {
+    border-color: var(--color-primary);
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    font-weight: var(--font-semibold);
+}
+
+.gb-stepbar__btn[aria-current="step"] .gb-stepbar__num {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+    color: var(--color-white);
+}
+
+.gb-stepbar__btn[aria-disabled="true"] {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.gb-stepbar__btn:focus-visible,
+.gb-btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+.gb-step__nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+}
+
+.gb-step__nav .gb-btn-next:only-child {
+    margin-left: auto;
+}
+
+.gb-step__nav--review {
+    justify-content: flex-start;
+}
+
+.gb-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: 48px;
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+    transition: background-color var(--transition-fast) ease, border-color var(--transition-fast) ease, color var(--transition-fast) ease;
+}
+
+/* Continue / Review booking reuse the editorial primary button; only the
+   step-nav extras (icon gap, pointer, busy state) are added here. */
+.gb-btn-next {
+    gap: var(--space-2);
+    min-height: 48px;
+    font-family: var(--font-body);
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+
+.gb-btn-next:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+.gb-btn--ghost {
+    border: 1px solid var(--color-border);
+    background: var(--color-white);
+    color: var(--color-text-primary);
+}
+
+.gb-btn--ghost:hover {
+    border-color: var(--color-primary);
+}
+
+.gb-step__error:not([hidden]),
+.gb-field-error {
+    margin: var(--space-2) 0 0;
+    color: var(--color-error);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+}
+
+.gb-step__error:not([hidden]) {
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-md);
+    background: var(--color-white);
+}
+
+#roomSectionWrapper > .gb-field-error,
+#preselectedRoomSection > .gb-field-error,
+#packagesSection > .gb-field-error {
+    margin: 0 0 var(--space-4);
+}
+
+.form-control[aria-invalid="true"] {
+    border-color: var(--color-error);
+}
+
+.gb-quote-status {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    text-align: center;
+}
+
+.gb-quote-status:empty {
+    display: none;
+}
+
+@media (max-width: 600px) {
+    .gb-stepbar__list {
+        gap: var(--space-1);
+    }
+
+    .gb-stepbar__btn {
+        flex-direction: column;
+        justify-content: center;
+        gap: var(--space-1);
+        padding: var(--space-2) var(--space-1);
+        text-align: center;
+        font-size: var(--text-xs);
+    }
+
+    .gb-stepbar__label {
+        max-width: 100%;
+    }
+
+    .gb-step__nav {
+        flex-wrap: wrap;
+    }
+
+    .gb-step__nav .gb-btn-next {
+        flex: 1 1 auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .booking-summary.is-visible {
+        animation: none;
+    }
+
+    .gb-stepbar__btn,
+    .gb-btn {
+        transition: none;
+    }
+}

@@ -250,8 +250,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'guest_country' => '', 'guest_address' => '', 'special_requests' => ''];
         } elseif (!empty($validation_errors)) {
             $error_messages = [];
+            // The re-rendered page opens the lowest step with an error (js/booking.js, postedBooking.error_step).
+            $gbFieldSteps = rh_guest_field_steps();
             foreach ($validation_errors as $field => $message) {
                 $error_messages[] = '• ' . $message;
+                $s = $gbFieldSteps[$field] ?? 4;
+                if ($gbStep === 0 || $s < $gbStep) {
+                    $gbStep = $s;
+                    $gbField = (string)$field;
+                }
             }
             throw new Exception('Please fix the following before submitting: ' . implode(' ', $error_messages));
         }
@@ -1016,6 +1023,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->rollBack();
         }
         $error_message = rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage();
+        if (rh_is_lock_conflict($e)) {
+            $gbStep = 0;
+            $gbField = '';
+        }
         if ($gbDry) {
             $gbReply(['ok' => false, 'step' => rh_is_lock_conflict($e) ? 0 : $gbStep, 'message' => $error_message, 'field' => $gbField]);
         }
@@ -1319,7 +1330,20 @@ try {
             <?php endif; ?>
 
             <div class="booking-form-wrapper">
-                <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="booking-form-card" id="bookingForm">
+                <!-- Booking steps: shown by js/booking.js (without JS the whole form shows at once) -->
+                <nav class="gb-stepbar" id="gbStepBar" aria-label="Booking steps" hidden>
+                    <ol class="gb-stepbar__list">
+                        <?php foreach ([1 => 'When', 2 => 'Who', 3 => 'Room', 4 => 'Your details', 5 => 'Review'] as $gbN => $gbLabel): ?>
+                        <li class="gb-stepbar__item">
+                            <button type="button" class="gb-stepbar__btn" data-gb-go="<?php echo $gbN; ?>">
+                                <span class="gb-stepbar__num" aria-hidden="true"><?php echo $gbN; ?></span>
+                                <span class="gb-stepbar__label"><?php echo htmlspecialchars($gbLabel); ?></span>
+                            </button>
+                        </li>
+                        <?php endforeach; ?>
+                    </ol>
+                </nav>
+                <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="booking-form-card" id="bookingForm" novalidate>
                 <?php
                 // Per-render idempotency token. Survives double-clicks, refresh-resubmit,
                 // and offline-queue replays — the DB unique index is the ultimate guarantor.
@@ -1331,6 +1355,9 @@ try {
                 <div id="extraRoomInputs"></div><!-- extra_room_types[] hidden inputs, filled by js/booking.js -->
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(pub_csrf_generate('booking'), ENT_QUOTES, 'UTF-8'); ?>">
 
+                <!-- Step 1 When -->
+                <section class="gb-step" data-step="1" id="gbStep1" tabindex="-1" aria-label="Step 1 of 5: When">
+                <p class="gb-step__error" role="alert" hidden></p>
                 <!-- Booking Details — date-first UX: pick dates before browsing rooms -->
                 <div class="form-section form-section--step" id="bookingDetailsSection">
                     <h3 class="form-section-title"><i class="fas fa-calendar-alt"></i> When Are You Staying?</h3>
@@ -1374,7 +1401,14 @@ try {
                         </div>
                     </div>
                 </div>
+                <div class="gb-step__nav">
+                    <button type="button" class="editorial-btn-primary gb-btn-next" data-gb-next>Continue <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                </div>
+                </section>
 
+                <!-- Step 2 Who -->
+                <section class="gb-step" data-step="2" id="gbStep2" tabindex="-1" aria-label="Step 2 of 5: Who">
+                <p class="gb-step__error" role="alert" hidden></p>
                 <!-- Who is staying? Guests come BEFORE rooms so every room card can say up front
                      whether it fits the party, how many rooms it takes, and what that costs. -->
                 <div class="form-section form-section--step" id="partySection">
@@ -1419,10 +1453,18 @@ try {
                         </div>
                     </div>
                 </div>
+                <div class="gb-step__nav">
+                    <button type="button" class="gb-btn gb-btn--ghost" data-gb-back><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                    <button type="button" class="editorial-btn-primary gb-btn-next" data-gb-next>Continue <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                </div>
+                </section>
 
-                <!-- Room Selection — revealed after both dates are selected -->
+                <!-- Step 3 Room -->
+                <section class="gb-step" data-step="3" id="gbStep3" tabindex="-1" aria-label="Step 3 of 5: Room">
+                <p class="gb-step__error" role="alert" hidden></p>
+                <!-- Room Selection -->
                 <?php if (!$preselected_room): ?>
-                    <div class="form-section form-section--room form-section--step" id="roomSectionWrapper" style="<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? '' : 'display:none'; ?>">
+                    <div class="form-section form-section--room form-section--step" id="roomSectionWrapper">
                         <h3 class="form-section-title"><i class="fas fa-bed"></i> Select Your Room</h3>
                         <!-- Room Category Filter Tabs -->
                         <div class="rooms-filter" id="roomsFilterTabs">
@@ -1481,7 +1523,7 @@ try {
 
                 <!-- Pre-selected Room Info (shown if room is pre-selected) -->
                 <?php if ($preselected_room): ?>
-                    <div class="form-section">
+                    <div class="form-section" id="preselectedRoomSection">
                         <h3 class="form-section-title"><i class="fas fa-bed"></i> Selected Room</h3>
                         <div class="room-selection">
                             <div class="room-option selected"
@@ -1522,38 +1564,8 @@ try {
                     </div>
                 <?php endif; ?>
 
-                <!-- Guest Information -->
-                <div class="form-section form-section--step">
-                    <h3 class="form-section-title"><i class="fas fa-user"></i> Guest Information</h3>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="guest_name" class="required">Full Name</label>
-                            <input type="text" id="guest_name" name="guest_name" class="form-control" required autocomplete="name" autocapitalize="words" placeholder="Your full name" value="<?php echo isset($_POST['guest_name']) ? htmlspecialchars($_POST['guest_name']) : ''; ?>">
-                        </div>
-                        <div class="form-group">
-                            <label for="guest_email" class="required">Email Address</label>
-                            <input type="email" id="guest_email" name="guest_email" class="form-control" required autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="your@email.com" value="<?php echo isset($_POST['guest_email']) ? htmlspecialchars($_POST['guest_email']) : ''; ?>">
-                        </div>
-                        <div class="form-group">
-                            <label for="guest_phone" class="required">Phone Number</label>
-                            <input type="tel" id="guest_phone" name="guest_phone" class="form-control" required autocomplete="tel" inputmode="tel" placeholder="+265 999 123 456" value="<?php echo isset($_POST['guest_phone']) ? htmlspecialchars($_POST['guest_phone']) : ''; ?>">
-                        </div>
-                        <div class="form-group">
-                            <label for="guest_country">Country</label>
-                            <input type="text" id="guest_country" name="guest_country" class="form-control" autocomplete="country-name" autocapitalize="words" value="<?php echo isset($_POST['guest_country']) ? htmlspecialchars($_POST['guest_country']) : ''; ?>">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="guest_address">Address</label>
-                        <textarea id="guest_address" name="guest_address" class="form-control" rows="2"><?php echo isset($_POST['guest_address']) ? htmlspecialchars($_POST['guest_address']) : ''; ?></textarea>
-                    </div>
-                </div>
-
-                <!-- Guest Details + Booking Type: side-by-side on desktop -->
-                <div class="form-sections-row">
-
                 <div class="form-section form-section--step" id="guestDetailsSection">
-                    <h3 class="form-section-title"><i class="fas fa-users"></i> Your Rooms &amp; Requests</h3>
+                    <h3 class="form-section-title"><i class="fas fa-users"></i> Your Rooms</h3>
                     <!-- Occupancy Type Guide (Informational Only) -->
                     <div class="form-group">
                         <label>Price per Night (by Guest Count)</label>
@@ -1592,7 +1604,56 @@ try {
                             </div>
                         </div>
                     </div>
-                    <div class="form-group" style="margin-top:16px;">
+                </div>
+
+                <!-- Rate Plan Badge (shown via JS when a discount/surcharge is active) -->
+                <div class="form-section" id="ratePlanSection" style="display:none;">
+                    <div id="ratePlanBadge" class="rate-plan-badge"></div>
+                </div>
+
+                <!-- Package Add-ons (populated via JS after availability check) -->
+                <div class="form-section" id="packagesSection" style="display:none;">
+                    <h3 class="form-section-title"><i class="fas fa-gift"></i> Add-On Packages</h3>
+                    <p class="form-section-subtitle">
+                        Enhance your stay with one of our curated packages.
+                    </p>
+                    <div id="packagesList"></div>
+                </div>
+                <div class="gb-step__nav">
+                    <button type="button" class="gb-btn gb-btn--ghost" data-gb-back><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                    <button type="button" class="editorial-btn-primary gb-btn-next" data-gb-next>Continue <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                </div>
+                </section>
+
+                <!-- Step 4 Your details -->
+                <section class="gb-step" data-step="4" id="gbStep4" tabindex="-1" aria-label="Step 4 of 5: Your details">
+                <p class="gb-step__error" role="alert" hidden></p>
+                <!-- Guest Information -->
+                <div class="form-section form-section--step" id="guestInfoSection">
+                    <h3 class="form-section-title"><i class="fas fa-user"></i> Guest Information</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="guest_name" class="required">Full Name</label>
+                            <input type="text" id="guest_name" name="guest_name" class="form-control" required autocomplete="name" autocapitalize="words" placeholder="Your full name" value="<?php echo isset($_POST['guest_name']) ? htmlspecialchars($_POST['guest_name']) : ''; ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="guest_email" class="required">Email Address</label>
+                            <input type="email" id="guest_email" name="guest_email" class="form-control" required autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="your@email.com" value="<?php echo isset($_POST['guest_email']) ? htmlspecialchars($_POST['guest_email']) : ''; ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="guest_phone" class="required">Phone Number</label>
+                            <input type="tel" id="guest_phone" name="guest_phone" class="form-control" required autocomplete="tel" inputmode="tel" placeholder="+265 999 123 456" value="<?php echo isset($_POST['guest_phone']) ? htmlspecialchars($_POST['guest_phone']) : ''; ?>">
+                        </div>
+                        <div class="form-group">
+                            <label for="guest_country">Country</label>
+                            <input type="text" id="guest_country" name="guest_country" class="form-control" autocomplete="country-name" autocapitalize="words" value="<?php echo isset($_POST['guest_country']) ? htmlspecialchars($_POST['guest_country']) : ''; ?>">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="guest_address">Address</label>
+                        <textarea id="guest_address" name="guest_address" class="form-control" rows="2"><?php echo isset($_POST['guest_address']) ? htmlspecialchars($_POST['guest_address']) : ''; ?></textarea>
+                    </div>
+                    <div class="form-group">
                         <label for="special_requests">Special Requests (Optional)</label>
                         <textarea id="special_requests" name="special_requests" class="form-control" rows="3" placeholder="E.g., early check-in, airport pickup, dietary requirements..."><?php echo isset($_POST['special_requests']) ? htmlspecialchars($_POST['special_requests']) : ''; ?></textarea>
                     </div>
@@ -1600,7 +1661,7 @@ try {
 
                 <!-- Booking Type Selection -->
                 <?php $tentative_bookings_enabled = getSetting('tentative_bookings_enabled', '1') !== '0'; ?>
-                <div class="form-section">
+                <div class="form-section" id="bookingTypeSection">
                     <h3 class="form-section-title"><i class="fas fa-clipboard-list"></i> Booking Type</h3>
                     <div class="booking-type-selection">
                         <label class="booking-type-option" onclick="selectBookingType('standard')">
@@ -1648,25 +1709,16 @@ try {
                     <?php endif; ?>
                 </div>
 
-                </div><!-- /.form-sections-row -->
-
-                <!-- Rate Plan Badge (shown via JS when a discount/surcharge is active) -->
-                <div class="form-section" id="ratePlanSection" style="display:none;">
-                    <div id="ratePlanBadge" class="rate-plan-badge"></div>
+                <div class="gb-step__nav">
+                    <button type="button" class="gb-btn gb-btn--ghost" data-gb-back><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                    <button type="button" class="editorial-btn-primary gb-btn-next" data-gb-next>Review booking <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
                 </div>
+                </section>
 
-                <!-- Package Add-ons (populated via JS after availability check) -->
-                <div class="form-section" id="packagesSection" style="display:none;">
-                    <h3 class="form-section-title"><i class="fas fa-gift"></i> Add-On Packages</h3>
-                    <p class="form-section-subtitle">
-                        Enhance your stay with one of our curated packages.
-                    </p>
-                    <div id="packagesList"></div>
-                </div>
-
-                </form>
-
-                <!-- ── Booking Bottom: summary + submit (below the form) ──── -->
+                <!-- Step 5 Review and book: every amount here is the server's price check (js/booking.js) -->
+                <section class="gb-step" data-step="5" id="gbStep5" tabindex="-1" aria-label="Step 5 of 5: Review and book">
+                <p class="gb-step__error" role="alert" hidden></p>
+                <!-- ── Booking Bottom: summary + submit ──── -->
                 <div class="booking-bottom-section">
 
                     <!-- Empty state (hidden once summary is populated) -->
@@ -1800,6 +1852,7 @@ try {
 
                     <!-- Submit + trust -->
                     <div class="booking-action-bar">
+                        <p class="gb-quote-status" id="gbQuoteStatus" role="status" aria-live="polite"></p>
                         <button type="submit" class="btn-submit" form="bookingForm">
                             <i class="fas fa-check-circle"></i> Confirm Booking
                         </button>
@@ -1815,6 +1868,12 @@ try {
                     </div>
 
                 </div><!-- /.booking-bottom-section -->
+                <div class="gb-step__nav gb-step__nav--review">
+                    <button type="button" class="gb-btn gb-btn--ghost" data-gb-back><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                </div>
+                </section>
+
+                </form>
             </div><!-- /.booking-form-wrapper -->
         </div>
     </main>
@@ -1886,7 +1945,11 @@ try {
             'booking_type' => $posted_booking_type ?: null,
             'package_ids' => $posted_package_ids,
             'extra_room_types' => $posted_extra_room_types,
-        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            // The step of the refusal (1-5; 0 = the whole page) and its field: the page opens that step.
+            'error_step' => ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($error_message)) ? (int)$gbStep : null,
+            'error_field' => ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($error_message)) ? (string)$gbField : '',
+            'error_message' => ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($error_message)) ? (string)$error_message : '',
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE); ?>;
 
         // Rooms data for dynamic validation
         const roomsData = <?php echo json_encode($rooms_data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
