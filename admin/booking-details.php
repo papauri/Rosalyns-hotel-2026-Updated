@@ -2073,7 +2073,12 @@ $flash_error_message = (string)($_SESSION['error_message'] ?? '');
 if ($flash_error_message === '' && isset($error_message) && (string)$error_message !== '') {
     $flash_error_message = (string)$error_message;
 }
-unset($_SESSION['success_message'], $_SESSION['error_message']);
+// New Booking's "Booking ... created" message (admin/create-booking.php keeps it under flash_message, with parts
+// already HTML-escaped): shown once as plain text; the toast below escapes it.
+if ($flash_success_message === '' && is_array($_SESSION['flash_message'] ?? null) && ($_SESSION['flash_message']['type'] ?? '') === 'success') {
+    $flash_success_message = trim(strip_tags(html_entity_decode((string)($_SESSION['flash_message']['text'] ?? ''), ENT_QUOTES, 'UTF-8')));
+}
+unset($_SESSION['success_message'], $_SESSION['error_message'], $_SESSION['flash_message']);
 ?>
 <!DOCTYPE html>
 <html lang="en">

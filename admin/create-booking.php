@@ -51,10 +51,10 @@ if (($_GET['ajax'] ?? '') === 'guest_credit_lookup') {
             FROM credit_notes
             WHERE guest_email = ?
               AND status IN ('active', 'partially_applied')
-              AND balance > 0.005
+              AND balance > 0.01
               AND (expires_at IS NULL OR expires_at >= CURDATE())
             ORDER BY (expires_at IS NULL), expires_at ASC, id ASC
-        ");
+        "); // 0.01 = BALANCE_TOLERANCE: a note with that or less cannot be applied (applyCreditNote)
         $cnLookup->execute([$lookupEmail]);
         $cnData = [];
         $cnTotal = 0.0;
@@ -343,6 +343,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
     $cbStep     = 0;   // stage marker: the wizard step an error belongs to (0 = shown where staff are)
     $cbField    = '';  // the input to point at for that error ('' = none)
     $cbWarnings = [];  // dry run only: checks that refuse a real save, returned next to the quote instead
+    $cbPriceChanged = false; // Create refused because the total moved since Review: logged as info, not as a failure
     $cbWizardReply = static function (array $reply): void {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE);
@@ -888,13 +889,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             if (!$is_tentative && is_array($cbRawCreditIds) && !empty($cbRawCreditIds)) {
                 $cbCreditNotes = rh_cb_credit_queue($pdo, $cbRawCreditIds, (string)$guest_email, !empty($_POST['apply_credit_override']),
                     trim((string)($_POST['apply_credit_override_reason'] ?? '')), BALANCE_TOLERANCE)['notes'];
+                // The save's own condition: the override ticked with no reason applies no other account's credit.
+                if (!empty($_POST['apply_credit_override']) && trim((string)($_POST['apply_credit_override_reason'] ?? '')) === '') {
+                    $cbWarnings[] = ['step' => 4, 'field' => 'creditOverrideReason', 'message' => 'Credit from a different account is used only with a reason. Enter the reason, or untick it: without a reason that credit is not applied.'];
+                }
             }
-            $cbEligible = round(array_sum(array_column($cbCreditNotes, 'balance')), 2);
             $cbCash     = round($amount_collected, 2);                 // after the payment normalisation above (0 = none)
-            $cbOwed     = round($grand_total_with_vat - $cbCash, 2);
-            // applyCreditNote() also refuses an account that owes BALANCE_TOLERANCE or less: nothing is applied then.
-            $cbWillApply = $cbOwed > BALANCE_TOLERANCE ? round(max(0.0, min($cbEligible, $cbOwed)), 2) : 0.0;
-            $cbStillOwed = round(max(0.0, $cbOwed - $cbWillApply), 2);
+            // The save's cash split and credit loop, row by row (applyCreditNote() refuses a note or a row at 0.01 or
+            // less): the credit it will apply, what each row still owes and each row's payment status.
+            $cbRowTotals = [];
+            foreach ($room_lines as $cbLine) {
+                foreach ($cbLine['rows'] as $cbRow) {
+                    $cbRowTotals[] = (float)$cbRow['total_with_vat'];
+                }
+            }
+            $cbSim       = rh_cb_credit_simulate($cbRowTotals, (float)$amount_collected, (float)$grand_total_with_vat, $cbCreditNotes, BALANCE_TOLERANCE);
+            $cbWillApply = $cbSim['will_apply'];
+            $cbStillOwed = $cbSim['still_owed'];
             // Every figure is the row the save would store ($line['rows'] above), summed the same way.
             $cbLines    = [];
             $cbNetTotal = 0.0;
@@ -950,7 +961,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                         'status'       => $payment_status_val,   // cash only, as the save stores it
                         'over_by'      => ($payment_received && $amount_collected > $grand_total_with_vat + BALANCE_TOLERANCE)
                             ? round($amount_collected - $grand_total_with_vat, 2) : 0.0,
-                        'final_status' => rh_pay_state_key($cbCash + $cbWillApply, $cbStillOwed, false, $grand_total_with_vat, false),
+                        // Whole booking; when every room row is paid it reads paid (rows may each keep a leftover of
+                        // 0.01 or less that applyCreditNote refuses, which must not add up to "partial").
+                        'final_status' => (!empty($cbSim['rows']) && !array_filter($cbSim['rows'], static fn($cbR) => ($cbR['status'] ?? '') !== 'paid'))
+                            ? 'paid'
+                            : rh_pay_state_key($cbCash + $cbWillApply, $cbStillOwed, false, $grand_total_with_vat, false),
+                        // Each room row as the save stores it, in the save's order: cash share, credit, still owed, status.
+                        'rows'         => $cbSim['rows'],
                     ],
                     'credit'    => [
                         'will_apply' => $cbWillApply,
@@ -973,6 +990,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 throw new Exception('The price was not checked before Create. Check the Review again.');
             }
             if (round(abs($grand_total_with_vat - (float)$cbQuoteTotal), 2) > BALANCE_TOLERANCE) {
+                $cbPriceChanged = true;
                 throw new Exception('The price changed since you checked it: ' . $currency_symbol . ' ' . number_format((float)$cbQuoteTotal, 2)
                     . ' -> ' . $currency_symbol . ' ' . number_format($grand_total_with_vat, 2) . '. Check the Review again.');
             }
@@ -1310,8 +1328,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
 
                 // Build a queue of usable, selected credit notes: the eligibility rule shared with the dry run
                 // (admin/includes/finance-booking-credit.php; status, expiry, balance, email match or override
-                // with a reason). 0.005 is this save's own threshold, kept as it was.
-                $cnQueue = rh_cb_credit_queue($pdo, $rawCreditIds, (string)$guest_email, $credit_override, $credit_override_reason, 0.005)['notes'];
+                // with a reason). One threshold, BALANCE_TOLERANCE (0.01): applyCreditNote() refuses a note with that
+                // balance or less and a booking owing that or less, so skipping them here stores exactly the same.
+                $cnQueue = rh_cb_credit_queue($pdo, $rawCreditIds, (string)$guest_email, $credit_override, $credit_override_reason, BALANCE_TOLERANCE)['notes'];
 
                 $applied_credit_total = 0.0;
                 $applied_credit_numbers = [];
@@ -1324,10 +1343,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $due = round((float)($dueStmt->fetchColumn() ?: 0), 2);
 
                     foreach ($cnQueue as &$cnq) {
-                        if ($due <= 0.005) {
+                        if ($due <= BALANCE_TOLERANCE) {
                             break;
                         }
-                        if ($cnq['balance'] <= 0.005) {
+                        if ($cnq['balance'] <= BALANCE_TOLERANCE) {
                             continue;
                         }
                         $amt = round(min($due, $cnq['balance']), 2);
@@ -1638,10 +1657,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         if ($cbDryRun) { // a refused price check: the step to go back to; not logged (nothing was attempted)
             $cbWizardReply(['ok' => false, 'step' => rh_is_lock_conflict($e) ? 0 : $cbStep, 'message' => $error, 'field' => $cbField, 'warnings' => $cbWarnings]);
         }
-        rh_log_event('create-booking', 'error', 'Booking creation failed: ' . $e->getMessage(), [
-            'by'        => $user['username'] ?? null,
-            'exception' => get_class($e),
-        ]);
+        if ($cbPriceChanged) { // nothing was attempted: staff go back to Review (a refused price check is not logged either)
+            rh_log_event('create-booking', 'info', 'Booking not created: price changed since review', [
+                'by'     => $user['username'] ?? null,
+                'detail' => $e->getMessage(),
+            ]);
+        } else {
+            rh_log_event('create-booking', 'error', 'Booking creation failed: ' . $e->getMessage(), [
+                'by'        => $user['username'] ?? null,
+                'exception' => get_class($e),
+            ]);
+        }
         if ($cbWizard) { // logged above like a plain refused save; then the step to go back to
             if ($cbSaved) { // the booking is committed: never "nothing was saved" (so never the lock-conflict text)
                 $cbLaterStep = rh_is_lock_conflict($e) ? 'the database was busy' : rtrim($e->getMessage(), '. ');
@@ -1673,6 +1699,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error !== '') {
         'paid'       => ($_POST['payment_received'] ?? '') === '1',
         'method'     => in_array($cbRpMethod, ['cash', 'bank_transfer', 'mobile_money', 'card', 'cheque', 'other'], true) ? $cbRpMethod : '',
         'amount'     => $cbRpAmount > 0 ? $cbRpAmount : 0,
+        // The status picked and the guest email tick, as staff left them (a fresh page keeps its own defaults).
+        'status'     => in_array($_POST['booking_status'] ?? '', ['confirmed', 'pending', 'tentative', 'checked-in'], true) ? (string)$_POST['booking_status'] : '',
+        'send_email' => isset($_POST['send_email']),
         // The step-by-step screen opens the step the refusal belongs to (the handler's own stage marker; read only).
         'step'       => isset($cbStep) ? (int)$cbStep : 0,
         'field'      => isset($cbField) ? (string)$cbField : '',
@@ -2665,6 +2694,7 @@ try {
                             <input type="checkbox" id="paymentReceivedCheck" onchange="togglePaymentSection()">
                             Payment Received Now
                         </label>
+                        <p class="cb-quote-note" id="cbCreditCoversNote" hidden>Credit covers the total; no payment needed.</p>
                         <div id="tentativePaymentNotice" class="alert alert-warning" style="display:none;margin-top:10px;">
                             <i class="fas fa-info-circle"></i> Payment collection is disabled for tentative bookings. You can send the guest a quotation below.
                         </div>
@@ -4415,6 +4445,7 @@ try {
             const hid = el('paymentReceivedHidden');
             hid.value = chk.checked ? '1' : '0';
             sec.classList.toggle('open', chk.checked);
+            if (chk.checked && el('cbCreditCoversNote')) el('cbCreditCoversNote').hidden = true;
             if (chk.checked) calculateTotal();
             cbMarkStale();
             cbWordingSync();
@@ -4659,6 +4690,18 @@ try {
             if (amt.value === next) return false;
             amt.value = next;
             checkPartialPayment();
+            const covNote = el('cbCreditCoversNote');
+            if (covNote && next !== '') covNote.hidden = true;
+            // The guest credit now covers the whole total while "Payment received now" is ticked: untick it once, the
+            // way staff would (the same change event), with a plain note. Ticking it again is left alone.
+            const payCb = el('paymentReceivedCheck');
+            if (next === '' && credit > 0 && !cbQ.creditUnticked && payCb && payCb.checked && !payCb.disabled && cbStatus() !== 'tentative') {
+                cbQ.creditUnticked = true;
+                payCb.checked = false;
+                payCb.dispatchEvent(new Event('change', { bubbles: true }));
+                if (covNote) covNote.hidden = false;
+                return true;
+            }
             if (el('paymentReceivedHidden') && el('paymentReceivedHidden').value === '1') {
                 cbQ.ver++;
                 cbQ.fresh = false;
@@ -4855,6 +4898,18 @@ try {
                 + '</tbody></table>'
                 + '<p class="cb-quote-note">Payment status after create: <strong id="cbReviewPayState">' + cbEsc(CB_PAY_NAMES[q.payment.final_status] || q.payment.final_status) + '</strong>'
                 + cbHelp('How the booking shows its payment once it is created: after the money received now and any guest credit.') + '</p>';
+            // More than one room: each room is its own booking row with its own payment status (the money received
+            // is shared across the rooms by their totals, then the credit is used room by room, in this order).
+            const payRows = Array.isArray(q.payment.rows) ? q.payment.rows : [];
+            if (payRows.length > 1) {
+                const names = [];
+                (q.lines || []).forEach(function (l) { (l.rows || []).forEach(function () { names.push(l.name); }); });
+                b4 += '<p class="cb-quote-note" id="cbReviewRowStates">Each room after create' + cbHelp('Every room is saved as its own booking row. The money received now is shared across the rooms by their totals; the guest credit is then used room by room, in this order.') + ': '
+                    + payRows.map(function (r, i) {
+                        return cbEsc((i + 1) + '. ' + (names[i] || 'Room')) + ' <strong>' + cbEsc(CB_PAY_NAMES[r.status] || r.status) + '</strong>'
+                            + (Number(r.owed) > 0 ? ' (' + fmt(Number(r.owed)) + ' owed)' : '');
+                    }).join(' · ') + '</p>';
+            }
             h += cbReviewBlock(4, 'Status and payment', b4);
             box.innerHTML = h;
             if (cbQ.fresh) cbQ.shown = cbReviewSnap(q);
@@ -4936,7 +4991,8 @@ try {
             const ws = cbQ.warnings || [];
             if (here >= 4 && ws.some(function (w) { return Number(w.step) === 4; })) {
                 if (cbNav.current !== 4) cbShowStep(4);
-                if (!quiet) cbFocusField(el('overCollectedCb'));
+                const w4 = ws.filter(function (w) { return Number(w.step) === 4; })[0];
+                if (!quiet) cbFocusField((w4 && w4.field && el(w4.field)) || el('overCollectedCb'));
                 return false;
             }
             if (here >= 5 && ws.some(function (w) { return Number(w.step) === 5; })) return false;
@@ -4951,7 +5007,7 @@ try {
         const cbPrefill = <?php echo json_encode($cb_prefill, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         let cbPrefillRoom = (cbPrefill.room_type && cbPrefill.room) ? cbPrefill.room : 0;
         // After a refused save (validated in PHP): the room types and payment fields that were sent.
-        const cbRepost = <?php echo json_encode($cb_repost, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const cbRepost = <?php echo json_encode($cb_repost, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE); ?>;
 
         function initBookingForm() {
             if (cbPrefillRoom && el('irModePick')) {
@@ -4969,6 +5025,11 @@ try {
             if (ci && co) checkAvailabilityForDates(ci, co);
             calculateTotal();
             updateGroupSummary();
+            if (cbRepost) { // a refused save: the status and the guest email tick come back as staff left them
+                const st = cbRepost.status ? document.querySelector('#createBookingForm input[name="booking_status"][value="' + cbRepost.status + '"]') : null;
+                if (st && !st.disabled) st.checked = true;
+                if (el('sendEmail')) el('sendEmail').checked = !!cbRepost.send_email;
+            }
             onBookingStatusChange();
             const payCb = el('paymentReceivedCheck');
             if (cbRepost && cbRepost.paid && payCb && !payCb.disabled && !payCb.checked) {
