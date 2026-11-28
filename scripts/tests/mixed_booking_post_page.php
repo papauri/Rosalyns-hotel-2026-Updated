@@ -8,7 +8,11 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
 $root = dirname(__DIR__, 2);
 require_once $root . '/includes/session-boot.php';
 rh_session_start();
-$_SESSION['_csrf_pub_booking'] = (string)($_POST['csrf_token'] ?? '');
+// cfg.keep_csrf = true: leave the token cfg.session put in the session (tests that a price check does not use it up).
+if (empty($GLOBALS['__h_cfg']['keep_csrf'])) {
+    $_SESSION['_csrf_pub_booking'] = (string)($_POST['csrf_token'] ?? '');
+}
+foreach (glob(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'iprl_booking_quote_*.json') ?: [] as $f) { @unlink($f); } // the price-check limit too
 foreach (glob(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'iprl_booking_form_*.json') ?: [] as $f) { @unlink($f); } // the 10-per-10-minutes limit must not stop repeated test runs
 chdir($root);
 require $root . '/booking.php';

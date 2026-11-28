@@ -24,6 +24,29 @@ require_once 'includes/pricing.php';
 require_once 'includes/public-csrf.php';
 require_once 'includes/guest-allocation.php';
 require_once 'includes/mixed-booking.php';
+require_once 'includes/guest-booking-quote.php';
+
+// Price check (dry run) of the booking page: the same POST with response=wizard + dry_run=1 runs every check and
+// works out every figure the save would store, then answers JSON and stops before anything is written: no booking,
+// log, email, session change or redirect. dry_run_upto (1-5) = the step the guest has reached; fields of later steps
+// are not checked yet and the duplicate check runs only at 5. Any other POST is the normal save, unchanged.
+$gbDry = ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && (string)($_POST['response'] ?? '') === 'wizard'
+    && (string)($_POST['dry_run'] ?? '') === '1';
+$gbUpto = max(1, min(5, (int)($_POST['dry_run_upto'] ?? 5) ?: 5));
+$gbStep = 0;     // booking page step a refusal belongs to (0 = the whole page: token, too many tries, busy)
+$gbField = '';   // the form field it is about
+$gbReply = static function (array $reply): void {
+    $reply = array_merge(['ok' => false, 'step' => 0, 'message' => '', 'field' => ''], $reply);
+    $reply['csrf_token'] = pub_csrf_generate('booking');
+    $reply += ['quote' => null, 'warnings' => []];
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+};
+if ($gbDry && !isBookingEnabled()) {
+    $gbReply(['ok' => false, 'step' => 0, 'message' => 'Online booking is unavailable right now.']);
+}
 
 
 // Check if booking system is enabled
@@ -36,7 +59,8 @@ $booking_csrf_token = pub_csrf_generate('booking');
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         // CSRF validation — must pass before any processing
-        if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'booking')) {
+        // The price check only compares the token (it is sent several times before the save); the save uses it up.
+        if ($gbDry ? !pub_csrf_check((string)($_POST['csrf_token'] ?? ''), 'booking') : !pub_csrf_validate($_POST['csrf_token'] ?? '', 'booking')) {
             throw new Exception('Security token invalid. Please refresh the page and try again.');
         }
 
@@ -46,21 +70,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // and offline-queue replays all converge to the SAME single booking.
         $__incomingClientUuid = $_POST['client_uuid'] ?? null;
         if ($__existing = idem_find_existing_booking($pdo, $__incomingClientUuid)) {
+            if ($gbDry) {
+                // Price check: say where the booking is, change nothing.
+                $gbReply(['ok' => true, 'duplicate' => true, 'step' => 5,
+                    'redirect' => 'booking-confirmation.php?ref=' . urlencode((string)$__existing['booking_reference']),
+                    'message' => 'This booking has already been made.']);
+            }
             pub_confirm_remember('booking', (string)$__existing['booking_reference']);
             header('Location: booking-confirmation.php?ref=' . urlencode((string)$__existing['booking_reference']));
             exit;
         }
-        // Rate limiting: max 5 booking submissions per 10 minutes
-        if (!isset($_SESSION['booking_attempts'])) {
-            $_SESSION['booking_attempts'] = [];
+        if ($gbDry) {
+            // The price check has its own light per-IP limit; it never counts as a booking attempt.
+            if (!pub_ip_rate_limit('booking_quote', 60, 600)) {
+                throw new Exception('Too many price checks. Please wait a few minutes and try again.');
+            }
+        } else {
+            // Rate limiting: max 5 booking submissions per 10 minutes
+            if (!isset($_SESSION['booking_attempts'])) {
+                $_SESSION['booking_attempts'] = [];
+            }
+            $_SESSION['booking_attempts'] = array_filter($_SESSION['booking_attempts'], function ($t) {
+                return $t > time() - 600;
+            });
+            if (count($_SESSION['booking_attempts']) >= 5 || !pub_ip_rate_limit('booking_form', 10, 600)) {
+                throw new Exception('Too many booking attempts. Please wait a few minutes before trying again.');
+            }
+            $_SESSION['booking_attempts'][] = time();
         }
-        $_SESSION['booking_attempts'] = array_filter($_SESSION['booking_attempts'], function ($t) {
-            return $t > time() - 600;
-        });
-        if (count($_SESSION['booking_attempts']) >= 5 || !pub_ip_rate_limit('booking_form', 10, 600)) {
-            throw new Exception('Too many booking attempts. Please wait a few minutes before trying again.');
-        }
-        $_SESSION['booking_attempts'][] = time();
 
         // Initialize validation errors array
         $validation_errors = [];
@@ -187,7 +224,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Check for validation errors
-        if (!empty($validation_errors)) {
+        if ($gbDry) {
+            // Price check: only the fields of the steps the guest has reached; the lowest step's messages are the answer.
+            $gbFieldSteps = rh_guest_field_steps();
+            $gbErrors = [];
+            foreach ($validation_errors as $field => $message) {
+                $s = $gbFieldSteps[$field] ?? 4;
+                if ($s <= $gbUpto) {
+                    $gbErrors[$s][$field] = $message;
+                }
+            }
+            if ($gbErrors) {
+                ksort($gbErrors);
+                $gbStep = (int)array_key_first($gbErrors);
+                $gbField = (string)array_key_first($gbErrors[$gbStep]);
+                throw new Exception(implode(' ', $gbErrors[$gbStep]));
+            }
+            if ($gbUpto <= 2) {
+                // Dates and party are fine; nothing to price before a room is chosen.
+                $gbReply(['ok' => true, 'step' => $gbUpto]);
+            }
+            // Details not asked yet (step 4): stand-ins so the shared availability check can run. Never saved:
+            // the price check stops before anything is written, and the duplicate check needs step 5.
+            $sanitized_data += ['guest_name' => 'Guest', 'guest_email' => 'guest@example.invalid', 'guest_phone' => '00000000',
+                'guest_country' => '', 'guest_address' => '', 'special_requests' => ''];
+        } elseif (!empty($validation_errors)) {
             $error_messages = [];
             foreach ($validation_errors as $field => $message) {
                 $error_messages[] = '• ' . $message;
@@ -196,6 +257,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Load room now so we can apply occupancy policies before availability validation
+        $gbStep = 3;
+        $gbField = 'room_id';
         $room_pre_stmt = $pdo->prepare("
             SELECT r.*,
                    GREATEST(
@@ -233,16 +296,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // never silently dropped (owner 2026-11-26).
                 $mxPk = rh_packages_for_booking($pdo, (int)$sanitized_data['room_id'], $mxPkgIds, $mxNights, $mxAdults);
                 if ($mxPk['missing']) {
+                    $gbField = 'package_ids';
                     throw new Exception(rh_package_unavailable_message($mxPk['missing']));
                 }
                 $mxPackageTotal = $mxPk['total'];
                 $mxPackageRows = $mxPk['rows'];
             }
 
-            $mxDup = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE guest_email = ? AND room_id = ? AND status IN ('pending', 'tentative', 'confirmed', 'checked-in') AND check_in_date = ? AND check_out_date = ?");
-            $mxDup->execute([$sanitized_data['guest_email'], $sanitized_data['room_id'], $mxCheckIn, $mxCheckOut]);
-            if ((int)$mxDup->fetchColumn() > 0) {
-                throw new Exception('A booking already exists for these dates and room. Please check your existing bookings.');
+            if (!$gbDry || $gbUpto >= 5) {
+                $gbStep = 5;
+                $gbField = '';
+                $mxDup = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE guest_email = ? AND room_id = ? AND status IN ('pending', 'tentative', 'confirmed', 'checked-in') AND check_in_date = ? AND check_out_date = ?");
+                $mxDup->execute([$sanitized_data['guest_email'], $sanitized_data['room_id'], $mxCheckIn, $mxCheckOut]);
+                if ((int)$mxDup->fetchColumn() > 0) {
+                    throw new Exception('A booking already exists for these dates and room. Please check your existing bookings.');
+                }
+            }
+
+            if ($gbDry) {
+                // Price check: the same checks and prices as rh_mixed_create(), the stock re-check without the lock.
+                $mxPrep = rh_mixed_prepare($pdo, [
+                    'chosen_id' => (int)$sanitized_data['room_id'],
+                    'extra_ids' => $extraTypeIds,
+                    'total_guests' => $mxTotal,
+                    'child_guests' => $mxChildren,
+                    'check_in' => $mxCheckIn,
+                    'check_out' => $mxCheckOut,
+                    'validation_data' => $sanitized_data,
+                ]);
+                if (empty($mxPrep['ok'])) {
+                    $gbStep = (int)$mxPrep['step'];
+                    $gbField = (string)$mxPrep['field'];
+                    throw new Exception($mxPrep['error'] ?: 'These rooms cannot seat your party.');
+                }
+                $gbStep = 3;
+                $gbField = 'room_id';
+                $mxRecheck = rh_mixed_recheck($mxPrep['resolved'], $mxPrep['priced'], $mxCheckIn, $mxCheckOut);
+                if ($mxRecheck !== '') {
+                    throw new Exception($mxRecheck);
+                }
+                $mxTentativeQuote = isset($_POST['booking_type']) && $_POST['booking_type'] === 'tentative' && getSetting('tentative_bookings_enabled', '1') !== '0';
+                $gbRows = [];
+                foreach ($mxPrep['priced']['rows'] as $i => $row) {
+                    $p = $row['priced'];
+                    $gbRows[] = [
+                        'room_id' => (int)$row['room_id'], 'name' => (string)($row['room_name'] ?? ''), 'occupancy' => (string)$row['occupancy_type'],
+                        'guests' => (int)$row['guests'], 'adults' => (int)$row['adults'], 'children' => (int)$row['children'],
+                        'priced' => [
+                            'rate' => $p['rate_per_night'], 'child_supplement' => $p['child_supplement'], 'dynamic' => $p['dynamic'],
+                        ] + rh_guest_row_amounts($p['stay'], ($i === 0) ? (float)$mxPackageTotal : 0.0),
+                    ];
+                }
+                $gbReply(['ok' => true, 'step' => $gbUpto,
+                    'quote' => rh_guest_build_quote($gbRows, $mxPackageRows, (float)$mxPackageTotal, (int)$mxPrep['nights'], $mxTentativeQuote)]);
             }
 
             $mxPrefix = rh_booking_reference_prefix();
@@ -306,6 +412,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // check-availability.php run the very same function.
         $plan = ga_plan($selected_room, (int)$sanitized_data['number_of_guests'], (int)($sanitized_data['child_guests'] ?? 0));
         $roomPolicy = $plan['policy'];
+        $gbStep = 2;
+        $gbField = in_array((string)($plan['reason'] ?? ''), ['children_not_allowed', 'children_max'], true) ? 'child_guests' : 'number_of_guests';
         if (empty($roomPolicy['single_enabled']) && empty($roomPolicy['double_enabled']) && empty($roomPolicy['triple_enabled'])) {
             throw new Exception('Selected room type has no enabled occupancy pricing. Please contact support.');
         }
@@ -323,6 +431,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $validation_payload['number_of_guests'] = ga_max_guests_in_one_room($bookingAllocation);
         $validation_result = validateBookingWithAvailability($validation_payload);
 
+        if (!$validation_result['valid'] && $gbDry) {
+            [$gbStep, $gbField] = rh_guest_availability_step($validation_result, (int)$sanitized_data['room_id'], $sanitized_data['check_in_date'], $sanitized_data['check_out_date']);
+        }
         if (!$validation_result['valid']) {
             // Handle validation errors
             if ($validation_result['type'] === 'availability') {
@@ -368,11 +479,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $room = $selected_room;
         $number_of_nights = $validation_result['availability']['nights'];
 
-        // Joined-room types: reserve ONE combination per room this booking needs, up
-        // front, and keep that queue for both pricing and assignment. Previously every
-        // split room was priced off combination[0] while the insert loop re-queried and
-        // assigned a different combination each iteration — so rooms 2..n could be
-        // charged one combination's price_override and given another's.
+        // Reserve one joined-room combination per split room up front, so each room is
+        // priced from the combination it will actually be assigned.
+        $gbStep = 3;
+        $gbField = 'room_id';
         $usesCombinations   = roomTypeHasActiveCombinations((int)$room['id']);
         $combinationQueue   = [];
         if ($usesCombinations) {
@@ -423,6 +533,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($occupancyPolicy['double_enabled'])) $enabledOptions[] = 'double';
             if (!empty($occupancyPolicy['triple_enabled'])) $enabledOptions[] = 'triple';
             $optionsList = empty($enabledOptions) ? 'none' : implode(', ', $enabledOptions);
+            $gbStep = 2;
+            $gbField = 'number_of_guests';
             throw new Exception("No valid occupancy option available for the allocated room. Room configuration allows: {$optionsList}. Please contact support.");
         }
 
@@ -472,6 +584,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // never silently dropped (owner 2026-11-26). quantity = the units charged (nights, or persons x nights).
             $pkPick = rh_packages_for_booking($pdo, (int)$room_id, $selectedPackageIds, (int)$number_of_nights, (int)$adult_guests);
             if ($pkPick['missing']) {
+                $gbField = 'package_ids';
                 throw new Exception(rh_package_unavailable_message($pkPick['missing']));
             }
             $packageTotal = $pkPick['total'];
@@ -480,20 +593,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $total_amount += $packageTotal;
 
         // Check for duplicate bookings (same email, room, overlapping dates)
-        $dup_check = $pdo->prepare("
-            SELECT COUNT(*) as count FROM bookings
-            WHERE guest_email = ? AND room_id = ?
-            AND status IN ('pending', 'tentative', 'confirmed', 'checked-in')
-            AND check_in_date = ? AND check_out_date = ?
-        ");
-        $dup_check->execute([
-            $sanitized_data['guest_email'],
-            $sanitized_data['room_id'],
-            $check_in_date,
-            $check_out_date
-        ]);
-        if ($dup_check->fetch(PDO::FETCH_ASSOC)['count'] > 0) {
-            throw new Exception('A booking already exists for these dates and room. Please check your existing bookings.');
+        if (!$gbDry || $gbUpto >= 5) {
+            $gbStep = 5;
+            $gbField = '';
+            $dup_check = $pdo->prepare("
+                SELECT COUNT(*) as count FROM bookings
+                WHERE guest_email = ? AND room_id = ?
+                AND status IN ('pending', 'tentative', 'confirmed', 'checked-in')
+                AND check_in_date = ? AND check_out_date = ?
+            ");
+            $dup_check->execute([
+                $sanitized_data['guest_email'],
+                $sanitized_data['room_id'],
+                $check_in_date,
+                $check_out_date
+            ]);
+            if ($dup_check->fetch(PDO::FETCH_ASSOC)['count'] > 0) {
+                throw new Exception('A booking already exists for these dates and room. Please check your existing bookings.');
+            }
+        }
+
+        // Stock re-check: enough rooms of this type must be free for EVERY night (inventory minus overlapping
+        // bookings), for ALL rooms the party needs. The save runs it under the lock, the price check without.
+        $gbRecheck = static function () use ($room_id, $check_in_date, $check_out_date, $child_guests, $bookingAllocation, $roomsNeeded, $room, $usesCombinations, $combinationQueue): void {
+            $childRoomsNeeded = ga_child_rooms($bookingAllocation);
+            $lockedAvailability = checkRoomAvailability($room_id, $check_in_date, $check_out_date, null, $child_guests, $childRoomsNeeded);
+            $inventoryError = ga_inventory_error($lockedAvailability, $roomsNeeded, (string)$room['name'], $check_in_date, $check_out_date);
+            if ($inventoryError !== '') {
+                throw new Exception($inventoryError . ' Please adjust your dates, guest count or room type.');
+            }
+            // Joined rooms: a member-type booking committed a moment ago has no room yet (see the helper).
+            if ($usesCombinations) {
+                $joinedErr = rh_joined_members_stock_error($combinationQueue, $check_in_date, $check_out_date);
+                if ($joinedErr !== '') {
+                    throw new Exception($joinedErr . ' Please adjust your dates or room type.');
+                }
+            }
+        };
+
+        if ($gbDry) {
+            // Price check: every room priced by the same helper the insert loop below uses.
+            $gbStep = 3;
+            $gbField = 'room_id';
+            $gbRecheck();
+            $gbRows = [];
+            for ($i = 0; $i < $roomsNeeded; $i++) {
+                $allocationPart = $bookingAllocation[$i];
+                $gbRows[] = [
+                    'room_id' => (int)$room_id, 'name' => (string)($selected_room['name'] ?? ''), 'occupancy' => (string)$allocationPart['occupancy_type'],
+                    'guests' => (int)$allocationPart['guests'], 'adults' => (int)$allocationPart['adults'], 'children' => (int)$allocationPart['children'],
+                    'priced' => rh_guest_price_row($pdo, $room, $selected_room, $usesCombinations ? $combinationQueue[$i] : null, (int)$room_id,
+                        $check_in_date, $check_out_date, (int)$number_of_nights, (string)$allocationPart['occupancy_type'],
+                        (int)$allocationPart['children'], $childRule, ($i === 0) ? (float)$packageTotal : 0.0),
+                ];
+            }
+            $gbReply(['ok' => true, 'step' => $gbUpto,
+                'quote' => rh_guest_build_quote($gbRows, $packageRowsToInsert, (float)$packageTotal, (int)$number_of_nights, (bool)$is_tentative_booking)]);
         }
 
         // Generate unique booking reference (guaranteed unique)
@@ -535,22 +690,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Also locks the joined-room types that share physical rooms with this one (ascending id).
             rh_lock_room_types($pdo, $lockTypeIds);
 
-            $childRoomsNeeded = ga_child_rooms($bookingAllocation);
-
-            // Re-check under the lock: enough rooms of this type must be free for EVERY
-            // night (inventory minus overlapping bookings), for ALL rooms the party needs.
-            $lockedAvailability = checkRoomAvailability($room_id, $check_in_date, $check_out_date, null, $child_guests, $childRoomsNeeded);
-            $inventoryError = ga_inventory_error($lockedAvailability, $roomsNeeded, (string)$room['name'], $check_in_date, $check_out_date);
-            if ($inventoryError !== '') {
-                throw new Exception($inventoryError . ' Please adjust your dates, guest count or room type.');
-            }
-            // Joined rooms: a member-type booking committed a moment ago has no room yet (see the helper).
-            if ($usesCombinations) {
-                $joinedErr = rh_joined_members_stock_error($combinationQueue, $check_in_date, $check_out_date);
-                if ($joinedErr !== '') {
-                    throw new Exception($joinedErr . ' Please adjust your dates or room type.');
-                }
-            }
+            // Re-check under the lock (the closure above, shared with the price check).
+            $gbRecheck();
 
             $insert_stmt = $pdo->prepare("
                 INSERT INTO bookings (
@@ -587,43 +728,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $childrenThisBooking = (int)$allocationPart['children'];
                 $occThisBooking = $allocationPart['occupancy_type'];
 
-                // Price this room off the combination it will actually be assigned,
-                // not off the first one in the list.
-                $roomForThisBooking = $room;
-                if ($usesCombinations) {
-                    $comboThisBooking = $combinationQueue[$i];
-                    $comboRate = ($comboThisBooking['price_override'] !== null && $comboThisBooking['price_override'] !== '')
-                        ? (float)$comboThisBooking['price_override']
-                        : (float)$selected_room['price_per_night'];
-                    $roomForThisBooking['price_per_night']        = $comboRate;
-                    $roomForThisBooking['price_single_occupancy'] = $comboRate;
-                    $roomForThisBooking['price_double_occupancy'] = $comboRate;
-                    $roomForThisBooking['price_triple_occupancy'] = $comboRate;
-                }
-
-                $baseRateThisBooking = ga_price_for_occupancy($roomForThisBooking, $occThisBooking);
-                $dynamicThisBooking = applyDynamicPricing($pdo, $room_id, $check_in_date, $check_out_date, $number_of_nights, $baseRateThisBooking);
-                $rateThisBooking = (float)$dynamicThisBooking['final_price'];
-                // Packages added to first booking only; subsequent splits get 0
-                $pkgTotalThisBooking = ($i === 0) ? $packageTotal : 0.0;
-
-                $baseThisBooking = $rateThisBooking * $number_of_nights;
-                $childSupplementThisBooking = rh_child_supplement($childRule, $childrenThisBooking, (int)$number_of_nights, $rateThisBooking);
-                // Stay totals via the shared helper: the tourism levy is OUTSIDE the VAT
-                // base (levy = net * levy%, VAT = net * VAT%). Levy applies to room +
-                // child supplement only; packages carry VAT but no levy.
-                $stayTotals = rh_stay_totals($baseThisBooking + $childSupplementThisBooking, 'price');
-                $pkgTotals  = $pkgTotalThisBooking > 0
-                    ? rh_stay_totals($pkgTotalThisBooking, 'price', false)
-                    : ['net' => 0.0, 'vat' => 0.0, 'levy' => 0.0, 'total_with_vat' => 0.0];
-                $tourismLevyThisBooking = round($stayTotals['levy'], 2);
-                $vatRateThisBooking     = $stayTotals['vat_rate'];
-                $vatAmtThisBooking      = round($stayTotals['vat'] + $pkgTotals['vat'], 2);
-                $totalWithVatBooking    = round($stayTotals['total_with_vat'] + $pkgTotals['total_with_vat'], 2);
+                // Price this room off the combination it will actually be assigned, with the one helper the price
+                // check also uses (includes/guest-booking-quote.php). Packages go on the first room only.
+                $pricedThisBooking = rh_guest_price_row($pdo, $room, $selected_room, $usesCombinations ? $combinationQueue[$i] : null, (int)$room_id,
+                    $check_in_date, $check_out_date, (int)$number_of_nights, (string)$occThisBooking, $childrenThisBooking, $childRule,
+                    ($i === 0) ? (float)$packageTotal : 0.0);
+                $baseRateThisBooking = $pricedThisBooking['base_rate'];
+                $dynamicThisBooking = $pricedThisBooking['dynamic'];
+                $rateThisBooking = $pricedThisBooking['rate'];
+                $pkgTotalThisBooking = $pricedThisBooking['package_total'];
+                $childSupplementThisBooking = $pricedThisBooking['child_supplement'];
+                $tourismLevyThisBooking = $pricedThisBooking['levy'];
+                $vatRateThisBooking     = $pricedThisBooking['vat_rate'];
+                $vatAmtThisBooking      = $pricedThisBooking['vat'];
+                $totalWithVatBooking    = $pricedThisBooking['total_with_vat'];
                 // total_amount convention: net of VAT, levy included (net + levy);
                 // total_with_vat = net + levy + VAT = everything the guest owes.
-                $totalThisBooking       = round($stayTotals['net'] + $pkgTotals['net'] + $tourismLevyThisBooking, 2);
-                $tourismLevyPctBooking  = $stayTotals['levy_rate'];
+                $totalThisBooking       = $pricedThisBooking['total_amount'];
+                $tourismLevyPctBooking  = $pricedThisBooking['levy_rate'];
 
                 $refForBooking = ($i === 0) ? $booking_reference : ($booking_reference . '-' . ($i + 1));
                 if ($i > 0) {
@@ -894,6 +1016,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->rollBack();
         }
         $error_message = rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage();
+        if ($gbDry) {
+            $gbReply(['ok' => false, 'step' => rh_is_lock_conflict($e) ? 0 : $gbStep, 'message' => $error_message, 'field' => $gbField]);
+        }
     }
 }
 

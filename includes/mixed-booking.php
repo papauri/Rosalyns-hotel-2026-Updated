@@ -16,6 +16,7 @@
 
 require_once __DIR__ . '/guest-allocation.php';
 require_once __DIR__ . '/pricing.php';
+require_once __DIR__ . '/guest-booking-quote.php';
 
 /** Most rooms of other types one booking may add (keeps a crafted POST small). */
 if (!defined('RH_MIXED_MAX_EXTRA')) {
@@ -390,20 +391,14 @@ if (!function_exists('rh_mixed_load_room')) {
     }
 
     /**
-     * Create the mixed booking: one bookings row per room, each priced for its own type and the guests seated in it,
-     * all linked to the first row (primary_booking_id NULL on the lead). Validation, lock, per-type re-check and
-     * insert happen as one transaction. Emails, timeline and redirect stay with the caller.
-     *
-     * $in: chosen_id, extra_ids[], guest_name, guest_email, guest_phone, guest_country, guest_address,
-     *      total_guests, child_guests, check_in, check_out, special_requests, status ('pending'|'tentative'),
-     *      is_tentative (0|1), tentative_expires_at (?string), reference (base), client_uuid (?string, normalised),
-     *      package_total (float, charged on the lead row), package_rows[] (written against the lead row),
-     *      validation_data (the sanitised booking fields validateBookingWithAvailability() reads).
-     * @return array {success, error, ids[], references[], rows[], group{total, vat, total_with_vat, child_supplement, levy}}
+     * Everything rh_mixed_create() checks and prices before it takes the locks (read only). The booking page's
+     * price check (booking.php dry run) calls it too, then rh_mixed_recheck() without the lock.
+     * $in: chosen_id, extra_ids[], total_guests, child_guests, check_in, check_out, validation_data.
+     * @return array {ok, error, step (booking page step of a refusal), field, resolved, priced, nights}
      */
-    function rh_mixed_create(PDO $pdo, array $in): array
+    function rh_mixed_prepare(PDO $pdo, array $in): array
     {
-        $fail = static fn(string $m): array => ['success' => false, 'error' => $m, 'ids' => [], 'references' => [], 'rows' => [], 'group' => []];
+        $fail = static fn(string $m, int $step = 3, string $field = 'room_id'): array => ['ok' => false, 'error' => $m, 'step' => $step, 'field' => $field, 'resolved' => null, 'priced' => null, 'nights' => 0];
         $ci = (string)$in['check_in'];
         $co = (string)$in['check_out'];
         $total = (int)$in['total_guests'];
@@ -448,14 +443,78 @@ if (!function_exists('rh_mixed_load_room')) {
             $check = validateBookingWithAvailability($payload);
             if (empty($check['valid'])) {
                 $msg = $check['errors']['availability'] ?? ($check['errors']['number_of_guests'] ?? implode('; ', array_map('strval', $check['errors'] ?? [])));
-                return $fail((string)$msg);
+                [$stepHere, $fieldHere] = rh_guest_availability_step($check, (int)$typeId, $ci, $co);
+                return $fail((string)$msg, $stepHere, $fieldHere);
             }
         }
         $priced = rh_mixed_price_plan($pdo, $resolved, $ci, $co);
         if ($priced['error'] !== '') {
             return $fail($priced['error']);
         }
-        $nights = (int)$resolved['nights'];
+        return ['ok' => true, 'error' => '', 'step' => 0, 'field' => '', 'resolved' => $resolved, 'priced' => $priced, 'nights' => (int)$resolved['nights']];
+    }
+
+    /**
+     * Stock re-check of every type, for all the rooms of that type the booking takes. rh_mixed_create() runs it under
+     * the lock; the price check runs it without. Returns the refusal message, or '' when every room is still free.
+     */
+    function rh_mixed_recheck(array $resolved, array $priced, string $ci, string $co): string
+    {
+        foreach ($resolved['need'] as $typeId => $n) {
+            $childGuestsHere = 0;
+            $childRoomsHere = 0;
+            foreach ($resolved['plan']['rows'] as $row) {
+                if ($row['room_id'] === (int)$typeId && $row['children'] > 0) {
+                    $childGuestsHere += $row['children'];
+                    $childRoomsHere++;
+                }
+            }
+            $av = checkRoomAvailability((int)$typeId, $ci, $co, null, $childGuestsHere, $childRoomsHere);
+            $err = ga_inventory_error($av, (int)$n, (string)$resolved['types'][$typeId]['name'], $ci, $co);
+            if ($err !== '') {
+                return $err . ' Please adjust your dates, guest count or rooms.';
+            }
+            if (roomTypeHasActiveCombinations((int)$typeId)) {
+                $queue = [];
+                foreach ($priced['rows'] as $r) {
+                    if ($r['room_id'] === (int)$typeId && $r['combination']) {
+                        $queue[] = $r['combination'];
+                    }
+                }
+                $joinedErr = rh_joined_members_stock_error($queue, $ci, $co);
+                if ($joinedErr !== '') {
+                    return $joinedErr . ' Please adjust your dates or rooms.';
+                }
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Create the mixed booking: one bookings row per room, each priced for its own type and the guests seated in it,
+     * all linked to the first row (primary_booking_id NULL on the lead). Validation, lock, per-type re-check and
+     * insert happen as one transaction. Emails, timeline and redirect stay with the caller.
+     *
+     * $in: chosen_id, extra_ids[], guest_name, guest_email, guest_phone, guest_country, guest_address,
+     *      total_guests, child_guests, check_in, check_out, special_requests, status ('pending'|'tentative'),
+     *      is_tentative (0|1), tentative_expires_at (?string), reference (base), client_uuid (?string, normalised),
+     *      package_total (float, charged on the lead row), package_rows[] (written against the lead row),
+     *      validation_data (the sanitised booking fields validateBookingWithAvailability() reads).
+     * @return array {success, error, ids[], references[], rows[], group{total, vat, total_with_vat, child_supplement, levy}}
+     */
+    function rh_mixed_create(PDO $pdo, array $in): array
+    {
+        $fail = static fn(string $m): array => ['success' => false, 'error' => $m, 'ids' => [], 'references' => [], 'rows' => [], 'group' => []];
+        $ci = (string)$in['check_in'];
+        $co = (string)$in['check_out'];
+
+        $prep = rh_mixed_prepare($pdo, $in);
+        if (!$prep['ok']) {
+            return $fail($prep['error']);
+        }
+        $resolved = $prep['resolved'];
+        $priced = $prep['priced'];
+        $nights = (int)$prep['nights'];
 
         $lockTypeIds = rh_related_room_type_ids($pdo, array_keys($resolved['types'])); // ascending, read BEFORE the transaction
         $pdo->beginTransaction();
@@ -463,32 +522,9 @@ if (!function_exists('rh_mixed_load_room')) {
             rh_lock_room_types($pdo, $lockTypeIds);
 
             // Re-check every type under the lock, for all the rooms of that type this booking takes.
-            foreach ($resolved['need'] as $typeId => $n) {
-                $childGuestsHere = 0;
-                $childRoomsHere = 0;
-                foreach ($resolved['plan']['rows'] as $row) {
-                    if ($row['room_id'] === (int)$typeId && $row['children'] > 0) {
-                        $childGuestsHere += $row['children'];
-                        $childRoomsHere++;
-                    }
-                }
-                $av = checkRoomAvailability((int)$typeId, $ci, $co, null, $childGuestsHere, $childRoomsHere);
-                $err = ga_inventory_error($av, (int)$n, (string)$resolved['types'][$typeId]['name'], $ci, $co);
-                if ($err !== '') {
-                    throw new Exception($err . ' Please adjust your dates, guest count or rooms.');
-                }
-                if (roomTypeHasActiveCombinations((int)$typeId)) {
-                    $queue = [];
-                    foreach ($priced['rows'] as $r) {
-                        if ($r['room_id'] === (int)$typeId && $r['combination']) {
-                            $queue[] = $r['combination'];
-                        }
-                    }
-                    $joinedErr = rh_joined_members_stock_error($queue, $ci, $co);
-                    if ($joinedErr !== '') {
-                        throw new Exception($joinedErr . ' Please adjust your dates or rooms.');
-                    }
-                }
+            $recheckError = rh_mixed_recheck($resolved, $priced, $ci, $co);
+            if ($recheckError !== '') {
+                throw new Exception($recheckError);
             }
 
             $insert = $pdo->prepare("
@@ -513,13 +549,11 @@ if (!function_exists('rh_mixed_load_room')) {
             foreach ($priced['rows'] as $i => $row) {
                 $p = $row['priced'];
                 $pkgThis = ($i === 0) ? (float)$in['package_total'] : 0.0;
-                $pkgTotals = $pkgThis > 0
-                    ? rh_stay_totals($pkgThis, 'price', false)
-                    : ['net' => 0.0, 'vat' => 0.0, 'levy' => 0.0, 'total_with_vat' => 0.0];
-                $levy = round($p['stay']['levy'], 2);
-                $vatAmt = round($p['stay']['vat'] + $pkgTotals['vat'], 2);
-                $withVat = round($p['stay']['total_with_vat'] + $pkgTotals['total_with_vat'], 2);
-                $totalAmount = round($p['stay']['net'] + $pkgTotals['net'] + $levy, 2);
+                $amounts = rh_guest_row_amounts($p['stay'], $pkgThis); // the stored figures, shared with the price check
+                $levy = $amounts['levy'];
+                $vatAmt = $amounts['vat'];
+                $withVat = $amounts['total_with_vat'];
+                $totalAmount = $amounts['total_amount'];
 
                 $ref = ($i === 0) ? (string)$in['reference'] : ((string)$in['reference'] . '-' . ($i + 1));
                 if ($i > 0) {

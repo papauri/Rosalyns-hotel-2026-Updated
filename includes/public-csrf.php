@@ -148,3 +148,15 @@ if (!function_exists('pub_client_ip')) {
         return false;
     }
 }
+
+if (!function_exists('pub_csrf_check')) {
+    /**
+     * Compares the token WITHOUT using it up (pub_csrf_validate() unsets it). Only for read-only requests that may be
+     * sent several times before the real submit, e.g. the booking page's price check.
+     */
+    function pub_csrf_check(string $token, string $form_key): bool
+    {
+        $expected = $_SESSION['_csrf_pub_' . $form_key] ?? '';
+        return is_string($expected) && $expected !== '' && hash_equals($expected, $token);
+    }
+}
