@@ -140,6 +140,15 @@ when prompted."
   with more than one room Review lists each room's payment status after create; credit that covers the total unticks
   "Payment received now" with a note; credit from another account needs a reason or it is not used (step 4 warns).
 
+- 2026-11-28 Liwonde ad886a7 / Rosalyn's 7df141f (owner FEATURE): Calendar > Timeline scrolls sideways like a spreadsheet: the
+  3 / 7 / 14 / 30 days buttons now set how many days fit on one screen, earlier and later days are a sideways scroll away
+  (mouse wheel with Shift, trackpad, scroll bar, arrow keys) and load by themselves. Prev / Next and Alt+Page Up / Alt+Page
+  Down move one screen; the From date shows the first day on screen and still jumps. Dragging a confirmed stay to the
+  left or right edge scrolls the grid, so it can be dropped on dates that were off screen; the drop still opens the
+  booking's Change dates screen with the new dates and price (nothing saved on the calendar). Guides: calendar / room
+  timeline (navigating dates, changing dates by drag). Assistant: 'how do I see next week on the calendar' -> scroll
+  sideways or Next; 'move a booking to another date' -> drag the bar (confirmed stays), Change dates opens.
+
 ## Synced 2026-11-26 (owner prompted "assistant and guide sync"; guides + Assistant: commit "Guides + Assistant sync 2026-11-26" in both repos · guides 06, 07, 12, 13, 19, 99 (+ Liwonde-only brand fix in 01, 02, 14, 23; guide 07 Blocked Dates note) · Assistant: when-did-they-pay -> Paid "i", dashboard vs End of Day rule, email Tone, calendar arrow keys, bare pre-arrival question gets its own answer (payment chase needs "payment"), expired / cancelled / no-show answers point to the Status pill, movements arrows for tomorrow / next week, receipt comment per b145620, expiry questions never catch stock or gym questions · Manager Guides: Money and End of Day, Bookings, Daily checklist refreshed; others no change) - entries kept for reference
 
 - 7994a1f / Rosalyn's 5c44967 (2026-11-25): Email & PDF templates: the preview and "Send test" of a PDF template now
