@@ -148,6 +148,10 @@ when prompted."
   booking's Change dates screen with the new dates and price (nothing saved on the calendar). Guides: calendar / room
   timeline (navigating dates, changing dates by drag). Assistant: 'how do I see next week on the calendar' -> scroll
   sideways or Next; 'move a booking to another date' -> drag the bar (confirmed stays), Change dates opens.
+- 2026-11-28 Liwonde b9eb3af / Rosalyn's 29f1e2f (owner decision): pending and tentative stays can also be dragged to
+  other dates on the Calendar timeline (Change dates opens, nothing saved there); they still cannot be moved to another
+  room until confirmed. Guides: calendar / room timeline (changing dates by drag). Assistant: same answer as above,
+  for pending / tentative too.
 
 ## Synced 2026-11-26 (owner prompted "assistant and guide sync"; guides + Assistant: commit "Guides + Assistant sync 2026-11-26" in both repos · guides 06, 07, 12, 13, 19, 99 (+ Liwonde-only brand fix in 01, 02, 14, 23; guide 07 Blocked Dates note) · Assistant: when-did-they-pay -> Paid "i", dashboard vs End of Day rule, email Tone, calendar arrow keys, bare pre-arrival question gets its own answer (payment chase needs "payment"), expired / cancelled / no-show answers point to the Status pill, movements arrows for tomorrow / next week, receipt comment per b145620, expiry questions never catch stock or gym questions · Manager Guides: Money and End of Day, Bookings, Daily checklist refreshed; others no change) - entries kept for reference
 
