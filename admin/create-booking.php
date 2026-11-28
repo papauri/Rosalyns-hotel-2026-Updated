@@ -336,6 +336,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
     // answered as JSON BEFORE the transaction: nothing is inserted, paid, assigned, emailed, logged or locked. dry_run
     // is honoured ONLY with response=wizard; every other post (the Assistant's JSON replay, the plain form) is unchanged.
     $cbDryRun   = ($_POST['response'] ?? '') === 'wizard' && ($_POST['dry_run'] ?? '') === '1';
+    // Create without reload (Phase C): the same save as a plain post, only the reply is JSON ({ok, redirect} or
+    // {ok:false, step, message, field}); the success flash is kept for the booking page.
+    $cbWizard   = ($_POST['response'] ?? '') === 'wizard' && !$cbDryRun;
+    $cbSaved    = false; // set once the booking transaction committed: a later failure is not "nothing was saved"
     $cbStep     = 0;   // stage marker: the wizard step an error belongs to (0 = shown where staff are)
     $cbField    = '';  // the input to point at for that error ('' = none)
     $cbWarnings = [];  // dry run only: checks that refuse a real save, returned next to the quote instead
@@ -361,6 +365,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote('rh_idem_bk_' . md5($__idemKey)) . ', 15)')->fetchColumn() !== 1) {
                 // The first click is still being saved: never risk a second booking.
                 http_response_code(409);
+                if ($cbWizard) {
+                    $cbWizardReply(['ok' => false, 'step' => 0, 'field' => '', 'message' => 'This booking is still being saved from the first press of Create. Check the Bookings list before trying again.']);
+                }
                 if (($_POST['response'] ?? '') === 'json') { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => false, 'error' => 'still_saving', 'message' => 'This booking is still being saved from the first submission. Check the Bookings list before trying again.']); exit; } // Assistant replay (additive)
                 echo '<!doctype html><meta charset="utf-8"><title>Still saving</title><body style="font-family:system-ui,sans-serif;max-width:560px;margin:60px auto;padding:0 16px;line-height:1.6">'
                     . '<h1 style="font-size:1.3rem">This booking is still being saved</h1>'
@@ -377,6 +384,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $message = 'Booking already created (reference ' . htmlspecialchars((string)$__existingBooking['booking_reference']) . '). Duplicate submission ignored.';
             $_SESSION['flash_message'] = ['type' => 'success', 'text' => $message];
             if (($_POST['response'] ?? '') === 'json') { unset($_SESSION['flash_message']); header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => true, 'booking_id' => (int)$__existingBooking['id'], 'reference' => (string)$__existingBooking['booking_reference'], 'duplicate' => true, 'message' => 'Booking already created (reference ' . (string)$__existingBooking['booking_reference'] . ').']); exit; } // Assistant replay (additive)
+            if ($cbWizard) { // the flash above is kept, as for the plain post
+                $cbWizardReply(['ok' => true, 'duplicate' => true, 'redirect' => 'booking-details.php?id=' . (int)$__existingBooking['id']]);
+            }
             header('Location: booking-details.php?id=' . (int)$__existingBooking['id']);
             exit;
         }
@@ -953,6 +963,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             ]);
         }
 
+        // ── Create without reload: the total staff saw on Review must still be the save's own total ──
+        // (rate plans count from today, the joined pair is picked now). Only for response=wizard: the Assistant's
+        // replay and the plain form never send quote_total and are not checked.
+        if ($cbWizard) {
+            $cbStep = 5; $cbField = '';
+            $cbQuoteTotal = $_POST['quote_total'] ?? null;
+            if (!is_string($cbQuoteTotal) || !is_numeric($cbQuoteTotal)) {
+                throw new Exception('The price was not checked before Create. Check the Review again.');
+            }
+            if (round(abs($grand_total_with_vat - (float)$cbQuoteTotal), 2) > BALANCE_TOLERANCE) {
+                throw new Exception('The price changed since you checked it: ' . $currency_symbol . ' ' . number_format((float)$cbQuoteTotal, 2)
+                    . ' -> ' . $currency_symbol . ' ' . number_format($grand_total_with_vat, 2) . '. Check the Review again.');
+            }
+        }
+
         // ── Transaction: create bookings for all lines ───────────────────────
         // Every requested type AND the types that share rooms with it through joined rooms are locked
         // (ascending id, deadlock-free) so two receptionists can never both sell the last room. The set is
@@ -1230,6 +1255,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
 
         $pdo->commit();
+        $cbSaved = true;
         if (function_exists('rh_payment_audit_flush')) {
             rh_payment_audit_flush($pdo); // History rows queued above, now that the booking and payment are committed
         }
@@ -1601,6 +1627,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             'text' => 'Booking ' . $primary_ref . $rooms_suffix . ' created successfully!' . ($credit_msg ?? '') . ($overpay_msg ?? '') . $email_msg,
         ];
         if (($_POST['response'] ?? '') === 'json') { $__jsonMsg = (string)$_SESSION['flash_message']['text']; unset($_SESSION['flash_message']); header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => true, 'booking_id' => (int)$primary_id, 'reference' => (string)$primary_ref, 'message' => $__jsonMsg]); exit; } // Assistant replay (additive)
+        if ($cbWizard) { // the flash above stays in the session, exactly as after the plain post
+            $cbWizardReply(['ok' => true, 'redirect' => 'booking-details.php?id=' . (int)$primary_id]);
+        }
         header('Location: booking-details.php?id=' . $primary_id);
         exit;
     } catch (\Throwable $e) {
@@ -1613,6 +1642,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             'by'        => $user['username'] ?? null,
             'exception' => get_class($e),
         ]);
+        if ($cbWizard) { // logged above like a plain refused save; then the step to go back to
+            if ($cbSaved) { // the booking is committed: never "nothing was saved" (so never the lock-conflict text)
+                $cbLaterStep = rh_is_lock_conflict($e) ? 'the database was busy' : rtrim($e->getMessage(), '. ');
+                $cbWizardReply(['ok' => false, 'step' => 0, 'field' => '', 'saved' => true,
+                    'redirect' => !empty($primary_id) ? 'booking-details.php?id=' . (int)$primary_id : '',
+                    'message' => 'The booking was saved, but a later step failed: ' . $cbLaterStep . '. Check the booking before pressing Create again.']);
+            }
+            $cbWizardReply(['ok' => false, 'step' => rh_is_lock_conflict($e) ? 0 : $cbStep, 'message' => $error, 'field' => $cbField]);
+        }
         if (($_POST['response'] ?? '') === 'json') { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => false, 'error' => $error, 'message' => $error]); exit; } // Assistant replay (additive)
     }
 }
@@ -4823,14 +4861,14 @@ try {
         }
 
         // Error inside a step (the server's refusals are marked so a later good check can clear them).
-        function cbStepError(n, msg, link, fieldId, src) {
+        function cbStepError(n, msg, link, fieldId, src, linkText) {
             const box = el('cbErr' + n);
             if (!box) return;
             box.textContent = msg || '';
             if (msg && link && /^[a-z0-9_\-]+\.php(\?[a-z0-9_=&\-]*)?$/i.test(link)) {
                 const a = document.createElement('a');
                 a.href = link;
-                a.textContent = 'Open the booking';
+                a.textContent = linkText || 'Open the booking';
                 box.appendChild(document.createTextNode(' '));
                 box.appendChild(a);
             }
@@ -5338,32 +5376,78 @@ try {
                     btn.removeAttribute('aria-busy');
                 }
             }
-            // The checks passed: the form goes to the server exactly as before (the page loader and, when offline,
-            // the offline queue take it from here).
+            // Offline: the form is submitted as before and the offline queue keeps it on this device. The button stays
+            // disabled until the submit has been handed over, then comes back (the page stays).
             function submitNow() {
-                createBusy(false);
-                const btn = el('cbSubmitBtn');
                 submitOk = true;
                 try {
-                    if (typeof form.requestSubmit === 'function') form.requestSubmit(btn || null);
+                    if (typeof form.requestSubmit === 'function') form.requestSubmit();
                     else HTMLFormElement.prototype.submit.call(form);
                 } catch (err) {
                     cbStepError(CB_STEPS, 'The booking could not be sent. Try again.');
                 }
                 submitOk = false;
+                createBusy(false);
+            }
+            // Online: the same form a plain post sends, saved in the background with response=wizard and the total
+            // staff saw on Review (quote_total), both added here, never form fields. A fetch is not a form submit, so
+            // the offline queue never takes it. The form keeps its client_uuid, so a second press after an unclear
+            // answer finds the booking the first one saved instead of making another. true = going to the booking.
+            async function cbSend() {
+                const btn = el('cbSubmitBtn');
+                if (btn) btn.textContent = 'Saving the booking…';
+                const unclear = 'It may have saved. Check Bookings before pressing Create again.';
+                let res = null;
+                try {
+                    const body = new URLSearchParams(new FormData(form));
+                    body.delete('dry_run');
+                    body.set('response', 'wizard');
+                    body.set('quote_total', (Number(cbQ.quote.totals.total_with_vat) || 0).toFixed(2));
+                    const r = await fetch(window.location.href, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: body.toString()
+                    });
+                    const text = await r.text();
+                    try { res = JSON.parse(text); } catch (e) { res = null; }
+                    if (!res || typeof res !== 'object' || typeof res.ok !== 'boolean') res = null;
+                } catch (e) {
+                    res = null;
+                }
+                // Not our answer (signed out, security token, server error, no connection): the save may have happened.
+                if (!res) {
+                    cbStepError(cbNav.current, unclear, 'bookings.php', '', 'server', 'Open Bookings');
+                    return false;
+                }
+                const link = (typeof res.redirect === 'string' && /^booking-details\.php\?id=\d+$/.test(res.redirect)) ? res.redirect : '';
+                if (res.ok && link) {
+                    window.addEventListener('pageshow', function (e) { if (e.persisted) { creating = false; createBusy(false); } }, { once: true });
+                    window.location.assign(link);
+                    return true;
+                }
+                if (res.ok || res.saved) {
+                    cbStepError(cbNav.current, res.saved && res.message ? String(res.message) : unclear, link || 'bookings.php', '', 'server', link ? 'Open the booking' : 'Open Bookings');
+                    return false;
+                }
+                // Refused, nothing saved: open the step it belongs to (0 = where staff are), everything typed stays.
+                const step = Number(res.step) >= 1 && Number(res.step) <= CB_STEPS ? Number(res.step) : cbNav.current;
+                if (step !== cbNav.current) cbShowStep(step);
+                cbStepError(step, String(res.message || 'The booking was not created.'), '', String(res.field || ''), 'server');
+                return false;
             }
             async function cbCreate() {
                 creating = true;
                 const before = cbQ.shown; // the figures Review showed when Create was pressed
-                let go = false;
+                let go = ''; // 'queue' = offline, kept on this device; 'send' = saved now in the background
                 createBusy(true);
                 try {
                     for (let i = 1; i <= CB_STEPS; i++) {
                         if (!checkStep(i)) return;
                     }
-                    if (navigator.onLine === false) { go = true; return; } // kept on this device, saved when back online
+                    if (navigator.onLine === false) { go = 'queue'; return; } // kept on this device, saved when back online
                     const res = await cbFreshQuote();
-                    if (res && res.offline) { go = true; return; }
+                    if (res && res.offline) { go = 'queue'; return; }
                     if (!cbGate(res, CB_STEPS)) return;
                     if (!cbQ.fresh) {
                         cbStepError(CB_STEPS, 'The booking changed while it was being checked. Check the figures, then press Create booking again.');
@@ -5382,12 +5466,25 @@ try {
                         cbStepError(CB_STEPS, 'The email for this booking changed, so your edited wording was cleared. Edit it again if needed, then press Create booking.');
                         return;
                     }
-                    go = true;
+                    go = 'send';
                 } catch (err) {
+                    go = '';
                     cbStepError(CB_STEPS, 'The booking could not be checked. Try again. Nothing was saved.');
                 } finally {
-                    creating = false;
-                    if (go) submitNow(); else createBusy(false);
+                    if (go === 'send') {
+                        // Still "creating" while it saves: a second click or Enter does nothing; the button is disabled.
+                        cbSend().then(function (leaving) {
+                            creating = leaving;
+                            if (!leaving) createBusy(false);
+                        }, function () {
+                            creating = false;
+                            createBusy(false);
+                            cbStepError(cbNav.current, 'It may have saved. Check Bookings before pressing Create again.', 'bookings.php', '', 'server', 'Open Bookings');
+                        });
+                    } else {
+                        creating = false;
+                        if (go === 'queue') submitNow(); else createBusy(false);
+                    }
                 }
             }
 
